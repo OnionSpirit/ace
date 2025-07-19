@@ -1,2 +1,2 @@
 # ace
-Async Concurrent Execution for C++
+Async Concurrent Execution framework for C++

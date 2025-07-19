@@ -1,0 +1,4 @@
+[wrap-git]
+directory = jsoncpp
+url = https://github.com/open-source-parsers/jsoncpp.git
+revision = 1.9.6

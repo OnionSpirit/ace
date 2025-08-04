@@ -26,8 +26,8 @@ namespace ace::async {
         /**
          * @details Future value check function,
          * @b true if value is ready
-         * @b flase otherwise
-         * @remark Spicified by C++20 standart
+         * @b false otherwise
+         * @remark Specified by C++20 standard
          */
         virtual bool await_ready() = 0;
 

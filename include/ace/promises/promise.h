@@ -20,10 +20,11 @@
 namespace ace::async {
 
     enum promise_touch_result : uint8_t  {
-        e_failed = 0,
-        e_blocked = 1,
-        e_executed = 2,
-        e_executed_with_value = 3
+        e_failed,
+        e_blocked,
+        e_executed,
+        e_executed_with_value,
+        e_finished,
     };
 
     struct promise_rule_traits { enum { e_promise_rule }; };
@@ -55,6 +56,7 @@ namespace ace::async {
 
         auto return_value(returnT return_value) {
             _return_value =return_value;
+            _derived->_status = promise_touch_result::e_finished;
             return std::suspend_never{};
         }
 
@@ -81,7 +83,7 @@ namespace ace::async {
     template <typename returnT>
         struct promise_traits : public promise_return_traits<promise_traits<returnT>, returnT> {
 
-        typedef std::unique_ptr<ace::async::future_handler> future_handler_ptr_t;
+        typedef ace::async::future_handler* future_handler_ptr_t;
         typedef promise_return_traits<promise_traits, returnT> promise_return_traits_t;
         using promise_return_traits_t::_status;
 
@@ -96,16 +98,16 @@ namespace ace::async {
         template <typename futureT>
         requires dispatch::is_future<std::remove_reference_t<futureT>, returnT>
         futureT& await_transform(futureT& future) {
-            _future.release();
-            _future.reset(&future);
+            _status = promise_touch_result::e_blocked;
+            _future = &future;
             return future;
         }
 
         template <typename futureT>
         requires dispatch::is_future<std::remove_reference_t<futureT>, returnT>
         futureT&& await_transform(futureT&& future) {
-            _future.release();
-            _future.reset(&future);
+            _status = promise_touch_result::e_blocked;
+            _future = &future;
             return std::forward<futureT>(future);
         }
 
@@ -122,9 +124,7 @@ namespace ace::async {
 
         /* static inline void operator delete(void* memptr, size_t memsize) noexcept; */
 
-        uint id =0;
         void* _pool_data;
-        volatile uint _retcode =0;
         future_handler_ptr_t _future;
 
     };
@@ -134,8 +134,7 @@ namespace ace::async {
 #define IMPORT_PROMISE_TRAITS_ENV               \
     using promise_traits_t::_future;            \
     using promise_traits_t::_pool_data;         \
-    using promise_traits_t::_retcode;           \
-    using promise_traits_t::id;
+    using promise_traits_t::_status;
 
 }
 

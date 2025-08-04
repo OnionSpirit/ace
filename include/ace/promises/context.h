@@ -12,7 +12,7 @@
 #include "ace/promises/promise.h"
 #include <coroutine>
 
-// ToDo: yield операцию преретащить в генератор
+// ToDo: yield операцию преретащить в генератор/ пусть генератор имеет перегрузку итераторов чтобы запускать его в цикле for
 namespace ace::async {
     template<typename returnT =void, is_promise_rule launch_ruleT =differed>
     struct context : future_traits<context<returnT> > {
@@ -27,34 +27,11 @@ namespace ace::async {
 
         context() = default;
 
-        // NOTE: Добавить создание id если таковой будет
-        explicit context(coroutine_t &&h) : _coroutine{h} {
-        };
+        explicit context(coroutine_t &&h) : _coroutine{h} {};
 
-        operator bool() const { return _coroutine.done(); }
+        explicit operator bool() const { return not _coroutine or _coroutine.done(); }
 
-        // react(const react &) =delete;
-
-        // react &operator=(const react &) =delete;
-
-        // react(react&& t) noexcept  {
-        //     _coroutine = t._coroutine;
-        //     t._coroutine = nullptr;
-        //     _coroutine._unresolved = t._unresolved;
-        // }
-
-        // react &operator=(react&& t) noexcept {
-        //     if (_coroutine) [[likely]] _coroutine.destroy();
-        //     _coroutine = t._coroutine;
-        //     t._coroutine = nullptr;
-        //     _coroutine._unresolved = t._unresolved;
-        //     return *this;
-        // }
-
-        // NOTE: Добавить удаление id если таковой будет
-        ~context() override {
-            /* while (not _resolved) this->resolve(); */
-        };
+        ~context() override = default;
 
         struct promise_type : promise_traits<returnT> {
             DECLARE_PROMISE_TRAITS(returnT)
@@ -71,15 +48,13 @@ namespace ace::async {
             auto final_suspend() noexcept { return std::suspend_always{}; }
 
             void unhandled_exception() {
+                _status = e_failed;
                 this->interrupt("Unhandled exception.");
             }
 
             void interrupt(const std::string_view &&str) {
-                std::cerr << "coroutine: " << std::to_string(id)
-                        << " - interrupted by: " << str
-                        << " Destroying context..." << std::endl;
                 this->final_suspend();
-                _retcode = -1;
+                _status = e_failed;
             };
 
             auto get_return_object() noexcept { return context{coroutine_t::from_promise(*this)}; }
@@ -88,65 +63,43 @@ namespace ace::async {
         };
 
         bool await_ready() override {
-            // NOTE: Если корутина выполнена или реакция резрешена, возвращаем true без дальнейших проверок
             if (_coroutine.done()) return true;
-            if (_coroutine.promise()._future) {
-                if (_coroutine.promise()._future.get()->await_ready()) {
-                    _coroutine.promise()._future.release();
-                    _coroutine.promise()._future.reset();
-                    _coroutine.resume();
-                }
-            } else _coroutine.resume();
+            if (_coroutine.promise()._future)
+                if (_coroutine.promise()._future->await_ready())
+                    _coroutine.promise()._future = nullptr;
+            _coroutine.resume();
             return _coroutine.done();
         }
 
         template<typename promiseT>
         bool await_suspend(std::coroutine_handle<promiseT>) {
-            if (_coroutine.promise()._retcode
-                or _coroutine.done()
-                or _coroutine.promise()._status == e_executed_with_value) {
+            if (not _coroutine or _coroutine.done())
                 return false;
-            } else [[likely]] { return true; }
+            return true;
         }
 
         returnT await_resume() {
-            if constexpr (requires(promise_type promise_t) { promise_t._return_value; }) {
+            if constexpr (requires(promise_type promise_t) { promise_t._return_value; })
                 return _coroutine.promise()._return_value;
-            }
+            else return;
         }
 
         returnT awake(promise_touch_result *const _res = nullptr) noexcept {
-            if (_coroutine) [[likely]] {
-                // std::cout << "RESUMING ID: " << _coroutine.promise().id << std::endl;
-
-                _coroutine.promise()._status = e_blocked;
-
+            if (_coroutine and not _coroutine.done()) [[likely]] {
                 if (not _coroutine.promise()._future) {
-                    if constexpr (std::same_as<void, returnT>) {
                         _coroutine();
-                        _coroutine.promise()._status = e_executed;
-                    } else {
-                        _coroutine();
-                        if (_coroutine.promise()._status not_eq e_executed_with_value) {
-                            _coroutine.promise()._status = e_executed;
-                        }
-                    }
                 } else if (_coroutine.promise()._future->await_ready()) {
-                    _coroutine.promise()._future.reset();
+                    _coroutine.promise()._future = nullptr;
                     _coroutine();
-                    _coroutine.promise()._status = e_executed;
-                } else { _coroutine.promise()._status = e_blocked; }
-
-                if (_res != nullptr) {
-                    *_res = _coroutine.promise()._status;
                 }
-
-                if constexpr (not std::same_as<void, returnT>) return returnT{};
             }
 
-            if constexpr (not std::same_as<void, returnT>) {
+            if (_res != nullptr)
+                *_res = _coroutine.promise()._status;
+
+            if constexpr (not std::same_as<void, returnT>)
                 return this->_coroutine.promise()._return_value;
-            }
+            else return;
         }
     };
 }

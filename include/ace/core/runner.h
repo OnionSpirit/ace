@@ -2,14 +2,18 @@
 * @file
  * @details This file contains a @b runner class, that executes and controls passed tasks
  */
-
 #ifndef ACE_RUNNER_H
 #define ACE_RUNNER_H
+#include <queue>
 
-#include "ace.h"
+#include "ace/promises/async.h"
 
 
-namespace ace::control {
+namespace ace::core {
+
+    // todo: temp queue type
+    template <typename T>
+    using queue_t = std::queue<T>;
 
 /**
  * @details coroutines execution manager.
@@ -18,12 +22,13 @@ namespace ace::control {
  * @tparam Policies Pools policies, each policy provides independent
  * pool for coroutines
  */
-class runner
-        : public ace::meta::technical::scheduler_id {
+class runner : public ace::meta::technical::scheduler_id {
 
-    uint _runner_id; ///< unique runner id
-    ContextManager _pool_manager; ///< Manager of supported pools
-    std::atomic<int> _break_flag{0}; ///< flag for terminate operation
+    std::vector<queue_t<ace::promise::async<>>> _pools; // Note: pool of task queue
+    // Note: mpsc queue to emplace task from another runner or spawning
+    // std::queue<ace::promise::async<>> _input;
+    // Note: signaling queue for external control
+    queue_t<int> _signals;
 
 public:
 
@@ -99,7 +104,7 @@ public:
      * @return Pointer to requested pool
      */
     template <ace::meta::types::ContextPoolConcept Pool>
-    [[nodiscard]] auto *get_pool(ace::control::context_pool_handler &handler);
+    [[nodiscard]] auto *get_pool(ace::core::context_pool_handler &handler);
 
     /**
      * @details Function to get pool pointer
@@ -109,7 +114,7 @@ public:
      * @return Pointer to requested pool
      */
     template <ace::meta::types::PoolPolicyConcept Policy>
-    [[nodiscard]] auto *get_pool(ace::control::context_pool_handler &handler);
+    [[nodiscard]] auto *get_pool(ace::core::context_pool_handler &handler);
 
     /**
      * @details Function to get pool pointer
@@ -119,7 +124,7 @@ public:
      * @return Pointer to requested pool
      */
     template <size_t Index = 0>
-    [[nodiscard]] auto *get_pool(ace::control::context_pool_handler &handler);
+    [[nodiscard]] auto *get_pool(ace::core::context_pool_handler &handler);
 
     /**
      * @details Function to get pool pointer
@@ -163,7 +168,7 @@ public:
     [[nodiscard]] uint get_runner_id() noexcept { return _runner_id; };
 };
 
-} // end namespace ace::control
+} // end namespace ace::core
 
 
 //==============================DEFINITIONS==================================
@@ -299,7 +304,7 @@ public:
 //
 //
 // ACE_RUNNER_META template<ace::meta::types::ContextPoolConcept Pool>
-// auto* ACE_RUNNER_MEMBER get_pool(ace::control::context_pool_handler &handler) {
+// auto* ACE_RUNNER_MEMBER get_pool(ace::core::context_pool_handler &handler) {
 //
 //     auto a = _pool_manager.template get_pool<Pool>();
 //     handler = a;
@@ -308,7 +313,7 @@ public:
 //
 //
 // ACE_RUNNER_META template<ace::meta::types::PoolPolicyConcept Policy>
-// auto* ACE_RUNNER_MEMBER get_pool(ace::control::context_pool_handler &handler) {
+// auto* ACE_RUNNER_MEMBER get_pool(ace::core::context_pool_handler &handler) {
 //
 //     auto a = _pool_manager.template get_pool<Policy>();
 //     handler = a;
@@ -317,7 +322,7 @@ public:
 //
 //
 // ACE_RUNNER_META template<size_t Index>
-// auto* ACE_RUNNER_MEMBER get_pool(ace::control::context_pool_handler &handler) {
+// auto* ACE_RUNNER_MEMBER get_pool(ace::core::context_pool_handler &handler) {
 //
 //     auto a = _pool_manager.template get_pool<Index>();
 //     handler = a;

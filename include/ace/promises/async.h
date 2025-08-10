@@ -13,10 +13,11 @@
 #include <coroutine>
 
 // ToDo: yield операцию преретащить в генератор/ пусть генератор имеет перегрузку итераторов чтобы запускать его в цикле for
-namespace ace::async {
+namespace ace::promise {
+
     template<typename returnT =void, is_promise_rule launch_ruleT =differed>
-    struct context : future_traits<context<returnT> > {
-        DECLARE_FUTURE(context)
+    struct async : future::future_traits<async<returnT> > {
+        DECLARE_FUTURE(async)
         IMPORT_FUTURE_ENV
 
         struct promise_type;
@@ -25,13 +26,13 @@ namespace ace::async {
 
         coroutine_t _coroutine;
 
-        context() = default;
+        async() = default;
 
-        explicit context(coroutine_t &&h) : _coroutine{h} {};
+        explicit async(coroutine_t &&h) : _coroutine{h} {};
 
         explicit operator bool() const { return not _coroutine or _coroutine.done(); }
 
-        ~context() override = default;
+        ~async() override = default;
 
         struct promise_type : promise_traits<returnT> {
             DECLARE_PROMISE_TRAITS(returnT)
@@ -54,12 +55,11 @@ namespace ace::async {
 
             void interrupt(const std::string_view &&str) {
                 this->final_suspend();
-                _status = e_failed;
             };
 
-            auto get_return_object() noexcept { return context{coroutine_t::from_promise(*this)}; }
+            auto get_return_object() noexcept { return async{coroutine_t::from_promise(*this)}; }
 
-            static auto get_return_object_on_allocation_failure() { return context(nullptr); }
+            static auto get_return_object_on_allocation_failure() { return async(nullptr); }
         };
 
         bool await_ready() override {
@@ -86,9 +86,9 @@ namespace ace::async {
 
         returnT awake(promise_touch_result *const _res = nullptr) noexcept {
             if (_coroutine and not _coroutine.done()) [[likely]] {
-                if (not _coroutine.promise()._future) {
-                        _coroutine();
-                } else if (_coroutine.promise()._future->await_ready()) {
+                if (not _coroutine.promise()._future)
+                    _coroutine();
+                else if (_coroutine.promise()._future->await_ready()) {
                     _coroutine.promise()._future = nullptr;
                     _coroutine();
                 }

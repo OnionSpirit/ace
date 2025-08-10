@@ -11,12 +11,9 @@
 #define ACE_FUTURE_H
 
 #include <concepts>
-#include <coroutine>
-#include <cstddef>
 #include <memory>
-#include <type_traits>
 
-namespace ace::async {
+namespace ace::future {
 
     /**
      * @details Handler for future objects
@@ -73,39 +70,10 @@ namespace ace::async {
         ~future_traits() override = default;
     };
 
-    #define DECLARE_FUTURE(future_t) typedef future_traits<future_t> future_traits_t;
+    #define DECLARE_FUTURE(future_t) typedef ace::future::future_traits<future_t> future_traits_t;
 
     #define IMPORT_FUTURE_ENV using typename future_traits_t::derived_future_t;
 
-
-    /**
-     * @brief namespace for dispatch concepts declaration
-     */
-    namespace dispatch {
-
-        template <typename awaitableT, typename promiseT>
-        concept is_awaitable =
-            requires (awaitableT awaitable_t, std::coroutine_handle<promiseT> promise_t) {
-                { awaitable_t.await_ready() } -> std::same_as<bool>;
-                awaitable_t.await_resume();
-                // awaitable_t.detach(promise_t);
-            }
-            and (
-                 requires (awaitableT awaitable_t, std::coroutine_handle<promiseT> promise_t) {
-                     { awaitable_t.await_suspend(promise_t) } -> std::same_as<std::coroutine_handle<promiseT>>; }
-                 or requires (awaitableT awaitable_t, std::coroutine_handle<promiseT> promise_t) {
-                     { awaitable_t.await_suspend(promise_t) } -> std::same_as<bool>; }
-                 or requires (awaitableT awaitable_t, std::coroutine_handle<promiseT> promise_t) {
-                     { awaitable_t.await_suspend(promise_t) } -> std::same_as<void>; }
-                 );
-
-        template <typename futureT, typename promiseT>
-        concept is_future =
-            requires { typename futureT::future_traits_t; }
-            and std::derived_from<futureT, typename futureT::future_traits_t>
-            and is_awaitable<futureT, promiseT>;
-
-    }
 
 }
 

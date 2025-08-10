@@ -10,14 +10,14 @@
 
 #include "ace/futures/future.h"
 #include "ace/futures/command.h"
+#include "ace/common/dispatch.h"
 
 #include <concepts>
 #include <coroutine>
 #include <memory>
-#include <iostream>
 #include <type_traits>
 
-namespace ace::async {
+namespace ace::promise {
 
     enum promise_touch_result : uint8_t  {
         e_failed,
@@ -83,7 +83,7 @@ namespace ace::async {
     template <typename returnT>
         struct promise_traits : public promise_return_traits<promise_traits<returnT>, returnT> {
 
-        typedef ace::async::future_handler* future_handler_ptr_t;
+        typedef ace::future::future_handler* future_handler_ptr_t;
         typedef promise_return_traits<promise_traits, returnT> promise_return_traits_t;
         using promise_return_traits_t::_status;
 
@@ -96,7 +96,7 @@ namespace ace::async {
         std::suspend_never await_transform(std::suspend_never& e) { return e; }
 
         template <typename futureT>
-        requires dispatch::is_future<std::remove_reference_t<futureT>, returnT>
+        requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, returnT>
         futureT& await_transform(futureT& future) {
             _status = promise_touch_result::e_blocked;
             _future = &future;
@@ -104,27 +104,28 @@ namespace ace::async {
         }
 
         template <typename futureT>
-        requires dispatch::is_future<std::remove_reference_t<futureT>, returnT>
+        requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, returnT>
         futureT&& await_transform(futureT&& future) {
             _status = promise_touch_result::e_blocked;
             _future = &future;
             return std::forward<futureT>(future);
         }
 
-        // template <typename commandT>
-        // requires dispatch::is_command<std::remove_reference_t<commandT>, returnT>
-        // commandT& await_transform(commandT& command) { return command; }
+        template <typename commandT>
+        requires ace::common::dispatch::is_command<std::remove_reference_t<commandT>, returnT>
+        static commandT& await_transform(commandT& command) { return command; }
 
-
-        // template <typename commandT>
-        // requires dispatch::is_command<std::remove_reference_t<commandT>, returnT>
-        // future_handler& await_transform(commandT&& command) { return command; }
+        template <typename commandT>
+        requires ace::common::dispatch::is_command<std::remove_reference_t<commandT>, returnT>
+        static commandT&& await_transform(commandT&& command) { return command; }
 
         /* static inline void* operator new(size_t memsize) noexcept; */
 
         /* static inline void operator delete(void* memptr, size_t memsize) noexcept; */
 
-        void* _pool_data;
+        // Note: pointers to actual and prev pool
+        void* _current_pool{};
+        void* _original_pool{};
         future_handler_ptr_t _future;
 
     };
@@ -133,7 +134,8 @@ namespace ace::async {
 
 #define IMPORT_PROMISE_TRAITS_ENV               \
     using promise_traits_t::_future;            \
-    using promise_traits_t::_pool_data;         \
+    using promise_traits_t::_current_pool;      \
+    using promise_traits_t::_original_pool;     \
     using promise_traits_t::_status;
 
 }

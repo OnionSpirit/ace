@@ -13,12 +13,9 @@
 #define ACE_COMMAND_H
 
 #include "ace/futures/future.h"
-
-#include <concepts>
-#include <coroutine>
 #include <memory>
 
-namespace ace::async {
+namespace ace::future {
 
     /**
      * @details Trait class for command objects
@@ -45,23 +42,9 @@ namespace ace::async {
         ~command_traits() override = default;
     };
 
-    #define DECLARE_COMMAND(command_t) typedef command_traits<command_t> command_traits_t;
+    #define DECLARE_COMMAND(command_t) typedef ace::future::command_traits<command_t> command_traits_t;
 
     #define IMPORT_COMMAND_ENV using typename command_traits_t::derived_command_t;
-
-
-    /**
-     * @brief namespace for dispatch concepts declaration
-     */
-    namespace dispatch {
-
-        template <typename commandT, typename promiseT>
-        concept is_command =
-            requires { typename commandT::command_traits_t; }
-            and std::derived_from<commandT, typename commandT::command_traits_t>
-            and is_awaitable<commandT, promiseT>;
-
-    }
 
 }
 

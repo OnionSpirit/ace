@@ -13,7 +13,7 @@
 #include <concepts>
 #include <memory>
 
-namespace ace::future {
+namespace ace::futures {
 
     /**
      * @details Handler for future objects
@@ -70,7 +70,7 @@ namespace ace::future {
         ~future_traits() override = default;
     };
 
-    #define DECLARE_FUTURE(future_t) typedef ace::future::future_traits<future_t> future_traits_t;
+    #define DECLARE_FUTURE(future_t) typedef ace::futures::future_traits<future_t> future_traits_t;
 
     #define IMPORT_FUTURE_ENV using typename future_traits_t::derived_future_t;
 

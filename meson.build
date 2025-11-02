@@ -1,10 +1,15 @@
-project('ace', 'cpp', default_options: ['cpp_std=c++20'])
+project('ace', 'cpp', default_options: ['cpp_std=c++23'])
 
 # Дериктория с файлами библиотеки
 include_dir = include_directories(['include'])
 
+# Подключаем nukes
+cmake = import('cmake')
+nukes = cmake.subproject('nukes')
+nukes = nukes.dependency('nukes')
+
 # Декларируем интерфейсную библеотеку
-ace_lib = declare_dependency(include_directories: include_dir)
+ace = declare_dependency(include_directories: include_dir, dependencies: [nukes])
 
 # # Создаем артифактную библиотеку
 # example_lib = library(
@@ -33,7 +38,7 @@ if tests_enabled
       cpp_args: ['-std=c++20', '-fconcepts-diagnostics-depth=2'],
       dependencies: [
           gtest_dep,
-          ace_lib,
+          ace,
       ],
   )
 

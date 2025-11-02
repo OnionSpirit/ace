@@ -15,7 +15,7 @@
 #include "ace/futures/future.h"
 #include <memory>
 
-namespace ace::future {
+namespace ace::futures {
 
     /**
      * @details Trait class for command objects

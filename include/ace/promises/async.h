@@ -13,10 +13,10 @@
 #include <coroutine>
 
 // ToDo: yield операцию преретащить в генератор/ пусть генератор имеет перегрузку итераторов чтобы запускать его в цикле for
-namespace ace::promise {
+namespace ace::promises {
 
     template<typename returnT =void, is_promise_rule launch_ruleT =differed>
-    struct async : future::future_traits<async<returnT> > {
+    struct async : futures::future_traits<async<returnT> > {
         DECLARE_FUTURE(async)
         IMPORT_FUTURE_ENV
 

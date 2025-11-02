@@ -27,6 +27,6 @@ TEST(context, do_const_nested_suspend_test) {
 
 TEST(context, do_empty_context_test) {
 
-    auto r = ace::promise::async<>();
+    auto r = ace::promises::async<>();
     ASSERT_TRUE(r);
 }

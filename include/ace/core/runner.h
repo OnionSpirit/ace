@@ -24,7 +24,7 @@ namespace ace::core {
  */
 class runner : public ace::meta::technical::scheduler_id {
 
-    std::vector<queue_t<ace::promise::async<>>> _pools; // Note: pool of task queue
+    std::vector<queue_t<ace::promises::async<>>> _pools; // Note: pool of task queue
     // Note: mpsc queue to emplace task from another runner or spawning
     // std::queue<ace::promise::async<>> _input;
     // Note: signaling queue for external control

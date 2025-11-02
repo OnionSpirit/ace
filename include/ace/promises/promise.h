@@ -17,7 +17,7 @@
 #include <memory>
 #include <type_traits>
 
-namespace ace::promise {
+namespace ace::promises {
 
     enum promise_touch_result : uint8_t  {
         e_failed,
@@ -83,7 +83,7 @@ namespace ace::promise {
     template <typename returnT>
         struct promise_traits : public promise_return_traits<promise_traits<returnT>, returnT> {
 
-        typedef ace::future::future_handler* future_handler_ptr_t;
+        typedef ace::futures::future_handler* future_handler_ptr_t;
         typedef promise_return_traits<promise_traits, returnT> promise_return_traits_t;
         using promise_return_traits_t::_status;
 
@@ -130,7 +130,7 @@ namespace ace::promise {
 
     };
 
-#define DECLARE_PROMISE_TRAITS(return_type_t) typedef promise_traits<return_type_t> promise_traits_t;
+#define DECLARE_PROMISE_TRAITS(return_type_t) typedef promises::promise_traits<return_type_t> promise_traits_t;
 
 #define IMPORT_PROMISE_TRAITS_ENV               \
     using promise_traits_t::_future;            \

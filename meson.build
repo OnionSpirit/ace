@@ -9,7 +9,7 @@ nukes = cmake.subproject('nukes')
 nukes = nukes.dependency('nukes')
 
 # Декларируем интерфейсную библеотеку
-ace = declare_dependency(include_directories: include_dir, dependencies: [nukes])
+ace = declare_dependency(include_directories: include_dir, dependencies: nukes)
 
 # # Создаем артифактную библиотеку
 # example_lib = library(

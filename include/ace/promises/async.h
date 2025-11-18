@@ -5,8 +5,8 @@
  * is_future. Types are intended to be used to create derived future objects,
  * that will be processed by co_await operator
  */
-#ifndef ACE_CONTEXT_H
-#define ACE_CONTEXT_H
+#ifndef ACE_ASYNC_H
+#define ACE_ASYNC_H
 
 #include "ace/futures/future.h"
 #include "ace/promises/promise.h"
@@ -15,8 +15,8 @@
 // ToDo: yield операцию преретащить в генератор/ пусть генератор имеет перегрузку итераторов чтобы запускать его в цикле for
 namespace ace::promises {
 
-    template<typename returnT =void, is_promise_rule launch_ruleT =differed>
-    struct async : futures::future_traits<async<returnT> > {
+    template<typename returnT =void, is_promise_rule launch_ruleT =permanent>
+    struct async : futures::future_traits<async<returnT, launch_ruleT>> {
         DECLARE_FUTURE(async)
         IMPORT_FUTURE_ENV
 
@@ -27,6 +27,10 @@ namespace ace::promises {
         coroutine_t _coroutine;
 
         async() = default;
+        async(async && t) = default;
+        async &operator=(async &&) = default;
+        async(const async &) = delete;
+        async &operator=(const async &) = delete;
 
         explicit async(coroutine_t &&h) : _coroutine{h} {};
 
@@ -102,6 +106,12 @@ namespace ace::promises {
             else return;
         }
     };
+
+    template<typename returnT =void>
+    using lazy = async<returnT, differed>;
+
+    using task = lazy<>;
+
 }
 
 // Говно нахуй не нужное, но
@@ -111,4 +121,4 @@ namespace ace::promises {
 
 // Добавить defer stack и insure stack
 
-#endif // ACE_CONTEXT_H
+#endif // ACE_ASYNC_H

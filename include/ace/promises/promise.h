@@ -27,7 +27,7 @@ namespace ace::promises {
         e_finished,
     };
 
-    struct promise_rule_traits { enum { e_promise_rule }; };
+    struct promise_rule_traits { struct e_promise_rule {}; };
 
     struct permanent : promise_rule_traits {
         consteval static auto action() noexcept { return std::suspend_never{}; };
@@ -39,8 +39,8 @@ namespace ace::promises {
 
     template <typename modeT>
     concept is_promise_rule = requires { typename modeT::e_promise_rule; }
-        and std::same_as<decltype(modeT::action()), std::suspend_never>
-        or std::same_as<decltype(modeT::action()), std::suspend_always>;
+        and (std::same_as<decltype(modeT::action()), std::suspend_never>
+        or std::same_as<decltype(modeT::action()), std::suspend_always>);
 
 
     template <typename promiseT, typename returnT>
@@ -123,19 +123,18 @@ namespace ace::promises {
 
         /* static inline void operator delete(void* memptr, size_t memsize) noexcept; */
 
-        // Note: pointers to actual and prev pool
-        void* _current_pool{};
-        void* _original_pool{};
+        // Note: pointers to actual and runner pool
+        void* _actual_pool{};
+        void* _runner_pool{};
         future_handler_ptr_t _future;
-
     };
 
 #define DECLARE_PROMISE_TRAITS(return_type_t) typedef promises::promise_traits<return_type_t> promise_traits_t;
 
 #define IMPORT_PROMISE_TRAITS_ENV               \
     using promise_traits_t::_future;            \
-    using promise_traits_t::_current_pool;      \
-    using promise_traits_t::_original_pool;     \
+    using promise_traits_t::_actual_pool;       \
+    using promise_traits_t::_runner_pool;       \
     using promise_traits_t::_status;
 
 }

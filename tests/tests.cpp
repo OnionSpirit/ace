@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "environment.h"
 #include "units.h"
+#include "ace/core/runner.h"
 
 TEST(context, do_co_await_test) {
     auto r = simple_context_test();
@@ -29,4 +30,11 @@ TEST(context, do_empty_context_test) {
 
     auto r = ace::promises::async<>();
     ASSERT_TRUE(r);
+}
+
+TEST(context, do_runner_test) {
+
+    ace::core::runner run;
+    run.spawn(nested_context_suspender());
+    run.run();
 }

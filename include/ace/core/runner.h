@@ -50,42 +50,41 @@ public:
     }
 
     /**
-     * @details Makes one round of execution through defined pools
-     * for custom ret code processing
+     * @details Resumes only one ready task
      */
-    void proceed() noexcept {
+    void yank() noexcept {
         promises::promise_touch_result touch_result = promises::promise_touch_result::e_blocked;
-        task_pool_t::node_t* captured_node = _pool.pop_node();
-        promises::task temp {};
+        auto* task_node = _pool.pop_node();
 
         /// NOTE: Pulling new context from queue
-        if (not captured_node) [[unlikely]]
-            return;
-
-        temp = std::move(captured_node->_data);
+        if (not task_node) [[unlikely]] return;
 
         // NOTE: Proceeding context
-        temp.awake(&touch_result);
+        task_node->_data.awake(&touch_result);
 
-        // NOTE: Making scheduling decision
-        if (touch_result not_eq promises::promise_touch_result::e_failed
-            and not temp._coroutine.done()) [[likely]] {
-            if (temp._coroutine.promise()._actual_pool not_eq &_pool) {
-                if (static_cast<task_pool_t*>(temp._coroutine.promise()._actual_pool)->push(std::move(temp)))
-                    _pool.release_node(captured_node);
-            } else {
-                captured_node->_data = std::move(temp);
-                _pool.push_node(captured_node);
-            }
-        } else [[unlikely]] {
-            _pool.release_node(captured_node);
-        }
+        // NOTE: Checking if task can be resumed
+        const bool is_resumable {
+            touch_result not_eq promises::promise_touch_result::e_failed
+            and not task_node->_data._coroutine.done()
+        };
+
+        // NOTE: Checking if task is rescheduled
+        const bool is_rescheduled {
+            is_resumable
+            and task_node->_data._coroutine.promise()._actual_pool not_eq &_pool
+            and static_cast<task_pool_t*>(task_node->_data._coroutine.promise()._actual_pool)
+                ->push(std::move(task_node->_data)) // TODO: Скорее всего нужен pool handler
+        };
+
+        // NOTE: Managing nodes depending on checks
+        if (not is_resumable or is_rescheduled) _pool.release_node(task_node);
+        else _pool.push_node(task_node);
     }
 
     /**
      * @details Resumes all tasks from the ready task pool until it is empty.
      */
-    void run() noexcept { while(not _pool.empty()) proceed(); }
+    void run() noexcept { while(not _pool.empty()) yank(); }
 
     /**
      * @details Function to spawn task at the runner

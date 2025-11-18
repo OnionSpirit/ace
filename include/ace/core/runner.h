@@ -14,6 +14,7 @@
 
 namespace ace::core {
 
+// TODO: Допилить объекты типа hub для менеджмента ожидающих задач, hub-объекты придут на замену пулам
 template <typename T>
 using pool_t = nukes::dynamic::mpsc_queue<T>;
 

@@ -11,6 +11,7 @@
 #include "ace/futures/future.h"
 #include "ace/futures/command.h"
 #include "ace/common/dispatch.h"
+#include "ace/hub/hub.h"
 
 #include <concepts>
 #include <coroutine>
@@ -80,8 +81,8 @@ namespace ace::promises {
         auto return_void() { return std::suspend_never{}; }
     };
 
-    template <typename returnT>
-        struct promise_traits : public promise_return_traits<promise_traits<returnT>, returnT> {
+    template <typename returnT, typename hubT>
+        struct promise_traits : public promise_return_traits<promise_traits<returnT, hubT>, returnT> {
 
         typedef ace::futures::future_handler* future_handler_ptr_t;
         typedef promise_return_traits<promise_traits, returnT> promise_return_traits_t;
@@ -124,17 +125,17 @@ namespace ace::promises {
         /* static inline void operator delete(void* memptr, size_t memsize) noexcept; */
 
         // Note: pointers to actual and runner pool
-        void* _actual_pool{};
-        void* _runner_pool{};
+        hubT* _actual_hub{};
+        hubT* _runner_hub{};
         future_handler_ptr_t _future;
     };
 
-#define DECLARE_PROMISE_TRAITS(return_type_t) typedef promises::promise_traits<return_type_t> promise_traits_t;
+#define DECLARE_PROMISE_TRAITS(return_type_t, hub_t) typedef promises::promise_traits<return_type_t, hub_t> promise_traits_t;
 
 #define IMPORT_PROMISE_TRAITS_ENV               \
     using promise_traits_t::_future;            \
-    using promise_traits_t::_actual_pool;       \
-    using promise_traits_t::_runner_pool;       \
+    using promise_traits_t::_actual_hub;        \
+    using promise_traits_t::_runner_hub;        \
     using promise_traits_t::_status;
 
 }

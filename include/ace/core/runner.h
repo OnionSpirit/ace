@@ -8,15 +8,10 @@
 #include <queue>
 
 #include "ace/promises/async.h"
-#include <nukes/dynamic/mpsc_queue.h>
-#include <nukes/dynamic/mpmc_queue.h>
+#include "ace/hub/queue_hub.h"
 
 
 namespace ace::core {
-
-// TODO: Допилить объекты типа hub для менеджмента ожидающих задач, hub-объекты придут на замену пулам
-template <typename T>
-using pool_t = nukes::dynamic::mpsc_queue<T>;
 
 /**
  * @details coroutines execution manager.
@@ -28,12 +23,12 @@ using pool_t = nukes::dynamic::mpsc_queue<T>;
 class runner // : public ace::meta::technical::scheduler_id
     {
 
-    typedef pool_t<promises::task> task_pool_t;
-    task_pool_t _pool; // Note: pool of task queue
+    typedef hubs::queue_hub task_hub_t;
+    task_hub_t _hub; // Note: pool of task queue
     // Note: mpsc queue to emplace task from another runner or spawning
     // std::queue<ace::promise::async<>> _input;
     // Note: signaling queue for external control
-    pool_t<int> _signals;
+    // pool_t<int> _signals;
 
 public:
 
@@ -55,7 +50,7 @@ public:
      */
     void yank() noexcept {
         promises::promise_touch_result touch_result = promises::promise_touch_result::e_blocked;
-        auto* task_node = _pool.pop_node();
+        auto* task_node = _hub._waiters.pop_node();
 
         /// NOTE: Pulling new context from queue
         if (not task_node) [[unlikely]] return;
@@ -72,20 +67,19 @@ public:
         // NOTE: Checking if task is rescheduled
         const bool is_rescheduled {
             is_resumable
-            and task_node->_data._coroutine.promise()._actual_pool not_eq &_pool
-            and static_cast<task_pool_t*>(task_node->_data._coroutine.promise()._actual_pool)
-                ->push(std::move(task_node->_data)) // TODO: Скорее всего нужен pool handler
+            and task_node->_data._coroutine.promise()._actual_hub not_eq &_hub
+            and task_node->_data._coroutine.promise()._actual_hub->emplace(std::move(task_node->_data))
         };
 
         // NOTE: Managing nodes depending on checks
-        if (not is_resumable or is_rescheduled) _pool.release_node(task_node);
-        else _pool.push_node(task_node);
+        if (not is_resumable or is_rescheduled) _hub._waiters.release_node(task_node);
+        else _hub._waiters.push_node(task_node);
     }
 
     /**
      * @details Resumes all tasks from the ready task pool until it is empty.
      */
-    void run() noexcept { while(not _pool.empty()) yank(); }
+    void run() noexcept { while(not _hub._waiters.empty()) yank(); }
 
     /**
      * @details Function to spawn task at the runner
@@ -93,15 +87,15 @@ public:
      * @return void
      */
     void spawn(promises::task&& new_task) noexcept {
-        new_task._coroutine.promise()._actual_pool = reinterpret_cast<void*>(&_pool);
-        _pool.push(std::forward<promises::task>(new_task));
+        new_task._coroutine.promise()._actual_hub = &_hub;
+        _hub._waiters.push(std::forward<promises::task>(new_task));
     }
 
     /**
      * @details Checks if any Tasks stored in the runner
      * @return @b true if empty, @b false otherwise
      */
-    [[nodiscard]] bool empty() noexcept { return _pool.empty(); };
+    [[nodiscard]] bool empty() noexcept { return _hub._waiters.empty(); };
 };
 
 } // end namespace ace::core

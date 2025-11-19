@@ -38,8 +38,10 @@ namespace ace::promises {
 
         ~async() override = default;
 
-        struct promise_type : promise_traits<returnT> {
-            DECLARE_PROMISE_TRAITS(returnT)
+        typedef hubs::hub_traits<async<void, differed>> hub_t;
+
+        struct promise_type : promise_traits<returnT, hub_t> {
+            DECLARE_PROMISE_TRAITS(returnT, hub_t)
             IMPORT_PROMISE_TRAITS_ENV
 
             promise_type() = default;
@@ -113,6 +115,9 @@ namespace ace::promises {
     using task = lazy<>;
 
 }
+
+// NOTE: Declaration of common hub_handler type
+namespace ace::hubs { typedef hub_traits<promises::task> hub_handler_t; }
 
 // Говно нахуй не нужное, но
 // bridge - обобщенный канал для отслеживания состояний запущеных в параллель асинхронных компонент, и отправки управляющих сигналов

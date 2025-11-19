@@ -1,7 +1,7 @@
 #ifndef UNITS_H
 #define UNITS_H
 
-#include "ace/promises/async.h"
+#include "ace/common/aliases.h"
 #include "include/ace/futures/future.h"
 
 struct once_suspend : ace::futures::future_traits<once_suspend> {
@@ -31,7 +31,7 @@ struct once_suspend : ace::futures::future_traits<once_suspend> {
     ~once_suspend() override = default;
 };
 
-inline ace::promises::async<bool> simple_context_test() {
+inline ace::promise<bool> simple_context_test() {
     once_suspend tests_future;
 
     co_await tests_future;
@@ -39,7 +39,7 @@ inline ace::promises::async<bool> simple_context_test() {
     co_return true;
 }
 
-inline ace::promises::task nested_context_suspender() {
+inline ace::task nested_context_suspender() {
     co_await simple_context_test();
     std::cout << "Nested call complete" << std::endl;
     co_return;

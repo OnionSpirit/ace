@@ -20,6 +20,9 @@ namespace ace::promises {
         DECLARE_FUTURE(async)
         IMPORT_FUTURE_ENV
 
+        // NOTE: Hub type traits implementation
+        typedef hubs::hub_traits<async<void, differed>> hub_t;
+
         struct promise_type;
 
         typedef std::coroutine_handle<promise_type> coroutine_t;
@@ -37,8 +40,6 @@ namespace ace::promises {
         explicit operator bool() const { return not _coroutine or _coroutine.done(); }
 
         ~async() override = default;
-
-        typedef hubs::hub_traits<async<void, differed>> hub_t;
 
         struct promise_type : promise_traits<returnT, hub_t> {
             DECLARE_PROMISE_TRAITS(returnT, hub_t)
@@ -109,15 +110,7 @@ namespace ace::promises {
         }
     };
 
-    template<typename returnT =void>
-    using lazy = async<returnT, differed>;
-
-    using task = lazy<>;
-
 }
-
-// NOTE: Declaration of common hub_handler type
-namespace ace::hubs { typedef hub_traits<promises::task> hub_handler_t; }
 
 // Говно нахуй не нужное, но
 // bridge - обобщенный канал для отслеживания состояний запущеных в параллель асинхронных компонент, и отправки управляющих сигналов

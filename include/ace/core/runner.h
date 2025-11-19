@@ -40,7 +40,7 @@ public:
 
     runner &operator=(runner &&t) noexcept = default;
 
-    static void schedule(promises::task&& p) {
+    static void schedule(task&& p) {
         // p._coroutine.promise()._actual_pool = p._coroutine.promise()._runner_pool;
         // reinterpret_cast<task_pool_t*>(p._coroutine.promise()._actual_pool)->push(p);
     }
@@ -86,9 +86,10 @@ public:
      * @param new_task Task to be pushed into the runner
      * @return void
      */
-    void spawn(promises::task&& new_task) noexcept {
+    void spawn(task&& new_task) noexcept {
         new_task._coroutine.promise()._actual_hub = &_hub;
-        _hub._waiters.push(std::forward<promises::task>(new_task));
+        new_task._coroutine.promise()._runner_hub = &_hub;
+        _hub._waiters.push(std::forward<task>(new_task));
     }
 
     /**

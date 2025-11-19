@@ -11,14 +11,14 @@
 #include "ace/futures/future.h"
 #include "ace/futures/command.h"
 #include "ace/common/dispatch.h"
-#include "ace/hub/hub.h"
+#include "nukes/dynamic/mpsc_queue.h"
 
 #include <concepts>
 #include <coroutine>
 #include <memory>
 #include <type_traits>
 
-namespace ace::promises {
+namespace ace::coroutines {
 
     enum promise_touch_result : uint8_t  {
         e_failed,
@@ -51,8 +51,6 @@ namespace ace::promises {
 
         promise_touch_result _status { e_blocked };
 
-    public:
-
         returnT _return_value {};
 
         auto return_value(returnT return_value) {
@@ -76,16 +74,14 @@ namespace ace::promises {
 
         promise_touch_result _status { e_blocked };
 
-    public:
-
         auto return_void() { return std::suspend_never{}; }
     };
 
-    template <typename returnT, typename hubT>
-        struct promise_traits : public promise_return_traits<promise_traits<returnT, hubT>, returnT> {
+    template <typename return_t>
+        struct promise_traits : public promise_return_traits<promise_traits<return_t>, return_t> {
 
         typedef ace::futures::future_handler* future_handler_ptr_t;
-        typedef promise_return_traits<promise_traits, returnT> promise_return_traits_t;
+        typedef promise_return_traits<promise_traits, return_t> promise_return_traits_t;
         using promise_return_traits_t::_status;
 
         promise_traits() =default;
@@ -97,45 +93,41 @@ namespace ace::promises {
         std::suspend_never await_transform(std::suspend_never& e) { return e; }
 
         template <typename futureT>
-        requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, returnT>
+        requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, return_t>
         futureT& await_transform(futureT& future) {
-            _status = promise_touch_result::e_blocked;
+            _status = e_blocked;
             _future = &future;
             return future;
         }
 
         template <typename futureT>
-        requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, returnT>
+        requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, return_t>
         futureT&& await_transform(futureT&& future) {
-            _status = promise_touch_result::e_blocked;
+            _status = e_blocked;
             _future = &future;
             return std::forward<futureT>(future);
         }
 
         template <typename commandT>
-        requires ace::common::dispatch::is_command<std::remove_reference_t<commandT>, returnT>
+        requires ace::common::dispatch::is_command<std::remove_reference_t<commandT>, return_t>
         static commandT& await_transform(commandT& command) { return command; }
 
         template <typename commandT>
-        requires ace::common::dispatch::is_command<std::remove_reference_t<commandT>, returnT>
+        requires ace::common::dispatch::is_command<std::remove_reference_t<commandT>, return_t>
         static commandT&& await_transform(commandT&& command) { return command; }
 
+        // TODO: Define in future to attach custom allocator
         /* static inline void* operator new(size_t memsize) noexcept; */
 
         /* static inline void operator delete(void* memptr, size_t memsize) noexcept; */
 
-        // Note: pointers to actual and runner pool
-        hubT* _actual_hub{};
-        hubT* _runner_hub{};
         future_handler_ptr_t _future;
     };
 
-#define DECLARE_PROMISE_TRAITS(return_type_t, hub_t) typedef promises::promise_traits<return_type_t, hub_t> promise_traits_t;
+#define DECLARE_PROMISE_TRAITS(return_type_t) typedef coroutines::promise_traits<return_type_t> promise_traits_t;
 
 #define IMPORT_PROMISE_TRAITS_ENV               \
     using promise_traits_t::_future;            \
-    using promise_traits_t::_actual_hub;        \
-    using promise_traits_t::_runner_hub;        \
     using promise_traits_t::_status;
 
 }

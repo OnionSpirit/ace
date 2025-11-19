@@ -7,8 +7,7 @@
 #include <optional>
 #include <queue>
 
-#include "ace/promises/async.h"
-#include "ace/hub/queue_hub.h"
+#include "ace/coroutines/context.h"
 
 
 namespace ace::core {
@@ -23,8 +22,7 @@ namespace ace::core {
 class runner // : public ace::meta::technical::scheduler_id
     {
 
-    typedef hubs::queue_hub task_hub_t;
-    task_hub_t _hub; // Note: pool of task queue
+    async<>::promise_type::runner_pool_t _pool; // Note: pool of task queue
     // Note: mpsc queue to emplace task from another runner or spawning
     // std::queue<ace::promise::async<>> _input;
     // Note: signaling queue for external control
@@ -40,7 +38,7 @@ public:
 
     runner &operator=(runner &&t) noexcept = default;
 
-    static void schedule(task&& p) {
+    static void schedule(async<>&& p) {
         // p._coroutine.promise()._actual_pool = p._coroutine.promise()._runner_pool;
         // reinterpret_cast<task_pool_t*>(p._coroutine.promise()._actual_pool)->push(p);
     }
@@ -49,54 +47,46 @@ public:
      * @details Resumes only one ready task
      */
     void yank() noexcept {
-        promises::promise_touch_result touch_result = promises::promise_touch_result::e_blocked;
-        auto* task_node = _hub._waiters.pop_node();
+        coroutines::promise_touch_result touch_result = coroutines::promise_touch_result::e_blocked;
+        auto* async_n = _pool.pop_node();
 
         /// NOTE: Pulling new context from queue
-        if (not task_node) [[unlikely]] return;
+        if (not async_n) [[unlikely]] return;
 
         // NOTE: Proceeding context
-        task_node->_data.awake(&touch_result);
+        async_n->_data.awake(&touch_result);
 
         // NOTE: Checking if task can be resumed
         const bool is_resumable {
-            touch_result not_eq promises::promise_touch_result::e_failed
-            and not task_node->_data._coroutine.done()
-        };
-
-        // NOTE: Checking if task is rescheduled
-        const bool is_rescheduled {
-            is_resumable
-            and task_node->_data._coroutine.promise()._actual_hub not_eq &_hub
-            and task_node->_data._coroutine.promise()._actual_hub->emplace(std::move(task_node->_data))
+            touch_result not_eq coroutines::promise_touch_result::e_failed
+            and not async_n->_data
         };
 
         // NOTE: Managing nodes depending on checks
-        if (not is_resumable or is_rescheduled) _hub._waiters.release_node(task_node);
-        else _hub._waiters.push_node(task_node);
+        if (not is_resumable) _pool.release_node(async_n);
+        else _pool.push_node(async_n);
     }
 
     /**
      * @details Resumes all tasks from the ready task pool until it is empty.
      */
-    void run() noexcept { while(not _hub._waiters.empty()) yank(); }
+    void run() noexcept { while(not _pool.empty()) yank(); }
 
     /**
      * @details Function to spawn task at the runner
      * @param new_task Task to be pushed into the runner
      * @return void
      */
-    void spawn(task&& new_task) noexcept {
-        new_task._coroutine.promise()._actual_hub = &_hub;
-        new_task._coroutine.promise()._runner_hub = &_hub;
-        _hub._waiters.push(std::forward<task>(new_task));
+    void spawn(async<>&& new_task) noexcept {
+        new_task._coroutine.promise()._runner_pool = &_pool;
+        _pool.push(std::forward<async<>>(new_task));
     }
 
     /**
      * @details Checks if any Tasks stored in the runner
      * @return @b true if empty, @b false otherwise
      */
-    [[nodiscard]] bool empty() noexcept { return _hub._waiters.empty(); };
+    [[nodiscard]] bool empty() noexcept { return _pool.empty(); };
 };
 
 } // end namespace ace::core

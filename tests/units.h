@@ -1,7 +1,7 @@
 #ifndef UNITS_H
 #define UNITS_H
 
-#include "ace/common/aliases.h"
+#include <ace/coroutines/context.h>
 #include "include/ace/futures/future.h"
 
 struct once_suspend : ace::futures::future_traits<once_suspend> {
@@ -39,7 +39,7 @@ inline ace::promise<bool> simple_context_test() {
     co_return true;
 }
 
-inline ace::task nested_context_suspender() {
+inline ace::async<> nested_context_suspender() {
     co_await simple_context_test();
     std::cout << "Nested call complete" << std::endl;
     co_return;

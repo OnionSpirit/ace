@@ -6,6 +6,8 @@
 TEST(context, do_co_await_test) {
     auto r = simple_context_test();
     ASSERT_FALSE(r);
+    r.awake();
+    ASSERT_TRUE(r);
 }
 
 // NOTE: Проверка разрешения не константных реакций
@@ -28,13 +30,14 @@ TEST(context, do_const_nested_suspend_test) {
 
 TEST(context, do_empty_context_test) {
 
-    auto r = ace::promises::async<>();
+    auto r = ace::coroutines::context<>();
     ASSERT_TRUE(r);
 }
 
 TEST(context, do_runner_test) {
 
-    ace::core::runner run;
-    run.spawn(nested_context_suspender());
-    run.run();
+    ace::core::runner runner;
+    runner.spawn(nested_context_suspender());
+    runner.run();
+    ASSERT_TRUE(runner.empty());
 }

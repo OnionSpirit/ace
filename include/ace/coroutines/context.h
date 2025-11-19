@@ -9,19 +9,16 @@
 #define ACE_ASYNC_H
 
 #include "ace/futures/future.h"
-#include "ace/promises/promise.h"
+#include "ace/coroutines/promise.h"
 #include <coroutine>
 
 // ToDo: yield операцию преретащить в генератор/ пусть генератор имеет перегрузку итераторов чтобы запускать его в цикле for
-namespace ace::promises {
+namespace ace::coroutines {
 
-    template<typename returnT =void, is_promise_rule launch_ruleT =permanent>
-    struct async : futures::future_traits<async<returnT, launch_ruleT>> {
-        DECLARE_FUTURE(async)
+    template<typename returnT =void, is_promise_rule launch_ruleT =differed>
+    struct context : futures::future_traits<context<returnT, launch_ruleT>> {
+        DECLARE_FUTURE(context)
         IMPORT_FUTURE_ENV
-
-        // NOTE: Hub type traits implementation
-        typedef hubs::hub_traits<async<void, differed>> hub_t;
 
         struct promise_type;
 
@@ -29,20 +26,30 @@ namespace ace::promises {
 
         coroutine_t _coroutine;
 
-        async() = default;
-        async(async && t) = default;
-        async &operator=(async &&) = default;
-        async(const async &) = delete;
-        async &operator=(const async &) = delete;
+        context() = default;
+        context(context && t) noexcept {
+            _coroutine = std::forward<coroutine_t>(t._coroutine);
+            t._coroutine = nullptr;
+        };
+        context &operator=(context && t)  noexcept {
+            _coroutine = std::forward<coroutine_t>(t._coroutine);
+            t._coroutine = nullptr;
+            return *this;
+        };
+        context(const context &) = delete;
+        context &operator=(const context &) = delete;
 
-        explicit async(coroutine_t &&h) : _coroutine{h} {};
+        explicit context(coroutine_t &&h) : _coroutine{h} {};
 
-        explicit operator bool() const { return not _coroutine or _coroutine.done(); }
+        // NOTE: Checks if context is idle
+        [[nodiscard]] bool is_idle() const noexcept { return not _coroutine or _coroutine.done(); }
 
-        ~async() override = default;
+        explicit operator bool() const { return is_idle(); }
 
-        struct promise_type : promise_traits<returnT, hub_t> {
-            DECLARE_PROMISE_TRAITS(returnT, hub_t)
+        ~context() override = default;
+
+        struct promise_type : promise_traits<returnT> {
+            DECLARE_PROMISE_TRAITS(returnT)
             IMPORT_PROMISE_TRAITS_ENV
 
             promise_type() = default;
@@ -64,9 +71,13 @@ namespace ace::promises {
                 this->final_suspend();
             };
 
-            auto get_return_object() noexcept { return async{coroutine_t::from_promise(*this)}; }
+            auto get_return_object() noexcept { return context{coroutine_t::from_promise(*this)}; }
 
-            static auto get_return_object_on_allocation_failure() { return async(nullptr); }
+            static auto get_return_object_on_allocation_failure() { return context(nullptr); }
+
+            typedef nukes::dynamic::mpsc_queue<context<>> runner_pool_t;
+            // TODO: Wrap into weak hazard ptr, when I will write it
+            runner_pool_t* _runner_pool{};
         };
 
         bool await_ready() override {
@@ -80,7 +91,7 @@ namespace ace::promises {
 
         template<typename promiseT>
         bool await_suspend(std::coroutine_handle<promiseT>) {
-            if (not _coroutine or _coroutine.done())
+            if (not is_idle())
                 return false;
             return true;
         }
@@ -92,24 +103,41 @@ namespace ace::promises {
         }
 
         returnT awake(promise_touch_result *const _res = nullptr) noexcept {
-            if (_coroutine and not _coroutine.done()) [[likely]] {
-                if (not _coroutine.promise()._future)
-                    _coroutine();
-                else if (_coroutine.promise()._future->await_ready()) {
-                    _coroutine.promise()._future = nullptr;
-                    _coroutine();
-                }
+            const bool is_ready {
+                not is_idle()
+                and (not _coroutine.promise()._future or _coroutine.promise()._future->await_ready())
+            };
+            // NOTE: Clear future ptr and resume context
+            if (is_ready) {
+                _coroutine.promise()._future = nullptr;
+                _coroutine.resume();
             }
-
-            if (_res != nullptr)
+            // NOTE: For user provided touch result ptr
+            if (_res != nullptr) [[likely]]
                 *_res = _coroutine.promise()._status;
-
             if constexpr (not std::same_as<void, returnT>)
                 return this->_coroutine.promise()._return_value;
             else return;
         }
     };
 
+}
+
+namespace ace {
+
+    // NOTE: Type alias for greedy coroutines
+    template<typename returnT =void>
+    using promise = coroutines::context<returnT, coroutines::permanent>;
+
+    // NOTE: Type alias for lazy coroutines
+    template<typename returnT =void>
+    using async = coroutines::context<returnT>;
+
+    // NOTE: Wrapper to spawn and manage coroutines in 'hubs' which is not 'task'
+    async<> async_wrap(auto&& some_async) {
+        co_await some_async;
+        co_return;
+    }
 }
 
 // Говно нахуй не нужное, но

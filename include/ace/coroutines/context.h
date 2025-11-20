@@ -12,6 +12,8 @@
 #include "ace/coroutines/promise.h"
 #include <coroutine>
 
+#include "conductor.h"
+
 // ToDo: yield операцию преретащить в генератор/ пусть генератор имеет перегрузку итераторов чтобы запускать его в цикле for
 namespace ace::coroutines {
 
@@ -27,19 +29,23 @@ namespace ace::coroutines {
         coroutine_t _coroutine;
 
         context() = default;
-        context(context && t) noexcept {
-            _coroutine = std::forward<coroutine_t>(t._coroutine);
-            t._coroutine = nullptr;
+
+        context(context && ctx) noexcept {
+            _coroutine = std::forward<coroutine_t>(ctx._coroutine);
+            ctx._coroutine = nullptr;
         };
-        context &operator=(context && t)  noexcept {
-            _coroutine = std::forward<coroutine_t>(t._coroutine);
-            t._coroutine = nullptr;
+
+        context &operator=(context && ctx)  noexcept {
+            _coroutine = std::forward<coroutine_t>(ctx._coroutine);
+            ctx._coroutine = nullptr;
             return *this;
         };
+
         context(const context &) = delete;
+
         context &operator=(const context &) = delete;
 
-        explicit context(coroutine_t &&h) : _coroutine{h} {};
+        explicit context(coroutine_t &&handler) : _coroutine{handler} {};
 
         // NOTE: Checks if context is idle
         [[nodiscard]] bool is_idle() const noexcept { return not _coroutine or _coroutine.done(); }
@@ -55,6 +61,10 @@ namespace ace::coroutines {
             promise_type() = default;
 
             ~promise_type() = default;
+
+            typedef conductor_traits<context<>> conductor_handler_t;
+
+            typedef nukes::dynamic::mpsc_queue<context<>> runner_pool_t;
 
             [[nodiscard]] auto initial_suspend() const noexcept {
                 return launch_ruleT::action();
@@ -75,24 +85,33 @@ namespace ace::coroutines {
 
             static auto get_return_object_on_allocation_failure() { return context(nullptr); }
 
-            typedef nukes::dynamic::mpsc_queue<context<>> runner_pool_t;
+            std::unique_ptr<conductor_handler_t> _conductor {nullptr};
             // TODO: Wrap into weak hazard ptr, when I will write it
-            runner_pool_t* _runner_pool{};
+            runner_pool_t* _runner_pool {nullptr};
         };
+
+        template<typename promiseT>
+        void pass_conductor(std::coroutine_handle<promiseT> outer) noexcept {
+            if (_coroutine.promise()._conductor) {
+                outer.promise()._conductor = std::move(_coroutine.promise()._conductor);
+                _coroutine.promise()._conductor.reset();
+            }
+        }
 
         bool await_ready() override {
             if (_coroutine.done()) return true;
-            if (_coroutine.promise()._future)
-                if (_coroutine.promise()._future->await_ready())
-                    _coroutine.promise()._future = nullptr;
+            if (_coroutine.promise()._future and _coroutine.promise()._future->await_ready())
+                _coroutine.promise()._future = nullptr;
             _coroutine.resume();
             return _coroutine.done();
         }
 
         template<typename promiseT>
-        bool await_suspend(std::coroutine_handle<promiseT>) {
-            if (not is_idle())
+        bool await_suspend(std::coroutine_handle<promiseT> outer) {
+            if (not is_idle()) {
+                pass_conductor(outer);
                 return false;
+            }
             return true;
         }
 
@@ -139,6 +158,12 @@ namespace ace {
         co_await some_async;
         co_return;
     }
+
+    // NOTE: Type of a pool for runner [Relates 'context' and 'runner']
+    typedef async<>::promise_type::runner_pool_t runner_pool_t;
+
+    // NOTE: Type of a conductor handler for runner and future objects [Relates 'future' and 'runner']
+    typedef async<>::promise_type::conductor_handler_t conductor_handler_t;
 }
 
 // Говно нахуй не нужное, но

@@ -15,7 +15,7 @@
 #include <nukes/bounded/mpmc_queue.h>
 
 #include "ace/core/runner.h"
-#include "ace/promises/async.h"
+#include "ace/coroutines/context.h"
 
 
 namespace ace::futures {
@@ -44,6 +44,8 @@ class channel {
 
     class pull_impl;
 
+    struct channel_conductor;
+
     void reset();
 
     static auto consteval define_data_storage() {
@@ -57,15 +59,19 @@ class channel {
 
     static auto consteval define_waiters_storage() {
         if constexpr (waiters_allocation_v == allocation_type::e_dynamic)
-            return nukes::dynamic::mpsc_queue<promises::async<>>{};
+            return nukes::dynamic::mpsc_queue<async<>>{};
         if constexpr (waiters_allocation_v == allocation_type::e_static)
-            return nukes::bounded::mpsc_queue<promises::async<>, waiters_buffer_size_v>{};
+            return nukes::bounded::mpsc_queue<async<>, waiters_buffer_size_v>{};
         if constexpr (waiters_allocation_v == allocation_type::e_on_init)
-            return nukes::bounded::mpsc_queue<promises::async<>>{};
+            return nukes::bounded::mpsc_queue<async<>>{};
     }
 
     typedef std::decay_t<decltype(define_data_storage())> data_storage_t;
     typedef std::decay_t<decltype(define_waiters_storage())> waiters_storage_t;
+
+    friend pull_impl;
+
+    friend channel_conductor;
 
 public:
 
@@ -119,49 +125,37 @@ public:
      * @details @b pull method alternative interface
      * @param data Data to pull
      */
-    [[nodiscard]] context<> operator >> (data_t& data) { data = co_await pull(); }
+    [[nodiscard]] async<> operator >> (data_t& data) { data = co_await pull(); }
 
     /**
      * @details @b pull method alternative interface
      * @param data Data to pull
      */
-    [[nodiscard]] context<> operator >> (data_t&& data) { data = std::move(co_await pull()); }
+    [[nodiscard]] async<> operator >> (data_t&& data) { data = std::move(co_await pull()); }
 };
 
 
 template <typename Type, size_t DataBufferSize = 16ul, size_t WaitersBufferSize = 4ul>
-using channel_static_static = channel
+using channel_bounded = channel
 <
     Type,
     DataBufferSize,
-    ace::component_modes::allocation::static_mode,
-    WaitersBufferSize,
-    ace::component_modes::allocation::static_mode
+    allocation_type::e_static,
+    WaitersBufferSize
 >;
 
 
 template <typename Type, size_t DataBufferSize = 16ul, size_t WaitersBufferSize = 4ul>
-using channel_static_dynamic = channel
+using channel_dyn = channel
 <
     Type,
     DataBufferSize,
-    ace::component_modes::allocation::static_mode,
-    WaitersBufferSize,
-    ace::component_modes::allocation::dynamic_mode
+    allocation_type::e_dynamic,
+    WaitersBufferSize
 >;
 
 
-template <typename Type, size_t DataBufferSize = 16ul, size_t WaitersBufferSize = 4ul>
-using channel_dynamic_static = channel
-<
-    Type,
-    DataBufferSize,
-    ace::component_modes::allocation::dynamic_mode,
-    WaitersBufferSize,
-    ace::component_modes::allocation::static_mode
->;
-
-} // namespace ace::async
+} // namespace ace::futures
 
 //==============================DEFINITIONS==================================
 
@@ -205,10 +199,24 @@ public:
 };
 
 
+ACE_FUTURE_CHANNEL_META
+struct ACE_FUTURE_CHANNEL_SPACE channel_conductor final : conductor_handler_t {
+
+    channel_conductor() =delete;
+
+    explicit channel_conductor(waiters_storage_t & waiters) : _waiters(&waiters) {};
+
+    waiters_storage_t* _waiters;
+
+    void forward(async<>&& ctx) override { _waiters->push(std::move(ctx)); }
+
+    ~channel_conductor() override = default;
+};
+
+
 ACE_FUTURE_CHANNEL_MEMBER(void) reset() {
-    ace::promises::async<> temp;
-    if (_waiters.pop(temp)) [[likely]]
-        core::runner::schedule(temp);
+    if (async<> temp; _waiters.pop(temp)) [[likely]]
+        core::runner::schedule(std::move(temp));
 }
 
 
@@ -231,7 +239,8 @@ ACE_FUTURE_CHANNEL_MEMBER(bool) push(data_t&& data) {
 
 
 ACE_FUTURE_CHANNEL_META
-ACE_FUTURE_CHANNEL_SPACE pull_impl pull() {
+ACE_FUTURE_CHANNEL_SPACE pull_impl
+ACE_FUTURE_CHANNEL_SPACE pull() {
     return pull_impl(_waiters, _container);
 }
 
@@ -242,7 +251,7 @@ ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::ready() {
 
 ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::suspend(auto& ctx) {
     if (not _container->pop(_output_data)) {
-        ctx.promise().switch_pool(_waiters);
+        ctx.promise()._condutor = std::make_unique<conductor_handler_t>(channel_conductor(_waiters));
         return true;
     }
     return false;

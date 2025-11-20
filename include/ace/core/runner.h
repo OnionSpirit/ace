@@ -21,7 +21,7 @@ namespace ace::core {
 class runner // : public ace::meta::technical::scheduler_id
     {
 
-    async<>::promise_type::runner_pool_t _pool; // Note: pool of task queue
+    runner_pool_t _pool; // Note: pool of task queue
     // Note: mpsc queue to emplace task from another runner or spawning
     // std::queue<ace::promise::async<>> _input;
     // Note: signaling queue for external control
@@ -37,9 +37,12 @@ public:
 
     runner &operator=(runner &&t) noexcept = delete;
 
-    static void schedule(async<>&& p) {
-        // p._coroutine.promise()._actual_pool = p._coroutine.promise()._runner_pool;
-        // reinterpret_cast<task_pool_t*>(p._coroutine.promise()._actual_pool)->push(p);
+    static void schedule(async<>&& ctx) {
+        if (not ctx._coroutine.promise()._runner_pool) {
+            ctx._coroutine.destroy();
+            return;
+        }
+        ctx._coroutine.promise()._runner_pool->push(std::move(ctx));
     }
 
     /**
@@ -55,14 +58,27 @@ public:
         // NOTE: Proceeding context
         async_n->_data.awake(&touch_result);
 
-        // NOTE: Checking if task can be resumed
+        // NOTE: Checking if context can be resumed
         const bool is_resumable {
             touch_result not_eq coroutines::promise_touch_result::e_failed
             and not async_n->_data
         };
 
+        // NOTE: Checking if the context shall be forwarded via passed conductor
+        const bool is_conducted {
+            is_resumable
+            and async_n->_data._coroutine.promise()._conductor not_eq nullptr
+        };
+
+        // NOTE: Decision if node shall be released or pushed back
+        const bool is_idle = not is_resumable or is_conducted;
+
+        // NOTE: Forwarding via conductor if needed
+        if (is_conducted)
+            async_n->_data._coroutine.promise()._conductor->forward(std::forward<async<>>(async_n->_data));
+
         // NOTE: Managing nodes depending on checks
-        if (not is_resumable) _pool.release_node(async_n);
+        if (is_idle) _pool.release_node(async_n);
         else _pool.push_node(async_n);
     }
 

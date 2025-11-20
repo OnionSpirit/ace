@@ -9,7 +9,6 @@
 #define ACE_PROMISE_H
 
 #include "ace/futures/future.h"
-#include "ace/futures/command.h"
 #include "ace/common/dispatch.h"
 #include "nukes/dynamic/mpsc_queue.h"
 
@@ -74,13 +73,13 @@ namespace ace::coroutines {
 
         promise_touch_result _status { e_blocked };
 
-        auto return_void() { return std::suspend_never{}; }
+        static auto return_void() { return std::suspend_never{}; }
     };
 
     template <typename return_t>
-        struct promise_traits : public promise_return_traits<promise_traits<return_t>, return_t> {
+        struct promise_traits : promise_return_traits<promise_traits<return_t>, return_t> {
 
-        typedef ace::futures::future_handler* future_handler_ptr_t;
+        typedef futures::future_handler* future_handler_ptr_t;
         typedef promise_return_traits<promise_traits, return_t> promise_return_traits_t;
         using promise_return_traits_t::_status;
 
@@ -88,9 +87,9 @@ namespace ace::coroutines {
 
         ~promise_traits() =default;
 
-        std::suspend_always await_transform(std::suspend_always& e) { return e; }
+        static std::suspend_always await_transform(const std::suspend_always& e) { return e; }
 
-        std::suspend_never await_transform(std::suspend_never& e) { return e; }
+        static std::suspend_never await_transform(const std::suspend_never& e) { return e; }
 
         template <typename futureT>
         requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, return_t>
@@ -121,7 +120,7 @@ namespace ace::coroutines {
 
         /* static inline void operator delete(void* memptr, size_t memsize) noexcept; */
 
-        future_handler_ptr_t _future;
+        future_handler_ptr_t _future { nullptr };
     };
 
 #define DECLARE_PROMISE_TRAITS(return_type_t) typedef coroutines::promise_traits<return_type_t> promise_traits_t;

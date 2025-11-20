@@ -56,19 +56,19 @@ namespace ace::coroutines {
 
             ~promise_type() = default;
 
-            auto initial_suspend() const noexcept {
+            [[nodiscard]] auto initial_suspend() const noexcept {
                 return launch_ruleT::action();
             }
 
-            auto final_suspend() noexcept { return std::suspend_always{}; }
+            static auto final_suspend() noexcept { return std::suspend_always{}; }
 
             void unhandled_exception() {
                 _status = e_failed;
-                this->interrupt("Unhandled exception.");
+                interrupt("Unhandled exception.");
             }
 
-            void interrupt(const std::string_view &&str) {
-                this->final_suspend();
+            static void interrupt(const std::string_view &&str) {
+                final_suspend();
             };
 
             auto get_return_object() noexcept { return context{coroutine_t::from_promise(*this)}; }
@@ -133,8 +133,9 @@ namespace ace {
     template<typename returnT =void>
     using async = coroutines::context<returnT>;
 
-    // NOTE: Wrapper to spawn and manage coroutines in 'hubs' which is not 'task'
-    async<> async_wrap(auto&& some_async) {
+    // NOTE: Wrapper to spawn and manage coroutines in runner pool
+    template <typename async_return_t>
+    async<> async_wrap(async<async_return_t>&& some_async) {
         co_await some_async;
         co_return;
     }

@@ -4,7 +4,6 @@
  */
 #ifndef ACE_RUNNER_H
 #define ACE_RUNNER_H
-#include <optional>
 #include <queue>
 
 #include "ace/coroutines/context.h"
@@ -34,9 +33,9 @@ public:
 
     ~runner() =default;
 
-    runner(runner &&t) noexcept = default;
+    runner(runner &&t) noexcept = delete;
 
-    runner &operator=(runner &&t) noexcept = default;
+    runner &operator=(runner &&t) noexcept = delete;
 
     static void schedule(async<>&& p) {
         // p._coroutine.promise()._actual_pool = p._coroutine.promise()._runner_pool;
@@ -72,14 +71,16 @@ public:
      */
     void run() noexcept { while(not _pool.empty()) yank(); }
 
+    // TODO: Make return type as 'join_handler' future type, when I will write it
     /**
      * @details Function to spawn task at the runner
      * @param new_task Task to be pushed into the runner
      * @return void
      */
-    void spawn(async<>&& new_task) noexcept {
+    template <typename async_return_t>
+    void spawn(async<async_return_t>&& new_task) noexcept {
         new_task._coroutine.promise()._runner_pool = &_pool;
-        _pool.push(std::forward<async<>>(new_task));
+        _pool.push(std::forward<async<>>(async_wrap(std::forward<async<async_return_t>>(new_task))));
     }
 
     /**
@@ -88,6 +89,12 @@ public:
      */
     [[nodiscard]] bool empty() noexcept { return _pool.empty(); };
 };
+
+template <>
+inline void runner::spawn<void>(async<>&& new_task) noexcept {
+    new_task._coroutine.promise()._runner_pool = &_pool;
+    _pool.push(std::forward<async<>>(new_task));
+}
 
 } // end namespace ace::core
 

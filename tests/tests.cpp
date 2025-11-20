@@ -41,3 +41,11 @@ TEST(context, do_runner_test) {
     runner.run();
     ASSERT_TRUE(runner.empty());
 }
+
+// TEST(context, do_promise_spawn_test) {
+//
+//     ace::core::runner runner;
+//     runner.spawn(simple_context_test());
+//     runner.run();
+//     ASSERT_TRUE(runner.empty());
+// }

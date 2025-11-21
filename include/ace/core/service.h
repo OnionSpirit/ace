@@ -6,15 +6,15 @@
 #ifndef ACE_SERVICE_H
 #define ACE_SERVICE_H
 
-#include "signal.h"
+#include "ace/core/signal.h"
 #include "ace/coroutines/context.h"
 
 namespace ace::core {
 
     template <typename derived_t>
-    struct service {
+    struct service_traits {
 
-        service() = default;
+        service_traits() = default;
 
         async<> service(sig_pipe_t& sig_pipe) {
             std::unique_ptr<signal_handler> sig { nullptr };

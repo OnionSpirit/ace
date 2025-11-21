@@ -123,14 +123,14 @@ namespace ace::coroutines {
                 return launch_ruleT::action();
             }
 
-            static auto final_suspend() noexcept { return std::suspend_always{}; }
+            auto final_suspend() noexcept { return std::suspend_always{}; }
 
             void unhandled_exception() {
                 _status = e_failed;
                 interrupt("Unhandled exception.");
             }
 
-            static void interrupt(const std::string_view &&str) {
+            void interrupt(const std::string_view &&str) {
                 final_suspend();
             };
 

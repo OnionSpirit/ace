@@ -14,7 +14,6 @@
 
 #include <concepts>
 #include <coroutine>
-#include <memory>
 #include <type_traits>
 
 namespace ace::coroutines {
@@ -73,7 +72,7 @@ namespace ace::coroutines {
 
         promise_touch_result _status { e_blocked };
 
-        static auto return_void() { return std::suspend_never{}; }
+        auto return_void() { return std::suspend_never{}; }
     };
 
     template <typename return_t>
@@ -87,9 +86,9 @@ namespace ace::coroutines {
 
         ~promise_traits() =default;
 
-        static std::suspend_always await_transform(const std::suspend_always& e) { return e; }
+        std::suspend_always await_transform(const std::suspend_always& e) { return e; }
 
-        static std::suspend_never await_transform(const std::suspend_never& e) { return e; }
+        std::suspend_never await_transform(const std::suspend_never& e) { return e; }
 
         template <typename futureT>
         requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, return_t>
@@ -109,11 +108,11 @@ namespace ace::coroutines {
 
         template <typename commandT>
         requires ace::common::dispatch::is_command<std::remove_reference_t<commandT>, return_t>
-        static commandT& await_transform(commandT& command) { return command; }
+        commandT& await_transform(commandT& command) { return command; }
 
         template <typename commandT>
         requires ace::common::dispatch::is_command<std::remove_reference_t<commandT>, return_t>
-        static commandT&& await_transform(commandT&& command) { return command; }
+        commandT&& await_transform(commandT&& command) { return command; }
 
         // TODO: Define in future to attach custom allocator
         /* static inline void* operator new(size_t memsize) noexcept; */

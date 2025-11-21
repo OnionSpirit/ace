@@ -19,33 +19,35 @@ namespace ace::core {
         std::chrono::duration<uint64_t, std::micro> _duration;
         async<> _context;
 
-        bool operator<(const clock_record& p) const {
-            return this->_duration < p._duration;
+        bool operator>(const clock_record& p) const {
+            return this->_duration > p._duration;
         }
     };
 
-    struct clock : service<clock> {
+    struct clock : service_traits<clock> {
 
         clock() = delete;
 
         explicit clock(const int releases_per_yank)
-            : service()
+            : service_traits()
             , _releases_per_yank(releases_per_yank) {
         };
 
         // TODO: Add record detach
         async<> service_yank() {
             _current_ts = std::chrono::steady_clock::now();
-            auto [_request_ts, _duration, _context] = _queue.top();
-            for (int i = 0; _request_ts + _duration.count() >= _current_ts and i < _releases_per_yank; ++i ) {
-                runner::schedule(std::move(_context));
-                _queue.pop();
-                std::tie(_request_ts, _duration, _context) = _queue.top();
+            for (int i = 0; not _queue.empty() and i < _releases_per_yank; ++i) {
+                const auto&[_request_ts, _duration, _context] = _queue.top();
+                if (_request_ts + _duration >= _current_ts) {
+                    // TODO: Need to write own priority queue because std type can't pop move-only type handy
+                    runner::schedule(std::move((const_cast<async<>&&>(_context))));
+                    _queue.pop();
+                }
             }
             co_return;
         }
 
-        std::priority_queue<clock_record> _queue;
+        std::priority_queue<clock_record, std::deque<clock_record>, std::greater<>> _queue;
         std::chrono::time_point<std::chrono::steady_clock> _current_ts;
         int _releases_per_yank {1024};
     };

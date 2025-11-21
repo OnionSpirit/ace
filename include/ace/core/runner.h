@@ -1,5 +1,5 @@
 /**
-* @file
+ * @file
  * @details This file contains a @b runner class, that executes and controls passed tasks
  */
 #ifndef ACE_RUNNER_H

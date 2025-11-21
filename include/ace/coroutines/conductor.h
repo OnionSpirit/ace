@@ -1,5 +1,6 @@
 /**
- * @file The file contains a class defining the 'conductor' interface.
+ * @file
+ * @details The file contains a class defining the 'conductor' interface.
  * The 'conductor' describes how to forward 'context' from the 'runner' storage
  * to the 'future' storage. When the 'future' decides to suspend 'context',
  * it puts its special 'conductor' in the 'promise_type' of the 'context'.

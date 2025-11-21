@@ -5,6 +5,7 @@
 
 #include "future.h"
 #include "ace/common/selection.h"
+#include "ace/coroutines/context.h"
 
 namespace ace::futures {
 
@@ -16,15 +17,16 @@ namespace ace::futures {
  */
 template
 <
+    typename duration_t,
     size_t buffLenV =16ul,
     allocation_type allocationT = allocation_type::e_dynamic
 >
-class timer :
-        public ace::futures::future_traits<timer<buffLenV>, allocationT>
+class timer : public future_traits<timer<duration_t, buffLenV, allocationT>>
 {
 
     typedef riot::meta::helpers::timed_pool<> timed_pool;
     typedef riot::meta::helpers::pool_timed_record record;
+
 
     class time_manager_handler {
 

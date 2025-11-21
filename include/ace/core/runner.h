@@ -65,7 +65,7 @@ public:
         // NOTE: Checking if the context shall be forwarded via passed conductor
         const bool is_conducted {
             is_resumable
-            and async_n->_data._coroutine.promise()._conductor not_eq nullptr
+            and async_n->_data._coroutine.promise()._conductor
         };
 
         // NOTE: Decision if node shall be released or pushed back

@@ -1,3 +1,4 @@
+#include <ranges>
 #include <gtest/gtest.h>
 #include "environment.h"
 #include "units.h"

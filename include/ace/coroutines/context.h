@@ -14,6 +14,10 @@
 
 #include "conductor.h"
 
+#ifndef ACE_CONDUCTOR_MEM_SIZE
+#define ACE_CONDUCTOR_MEM_SIZE std::hardware_constructive_interference_size // Size of cacheline
+#endif
+
 // ToDo: yield операцию преретащить в генератор/ пусть генератор имеет перегрузку итераторов чтобы запускать его в цикле for
 namespace ace::coroutines {
 
@@ -25,6 +29,10 @@ namespace ace::coroutines {
         struct promise_type;
 
         typedef std::coroutine_handle<promise_type> coroutine_t;
+
+        typedef nukes::dynamic::mpsc_queue<context<>> runner_pool_t;
+
+        typedef conductor_traits<context<>> conductor_handler_t;
 
         coroutine_t _coroutine;
 
@@ -54,6 +62,55 @@ namespace ace::coroutines {
 
         ~context() override = default;
 
+
+        // NOTE: Type to store conductor and pass it to outer promise
+        struct conductor_carry {
+            template <typename conductor_t>
+            requires std::derived_from<conductor_t, conductor_handler_t>
+            conductor_carry& operator =(conductor_t&& conductor) {
+                static_assert(sizeof(conductor_t) <= ACE_CONDUCTOR_MEM_SIZE,
+                "[conductor_carry]: conductor size can't be larger than ACE_CONDUCTOR_MEM_SIZE");
+                _conductor = new (_conductor_area) conductor_t(std::forward<conductor_t>(conductor));
+                return *this;
+            }
+
+            template<typename carry_t>
+            requires requires { carry_t::_conductor; carry_t::_conductor_area; }
+            conductor_carry& operator =(carry_t&& carry) noexcept {
+                if (carry._conductor) {
+                    _conductor = carry._conductor;
+                    memcpy(_conductor_area, carry._conductor_area, ACE_CONDUCTOR_MEM_SIZE);
+                    carry._conductor = nullptr;
+                }
+                return *this;
+            }
+
+            // NOTE: Releases conductor from carry with distracting
+            void release() {
+                if (_conductor) {
+                    _conductor->~conductor_handler_t();
+                    _conductor = nullptr;
+                }
+            }
+
+            // NOTE: Wipes conductor data from carry without distracting
+            void reset() {
+                if (_conductor)
+                    _conductor = nullptr;
+            }
+
+            [[nodiscard]] conductor_handler_t* get() const { return _conductor; }
+
+            conductor_handler_t* operator->() const { return get(); }
+
+            explicit operator bool() const { return _conductor != nullptr; };
+
+            ~conductor_carry() { release(); };
+
+            conductor_handler_t* _conductor {nullptr};
+            uint8_t _conductor_area [ACE_CONDUCTOR_MEM_SIZE] {};
+        };
+
         struct promise_type : promise_traits<returnT> {
             DECLARE_PROMISE_TRAITS(returnT)
             IMPORT_PROMISE_TRAITS_ENV
@@ -61,10 +118,6 @@ namespace ace::coroutines {
             promise_type() = default;
 
             ~promise_type() = default;
-
-            typedef conductor_traits<context<>> conductor_handler_t;
-
-            typedef nukes::dynamic::mpsc_queue<context<>> runner_pool_t;
 
             [[nodiscard]] auto initial_suspend() const noexcept {
                 return launch_ruleT::action();
@@ -85,18 +138,10 @@ namespace ace::coroutines {
 
             static auto get_return_object_on_allocation_failure() { return context(nullptr); }
 
-            std::unique_ptr<conductor_handler_t> _conductor {nullptr};
             // TODO: Wrap into weak hazard ptr, when I will write it
             runner_pool_t* _runner_pool {nullptr};
+            conductor_carry _conductor {};
         };
-
-        template<typename promiseT>
-        void pass_conductor(std::coroutine_handle<promiseT> outer) noexcept {
-            if (_coroutine.promise()._conductor) {
-                outer.promise()._conductor = std::move(_coroutine.promise()._conductor);
-                _coroutine.promise()._conductor.reset();
-            }
-        }
 
         bool await_ready() override {
             if (_coroutine.done()) return true;
@@ -108,10 +153,12 @@ namespace ace::coroutines {
 
         template<typename promiseT>
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
-            if (not is_idle()) {
-                pass_conductor(outer);
+            // NOTE: Passing conductor to outer
+            if (not is_idle() and _coroutine.promise()._conductor)
+                outer.promise()._conductor = std::move(_coroutine.promise()._conductor);
+            // NOTE: Suspending if not idle
+            if (not is_idle())
                 return false;
-            }
             return true;
         }
 
@@ -160,10 +207,10 @@ namespace ace {
     }
 
     // NOTE: Type of a pool for runner [Relates 'context' and 'runner']
-    typedef async<>::promise_type::runner_pool_t runner_pool_t;
+    typedef async<>::runner_pool_t runner_pool_t;
 
     // NOTE: Type of a conductor handler for runner and future objects [Relates 'future' and 'runner']
-    typedef async<>::promise_type::conductor_handler_t conductor_handler_t;
+    typedef async<>::conductor_handler_t conductor_handler_t;
 }
 
 // Говно нахуй не нужное, но

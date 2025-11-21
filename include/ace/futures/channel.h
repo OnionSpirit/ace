@@ -194,7 +194,7 @@ public:
 
     bool await_ready() override;
 
-    bool await_suspend(auto& ctx);
+    bool await_suspend(auto ctx);
 
     auto await_resume() { return std::forward<data_t>(_output_data); }
 };
@@ -242,7 +242,7 @@ ACE_FUTURE_CHANNEL_MEMBER(bool) push(data_t&& data) {
 ACE_FUTURE_CHANNEL_META
 ACE_FUTURE_CHANNEL_SPACE pull_impl
 ACE_FUTURE_CHANNEL_SPACE pull() {
-    return pull_impl(&_waiters, &_container);
+    return std::forward<pull_impl>(pull_impl{&_waiters, &_container});
 }
 
 
@@ -250,10 +250,10 @@ ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::await_ready() {
     return _container->pop(_output_data);
 }
 
-ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::await_suspend(auto& ctx) {
+ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::await_suspend(auto ctx) {
     if (not _container->pop(_output_data)) {
         // FIXME: WTF?? Y SIG?
-        // ctx.promise()._conductor.reset(new channel_conductor{_waiters});
+        ctx.promise()._conductor.reset(new channel_conductor{_waiters});
         return true;
     }
     return false;

@@ -85,7 +85,7 @@ namespace ace::coroutines {
 
             static auto get_return_object_on_allocation_failure() { return context(nullptr); }
 
-            std::unique_ptr<conductor_handler_t> _conductor {nullptr};
+            std::shared_ptr<conductor_handler_t> _conductor {nullptr};
             // TODO: Wrap into weak hazard ptr, when I will write it
             runner_pool_t* _runner_pool {nullptr};
         };
@@ -93,7 +93,7 @@ namespace ace::coroutines {
         template<typename promiseT>
         void pass_conductor(std::coroutine_handle<promiseT> outer) noexcept {
             if (_coroutine.promise()._conductor) {
-                outer.promise()._conductor = std::move(_coroutine.promise()._conductor);
+                outer.promise()._conductor = _coroutine.promise()._conductor;
                 _coroutine.promise()._conductor.reset();
             }
         }

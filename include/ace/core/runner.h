@@ -38,10 +38,8 @@ public:
     runner &operator=(runner &&t) noexcept = delete;
 
     static void schedule(async<>&& ctx) {
-        if (ctx and not ctx._coroutine.promise()._runner_pool) {
-            ctx._coroutine.destroy();
+        if (ctx.is_idle() or not ctx._coroutine.promise()._runner_pool)
             return;
-        }
         ctx._coroutine.promise()._runner_pool->push(std::move(ctx));
     }
 

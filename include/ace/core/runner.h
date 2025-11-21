@@ -38,7 +38,7 @@ public:
     runner &operator=(runner &&t) noexcept = delete;
 
     static void schedule(async<>&& ctx) {
-        if (not ctx._coroutine.promise()._runner_pool) {
+        if (ctx and not ctx._coroutine.promise()._runner_pool) {
             ctx._coroutine.destroy();
             return;
         }

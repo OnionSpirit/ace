@@ -16,6 +16,8 @@ namespace ace::coroutines {
     template <typename runner_context_t>
     struct conductor_traits {
 
+        conductor_traits() noexcept = default;
+
         virtual void forward(runner_context_t&& context) = 0;
 
         virtual ~conductor_traits() = default;

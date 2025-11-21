@@ -42,10 +42,6 @@ template
 >
 class channel {
 
-    class pull_impl;
-
-    struct channel_conductor;
-
     void reset();
 
     static auto consteval define_data_storage() {
@@ -69,8 +65,10 @@ class channel {
     typedef std::decay_t<decltype(define_data_storage())> data_storage_t;
     typedef std::decay_t<decltype(define_waiters_storage())> waiters_storage_t;
 
+    class pull_impl;
     friend pull_impl;
 
+    struct channel_conductor;
     friend channel_conductor;
 
 public:
@@ -182,41 +180,44 @@ class ACE_FUTURE_CHANNEL_SPACE pull_impl : public future_traits<pull_impl> {
 
 public:
 
+    DECLARE_FUTURE(pull_impl)
+    IMPORT_FUTURE_ENV
+
     pull_impl() =delete;
 
-    pull_impl(waiters_storage_t & waiters, data_storage_t& container)
-            : _waiters(&waiters), _container(&container) {};
+    pull_impl(waiters_storage_t* waiters, data_storage_t* container)
+            : _waiters(waiters), _container(container) {};
 
     waiters_storage_t* _waiters;
 
     data_storage_t* _container;
 
-    bool ready();
+    bool await_ready() override;
 
-    bool suspend(auto& ctx);
+    bool await_suspend(auto& ctx);
 
-    auto resume() { return std::forward<data_t>(_output_data); }
+    auto await_resume() { return std::forward<data_t>(_output_data); }
 };
 
 
 ACE_FUTURE_CHANNEL_META
-struct ACE_FUTURE_CHANNEL_SPACE channel_conductor final : conductor_handler_t {
+struct ACE_FUTURE_CHANNEL_SPACE channel_conductor : conductor_handler_t {
 
-    channel_conductor() =delete;
+    channel_conductor() = delete;
 
-    explicit channel_conductor(waiters_storage_t & waiters) : _waiters(&waiters) {};
-
-    waiters_storage_t* _waiters;
+    explicit channel_conductor(waiters_storage_t* waiters) : _waiters(waiters) {};
 
     void forward(async<>&& ctx) override { _waiters->push(std::move(ctx)); }
 
     ~channel_conductor() override = default;
+
+    waiters_storage_t* _waiters;
 };
 
 
 ACE_FUTURE_CHANNEL_MEMBER(void) reset() {
-    if (async<> temp; _waiters.pop(temp)) [[likely]]
-        core::runner::schedule(std::move(temp));
+    if (async<> ctx; _waiters.pop(ctx)) [[likely]]
+        core::runner::schedule(std::move(ctx));
 }
 
 
@@ -241,17 +242,17 @@ ACE_FUTURE_CHANNEL_MEMBER(bool) push(data_t&& data) {
 ACE_FUTURE_CHANNEL_META
 ACE_FUTURE_CHANNEL_SPACE pull_impl
 ACE_FUTURE_CHANNEL_SPACE pull() {
-    return pull_impl(_waiters, _container);
+    return pull_impl(&_waiters, &_container);
 }
 
 
-ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::ready() {
+ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::await_ready() {
     return _container->pop(_output_data);
 }
 
-ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::suspend(auto& ctx) {
+ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::await_suspend(auto& ctx) {
     if (not _container->pop(_output_data)) {
-        ctx.promise()._condutor = std::make_unique<conductor_handler_t>(channel_conductor(_waiters));
+        ctx.promise()._conductor.reset(new channel_conductor{_waiters});
         return true;
     }
     return false;

@@ -3,6 +3,7 @@
 
 #include <ace/coroutines/context.h>
 #include "include/ace/futures/future.h"
+#include "ace/futures/channel.h"
 
 struct once_suspend : ace::futures::future_traits<once_suspend> {
 
@@ -44,6 +45,26 @@ inline ace::async<> nested_context_suspender() {
     std::cout << "Nested call complete" << std::endl;
     co_return;
 }
+
+struct channel_abuser {
+
+    ace::async<> channel_sender() {
+        once_suspend tests_future;
+        co_await tests_future;
+        _channel.push(5);
+        std::cout << "Channel send complete" << std::endl;
+        co_return;
+    }
+
+    ace::async<> channel_receiver() {
+        auto received = co_await _channel.pull();
+        std::cout << "Channel receive complete. DATA: " << received << std::endl;
+        co_return;
+    }
+
+
+    ace::futures::channel_dyn<int> _channel {};
+};
 
 
 #endif // UNITS_H

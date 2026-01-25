@@ -25,24 +25,30 @@ namespace ace::core {
         }
     };
 
-    struct clock : service_traits<clock> {
+    struct clock : global_service_traits<clock> {
 
-        clock() = delete;
+        clock() = default;
 
-        explicit clock(const int releases_per_yank)
-            : service_traits()
-            , _releases_per_yank(releases_per_yank) {
-        };
+        void setup_releases_per_yank(const int releases_per_yank) {
+            _releases_per_yank = releases_per_yank;
+        }
 
         // TODO: Add record detach
         async<> service_yank() {
             _current_ts = std::chrono::steady_clock::now();
-            for (auto&& record : _requests.pop_batch())
+            clock_record record;
+            while (_requests.pop(record)) {
                 _queue.push(std::forward<clock_record>(record));
+            }
+            // TODO: FIX BATCH!!!
+            // for (auto& record : _requests.pop_batch()) {
+            //     _queue.push(std::forward<clock_record>(record));
+            // }
             for (int i = 0; not _queue.empty() and i < _releases_per_yank; ++i) {
                 const auto&[_request_ts, _duration, _context] = _queue.top();
                 if (_request_ts + _duration >= _current_ts) {
                     // TODO: Need to write own priority queue because std type can't pop move-only type handy
+                    _context._coroutine.promise()._future = nullptr;
                     runner::schedule(std::move((const_cast<async<>&&>(_context))));
                     _queue.pop();
                 }
@@ -52,9 +58,13 @@ namespace ace::core {
 
         void subscribe(clock_record&& record) { _requests.push(std::move(record)); }
 
+        static auto current_time() {
+            return get_instance()._current_ts;
+        }
+
         nukes::dynamic::mpsc_queue<clock_record> _requests;
         std::priority_queue<clock_record, std::deque<clock_record>, std::greater<>> _queue;
-        std::chrono::time_point<std::chrono::steady_clock> _current_ts;
+        std::chrono::time_point<std::chrono::steady_clock> _current_ts = std::chrono::steady_clock::now();
         int _releases_per_yank {1024};
     };
 

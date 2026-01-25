@@ -7,6 +7,14 @@
 
 #ifndef ACE_DISPATCHER_H
 #define ACE_DISPATCHER_H
+
+#include "runner.h"
+#include "signal.h"
+
+// NOTE: temp definition of the dispatcher
+inline ace::core::runner dispatcher = ace::core::runner();
+inline ace::core::sig_pipe_t dispatcher_sig_pipe{};
+
  //
  // /**
  //     * @details Starts the coroutines execution, provides auto-stop

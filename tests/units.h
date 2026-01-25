@@ -5,6 +5,7 @@
 #include "include/ace/futures/future.h"
 #include "ace/futures/channel.h"
 #include "ace/core/clock.h"
+#include "ace/futures/timer.h"
 
 struct once_suspend : ace::futures::future_traits<once_suspend> {
 
@@ -66,6 +67,11 @@ struct channel_abuser {
 
     ace::futures::channel_dyn<int> _channel {};
 };
+
+inline ace::async<> timer_waiter() {
+    co_await ace::futures::timer(100ms);
+    co_return;
+}
 
 
 #endif // UNITS_H

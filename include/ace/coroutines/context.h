@@ -67,6 +67,15 @@ namespace ace::coroutines {
         struct conductor_carry {
             template <typename conductor_t>
             requires std::derived_from<conductor_t, conductor_handler_t>
+            conductor_carry& operator =(const conductor_t& conductor) {
+                static_assert(sizeof(conductor_t) <= ACE_CONDUCTOR_MEM_SIZE,
+                "[conductor_carry]: conductor size can't be larger than ACE_CONDUCTOR_MEM_SIZE");
+                _conductor = new (_conductor_area) conductor_t(std::forward<conductor_t>(conductor));
+                return *this;
+            }
+
+            template <typename conductor_t>
+            requires std::derived_from<conductor_t, conductor_handler_t>
             conductor_carry& operator =(conductor_t&& conductor) {
                 static_assert(sizeof(conductor_t) <= ACE_CONDUCTOR_MEM_SIZE,
                 "[conductor_carry]: conductor size can't be larger than ACE_CONDUCTOR_MEM_SIZE");

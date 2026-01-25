@@ -19,6 +19,10 @@ namespace ace::coroutines {
 
         conductor_traits() noexcept = default;
 
+        conductor_traits(const conductor_traits&) noexcept = default;
+
+        conductor_traits(conductor_traits&&) noexcept = default;
+
         virtual void forward(runner_context_t&& context) = 0;
 
         virtual ~conductor_traits() = default;

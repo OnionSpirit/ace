@@ -54,3 +54,9 @@ TEST(context, do_dynamic_channel_on_runner_test) {
     ASSERT_TRUE(abuser._channel.empty());
 }
 
+TEST(context, do_timer_on_runner_test) {
+    dispatcher.spawn(timer_waiter());
+    dispatcher.run();
+    ASSERT_TRUE(dispatcher.empty());
+}
+

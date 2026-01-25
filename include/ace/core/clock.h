@@ -43,13 +43,14 @@ namespace ace::core {
         async<> service_yank() {
             _current_ts = std::chrono::steady_clock::now();
             clock_record record;
+
             while (_requests.pop(record)) {
                 _heap.insert(std::move(record));
             }
-            // TODO: FIX BATCH!!!
-            // for (auto& record : _requests.pop_batch()) {
-            //     _queue.push(std::forward<clock_record>(record));
-            // }
+            // TODO: FIX BATCH!!! After fix replace while block
+            // for (auto&& record : _requests.pop_batch())
+            //     _heap.insert(std::forward<clock_record>(record));
+
             int i = 0; auto el = _heap.begin();
             while (el not_eq _heap.end() and i < _releases_per_yank) {
                 auto node = std::forward<clock_record>(_heap.extract(el).value());

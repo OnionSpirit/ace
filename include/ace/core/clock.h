@@ -6,7 +6,6 @@
 #ifndef ACE_CLOCK_H
 #define ACE_CLOCK_H
 #include <chrono>
-#include <queue>
 #include <set>
 
 #include "service.h"
@@ -35,15 +34,17 @@ namespace ace::core {
         // TODO: Add record detach
         promise<bool> service_yank() {
             _current_ts = std::chrono::steady_clock::now();
-            clock_record record;
 
             // NOTE: Fetching time requests to inner records pool
-            while (_requests.pop(record))
-                _records.insert(std::move(record));
+            {
+                clock_record record;
+                while (_requests.pop(record)) _records.insert(std::move(record));
+            }
 
-            // TODO: FIX BATCH!!! After fix replace while block
-            // for (auto&& record : _requests.pop_batch())
-            //     _heap.insert(std::forward<clock_record>(record));
+            // // TODO: FIX BATCH!!! After fix replace while block
+            // for (auto&& record : _requests.pop_batch()) {
+            //     _records.insert(std::forward<clock_record>(record));
+            // }
 
             for (int i =0;
                 not _records.empty()

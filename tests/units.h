@@ -76,6 +76,7 @@ ace::async<> timer_waiter(std::chrono::duration<Rep, Period> wait_time) {
 
 template<typename Rep, typename Period>
 ace::async<> timer_waiter_valued(std::chrono::duration<Rep, Period> wait_time, ace::futures::channel_dyn<int>& ch) {
+    std::cout << "Timer launched for: " << wait_time << std::endl;
     co_await ace::futures::timer(wait_time);
     std::cout << "Timer released after: " << wait_time << std::endl;
     ch << wait_time.count();

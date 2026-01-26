@@ -23,7 +23,7 @@ tests_enabled = get_option('tests')
 
 if tests_enabled
   message('Tests requested')
-  gtest_dep = dependency('gtest', main: true, fallback: ['googletest', 'gtest_dep'])
+  gtest_dep = dependency('gtest', main: true, fallback: ['gtest', 'gtest_dep'])
 
   test_sources = files(
     'tests/environment.h',

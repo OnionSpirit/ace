@@ -60,13 +60,23 @@ TEST(futures, do_timer_on_runner_test) {
     // NOTE: Spawning waiters with different duration and waited time count return
     dispatcher.spawn(timer_waiter_valued(500ms, _channel));
     std::this_thread::sleep_for(std::chrono::milliseconds(1ms));
+    dispatcher.spawn(timer_waiter_valued(450ms, _channel));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1ms));
     dispatcher.spawn(timer_waiter_valued(400ms, _channel));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1ms));
+    dispatcher.spawn(timer_waiter_valued(350ms, _channel));
     std::this_thread::sleep_for(std::chrono::milliseconds(1ms));
     dispatcher.spawn(timer_waiter_valued(300ms, _channel));
     std::this_thread::sleep_for(std::chrono::milliseconds(1ms));
+    dispatcher.spawn(timer_waiter_valued(250ms, _channel));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1ms));
     dispatcher.spawn(timer_waiter_valued(200ms, _channel));
     std::this_thread::sleep_for(std::chrono::milliseconds(1ms));
+    dispatcher.spawn(timer_waiter_valued(150ms, _channel));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1ms));
     dispatcher.spawn(timer_waiter_valued(100ms, _channel));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1ms));
+    dispatcher.spawn(timer_waiter_valued(50ms, _channel));
     dispatcher.run();
     ASSERT_TRUE(dispatcher.empty());
 

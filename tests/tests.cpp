@@ -93,7 +93,6 @@ TEST(futures, do_timer_on_runner_parallel_test) {
     dispatcher.run();
     auto end_time = std::chrono::_V2::high_resolution_clock::now();
     auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-    std::cout << "Timers await and processing duration without spawning period: " << ms_time << "ms" << std::endl;
     ASSERT_TRUE(dispatcher.empty());
     // NOTE: Check for parallel processing
     ASSERT_TRUE(ms_time < 1000);

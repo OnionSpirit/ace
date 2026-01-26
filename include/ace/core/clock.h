@@ -15,12 +15,12 @@
 namespace ace::core {
 
     struct clock_record {
-        std::chrono::time_point<std::chrono::steady_clock> _release_ts;
+        std::chrono::time_point<std::chrono::steady_clock> _expiration_ts;
         async<> _context;
 
-        // NOTE: Clock record is greater if its completion time is later
-        bool operator > (const clock_record& p) const {
-            return this->_release_ts > p._release_ts;
+        // NOTE: Clock record is less if its completion time is earlier
+        bool operator < (const clock_record& p) const {
+            return this->_expiration_ts < p._expiration_ts;
         }
     };
 
@@ -37,24 +37,25 @@ namespace ace::core {
             _current_ts = std::chrono::steady_clock::now();
             clock_record record;
 
-            while (_requests.pop(record)) {
-                _heap.insert(std::move(record));
-            }
+            // NOTE: Fetching time requests to inner records pool
+            while (_requests.pop(record))
+                _records.insert(std::move(record));
+
             // TODO: FIX BATCH!!! After fix replace while block
             // for (auto&& record : _requests.pop_batch())
             //     _heap.insert(std::forward<clock_record>(record));
 
             for (int i =0;
-                not _heap.empty()
-                and _heap.begin()->_release_ts <= _current_ts
+                not _records.empty()
+                and _records.begin()->_expiration_ts <= _current_ts
                 and i < _releases_per_yank;
             ++i) {
                 auto [_release_ts, _context]
-                    = std::forward<clock_record>(_heap.extract(_heap.begin()).value());
+                    = std::forward<clock_record>(_records.extract(_records.begin()).value());
                 runner::schedule(std::move(_context));
             }
 
-            return _heap.empty() and _requests.empty();
+            return _records.empty() and _requests.empty();
         }
 
         void subscribe(clock_record&& record) { _requests.push(std::move(record)); }
@@ -64,9 +65,9 @@ namespace ace::core {
         }
 
         nukes::dynamic::mpsc_queue<clock_record> _requests;
-        std::multiset<clock_record, std::greater<>> _heap;
+        std::multiset<clock_record> _records;
         std::chrono::time_point<std::chrono::steady_clock> _current_ts = std::chrono::steady_clock::now();
-        int _releases_per_yank {1024};
+        int _releases_per_yank {128};
     };
 
 }

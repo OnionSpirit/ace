@@ -55,25 +55,47 @@ TEST(futures, do_dynamic_channel_on_runner_test) {
 }
 
 TEST(futures, do_timer_on_runner_test) {
-    dispatcher.spawn(timer_waiter(500ms));
-    dispatcher.spawn(timer_waiter(200ms));
-    dispatcher.spawn(timer_waiter(100ms));
+    ace::futures::channel_dyn<int> _channel {};
+
+    // NOTE: Spawning waiters with different duration and waited time count return
+    dispatcher.spawn(timer_waiter_valued(500ms, _channel));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1ms));
+    dispatcher.spawn(timer_waiter_valued(400ms, _channel));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1ms));
+    dispatcher.spawn(timer_waiter_valued(300ms, _channel));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1ms));
+    dispatcher.spawn(timer_waiter_valued(200ms, _channel));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1ms));
+    dispatcher.spawn(timer_waiter_valued(100ms, _channel));
     dispatcher.run();
     ASSERT_TRUE(dispatcher.empty());
+
+    // NOTE: Collecting waited time sequence
+    std::vector<int> res{};
+    dispatcher.spawn(channel_fetcher(_channel, res));
+    dispatcher.run();
+    ASSERT_TRUE(dispatcher.empty());
+
+    // NOTE: Waited time sequence must monotonically increase. (Time is monotonic MA DUDES)
+    // NOTE: This means that timers are processed according to the sequence of expiration timestamps
+    // NOTE: without additional delay. This proves that the expiration sequence is ordered.
+    for (std::size_t i = 1; i < res.size(); ++i)
+        ASSERT_TRUE(res.at(i) >= res.at(i - 1));
 }
 
-TEST(futures, do_timer_on_runner_perf_test) {
-    for (int i = 0; i < 1000000; ++i) {
+TEST(futures, do_timer_on_runner_parallel_test) {
+    auto start_time = std::chrono::_V2::high_resolution_clock::now();
+    for (int i = 0; i < 100000; ++i) {
         dispatcher.spawn(timer_waiter(500ms));
         dispatcher.spawn(timer_waiter(200ms));
         dispatcher.spawn(timer_waiter(100ms));
     }
-    auto start_time = std::chrono::_V2::high_resolution_clock::now();
     dispatcher.run();
     auto end_time = std::chrono::_V2::high_resolution_clock::now();
-    std::cout << "Timers await and processing duration without spawning period: "
-        << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count()
-        << "ms" << std::endl;
+    auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    std::cout << "Timers await and processing duration without spawning period: " << ms_time << "ms" << std::endl;
     ASSERT_TRUE(dispatcher.empty());
+    // NOTE: Check for parallel processing
+    ASSERT_TRUE(ms_time < 1000);
 }
 

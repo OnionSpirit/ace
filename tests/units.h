@@ -71,9 +71,24 @@ struct channel_abuser {
 template<typename Rep, typename Period>
 ace::async<> timer_waiter(std::chrono::duration<Rep, Period> wait_time) {
     co_await ace::futures::timer(wait_time);
-    // std::cout << "Timer released after: " << wait_time << std::endl;
     co_return;
 }
+
+template<typename Rep, typename Period>
+ace::async<> timer_waiter_valued(std::chrono::duration<Rep, Period> wait_time, ace::futures::channel_dyn<int>& ch) {
+    co_await ace::futures::timer(wait_time);
+    std::cout << "Timer released after: " << wait_time << std::endl;
+    ch << wait_time.count();
+    co_return;
+}
+
+inline ace::async<> channel_fetcher(ace::futures::channel_dyn<int>& ch, std::vector<int>& output) {
+    std::vector<int> res {};
+    while (not ch.empty()) { res.emplace_back(co_await ch.pull()); }
+    output = res;
+    co_return;
+}
+
 
 
 #endif // UNITS_H

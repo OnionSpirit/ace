@@ -64,7 +64,7 @@ struct ACE_FUTURE_TIMER_SPACE timer_conductor : conductor_handler_t {
 
     void forward(async<>&& ctx) override {
         core::clock_record record;
-        record._release_ts = core::clock::current_time() + _timer->_duration;
+        record._expiration_ts = core::clock::current_time() + _timer->_duration;
         record._context = std::move(ctx);
         // NOTE: Marking timer released.
         // NOTE: Because await_ready() will be called after context retreatment to runner.

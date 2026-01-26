@@ -33,7 +33,7 @@ namespace ace::core {
         }
 
         // TODO: Add record detach
-        bool service_yank() {
+        promise<bool> service_yank() {
             _current_ts = std::chrono::steady_clock::now();
             clock_record record;
 
@@ -55,7 +55,7 @@ namespace ace::core {
                 runner::schedule(std::move(_context));
             }
 
-            return _records.empty() and _requests.empty();
+            co_return _records.empty() and _requests.empty();
         }
 
         void subscribe(clock_record&& record) { _requests.push(std::move(record)); }

@@ -86,9 +86,17 @@ namespace ace::coroutines {
 
         ~promise_traits() =default;
 
-        std::suspend_always await_transform(const std::suspend_always& e) { return e; }
+        std::suspend_always await_transform(const std::suspend_always& e) {
+            _status = e_executed;
+            _future = nullptr;
+            return e;
+        }
 
-        std::suspend_never await_transform(const std::suspend_never& e) { return e; }
+        std::suspend_never await_transform(const std::suspend_never& e) {
+            _status = e_executed;
+            _future = nullptr;
+            return e;
+        }
 
         template <typename futureT>
         requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, return_t>

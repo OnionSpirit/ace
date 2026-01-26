@@ -24,7 +24,7 @@ namespace ace::core {
         }
     };
 
-    struct clock : global_service_traits<clock> {
+    struct clock : singleton_service_traits<clock> {
 
         clock() = default;
 

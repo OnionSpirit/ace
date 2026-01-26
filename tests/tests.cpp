@@ -4,7 +4,7 @@
 #include "units.h"
 #include "ace/core/runner.h"
 
-TEST(context, DISABLED_do_co_await_test) {
+TEST(context, do_co_await_test) {
     auto r = simple_context_test();
     ASSERT_FALSE(r);
     r.awake();
@@ -12,7 +12,7 @@ TEST(context, DISABLED_do_co_await_test) {
 }
 
 // NOTE: Проверка разрешения не константных реакций
-TEST(context, DISABLED_do_nested_suspend_test) {
+TEST(context, do_nested_suspend_test) {
 
     auto r = nested_context_suspender();
     ASSERT_FALSE(r);
@@ -22,20 +22,20 @@ TEST(context, DISABLED_do_nested_suspend_test) {
 }
 
 // NOTE: Разрешать константные реакции не по деструктору запрещено
-TEST(context, DISABLED_do_const_nested_suspend_test) {
+TEST(context, do_const_nested_suspend_test) {
 
     const auto r = nested_context_suspender();
     ASSERT_FALSE(r);
     ASSERT_FALSE(r);
 }
 
-TEST(context, DISABLED_do_empty_context_test) {
+TEST(context, do_empty_context_test) {
 
     auto r = ace::coroutines::context<>();
     ASSERT_TRUE(r);
 }
 
-TEST(core, DISABLED_do_runner_test) {
+TEST(core, do_runner_test) {
 
     ace::core::runner runner;
     runner.spawn(nested_context_suspender());
@@ -43,7 +43,7 @@ TEST(core, DISABLED_do_runner_test) {
     ASSERT_TRUE(runner.empty());
 }
 
-TEST(futures, DISABLED_do_dynamic_channel_on_runner_test) {
+TEST(futures, do_dynamic_channel_on_runner_test) {
 
     ace::core::runner runner;
     channel_abuser abuser;
@@ -93,7 +93,7 @@ TEST(futures, do_timer_on_runner_test) {
         ASSERT_TRUE(res.at(i) >= res.at(i - 1));
 }
 
-TEST(futures, DISABLED_do_timer_on_runner_parallel_test) {
+TEST(futures, do_timer_on_runner_parallel_test) {
     auto start_time = std::chrono::_V2::high_resolution_clock::now();
     for (int i = 0; i < 100000; ++i) {
         dispatcher.spawn(timer_waiter(500ms));

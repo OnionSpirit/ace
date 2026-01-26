@@ -37,23 +37,32 @@ namespace ace::core {
     template <typename derived_t>
     class global_service_traits {
 
-        global_service_traits() {
+        void respawn() {
             dispatcher.spawn(service(dispatcher_sig_pipe));
-        };
+            _detached = false;
+        }
+
+        global_service_traits() { respawn(); };
+
+        bool _detached {false};
 
     friend derived_t;
     public:
 
-        static derived_t& get_instance()
-        {
+        static derived_t& get_instance() {
             static derived_t instance;
+            if (instance._detached) instance.respawn();
             return instance;
         }
 
+        // NOTE: The derived type's 'service_yank()' function shall return
+        // NOTE: the result of the service's job completion. If the service still
+        // NOTE: has unfinished work, the function shall return 'false'. If the service
+        // NOTE: has no unfinished work, the function shall return 'true'.
         async<> service(sig_pipe_t& sig_pipe) {
             std::unique_ptr<signal_handler> sig { nullptr };
-            while (true) {
-                co_await static_cast <derived_t*>(this)->service_yank();
+            while (not _detached) {
+                _detached = static_cast<derived_t*>(this)->service_yank();
                 if (sig_pipe.pop(sig)) [[unlikely]] {
                     switch (co_await sig->action()) {
                         case e_break: co_await std::suspend_always{};

@@ -35,7 +35,7 @@ TEST(context, do_empty_context_test) {
     ASSERT_TRUE(r);
 }
 
-TEST(context, do_runner_test) {
+TEST(core, do_runner_test) {
 
     ace::core::runner runner;
     runner.spawn(nested_context_suspender());
@@ -43,7 +43,7 @@ TEST(context, do_runner_test) {
     ASSERT_TRUE(runner.empty());
 }
 
-TEST(context, do_dynamic_channel_on_runner_test) {
+TEST(futures, do_dynamic_channel_on_runner_test) {
 
     ace::core::runner runner;
     channel_abuser abuser;
@@ -54,9 +54,26 @@ TEST(context, do_dynamic_channel_on_runner_test) {
     ASSERT_TRUE(abuser._channel.empty());
 }
 
-TEST(context, do_timer_on_runner_test) {
-    dispatcher.spawn(timer_waiter());
+TEST(futures, do_timer_on_runner_test) {
+    dispatcher.spawn(timer_waiter(500ms));
+    dispatcher.spawn(timer_waiter(200ms));
+    dispatcher.spawn(timer_waiter(100ms));
     dispatcher.run();
+    ASSERT_TRUE(dispatcher.empty());
+}
+
+TEST(futures, do_timer_on_runner_perf_test) {
+    for (int i = 0; i < 1000000; ++i) {
+        dispatcher.spawn(timer_waiter(500ms));
+        dispatcher.spawn(timer_waiter(200ms));
+        dispatcher.spawn(timer_waiter(100ms));
+    }
+    auto start_time = std::chrono::_V2::high_resolution_clock::now();
+    dispatcher.run();
+    auto end_time = std::chrono::_V2::high_resolution_clock::now();
+    std::cout << "Timers await and processing duration without spawning period: "
+        << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count()
+        << "ms" << std::endl;
     ASSERT_TRUE(dispatcher.empty());
 }
 

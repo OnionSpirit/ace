@@ -68,8 +68,10 @@ struct channel_abuser {
     ace::futures::channel_dyn<int> _channel {};
 };
 
-inline ace::async<> timer_waiter() {
-    co_await ace::futures::timer(100ms);
+template<typename Rep, typename Period>
+ace::async<> timer_waiter(std::chrono::duration<Rep, Period> wait_time) {
+    co_await ace::futures::timer(wait_time);
+    // std::cout << "Timer released after: " << wait_time << std::endl;
     co_return;
 }
 

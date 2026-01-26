@@ -16,6 +16,7 @@ namespace ace::futures {
 class timer : public future_traits<timer> {
 
     std::chrono::duration<uint64_t, std::micro> _duration;
+    bool _released {false};
 
     struct timer_conductor;
     friend timer_conductor;
@@ -31,13 +32,11 @@ class timer : public future_traits<timer> {
             _duration = std::chrono::duration_cast<std::chrono::microseconds, uint64_t, std::micro>(t);
         };
 
-        bool await_ready() override { return false; }
+        bool await_ready() override { return _released; }
 
         bool await_suspend(auto coroutine);
 
         static void await_resume() {}
-
-        unsigned int release_completed_records();
 
         // TODO: Support detatch later
         // void detach() { _detached = true; }
@@ -60,26 +59,29 @@ struct ACE_FUTURE_TIMER_SPACE timer_conductor : conductor_handler_t {
 
     timer_conductor() = delete;
 
-    explicit timer_conductor(const std::chrono::duration<uint64_t, std::micro> duration)
-        : _duration(duration) {};
+    explicit timer_conductor(timer* timer_)
+        : _timer(timer_) {};
 
     void forward(async<>&& ctx) override {
         core::clock_record record;
-        record._duration = _duration;
-        record._request_ts = core::clock::current_time();
+        record._release_ts = core::clock::current_time() + _timer->_duration;
         record._context = std::move(ctx);
+        // NOTE: Marking timer released.
+        // NOTE: Because await_ready() will be called after context retreatment to runner.
+        // NOTE: And retreatment will happen only when timer actually expired
+        _timer->_released = true;
         core::clock::get_instance().subscribe(std::move(record));
     }
 
     ~timer_conductor() override = default;
 
-    std::chrono::duration<uint64_t, std::micro> _duration;
+    timer* const _timer;
 };
 
 
 ACE_FUTURE_TIMER_MEMBER(bool)
 await_suspend(auto coroutine) {
-    coroutine.promise()._conductor = timer_conductor{_duration};
+    coroutine.promise()._conductor = timer_conductor{this};
     return true;
 }
 

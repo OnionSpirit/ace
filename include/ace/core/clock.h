@@ -109,7 +109,7 @@ namespace ace::core {
             _slots[_arrow + arrow_offset]._records.push(std::forward<clock_record>(record));
         }
 
-        int release_interval(uint passed_ticks) {
+        int release_ticks(uint passed_ticks) {
             int arrow_offset = 0;
             while (arrow_offset < passed_ticks
                 and (arrow_offset == 0 or _slots[_arrow % _tick_count + --arrow_offset].empty())

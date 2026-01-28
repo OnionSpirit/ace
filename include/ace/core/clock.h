@@ -127,7 +127,7 @@ namespace ace::core {
             // }
         }
 
-        void release_round() { release_interval(_tick_count); }
+        void release_round() { release_ticks(_tick_count); }
 
         auto count_interval(timepoint_t& from) const {
             return _current_ts->time_since_epoch() - from.time_since_epoch();

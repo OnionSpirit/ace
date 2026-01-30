@@ -93,18 +93,19 @@ TEST(futures, do_timer_on_runner_test) {
         ASSERT_TRUE(res.at(i) >= res.at(i - 1));
 }
 
-TEST(futures, DISABLED_do_timer_on_runner_parallel_test) {
+TEST(futures, do_timer_on_runner_parallel_test) {
     auto start_time = std::chrono::_V2::high_resolution_clock::now();
-    for (int i = 0; i < 100000; ++i) {
+    for (int i = 0; i < 1000000; ++i) {
         dispatcher.spawn(timer_waiter(500ms));
         dispatcher.spawn(timer_waiter(200ms));
         dispatcher.spawn(timer_waiter(100ms));
     }
+    std::cout << "Tasks spawned" << std::endl;
     dispatcher.run();
     auto end_time = std::chrono::_V2::high_resolution_clock::now();
     auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
     ASSERT_TRUE(dispatcher.empty());
     // NOTE: Check for parallel processing
-    ASSERT_TRUE(ms_time < 1000);
+    ASSERT_TRUE(ms_time < 5000);
 }
 

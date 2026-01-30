@@ -59,6 +59,16 @@ namespace ace::core {
             return released;
         }
 
+        void release_max() {
+            while (not _records.empty()) {
+                clock_record record;
+                if (_records.pop(record)) [[likely]] {
+                    release_record(std::move(record));
+                }
+            }
+        }
+
+
         bool empty() { return _records.empty(); }
     };
 
@@ -118,6 +128,7 @@ namespace ace::core {
                 ++arrow_offset;
                 // if (_ticks[arrow].empty()) continue;
                 *_release_counter -= _ticks[arrow].release_slot(*_release_counter);
+                // _ticks[arrow].release_max();
                 if (_ticks[arrow].empty())
                     pump_time(arrow_offset);
                 else break;
@@ -159,8 +170,8 @@ namespace ace::core {
         const duration_t _tick_duration;
         const std::size_t _tick_count;
         int _release_counter {};
-        int _release_limit {128};
-        std::atomic_size_t _total_awaited {0};
+        int _release_limit {5000000}; // NOTE Huinya kakayata
+        std::atomic_int _total_awaited {0};
 
         static std::size_t log_based(std::size_t base, std::size_t x) {
             return static_cast<std::size_t>(std::log(x) / std::log(base));
@@ -229,7 +240,7 @@ namespace ace::core {
         [[nodiscard]] auto current_time() const { return _current_ts; }
 
         [[nodiscard]] bool empty() const {
-            return _total_awaited.load(std::memory_order_relaxed) == 0;
+            return _total_awaited.load(std::memory_order_relaxed) <= 0;
         }
 
     };

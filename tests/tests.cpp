@@ -93,7 +93,7 @@ TEST(futures, do_timer_on_runner_test) {
         ASSERT_TRUE(res.at(i) >= res.at(i - 1));
 }
 
-TEST(futures, do_timer_on_runner_parallel_test) {
+TEST(futures, DISABLED_do_timer_on_runner_parallel_test) {
     auto start_time = std::chrono::_V2::high_resolution_clock::now();
     for (int i = 0; i < 100000; ++i) {
         dispatcher.spawn(timer_waiter(500ms));

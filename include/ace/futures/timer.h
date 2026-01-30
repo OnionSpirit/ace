@@ -15,7 +15,7 @@ namespace ace::futures {
 
 class timer : public future_traits<timer> {
 
-    std::chrono::duration<uint64_t, std::micro> _duration;
+    core::duration_t _duration;
     bool _released {false};
 
     struct timer_conductor;
@@ -29,7 +29,7 @@ class timer : public future_traits<timer> {
         template <typename I, typename T>
         requires std::is_integral_v<I>
         explicit timer(std::chrono::duration<I, T> t) {
-            _duration = std::chrono::duration_cast<std::chrono::microseconds, uint64_t, std::micro>(t);
+            _duration = std::chrono::duration_cast<std::chrono::milliseconds, uint64_t, std::milli>(t);
         };
 
         bool await_ready() override { return _released; }
@@ -63,14 +63,11 @@ struct ACE_FUTURE_TIMER_SPACE timer_conductor : conductor_handler_t {
         : _timer(timer_) {};
 
     void forward(async<>&& ctx) override {
-        core::clock_record record;
-        record._expiration_ts = core::clock::current_time() + _timer->_duration;
-        record._context = std::move(ctx);
         // NOTE: Marking timer released.
         // NOTE: Because await_ready() will be called after context retreatment to runner.
         // NOTE: And retreatment will happen only when timer actually expired
         _timer->_released = true;
-        core::clock::get_instance().subscribe(std::move(record));
+        core::clock::get_instance().subscribe(std::move(ctx), _timer->_duration);
     }
 
     ~timer_conductor() override = default;

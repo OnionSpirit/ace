@@ -7,7 +7,6 @@
 #define ACE_CLOCK_H
 #include <chrono>
 #include <complex>
-#include <set>
 
 #include "service.h"
 #include "ace/coroutines/context.h"
@@ -20,6 +19,9 @@ namespace ace::core {
 
     inline auto clock_now() { return std::chrono::steady_clock::now(); }
 
+    /**
+     * @brief Type of stored context record. Contains context and it's awaiting duration
+     */
     struct clock_record {
         duration_t _duration {};
         async<> _context;
@@ -48,6 +50,9 @@ namespace ace::core {
     };
 
 
+    /**
+     * @brief Represents time wheel slot. Storing records with same expiration time and provides release functionality
+     */
     struct time_slot {
 
         time_slot() = default;
@@ -65,37 +70,53 @@ namespace ace::core {
             return *this;
         }
 
-        nukes::dynamic::mpsc_queue<clock_record> _records;
-
+        /**
+         * @brief Releases passed record to scheduler
+         * @param [in] record Clock record to release
+         * @warning May cause cross-runner roaming in future updates
+         */
         static void release_record(clock_record&& record) {
             runner::schedule(std::move(record._context));
         }
 
+        /**
+         * @brief Releases not more than @b allowed_releases count of clock records
+         * @param [in] allowed_releases Max allowed releases
+         * @return Amount of released records
+         */
         int release_slot(int allowed_releases) {
             int released =0;
             while (not _records.empty() and released < allowed_releases) {
-                clock_record record;
-                if (_records.pop(record)) [[likely]] {
-                    release_record(std::move(record));
-                    ++released;
-                }
+                release_record(std::forward<clock_record>(_records.front()));
+                _records.pop();
+                ++released;
             }
             return released;
         }
 
-        void release_max() {
+        /**
+         * @brief Releases all stored records
+         */
+        void release_slot() {
             while (not _records.empty()) {
-                clock_record record;
-                if (_records.pop(record)) [[likely]] {
-                    release_record(std::move(record));
-                }
+                release_record(std::forward<clock_record>(_records.front()));
+                _records.pop();
             }
         }
 
+        /**
+         * @brief @b ARE @b YOU @b DUMB @b ?!
+         * @return Result of emptiness check operation
+         */
+        [[nodiscard]] bool empty() const { return _records.empty(); }
 
-        bool empty() { return _records.empty(); }
+        std::queue<clock_record> _records; ///< Queue of stored records
     };
 
+    /**
+     * @brief Abstraction of the Dial (Time Wheel)
+     * @details
+     */
     struct time_wheel {
 
         const duration_t _tick_duration;
@@ -124,22 +145,36 @@ namespace ace::core {
             , _release_counter(release_counter)
             , _upper_wheel(upper_wheel)
             , _ticks(_tick_count)
-            // , _arrow(_current_ts->time_since_epoch() % _wheel_period.count() / _tick_duration)
             {};
 
-        bool subscribe(async<>&& ctx, duration_t dur) {
-            if (dur > _wheel_period) [[unlikely]] return false;
-            const auto arrow_offset = dur / _tick_duration;
+        /**
+         * @brief Injects context to the wheel. Slot will be selected by duration
+         * @param [in] ctx Context to await
+         * @param [in] dur Duration of awaiting
+         */
+        void inject(async<>&& ctx, duration_t dur) {
+            const auto arrow_offset = (dur / _tick_duration) % _tick_count;
             _ticks[_arrow + arrow_offset]._records.push(std::forward<clock_record>({std::forward<async<>>(ctx), dur}));
-            return true;
         }
 
-        // WARNING DOESNT USE RELEASE COUNTER
-        void insert_upper_record(clock_record&& record) {
+        /**
+         * @brief Injects record to the wheel. Slot will be selected by duration
+         * @param [in] record Record to inject
+         */
+        void inject(clock_record&& record) {
             const auto arrow_offset = (record._duration / _tick_duration) % _tick_count;
             _ticks[_arrow + arrow_offset]._records.push(std::forward<clock_record>(record));
         }
 
+        /**
+         * @brief Releases all slots pointed to by the arrow on its way to completing the specified number of steps (passed_ticks).
+         * @warning Has two side effects:
+         * 1 - Dependent on the current position of the arrow;
+         * 2 - Constrained by the _release_counter class attribute.
+         * This attribute represents the number of released entries and can prevent the arrow from passing.
+         * @param [in] passed_ticks — The number of ticks passed. Also, the target number of arrow steps.
+         * @return The number of completed arrow steps.
+         */
         int release_ticks(std::size_t passed_ticks) {
             int arrow_offset = 0;
             while (arrow_offset < passed_ticks and *_release_counter > 0) {
@@ -156,6 +191,11 @@ namespace ace::core {
             return arrow_offset;
         }
 
+        /**
+         * @brief Releases all slots inside passed @b interval which means time duration from @b past to @b now
+         * @param interval A time interval that is treated as passed
+         * @return The number of completed arrow steps.
+         */
         auto release(const duration_t& interval) {
             return release_ticks(interval / _tick_duration);
         }
@@ -172,8 +212,8 @@ namespace ace::core {
             _arrow++;
             while(not records.empty()) {
                 clock_record record;
-                if (records.pop(record))
-                    lower_wheel->insert_upper_record(std::forward<clock_record>(record));
+                lower_wheel->inject(std::forward<clock_record>(records.front()));
+                records.pop();
             }
             pump_time();
         }
@@ -183,6 +223,8 @@ namespace ace::core {
 
     private:
 
+        typedef std::tuple<async<>, duration_t> input_record_t;
+
         timepoint_t _current_ts;
         timepoint_t _release_bound_ts {clock_now()}; ///< Time lower bound, higher than all released timers
         std::vector<time_wheel> _wheels;
@@ -190,7 +232,8 @@ namespace ace::core {
         const std::size_t _tick_count;
         int _release_counter {};
         int _release_limit {1024};
-        std::atomic_int _total_awaited {0};
+        std::size_t _total_records {0};
+        nukes::dynamic::mpsc_queue<input_record_t> _input;
 
         static std::size_t log_based(std::size_t base, std::size_t x) {
             return static_cast<std::size_t>(std::log(x) / std::log(base));
@@ -209,6 +252,32 @@ namespace ace::core {
 
         void update_release_bound(duration_t passed_interval) {
             _release_bound_ts += passed_interval;
+        }
+
+        void inject(async<>&& ctx, duration_t dur) {
+            auto idx = calc_wheel(dur);
+
+            if (not idx) [[unlikely]] {
+                runner::schedule(std::move(ctx));
+                return;
+            }
+
+            ++_total_records;
+            _wheels[idx.value()].inject(std::forward<async<>>(ctx), dur);
+        };
+
+        void fetch(const duration_t& passed) {
+            input_record_t input_record;
+            for (int i = 0; i < _release_limit and _input.pop(input_record); ++i) {
+                auto [ctx, dur] = std::forward<input_record_t>(input_record);
+                if (passed > dur) [[unlikely]] {
+                    runner::schedule(std::forward<async<>>(ctx));
+                    --_release_counter;
+                    return;
+                }
+                inject(std::move(ctx), dur);
+                ++_total_records;
+            }
         }
 
     public:
@@ -237,10 +306,11 @@ namespace ace::core {
             if (passed < _tick_duration) [[unlikely]]
                 return 0;
             _release_counter = _release_limit;
+            fetch(passed);
             const auto released_ticks = _wheels[0].release(passed);
             update_release_bound(_tick_duration * released_ticks);
             const auto released = _release_limit - _release_counter;
-            _total_awaited.fetch_sub(released, std::memory_order_relaxed);
+            _total_records -= released;
             return released;
         };
 
@@ -252,14 +322,14 @@ namespace ace::core {
                 return;
             }
 
-            _total_awaited.fetch_add(1, std::memory_order_relaxed);
-            _wheels[idx.value()].subscribe(std::forward<async<>>(ctx), dur);
+            ++_total_records;
+            _wheels[idx.value()].inject(std::forward<async<>>(ctx), dur);
         };
 
         [[nodiscard]] auto current_time() const { return _current_ts; }
 
         [[nodiscard]] bool empty() const {
-            return _total_awaited.load(std::memory_order_relaxed) <= 0;
+            return _total_records == 0;
         }
 
     };

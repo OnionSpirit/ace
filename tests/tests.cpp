@@ -96,9 +96,8 @@ TEST(futures, do_timer_on_runner_test) {
 TEST(futures, do_timer_on_runner_parallel_test) {
     auto start_time = std::chrono::_V2::high_resolution_clock::now();
     for (int i = 0; i < 1000000; ++i) {
-        dispatcher.spawn(timer_waiter(500ms));
-        dispatcher.spawn(timer_waiter(200ms));
-        dispatcher.spawn(timer_waiter(100ms));
+        for (int q = 0; q < 500; q += 50)
+            dispatcher.spawn(timer_waiter(std::chrono::milliseconds(q)));
     }
     std::cout << "Tasks spawned" << std::endl;
     dispatcher.run();
@@ -106,6 +105,6 @@ TEST(futures, do_timer_on_runner_parallel_test) {
     auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
     ASSERT_TRUE(dispatcher.empty());
     // NOTE: Check for parallel processing
-    ASSERT_TRUE(ms_time < 5000);
+    ASSERT_TRUE(ms_time < 10000);
 }
 

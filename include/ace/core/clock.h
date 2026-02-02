@@ -26,12 +26,20 @@ namespace ace::core {
 
         clock_record() = default;
 
-        // clock_record(const clock_record&) = delete;
+        clock_record(const clock_record&) = delete;
 
-        // clock_record(clock_record&& clk_rec) noexcept {
-        //     this->_duration = clk_rec._duration;
-        //     this->_context = std::move(clk_rec._context);
-        // };
+        clock_record operator= (const clock_record&) = delete;
+
+        clock_record(clock_record&& clk_rec) noexcept {
+            this->_duration = clk_rec._duration;
+            this->_context = std::move(clk_rec._context);
+        };
+
+        clock_record& operator=(clock_record&& clk_rec) noexcept {
+            this->_duration = clk_rec._duration;
+            this->_context = std::move(clk_rec._context);
+            return *this;
+        };
 
         clock_record(async<>&& ctx, const duration_t dur)
             : _duration(dur)
@@ -41,6 +49,22 @@ namespace ace::core {
 
 
     struct time_slot {
+
+        time_slot() = default;
+
+        time_slot(const time_slot& x) =delete;
+
+        time_slot& operator=(const time_slot& x) =delete;
+
+        time_slot(time_slot&& x) noexcept {
+            this->_records = std::move(x._records);
+        }
+
+        time_slot& operator=(time_slot&& x) noexcept {
+            this->_records = std::move(x._records);
+            return *this;
+        }
+
         nukes::dynamic::mpsc_queue<clock_record> _records;
 
         static void release_record(clock_record&& record) {
@@ -112,12 +136,7 @@ namespace ace::core {
 
         // WARNING DOESNT USE RELEASE COUNTER
         void insert_upper_record(clock_record&& record) {
-            record._duration -= _wheel_period;
-            if (record._duration.count() < 0) [[unlikely]] {
-                runner::schedule(std::forward<async<>>(record._context));
-                return;
-            }
-            const auto arrow_offset = record._duration / _tick_duration;
+            const auto arrow_offset = (record._duration / _tick_duration) % _tick_count;
             _ticks[_arrow + arrow_offset]._records.push(std::forward<clock_record>(record));
         }
 
@@ -126,23 +145,23 @@ namespace ace::core {
             while (arrow_offset < passed_ticks and *_release_counter > 0) {
                 auto arrow = (_arrow + arrow_offset) % _tick_count;
                 ++arrow_offset;
-                // if (_ticks[arrow].empty()) continue;
                 *_release_counter -= _ticks[arrow].release_slot(*_release_counter);
-                // _ticks[arrow].release_max();
-                if (_ticks[arrow].empty())
-                    pump_time(arrow_offset);
-                else break;
+                if (not _ticks[arrow].empty()) {
+                    --arrow_offset; // NOTE: Undo arrow increasing because queue is not empty
+                    break;
+                }
+                pump_time(arrow_offset);
             }
             _arrow += arrow_offset;
             return arrow_offset;
         }
 
-        int release(const duration_t& interval) {
+        auto release(const duration_t& interval) {
             return release_ticks(interval / _tick_duration);
         }
 
-        // NOTE: Pumps time from upper wheel by ticking its arrow
-        void pump_time(std::size_t offset = 0) {
+        // NOTE: Pumps time from upper wheel by ticking its arrow if current wheel finished its round
+        void pump_time(const std::size_t offset = 0) {
             if ((_arrow + offset) % _tick_count == 0 and _upper_wheel) {
                 _upper_wheel->advice_arrow(this);
             }
@@ -170,7 +189,7 @@ namespace ace::core {
         const duration_t _tick_duration;
         const std::size_t _tick_count;
         int _release_counter {};
-        int _release_limit {5000000}; // NOTE Huinya kakayata
+        int _release_limit {1024};
         std::atomic_int _total_awaited {0};
 
         static std::size_t log_based(std::size_t base, std::size_t x) {

@@ -194,7 +194,7 @@ namespace ace::core {
                 auto arrow = (_arrow + arrow_offset) % _tick_count;
                 *_release_counter -= _dial[arrow].release_slot(*_release_counter);
                 if (not _dial[arrow].empty()) [[unlikely]] break;
-                pump_time(arrow_offset);
+                migrate(arrow_offset);
                 ++arrow_offset;
             }
             _arrow += arrow_offset;
@@ -211,7 +211,7 @@ namespace ace::core {
         }
 
         // NOTE: Pumps time from upper wheel by ticking its arrow if current wheel finished its round
-        void pump_time(const std::size_t offset = 0) {
+        void migrate(const std::size_t offset = 0) {
             if ((_arrow + offset) % _tick_count == 0 and _upper_wheel) {
                 _upper_wheel->advance_arrow(this);
             }
@@ -223,7 +223,7 @@ namespace ace::core {
                 lower_wheel->inject_record(std::forward<clock_record>(records.front()));
                 records.pop();
             }
-            pump_time();
+            migrate();
             ++_arrow;
         }
     };
@@ -244,8 +244,14 @@ namespace ace::core {
         std::size_t _total_records {0};
         nukes::dynamic::mpsc_queue<input_record_t> _input;
 
-        static std::size_t log_based(std::size_t base, std::size_t x) {
-            return static_cast<std::size_t>(std::log(x) / std::log(base));
+        static std::size_t fast_log2(std::size_t x) {
+            if (x == 0) [[unlikely]] throw std::runtime_error("can't calculate <log> from 0");
+            return 63 - std::countl_zero(x);
+        }
+
+        // NOTE: Base replaces with the less power of 2
+        static std::size_t fast_log(std::size_t x, std::size_t base = 2) {
+            return (fast_log2(x) / fast_log2(base));
         }
 
         [[nodiscard]] std::optional<std::size_t> calc_wheel(const duration_t dur) const {
@@ -253,7 +259,7 @@ namespace ace::core {
                 return std::nullopt;
             if (dur < _tick_duration) [[unlikely]] return 0;
             std::size_t dur_ticks = dur / _tick_duration;
-            auto res = log_based(_tick_count, dur_ticks);
+            auto res = fast_log(dur_ticks, _tick_count);
             return res;
         }
 
@@ -303,7 +309,7 @@ namespace ace::core {
                               ? tick_count
                               : std::bit_ceil(tick_count)) {
             const auto ticks_amount = UINT64_MAX / tick_duration.count();
-            const auto wheels_amount = log_based(_tick_count, ticks_amount);
+            const auto wheels_amount = fast_log(ticks_amount, _tick_count);
             _wheels.reserve(wheels_amount);
             auto dur = _tick_duration;
             for (int i = 0; i < wheels_amount; ++i) {
@@ -369,7 +375,7 @@ namespace ace::core {
             return get_instance()._core.current_time();
         }
 
-        wheel_cascade _core{std::chrono::milliseconds(25), 32};
+        wheel_cascade _core{std::chrono::milliseconds(10), 32};
     };
 
 }

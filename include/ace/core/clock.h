@@ -309,7 +309,8 @@ namespace ace::core {
                               ? tick_count
                               : std::bit_ceil(tick_count)) {
             const auto ticks_amount = UINT64_MAX / tick_duration.count();
-            const auto wheels_amount = fast_log(ticks_amount, _tick_count);
+            // NOTE: Needs to increment because log function cuts off float reminder of log. We must handle all records
+            const auto wheels_amount = fast_log(ticks_amount, _tick_count) + 1;
             _wheels.reserve(wheels_amount);
             auto dur = _tick_duration;
             for (int i = 0; i < wheels_amount; ++i) {

@@ -91,17 +91,18 @@ TEST(futures, do_timer_on_runner_test) {
 }
 
 TEST(futures, do_timer_on_runner_parallel_test) {
-    auto start_time = std::chrono::_V2::high_resolution_clock::now();
     for (int i = 0; i < 1000000; ++i) {
         for (int q = 0; q < 500; q += 50)
             dispatcher.spawn(timer_waiter(std::chrono::milliseconds(q)));
     }
     std::cout << "Tasks spawned" << std::endl;
+    auto start_time = std::chrono::_V2::high_resolution_clock::now();
     dispatcher.run();
     auto end_time = std::chrono::_V2::high_resolution_clock::now();
     auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-    ASSERT_TRUE(dispatcher.empty());
+    std::cout << "Timers released after: " << ms_time << "ms" << std::endl;
     // NOTE: Check for parallel processing
-    ASSERT_TRUE(ms_time < 10000);
+    ASSERT_TRUE(ms_time < 1000);
+    ASSERT_TRUE(dispatcher.empty());
 }
 

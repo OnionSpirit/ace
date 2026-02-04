@@ -177,8 +177,8 @@ namespace ace::core {
          * @param [in] passed_ticks — The number of ticks passed. Also, the target number of arrow steps.
          * @return The number of completed arrow steps.
          */
-        int release_ticks(std::size_t passed_ticks) {
-            int arrow_offset = 0;
+        std::size_t release_ticks(std::size_t passed_ticks) {
+            std::size_t arrow_offset = 0;
             while (arrow_offset < passed_ticks and *_release_counter > 0) {
                 // NOTE: Old version
                 // auto arrow = (_arrow + arrow_offset) % _tick_count;
@@ -313,11 +313,9 @@ namespace ace::core {
             const auto wheels_amount = fast_log(ticks_amount, _tick_count) + 1;
             _wheels.reserve(wheels_amount);
             auto dur = _tick_duration;
-            for (int i = 0; i < wheels_amount; ++i) {
+            for (std::size_t i = 0; i < wheels_amount; ++i, dur *= static_cast<long>(_tick_count))
                 _wheels.emplace_back(dur, _tick_count, &_current_ts, &_release_counter);
-                dur *= _tick_count;
-            }
-            for (int i = 0; i < (wheels_amount - 1); ++i)
+            for (std::size_t i = 0; i < (wheels_amount - 1); ++i)
                 _wheels[i]._upper_wheel = &_wheels[i + 1];
         };
 

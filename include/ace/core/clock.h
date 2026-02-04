@@ -375,7 +375,7 @@ namespace ace::core {
             return get_instance()._core.current_time();
         }
 
-        wheel_cascade _core{std::chrono::milliseconds(10), 32};
+        wheel_cascade _core{std::chrono::milliseconds(1), 256};
     };
 
 }

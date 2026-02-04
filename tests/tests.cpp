@@ -58,20 +58,22 @@ TEST(futures, do_timer_on_runner_test) {
     ace::futures::channel_dyn<int> _channel {};
 
     // NOTE: Spawning waiters with different duration and waited time count return
-    dispatcher.spawn(timer_waiter_valued(500ms, _channel));
     dispatcher.spawn(timer_waiter_valued(501ms, _channel));
+    dispatcher.spawn(timer_waiter_valued(500ms, _channel));
     dispatcher.spawn(timer_waiter_valued(450ms, _channel));
-    dispatcher.spawn(timer_waiter_valued(400ms, _channel));
     dispatcher.spawn(timer_waiter_valued(401ms, _channel));
-    dispatcher.spawn(timer_waiter_valued(350ms, _channel));
+    dispatcher.spawn(timer_waiter_valued(400ms, _channel));
     dispatcher.spawn(timer_waiter_valued(399ms, _channel));
+    dispatcher.spawn(timer_waiter_valued(350ms, _channel));
     dispatcher.spawn(timer_waiter_valued(300ms, _channel));
+    dispatcher.spawn(timer_waiter_valued(256ms, _channel));
     dispatcher.spawn(timer_waiter_valued(250ms, _channel));
     dispatcher.spawn(timer_waiter_valued(200ms, _channel));
     dispatcher.spawn(timer_waiter_valued(150ms, _channel));
     dispatcher.spawn(timer_waiter_valued(100ms, _channel));
     dispatcher.spawn(timer_waiter_valued(50ms, _channel));
     dispatcher.spawn(timer_waiter_valued(10ms, _channel));
+    dispatcher.spawn(timer_waiter_valued(0ms, _channel));
     dispatcher.run();
     ASSERT_TRUE(dispatcher.empty());
 

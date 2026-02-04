@@ -180,17 +180,6 @@ namespace ace::core {
         std::size_t release_ticks(std::size_t passed_ticks) {
             std::size_t arrow_offset = 0;
             while (arrow_offset < passed_ticks and *_release_counter > 0) {
-                // NOTE: Old version
-                // auto arrow = (_arrow + arrow_offset) % _tick_count;
-                // ++arrow_offset;
-                // *_release_counter -= _dial[arrow].release_slot(*_release_counter);
-                // if (not _dial[arrow].empty()) {
-                //     --arrow_offset; // NOTE: Undo arrow increasing because queue is not empty
-                //     break;
-                // }
-                // pump_time(arrow_offset);
-
-                // NOTE: Maybe better
                 auto arrow = (_arrow + arrow_offset) % _tick_count;
                 *_release_counter -= _dial[arrow].release_slot(*_release_counter);
                 if (not _dial[arrow].empty()) [[unlikely]] break;
@@ -235,14 +224,15 @@ namespace ace::core {
         typedef std::tuple<async<>, duration_t> input_record_t;
 
         timepoint_t _current_ts;
-        timepoint_t _release_bound_ts {clock_now()}; ///< Time lower bound, higher than all released timers
+        timepoint_t _release_bound_ts { clock_now() }; ///< Time lower bound, higher than all released timers
         std::vector<time_wheel> _wheels;
         const duration_t _tick_duration;
         const std::size_t _tick_count;
         int _release_counter {};
         int _release_limit {1024};
         std::size_t _total_records {0};
-        nukes::dynamic::mpsc_queue<input_record_t> _input;
+        nukes::dynamic::mpsc_queue<input_record_t> _threadsafe_input;
+        bool _multithreading { false };
 
         static std::size_t fast_log2(std::size_t x) {
             if (x == 0) [[unlikely]] throw std::runtime_error("can't calculate <log> from 0");
@@ -272,20 +262,18 @@ namespace ace::core {
         }
 
         void inject(async<>&& ctx, duration_t dur) {
-            auto idx = calc_wheel(dur);
-
+            const auto idx = calc_wheel(dur);
             if (not idx) [[unlikely]] {
                 runner::schedule(std::move(ctx));
                 return;
             }
-
             ++_total_records;
             _wheels[idx.value()].inject_raw(std::forward<async<>>(ctx), dur);
         };
 
         void fetch(const duration_t& passed) {
             input_record_t input_record;
-            for (int i = 0; i < _release_limit and _input.pop(input_record); ++i) {
+            for (int i = 0; i < _release_limit and _threadsafe_input.pop(input_record); ++i) {
                 auto [ctx, dur] = std::forward<input_record_t>(input_record);
                 if (passed > dur) [[unlikely]] {
                     runner::schedule(std::forward<async<>>(ctx));
@@ -293,7 +281,6 @@ namespace ace::core {
                     continue;
                 }
                 inject(std::move(ctx), dur);
-                ++_total_records;
             }
         }
 
@@ -335,20 +322,17 @@ namespace ace::core {
         };
 
         void subscribe(async<>&& ctx, duration_t dur) {
-            auto idx = calc_wheel(dur);
-
-            if (not idx) [[unlikely]] {
-                runner::schedule(std::move(ctx));
-                return;
-            }
-
-            ++_total_records;
-            _wheels[idx.value()].inject_raw(std::forward<async<>>(ctx), dur);
-
-            // _input.push({std::forward<async<>>(ctx), dur});
+            if (_multithreading)
+                _threadsafe_input.push({std::forward<async<>>(ctx), dur});
+            else
+                inject(std::move(ctx), dur);
         };
 
         [[nodiscard]] auto current_time() const { return _current_ts; }
+
+        void enable_multithreading() { _multithreading = true; }
+
+        void disable_multithreading() { _multithreading = false; }
 
         [[nodiscard]] bool empty() const {
             return _total_records == 0;

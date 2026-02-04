@@ -152,10 +152,8 @@ namespace ace::core {
          * @param [in] ctx Context to await
          * @param [in] dur Duration of awaiting
          */
-        void inject(async<>&& ctx, duration_t dur) {
+        void inject_raw(async<>&& ctx, duration_t dur) {
             const auto arrow_offset = (dur / _tick_duration) % _tick_count;
-            // std::cout << "\tDuration is: " << dur.count() / 1000000 << "ms. Division: " << dur / _tick_duration << std::endl;
-            // std::cout << "\tInjected context in slot: " << _arrow + arrow_offset << std::endl << std::endl;
             const auto arrow = (_arrow + arrow_offset) % _tick_count;
             _dial.at(arrow)._records.push(std::forward<clock_record>({std::forward<async<>>(ctx), dur}));
         }
@@ -164,10 +162,8 @@ namespace ace::core {
          * @brief Injects record to the wheel. Slot will be selected by duration
          * @param [in] record Record to inject
          */
-        void inject(clock_record&& record) {
-            const auto arrow_offset = (record._duration / _tick_duration) % _tick_count;
-            // std::cout << "\tDuration is: " << record._duration.count() / 1000000 << "ms. Division: " << record._duration / _tick_duration << std::endl;
-            // std::cout << "\tInjected record in slot: " << _arrow + arrow_offset << std::endl << std::endl;
+        void inject_record(clock_record&& record) {
+            const auto arrow_offset = (record._duration / _tick_duration + 1) % _tick_count;
             const auto arrow = (_arrow + arrow_offset) % _tick_count;
             _dial.at(arrow)._records.push(std::forward<clock_record>(record));
         }
@@ -184,14 +180,22 @@ namespace ace::core {
         int release_ticks(std::size_t passed_ticks) {
             int arrow_offset = 0;
             while (arrow_offset < passed_ticks and *_release_counter > 0) {
+                // NOTE: Old version
+                // auto arrow = (_arrow + arrow_offset) % _tick_count;
+                // ++arrow_offset;
+                // *_release_counter -= _dial[arrow].release_slot(*_release_counter);
+                // if (not _dial[arrow].empty()) {
+                //     --arrow_offset; // NOTE: Undo arrow increasing because queue is not empty
+                //     break;
+                // }
+                // pump_time(arrow_offset);
+
+                // NOTE: Maybe better
                 auto arrow = (_arrow + arrow_offset) % _tick_count;
-                ++arrow_offset;
                 *_release_counter -= _dial[arrow].release_slot(*_release_counter);
-                if (not _dial[arrow].empty()) {
-                    --arrow_offset; // NOTE: Undo arrow increasing because queue is not empty
-                    break;
-                }
+                if (not _dial[arrow].empty()) [[unlikely]] break;
                 pump_time(arrow_offset);
+                ++arrow_offset;
             }
             _arrow += arrow_offset;
             return arrow_offset;
@@ -210,19 +214,17 @@ namespace ace::core {
         void pump_time(const std::size_t offset = 0) {
             if ((_arrow + offset) % _tick_count == 0 and _upper_wheel) {
                 _upper_wheel->advance_arrow(this);
-                // std::cout << "Time pumped on arrow: " << (_arrow + offset) % _tick_count << std::endl;
             }
         }
 
         void advance_arrow(time_wheel* lower_wheel) {
             auto&& records = std::move(_dial[_arrow % _tick_count]._records);
-            _arrow++;
             while(not records.empty()) {
-                clock_record record;
-                lower_wheel->inject(std::forward<clock_record>(records.front()));
+                lower_wheel->inject_record(std::forward<clock_record>(records.front()));
                 records.pop();
             }
             pump_time();
+            ++_arrow;
         }
     };
 
@@ -252,7 +254,6 @@ namespace ace::core {
             if (dur < _tick_duration) [[unlikely]] return 0;
             std::size_t dur_ticks = dur / _tick_duration;
             auto res = log_based(_tick_count, dur_ticks);
-            // std::cout << "\tSelected wheel: " << res << std::endl;
             return res;
         }
 
@@ -273,7 +274,7 @@ namespace ace::core {
             }
 
             ++_total_records;
-            _wheels[idx.value()].inject(std::forward<async<>>(ctx), dur);
+            _wheels[idx.value()].inject_raw(std::forward<async<>>(ctx), dur);
         };
 
         void fetch(const duration_t& passed) {
@@ -283,7 +284,6 @@ namespace ace::core {
                 if (passed > dur) [[unlikely]] {
                     runner::schedule(std::forward<async<>>(ctx));
                     --_release_counter;
-                    // return;
                     continue;
                 }
                 inject(std::move(ctx), dur);
@@ -298,7 +298,7 @@ namespace ace::core {
                                const std::size_t tick_count)
             : _current_ts(clock_now())
             , _release_bound_ts(_current_ts)
-            ,  _tick_duration(std::chrono::duration_cast<duration_t>(tick_duration))
+            , _tick_duration(std::chrono::duration_cast<duration_t>(tick_duration))
             , _tick_count((tick_count > 0) && ((tick_count & (tick_count - 1)) == 0)
                               ? tick_count
                               : std::bit_ceil(tick_count)) {
@@ -310,17 +310,18 @@ namespace ace::core {
                 _wheels.emplace_back(dur, _tick_count, &_current_ts, &_release_counter);
                 dur *= _tick_count;
             }
-            for (int i = 0; i < wheels_amount - 1; ++i)
+            for (int i = 0; i < (wheels_amount - 1); ++i)
                 _wheels[i]._upper_wheel = &_wheels[i + 1];
         };
 
         std::size_t release() {
             _current_ts = clock_now();
             const duration_t passed = calc_passed();
-            if (passed < _tick_duration) [[unlikely]]
-                return 0;
             _release_counter = _release_limit;
-            fetch(passed);
+            if (passed < _tick_duration) [[unlikely]] {
+                fetch(passed);
+                return 0;
+            }
             const auto released_ticks = _wheels[0].release(passed);
             update_release_bound(_tick_duration * released_ticks);
             const auto released = _release_limit - _release_counter;
@@ -337,7 +338,7 @@ namespace ace::core {
             }
 
             ++_total_records;
-            _wheels[idx.value()].inject(std::forward<async<>>(ctx), dur);
+            _wheels[idx.value()].inject_raw(std::forward<async<>>(ctx), dur);
 
             // _input.push({std::forward<async<>>(ctx), dur});
         };
@@ -368,7 +369,7 @@ namespace ace::core {
             return get_instance()._core.current_time();
         }
 
-        wheel_cascade _core{std::chrono::milliseconds(50), 8};
+        wheel_cascade _core{std::chrono::milliseconds(25), 32};
     };
 
 }

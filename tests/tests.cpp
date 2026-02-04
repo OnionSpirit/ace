@@ -59,10 +59,12 @@ TEST(futures, do_timer_on_runner_test) {
 
     // NOTE: Spawning waiters with different duration and waited time count return
     dispatcher.spawn(timer_waiter_valued(500ms, _channel));
+    dispatcher.spawn(timer_waiter_valued(501ms, _channel));
     dispatcher.spawn(timer_waiter_valued(450ms, _channel));
     dispatcher.spawn(timer_waiter_valued(400ms, _channel));
-    dispatcher.spawn(timer_waiter_valued(399ms, _channel));
+    dispatcher.spawn(timer_waiter_valued(401ms, _channel));
     dispatcher.spawn(timer_waiter_valued(350ms, _channel));
+    dispatcher.spawn(timer_waiter_valued(399ms, _channel));
     dispatcher.spawn(timer_waiter_valued(300ms, _channel));
     dispatcher.spawn(timer_waiter_valued(250ms, _channel));
     dispatcher.spawn(timer_waiter_valued(200ms, _channel));

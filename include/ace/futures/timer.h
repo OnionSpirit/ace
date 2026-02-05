@@ -44,6 +44,11 @@ class timer : public future_traits<timer> {
         // bool is_detached() { return _detached;}
 };
 
+struct expire : timer {
+    explicit expire(core::timepoint_t expires)
+        : timer(expires - core::clock::current_time()) {}
+};
+
 } // end namespace ace::futures
 
 

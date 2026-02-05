@@ -13,11 +13,24 @@
 
 namespace ace::core {
 
-    using timepoint_t = decltype(std::chrono::steady_clock::now());
+    using timepoint_t = decltype(
+        std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::high_resolution_clock, std::chrono::nanoseconds>(
+            std::chrono::high_resolution_clock::now()
+        )
+    );
 
-    using duration_t = decltype(std::chrono::steady_clock::duration());
+    using duration_t = decltype(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::duration()
+        )
+    );
 
-    inline auto clock_now() { return std::chrono::steady_clock::now(); }
+    inline auto clock_now() {
+        return
+        std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::high_resolution_clock, std::chrono::nanoseconds>(
+            std::chrono::high_resolution_clock::now()
+        );
+    }
 
     /**
      * @brief Type of stored context record. Contains context and it's awaiting duration

@@ -111,7 +111,7 @@ public:
      * @details @b push method alternative interface
      * @param data Data to push
      */
-    void operator << (data_t& data) { push(data); }
+    void operator << (data_t& data) { push(std::forward<data_t&>(data)); }
 
     /**
      * @details @b push method alternative interface
@@ -222,7 +222,7 @@ ACE_FUTURE_CHANNEL_MEMBER(void) reset() {
 
 
 ACE_FUTURE_CHANNEL_MEMBER(bool) push(data_t& data) {
-    if (_container.push(std::forward<data_t>(data_t(data)))) [[likely]] {
+    if (_container.push(std::forward<data_t&>(data))) [[likely]] {
         reset();
         return true;
     }

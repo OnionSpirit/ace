@@ -5,6 +5,7 @@
 #include "include/ace/futures/future.h"
 #include "ace/futures/channel.h"
 #include "ace/core/clock.h"
+#include "ace/futures/expire.h"
 #include "ace/futures/timer.h"
 
 struct once_suspend : ace::futures::future_traits<once_suspend> {
@@ -83,8 +84,18 @@ ace::async<> timer_waiter_valued(std::chrono::duration<Rep, Period> wait_time, a
     co_return;
 }
 
-inline ace::async<> channel_fetcher(ace::futures::channel_dyn<int>& ch, std::vector<int>& output) {
-    std::vector<int> res {};
+
+ace::async<> expire_waiter_valued(ace::core::timepoint_t wait_time, ace::futures::channel_dyn<ace::core::timepoint_t>& ch) {
+    std::cout << "Expires at: " << wait_time << std::endl;
+    co_await ace::futures::expire(wait_time);
+    std::cout << "Expired at: " << wait_time << std::endl;
+    ch << wait_time;
+    co_return;
+}
+
+template <typename channel_t>
+ace::async<> channel_fetcher(ace::futures::channel_dyn<channel_t>& ch, std::vector<channel_t>& output) {
+    std::vector<channel_t> res {};
     while (not ch.empty()) { res.emplace_back(co_await ch.pull()); }
     output = res;
     co_return;

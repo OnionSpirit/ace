@@ -106,3 +106,40 @@ TEST(futures, do_timer_on_runner_parallel_test) {
     ASSERT_TRUE(dispatcher.empty());
 }
 
+TEST(futures, do_expire_on_runner_test) {
+    ace::futures::channel_dyn<ace::core::timepoint_t> _channel {};
+
+    auto now = ace::core::clock::current_time();
+    // NOTE: Spawning waiters with different duration and waited time count return
+    dispatcher.spawn(expire_waiter_valued(now + 501ms, _channel));
+    dispatcher.spawn(expire_waiter_valued(now + 500ms, _channel));
+    dispatcher.spawn(expire_waiter_valued(now + 450ms, _channel));
+    dispatcher.spawn(expire_waiter_valued(now + 401ms, _channel));
+    dispatcher.spawn(expire_waiter_valued(now + 400ms, _channel));
+    dispatcher.spawn(expire_waiter_valued(now + 399ms, _channel));
+    dispatcher.spawn(expire_waiter_valued(now + 350ms, _channel));
+    dispatcher.spawn(expire_waiter_valued(now + 300ms, _channel));
+    dispatcher.spawn(expire_waiter_valued(now + 256ms, _channel));
+    dispatcher.spawn(expire_waiter_valued(now + 250ms, _channel));
+    dispatcher.spawn(expire_waiter_valued(now + 200ms, _channel));
+    dispatcher.spawn(expire_waiter_valued(now + 150ms, _channel));
+    dispatcher.spawn(expire_waiter_valued(now + 100ms, _channel));
+    dispatcher.spawn(expire_waiter_valued(now + 50ms, _channel));
+    dispatcher.spawn(expire_waiter_valued(now + 10ms, _channel));
+    dispatcher.spawn(expire_waiter_valued(now + 0ms, _channel));
+    dispatcher.run();
+    ASSERT_TRUE(dispatcher.empty());
+
+    // NOTE: Collecting waited time sequence
+    std::vector<ace::core::timepoint_t> res{};
+    dispatcher.spawn(channel_fetcher(_channel, res));
+    dispatcher.run();
+    ASSERT_TRUE(dispatcher.empty());
+
+    // NOTE: Waited time sequence must monotonically increase. (Time is monotonic MA DUDES)
+    // NOTE: This means that timers are processed according to the sequence of expiration timestamps
+    // NOTE: without additional delay. This proves that the expiration sequence is ordered.
+    for (std::size_t i = 1; i < res.size(); ++i)
+        ASSERT_TRUE(res.at(i) >= res.at(i - 1));
+}
+

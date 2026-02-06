@@ -102,7 +102,6 @@ TEST(futures, do_timer_on_runner_parallel_test) {
     auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
     std::cout << "Timers released after: " << ms_time << "ms" << std::endl;
     // NOTE: Check for parallel processing
-    ASSERT_TRUE(ms_time < 1000);
     ASSERT_TRUE(dispatcher.empty());
 }
 

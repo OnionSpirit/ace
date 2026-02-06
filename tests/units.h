@@ -6,6 +6,7 @@
 #include "ace/futures/channel.h"
 #include "ace/core/clock.h"
 #include "ace/futures/timer.h"
+#include "ace/futures/mutex.h"
 
 struct once_suspend : ace::futures::future_traits<once_suspend> {
 

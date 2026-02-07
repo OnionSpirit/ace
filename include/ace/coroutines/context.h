@@ -10,6 +10,7 @@
 
 #include "ace/futures/future.h"
 #include "ace/coroutines/promise.h"
+#include "nukes/dynamic/mpsc_queue.h"
 #include <coroutine>
 
 #include "conductor.h"
@@ -60,7 +61,7 @@ namespace ace::coroutines {
 
         explicit operator bool() const { return is_idle(); }
 
-        ~context() override = default;
+        ~context() override { if (_coroutine) _coroutine.destroy(); };
 
 
         // NOTE: Type to store conductor and pass it to outer promise

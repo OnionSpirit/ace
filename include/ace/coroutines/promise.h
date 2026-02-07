@@ -10,11 +10,12 @@
 
 #include "ace/futures/future.h"
 #include "ace/common/dispatch.h"
-#include "nukes/dynamic/mpsc_queue.h"
 
 #include <concepts>
 #include <coroutine>
 #include <type_traits>
+
+#include "ace/common/id_alloca.h"
 
 namespace ace::coroutines {
 
@@ -84,7 +85,7 @@ namespace ace::coroutines {
 
         promise_traits() =default;
 
-        ~promise_traits() =default;
+        ~promise_traits() { common::context_id_allocator::get_instance().id_free(_identifier); };
 
         std::suspend_always await_transform(const std::suspend_always& e) {
             _status = e_executed;
@@ -116,11 +117,19 @@ namespace ace::coroutines {
 
         template <typename commandT>
         requires ace::common::dispatch::is_command<std::remove_reference_t<commandT>, return_t>
-        commandT& await_transform(commandT& command) { return command; }
+        commandT& await_transform(commandT& command) {
+            _status = e_executed;
+            _future = nullptr;
+            return command;
+        }
 
         template <typename commandT>
         requires ace::common::dispatch::is_command<std::remove_reference_t<commandT>, return_t>
-        commandT&& await_transform(commandT&& command) { return command; }
+        commandT&& await_transform(commandT&& command) {
+            _status = e_executed;
+            _future = nullptr;
+            return command;
+        }
 
         // TODO: Define in future to attach custom allocator
         /* static inline void* operator new(size_t memsize) noexcept; */
@@ -128,6 +137,7 @@ namespace ace::coroutines {
         /* static inline void operator delete(void* memptr, size_t memsize) noexcept; */
 
         future_handler_ptr_t _future { nullptr };
+        std::size_t _identifier { common::context_id_allocator::get_instance().id_alloc() };
     };
 
 #define DECLARE_PROMISE_TRAITS(return_type_t) typedef coroutines::promise_traits<return_type_t> promise_traits_t;

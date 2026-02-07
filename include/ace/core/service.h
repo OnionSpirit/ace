@@ -18,11 +18,7 @@ namespace ace::core {
     };
 
     template <typename derived_t>
-    struct service_traits {
-
-    protected:
-
-        service_traits() { crtp_asserter(); };
+    class service_traits {
 
         static void crtp_asserter() {
             static_assert(is_service_templ<derived_t>,
@@ -32,8 +28,12 @@ namespace ace::core {
                 "Derived type is not actually derived from 'service_traits<DerivedT>'");
         };
 
+    protected:
+
+        service_traits() { crtp_asserter(); };
+
         void respawn() {
-            dispatcher::spawn(service(dispatcher::get_sig_pipe()));
+            spawn(service(dispatcher::get_sig_pipe()));
             _detached = false;
         }
 

@@ -37,8 +37,8 @@ public:
      * @param new_task Task to be pushed into the dispatcher
      * @return void
      */
-    static void spawn(async<>&& new_task) noexcept {
-        get_instance()._runner.spawn(std::forward<async<>>(new_task));
+    void spawn(async<>&& new_task) noexcept {
+        _runner.spawn(std::forward<async<>>(new_task));
     }
 
     // TODO: Temp realisation until I'll make a balancer
@@ -46,17 +46,42 @@ public:
      * @details Checks if any Tasks stored in the dispatcher
      * @return @b true if empty, @b false otherwise
      */
-    [[nodiscard]] static bool empty() noexcept { return get_instance()._runner.empty(); };
+    [[nodiscard]] bool empty() noexcept { return _runner.empty(); };
 
     // TODO: Temp realisation until I'll make a balancer
     /**
      * @details Resumes all tasks from the runners.
      */
-    static void run() noexcept { while ( not empty() ) get_instance()._runner.yank(); }
+    void run() noexcept { while ( not empty() ) _runner.yank(); }
 
 };
 
-}
+} // end namespace ace::core
+
+
+namespace ace {
+
+    /**
+     * @details Function to spawn task
+     * @param new_task Task to be pushed into the dispatcher
+     * @return void
+     */
+    static void spawn(async<>&& new_task) noexcept {
+        core::dispatcher::get_instance().spawn(std::forward<async<>>(new_task));
+    }
+
+    /**
+     * @details Checks if there are tasks to do
+     * @return @b true if there are no tasks to proceed, @b false otherwise
+     */
+    inline bool empty() noexcept { return core::dispatcher::get_instance().empty(); }
+
+    /**
+     * @details Processing all spawned tasks.
+     */
+    inline void run() noexcept { core::dispatcher::get_instance().run(); }
+
+} // end namespace ace
 
  //
  // /**

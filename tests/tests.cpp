@@ -1,8 +1,6 @@
 #include <ranges>
 #include <gtest/gtest.h>
 #include "environment.h"
-#include "units.h"
-#include "ace/core/dispatcher.h"
 
 TEST(context, do_co_await_test) {
     auto r = simple_context_test();
@@ -58,30 +56,30 @@ TEST(futures, do_timer_on_runner_test) {
     ace::futures::channel_dyn<int> _channel {};
 
     // NOTE: Spawning waiters with different duration and waited time count return
-    ace::core::dispatcher::spawn(timer_waiter_valued(501ms, _channel));
-    ace::core::dispatcher::spawn(timer_waiter_valued(500ms, _channel));
-    ace::core::dispatcher::spawn(timer_waiter_valued(450ms, _channel));
-    ace::core::dispatcher::spawn(timer_waiter_valued(401ms, _channel));
-    ace::core::dispatcher::spawn(timer_waiter_valued(400ms, _channel));
-    ace::core::dispatcher::spawn(timer_waiter_valued(399ms, _channel));
-    ace::core::dispatcher::spawn(timer_waiter_valued(350ms, _channel));
-    ace::core::dispatcher::spawn(timer_waiter_valued(300ms, _channel));
-    ace::core::dispatcher::spawn(timer_waiter_valued(256ms, _channel));
-    ace::core::dispatcher::spawn(timer_waiter_valued(250ms, _channel));
-    ace::core::dispatcher::spawn(timer_waiter_valued(200ms, _channel));
-    ace::core::dispatcher::spawn(timer_waiter_valued(150ms, _channel));
-    ace::core::dispatcher::spawn(timer_waiter_valued(100ms, _channel));
-    ace::core::dispatcher::spawn(timer_waiter_valued(50ms, _channel));
-    ace::core::dispatcher::spawn(timer_waiter_valued(10ms, _channel));
-    ace::core::dispatcher::spawn(timer_waiter_valued(0ms, _channel));
-    ace::core::dispatcher::run();
-    ASSERT_TRUE(ace::core::dispatcher::empty());
+    ace::spawn(timer_waiter_valued(501ms, _channel));
+    ace::spawn(timer_waiter_valued(500ms, _channel));
+    ace::spawn(timer_waiter_valued(450ms, _channel));
+    ace::spawn(timer_waiter_valued(401ms, _channel));
+    ace::spawn(timer_waiter_valued(400ms, _channel));
+    ace::spawn(timer_waiter_valued(399ms, _channel));
+    ace::spawn(timer_waiter_valued(350ms, _channel));
+    ace::spawn(timer_waiter_valued(300ms, _channel));
+    ace::spawn(timer_waiter_valued(256ms, _channel));
+    ace::spawn(timer_waiter_valued(250ms, _channel));
+    ace::spawn(timer_waiter_valued(200ms, _channel));
+    ace::spawn(timer_waiter_valued(150ms, _channel));
+    ace::spawn(timer_waiter_valued(100ms, _channel));
+    ace::spawn(timer_waiter_valued(50ms, _channel));
+    ace::spawn(timer_waiter_valued(10ms, _channel));
+    ace::spawn(timer_waiter_valued(0ms, _channel));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
 
     // NOTE: Collecting waited time sequence
     std::vector<int> res{};
-    ace::core::dispatcher::spawn(channel_fetcher(_channel, res));
-    ace::core::dispatcher::run();
-    ASSERT_TRUE(ace::core::dispatcher::empty());
+    ace::spawn(channel_fetcher(_channel, res));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
 
     // NOTE: Waited time sequence must monotonically increase. (Time is monotonic MA DUDES)
     // NOTE: This means that timers are processed according to the sequence of expiration timestamps
@@ -93,16 +91,16 @@ TEST(futures, do_timer_on_runner_test) {
 TEST(futures, do_timer_on_runner_parallel_test) {
     for (int i = 0; i < 1000000; ++i) {
         for (int q = 0; q < 500; q += 50)
-            ace::core::dispatcher::spawn(timer_waiter(std::chrono::milliseconds(q)));
+            ace::spawn(timer_waiter(std::chrono::milliseconds(q)));
     }
     std::cout << "Tasks spawned" << std::endl;
     auto start_time = std::chrono::_V2::high_resolution_clock::now();
-    ace::core::dispatcher::run();
+    ace::run();
     auto end_time = std::chrono::_V2::high_resolution_clock::now();
     auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
     std::cout << "Timers released after: " << ms_time << "ms" << std::endl;
     // NOTE: Check for parallel processing
-    ASSERT_TRUE(ace::core::dispatcher::empty());
+    ASSERT_TRUE(ace::empty());
 }
 
 TEST(futures, do_expire_on_runner_test) {
@@ -110,30 +108,30 @@ TEST(futures, do_expire_on_runner_test) {
 
     auto now = ace::core::clock::current_time();
     // NOTE: Spawning waiters with different duration and waited time count return
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 501ms, _channel));
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 500ms, _channel));
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 450ms, _channel));
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 401ms, _channel));
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 400ms, _channel));
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 399ms, _channel));
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 350ms, _channel));
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 300ms, _channel));
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 256ms, _channel));
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 250ms, _channel));
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 200ms, _channel));
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 150ms, _channel));
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 100ms, _channel));
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 50ms, _channel));
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 10ms, _channel));
-    ace::core::dispatcher::spawn(expire_waiter_valued(now + 0ms, _channel));
-    ace::core::dispatcher::run();
-    ASSERT_TRUE(ace::core::dispatcher::empty());
+    ace::spawn(expire_waiter_valued(now + 501ms, _channel));
+    ace::spawn(expire_waiter_valued(now + 500ms, _channel));
+    ace::spawn(expire_waiter_valued(now + 450ms, _channel));
+    ace::spawn(expire_waiter_valued(now + 401ms, _channel));
+    ace::spawn(expire_waiter_valued(now + 400ms, _channel));
+    ace::spawn(expire_waiter_valued(now + 399ms, _channel));
+    ace::spawn(expire_waiter_valued(now + 350ms, _channel));
+    ace::spawn(expire_waiter_valued(now + 300ms, _channel));
+    ace::spawn(expire_waiter_valued(now + 256ms, _channel));
+    ace::spawn(expire_waiter_valued(now + 250ms, _channel));
+    ace::spawn(expire_waiter_valued(now + 200ms, _channel));
+    ace::spawn(expire_waiter_valued(now + 150ms, _channel));
+    ace::spawn(expire_waiter_valued(now + 100ms, _channel));
+    ace::spawn(expire_waiter_valued(now + 50ms, _channel));
+    ace::spawn(expire_waiter_valued(now + 10ms, _channel));
+    ace::spawn(expire_waiter_valued(now + 0ms, _channel));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
 
     // NOTE: Collecting waited time sequence
     std::vector<ace::core::timepoint_t> res{};
-    ace::core::dispatcher::spawn(channel_fetcher(_channel, res));
-    ace::core::dispatcher::run();
-    ASSERT_TRUE(ace::core::dispatcher::empty());
+    ace::spawn(channel_fetcher(_channel, res));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
 
     // NOTE: Waited time sequence must monotonically increase. (Time is monotonic MA DUDES)
     // NOTE: This means that timers are processed according to the sequence of expiration timestamps

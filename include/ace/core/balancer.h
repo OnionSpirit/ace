@@ -20,7 +20,7 @@ namespace ace::core {
         std::vector<runner> _runners;
         std::atomic<std::size_t> _spawn_selection_counter {};
 
-        static void runner_on_the_thread(runner&& _runner) { _runner.run(); }
+        static void thread_function(const runner& runner) { runner.run(); }
 
     public:
 
@@ -45,9 +45,9 @@ namespace ace::core {
         void run() noexcept {
             std::vector<std::thread> threads;
             for (std::size_t runner_id = 1; runner_id < _runners.size() - 1; ++runner_id)
-                threads.emplace_back(runner_on_the_thread, std::forward<runner>(_runners[runner_id]));
+                threads.emplace_back(thread_function, std::forward<runner>(_runners[runner_id]));
 
-            runner_on_the_thread(std::forward<runner>(_runners[0]));
+            thread_function(std::forward<runner>(_runners[0]));
 
             for (auto& thread : threads)
                 thread.join();
@@ -57,7 +57,7 @@ namespace ace::core {
          * @details Checks if any Tasks stored in any of the runners
          * @return @b true if empty, @b false otherwise
          */
-        [[nodiscard]] bool empty() noexcept {
+        [[nodiscard]] bool empty() const noexcept {
             bool res { true };
             for (std::size_t runner_id = 0; runner_id < _runners.size() and res; ++runner_id)
                 res &= _runners[runner_id].empty();

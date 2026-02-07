@@ -21,7 +21,7 @@ namespace ace::core {
 class runner // : public ace::meta::technical::scheduler_id
     {
 
-    runner_pool_t _pool; // Note: pool of task queue
+    mutable runner_pool_t _pool; // Note: pool of task queue
     // Note: mpsc queue to emplace task from another runner or spawning
     // std::queue<ace::promise::async<>> _input;
     // Note: signaling queue for external control
@@ -51,7 +51,7 @@ public:
     /**
      * @details Resumes only one ready task
      */
-    void yank() noexcept {
+    void yank() const noexcept {
         coroutines::promise_touch_result touch_result = coroutines::promise_touch_result::e_blocked;
         auto* async_n = _pool.pop_node();
 
@@ -88,7 +88,7 @@ public:
     /**
      * @details Resumes all tasks from the ready task pool until it is empty.
      */
-    void run() noexcept { while(not _pool.empty()) yank(); }
+    void run() const noexcept { while(not _pool.empty()) yank(); }
 
     // TODO: Make return type as 'join_handler' future type, when I will write it
     /**
@@ -97,7 +97,7 @@ public:
      * @return void
      */
     template <typename async_return_t>
-    void spawn(async<async_return_t>&& new_task) noexcept {
+    void spawn(async<async_return_t>&& new_task) const noexcept {
         new_task._coroutine.promise()._runner_pool = &_pool;
         _pool.push(std::forward<async<>>(async_wrap(std::forward<async<async_return_t>>(new_task))));
     }
@@ -106,11 +106,11 @@ public:
      * @details Checks if any Tasks stored in the runner
      * @return @b true if empty, @b false otherwise
      */
-    [[nodiscard]] bool empty() noexcept { return _pool.empty(); };
+    [[nodiscard]] bool empty() const noexcept { return _pool.empty(); };
 };
 
 template <>
-inline void runner::spawn<void>(async<>&& new_task) noexcept {
+inline void runner::spawn<void>(async<>&& new_task) const noexcept {
     new_task._coroutine.promise()._runner_pool = &_pool;
     _pool.push(std::forward<async<>>(new_task));
 }

@@ -44,7 +44,7 @@ public:
      * @details Checks if any Tasks stored in the dispatcher
      * @return @b true if empty, @b false otherwise
      */
-    [[nodiscard]] bool empty() noexcept { return _balancer.empty(); };
+    [[nodiscard]] bool empty() const noexcept { return _balancer.empty(); };
 
     /**
      * @details Resumes all tasks from the runners.

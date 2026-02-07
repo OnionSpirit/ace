@@ -15,7 +15,7 @@
 #include <coroutine>
 #include <type_traits>
 
-#include "ace/common/id_alloca.h"
+#include "ace/common/id_alloc.h"
 
 namespace ace::coroutines {
 
@@ -85,7 +85,10 @@ namespace ace::coroutines {
 
         promise_traits() =default;
 
-        ~promise_traits() { common::context_id_allocator::get_instance().id_free(_identifier); };
+        ~promise_traits() {
+            if (_trace_id) [[unlikely]]
+                common::context_id_allocator::get_instance().id_free(_trace_id.value());
+        };
 
         std::suspend_always await_transform(const std::suspend_always& e) {
             _status = e_executed;
@@ -131,13 +134,18 @@ namespace ace::coroutines {
             return command;
         }
 
+        std::size_t setup_trace() {
+            _trace_id = common::context_id_allocator::get_instance().id_alloc();
+            return _trace_id.value();
+        }
+
         // TODO: Define in future to attach custom allocator
         /* static inline void* operator new(size_t memsize) noexcept; */
 
         /* static inline void operator delete(void* memptr, size_t memsize) noexcept; */
 
         future_handler_ptr_t _future { nullptr };
-        std::size_t _identifier { common::context_id_allocator::get_instance().id_alloc() };
+        std::optional<std::size_t> _trace_id;
     };
 
 #define DECLARE_PROMISE_TRAITS(return_type_t) typedef coroutines::promise_traits<return_type_t> promise_traits_t;

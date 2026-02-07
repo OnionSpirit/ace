@@ -8,12 +8,6 @@
 
 namespace ace::futures {
 
-    enum mutex_state {
-        e_free, // NOTE: There are no task that waiting or captured mutex
-        e_locked, // NOTE: Mutex is locked
-        e_pending, // NOTE: There is task that was released but didn't capture mutex yet
-    };
-
     class mutex_locker : public future_traits<mutex_locker> {
 
         struct mutex_conductor;
@@ -24,16 +18,17 @@ namespace ace::futures {
         DECLARE_FUTURE(mutex_locker)
         IMPORT_FUTURE_ENV
 
-        bool await_ready() override { return basic_capture(); }
+        bool try_lock() noexcept;
+
+        bool await_ready() override { return try_lock(); }
 
         bool await_suspend(auto coroutine);
 
         static void await_resume() {}
 
-        bool basic_capture() noexcept;
+        std::atomic_flag _captured = ATOMIC_FLAG_INIT;
+        std::atomic<bool> _pending {};
 
-        std::atomic<std::size_t> _candidate_id {};
-        std::atomic<mutex_state> _captured { e_free };
         mutable nukes::dynamic::mpmc_queue<async<>> _waiters {};
     };
 
@@ -84,15 +79,8 @@ struct ACE_FUTURE_MUTEX_LOCKER_SPACE mutex_conductor : conductor_handler_t {
 };
 
 ACE_FUTURE_MUTEX_LOCKER_MEMBER(bool)
-basic_capture() noexcept {
-    auto current_lock = _captured.load(std::memory_order_relaxed);
-    return (current_lock == e_free or current_lock == e_pending)
-    and _captured.compare_exchange_weak(
-        current_lock,
-        e_locked,
-        std::memory_order_release,
-        std::memory_order_relaxed
-    );
+try_lock() noexcept {
+    return not (_captured.test() or _captured.test_and_set());
 }
 
 ACE_FUTURE_MUTEX_LOCKER_MEMBER(bool)
@@ -114,7 +102,7 @@ returnT ACE_FUTURE_MUTEX_SPACE
 ACE_FUTURE_MUTEX_MEMBER(bool)
 notify_one() noexcept {
     if (async<> _waiter; _waiters.pop(_waiter)) [[likely]] {
-        _captured.store(e_pending, std::memory_order_release);
+        _pending.store(true, std::memory_order_release);
         core::runner::schedule(std::move(_waiter));
         return true; // NOTE: One notified
     }
@@ -123,33 +111,8 @@ notify_one() noexcept {
 
 ACE_FUTURE_MUTEX_MEMBER(void)
 resolve() noexcept {
-    // NOTE: Storing current mutex state
-    auto current_lock = _captured.load(std::memory_order_relaxed);
-
-    // NOTE: If lock is free and not empty waiters queue and we successfully changed status to pending.
-    // NOTE: It means we have smth to resolve
-    const bool is_on_resolve {
-        current_lock == e_free
-        and not _waiters.empty()
-        and _captured.compare_exchange_weak(
-            current_lock,
-            e_pending,
-            std::memory_order_release,
-            std::memory_order_relaxed
-        )
-    };
-
-    // NOTE: If we successfully fetched waiter, we scheduling it. Else we are trying to restore mutex status
-    if (async<> _waiter; is_on_resolve and _waiters.pop(_waiter)) [[unlikely]] {
-        core::runner::schedule(std::move(_waiter));
-    } else if (is_on_resolve) {
-        _captured.compare_exchange_weak(
-            current_lock,
-            e_free,
-            std::memory_order_release,
-            std::memory_order_relaxed
-        );
-    }
+    if (not _captured.test(std::memory_order_acquire) and not _pending.load(std::memory_order_acquire))
+        notify_one();
 }
 
 ACE_FUTURE_MUTEX_MEMBER(const ace::futures::mutex_locker&)
@@ -159,15 +122,15 @@ capture() noexcept {
 
 ACE_FUTURE_MUTEX_MEMBER(bool)
 try_capture() noexcept {
-    return basic_capture();
+    return try_lock();
 }
 
 ACE_FUTURE_MUTEX_MEMBER(void)
 sync() noexcept {
-    if (async<> _waiter; _waiters.pop(_waiter)) [[likely]] {
-        _captured.store(e_pending, std::memory_order_release);
-        core::runner::schedule(std::move(_waiter));
-    } else _captured.store(e_free, std::memory_order_release);
+    _captured.clear(std::memory_order_release);
+    if (not notify_one()) {
+        _pending.store(false, std::memory_order_release);
+    }
 }
 
 #undef ACE_FUTURE_MUTEX_MEMBER

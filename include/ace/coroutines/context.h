@@ -12,6 +12,7 @@
 #include "ace/coroutines/promise.h"
 #include "nukes/dynamic/mpsc_queue.h"
 #include <coroutine>
+#include <expected>
 
 #include "conductor.h"
 
@@ -194,6 +195,12 @@ namespace ace::coroutines {
             if constexpr (not std::same_as<void, returnT>)
                 return this->_coroutine.promise()._return_value;
             else return;
+        }
+
+        std::expected<std::size_t, std::string_view> trace() {
+            if (_coroutine)
+                return _coroutine.promise().setup_trace();
+            return std::unexpected("context is already dead.");
         }
     };
 

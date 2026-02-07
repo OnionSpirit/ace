@@ -33,9 +33,14 @@ public:
 
     ~runner() =default;
 
-    runner(runner &&t) noexcept = delete;
+    runner(runner &&t) noexcept {
+        this->_pool = std::move(t._pool);
+    };
 
-    runner &operator=(runner &&t) noexcept = delete;
+    runner &operator=(runner &&t) noexcept {
+        this->_pool = std::move(t._pool);
+        return *this;
+    };
 
     static void schedule(async<>&& ctx) {
         if (ctx.is_idle() or not ctx._coroutine.promise()._runner_pool)

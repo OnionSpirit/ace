@@ -57,10 +57,10 @@ namespace ace::coroutines {
 
         explicit context(coroutine_t &&handler) : _coroutine{handler} {};
 
-        // NOTE: Checks if context is idle
-        [[nodiscard]] bool is_idle() const noexcept { return not _coroutine or _coroutine.done(); }
+        // NOTE: Checks if context is resumable
+        [[nodiscard]] bool is_resumable() const noexcept { return _coroutine and not _coroutine.done(); }
 
-        explicit operator bool() const { return is_idle(); }
+        explicit operator bool() const { return is_resumable(); }
 
         ~context() override { if (_coroutine) _coroutine.destroy(); };
 
@@ -166,10 +166,10 @@ namespace ace::coroutines {
         template<typename promiseT>
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
             // NOTE: Passing conductor to outer
-            if (not is_idle() and _coroutine.promise()._conductor)
+            if (is_resumable() and _coroutine.promise()._conductor)
                 outer.promise()._conductor = std::move(_coroutine.promise()._conductor);
             // NOTE: Suspending if not idle
-            if (not is_idle())
+            if (is_resumable())
                 return false;
             return true;
         }
@@ -182,7 +182,7 @@ namespace ace::coroutines {
 
         returnT awake(promise_touch_result *const _res = nullptr) noexcept {
             const bool is_ready {
-                not is_idle()
+                is_resumable()
                 and (not _coroutine.promise()._future or _coroutine.promise()._future->await_ready())
             };
             // NOTE: Clear future ptr and resume context

@@ -43,7 +43,7 @@ public:
     };
 
     static void schedule(async<>&& ctx) {
-        if (ctx.is_idle() or not ctx._coroutine.promise()._runner_pool)
+        if (not ctx.is_resumable() or not ctx._coroutine.promise()._runner_pool)
             return;
         ctx._coroutine.promise()._runner_pool->push(std::move(ctx));
     }
@@ -58,13 +58,19 @@ public:
         /// NOTE: Pulling new context from queue
         if (not async_n) [[unlikely]] return;
 
+        /// NOTE: If context is dead
+        if (not async_n->_data._coroutine) {
+            _pool.release_node(async_n);
+            return;
+        }
+
         // NOTE: Proceeding context
         async_n->_data.awake(&touch_result);
 
         // NOTE: Checking if context can be resumed
         const bool is_resumable {
             touch_result not_eq coroutines::promise_touch_result::e_failed
-            and not async_n->_data
+            and async_n->_data
         };
 
         // NOTE: Checking if the context shall be forwarded via passed conductor

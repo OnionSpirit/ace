@@ -58,12 +58,6 @@ public:
         /// NOTE: Pulling new context from queue
         if (not async_n) [[unlikely]] return;
 
-        /// NOTE: If context is dead
-        if (not async_n->_data._coroutine) {
-            _pool.release_node(async_n);
-            return;
-        }
-
         // NOTE: Proceeding context
         async_n->_data.awake(&touch_result);
 
@@ -89,6 +83,16 @@ public:
         // NOTE: Managing nodes depending on checks
         if (is_idle) _pool.release_node(async_n);
         else _pool.push_node(async_n);
+    }
+
+    /**
+     * @brief Ejects task from runner
+     * @return Optional of ejected task
+     */
+    std::optional<async<>> eject() const noexcept {
+        if (async<> ejective; _pool.pop(ejective)) [[likely]]
+            return ejective;
+        return std::nullopt;
     }
 
     /**

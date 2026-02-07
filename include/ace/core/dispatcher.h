@@ -41,6 +41,15 @@ public:
     }
 
     /**
+     * @details Function to spawn task at the dispatcher
+     * @param new_service Task to be pushed into the dispatcher
+     * @return void
+     */
+    void spawn_service(async<>&& new_service) const noexcept {
+        _balancer.spawn_service(std::forward<async<>>(new_service));
+    }
+
+    /**
      * @details Checks if any Tasks stored in the dispatcher
      * @return @b true if empty, @b false otherwise
      */
@@ -50,6 +59,11 @@ public:
      * @details Resumes all tasks from the runners.
      */
     void run() noexcept { while ( not empty() ) _balancer.run(); }
+
+    /**
+     * @brief Reloads balancer configuration
+     */
+    void reconfigure() noexcept { _balancer.reload(); }
 
 };
 
@@ -77,6 +91,13 @@ namespace ace {
      * @details Processing all spawned tasks.
      */
     inline void run() noexcept { core::dispatcher::get_instance().run(); }
+
+    /**
+     * @brief Reloads dispatcher configurations
+     */
+    inline void reload() noexcept {
+        core::dispatcher::get_instance().reconfigure();
+    }
 
 } // end namespace ace
 

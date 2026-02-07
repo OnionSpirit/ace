@@ -345,7 +345,12 @@ namespace ace::core {
 
         void enable_multithreading() { _multithreading = true; }
 
-        void disable_multithreading() { _multithreading = false; }
+        void disable_multithreading() {
+            _multithreading = false;
+            input_record_t record;
+            while (_threadsafe_input.pop(record))
+                subscribe(std::move(std::get<async<>>(record)), std::get<duration_t>(record));
+        }
 
         [[nodiscard]] bool empty() const {
             return _total_records == 0;

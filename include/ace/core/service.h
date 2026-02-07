@@ -33,7 +33,7 @@ namespace ace::core {
         service_traits() { crtp_asserter(); };
 
         void respawn() {
-            spawn(service(dispatcher::get_sig_pipe()));
+            dispatcher::get_instance().spawn_service(service(dispatcher::get_sig_pipe()));
             _detached = false;
         }
 

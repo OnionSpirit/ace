@@ -30,7 +30,7 @@ TEST(context, do_const_nested_suspend_test) {
 TEST(context, do_empty_context_test) {
 
     auto r = ace::coroutines::context<>();
-    ASSERT_TRUE(r);
+    ASSERT_FALSE(r);
 }
 
 TEST(core, do_runner_test) {
@@ -89,6 +89,10 @@ TEST(futures, do_timer_on_runner_test) {
 }
 
 TEST(futures, do_timer_on_runner_parallel_test) {
+    // ace::core::s_balancer_config._runners_amount = 1;
+    // ace::core::clock::get_instance().enable_multithreading();
+    // ace::reload();
+
     for (int i = 0; i < 1000000; ++i) {
         for (int q = 0; q < 500; q += 50)
             ace::spawn(timer_waiter(std::chrono::milliseconds(q)));
@@ -101,6 +105,10 @@ TEST(futures, do_timer_on_runner_parallel_test) {
     std::cout << "Timers released after: " << ms_time << "ms" << std::endl;
     // NOTE: Check for parallel processing
     ASSERT_TRUE(ace::empty());
+
+    // ace::core::s_balancer_config._runners_amount = 1;
+    // ace::core::clock::get_instance().disable_multithreading();
+    // ace::reload();
 }
 
 TEST(futures, do_expire_on_runner_test) {

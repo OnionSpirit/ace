@@ -33,7 +33,7 @@ namespace ace::core {
         };
 
         void respawn() {
-            dispatcher.spawn(service(dispatcher_sig_pipe));
+            dispatcher::spawn(service(dispatcher::get_sig_pipe()));
             _detached = false;
         }
 

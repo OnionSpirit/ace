@@ -5,15 +5,58 @@
  * Provides necessary services for active futures
  */
 
-#ifndef ACE_DISPATCHER_H
-#define ACE_DISPATCHER_H
+#ifndef ACE_CORE_DISPATCHER_H
+#define ACE_CORE_DISPATCHER_H
 
-#include "runner.h"
-#include "signal.h"
+#include "ace/core/signal.h"
+#include "ace/core/runner.h"
 
-// NOTE: temp definition of the dispatcher
-inline ace::core::runner dispatcher = ace::core::runner();
-inline ace::core::sig_pipe_t dispatcher_sig_pipe{};
+namespace ace::core {
+
+class dispatcher {
+
+    dispatcher() = default;
+
+    runner _runner {}; // TODO: Temp entity until I'll make a balancer
+    sig_pipe_t _sig_pipe{};
+
+public:
+
+    static dispatcher& get_instance() noexcept {
+        static dispatcher instance;
+        return instance;
+    }
+
+    static sig_pipe_t& get_sig_pipe() noexcept {
+        return get_instance()._sig_pipe;
+    }
+
+    // TODO: Temp realisation until I'll make a balancer
+    /**
+     * @details Function to spawn task at the dispatcher
+     * @param new_task Task to be pushed into the dispatcher
+     * @return void
+     */
+    static void spawn(async<>&& new_task) noexcept {
+        get_instance()._runner.spawn(std::forward<async<>>(new_task));
+    }
+
+    // TODO: Temp realisation until I'll make a balancer
+    /**
+     * @details Checks if any Tasks stored in the dispatcher
+     * @return @b true if empty, @b false otherwise
+     */
+    [[nodiscard]] static bool empty() noexcept { return get_instance()._runner.empty(); };
+
+    // TODO: Temp realisation until I'll make a balancer
+    /**
+     * @details Resumes all tasks from the runners.
+     */
+    static void run() noexcept { while ( not empty() ) get_instance()._runner.yank(); }
+
+};
+
+}
 
  //
  // /**
@@ -301,4 +344,4 @@ inline ace::core::sig_pipe_t dispatcher_sig_pipe{};
 //     return a;
 // }
 
-#endif // ACE_DISPATCHER_H
+#endif // ACE_CORE_DISPATCHER_H

@@ -9,7 +9,7 @@
 #define ACE_CORE_DISPATCHER_H
 
 #include "ace/core/signal.h"
-#include "ace/core/runner.h"
+#include "ace/core/balancer.h"
 
 namespace ace::core {
 
@@ -17,7 +17,7 @@ class dispatcher {
 
     dispatcher() = default;
 
-    runner _runner {}; // TODO: Temp entity until I'll make a balancer
+    balancer _balancer {};
     sig_pipe_t _sig_pipe{};
 
 public:
@@ -31,28 +31,25 @@ public:
         return get_instance()._sig_pipe;
     }
 
-    // TODO: Temp realisation until I'll make a balancer
     /**
      * @details Function to spawn task at the dispatcher
      * @param new_task Task to be pushed into the dispatcher
      * @return void
      */
     void spawn(async<>&& new_task) noexcept {
-        _runner.spawn(std::forward<async<>>(new_task));
+        _balancer.spawn(std::forward<async<>>(new_task));
     }
 
-    // TODO: Temp realisation until I'll make a balancer
     /**
      * @details Checks if any Tasks stored in the dispatcher
      * @return @b true if empty, @b false otherwise
      */
-    [[nodiscard]] bool empty() noexcept { return _runner.empty(); };
+    [[nodiscard]] bool empty() noexcept { return _balancer.empty(); };
 
-    // TODO: Temp realisation until I'll make a balancer
     /**
      * @details Resumes all tasks from the runners.
      */
-    void run() noexcept { while ( not empty() ) _runner.yank(); }
+    void run() noexcept { while ( not empty() ) _balancer.run(); }
 
 };
 

@@ -371,6 +371,10 @@ namespace ace::core {
             return get_instance()._core.current_time();
         }
 
+        void enable_multithreading() { _core.enable_multithreading(); }
+
+        void disable_multithreading() { _core.disable_multithreading(); }
+
         wheel_cascade _core{std::chrono::milliseconds(1), 256};
     };
 

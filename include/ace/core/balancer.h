@@ -17,7 +17,7 @@ namespace ace::core {
     class balancer {
 
         struct alignas(ACE_CACHE_LINE_SIZE) worker_state {
-            std::size_t _worker_id { };
+            int _worker_id { 0 };
             bool _pending { false };
         };
 
@@ -32,8 +32,7 @@ namespace ace::core {
 
         // std::stop_token stoken
 
-        void yank_worker(std::size_t worker_id) {
-            _workers_states[worker_id]._worker_id = worker_id;
+        void yank_worker(int worker_id) {
             if (not _runners[worker_id].empty()) {
                 _workers_states[worker_id]._pending = false;
                 _runners[worker_id].run();
@@ -43,7 +42,8 @@ namespace ace::core {
             }
         }
 
-        void worker_tf(std::stop_token stoken, std::size_t worker_id) {
+        void worker_tf(std::stop_token stoken, int worker_id) {
+            _workers_states[worker_id]._worker_id = worker_id;
             while (not stoken.stop_requested())
                 yank_worker(worker_id);
         }
@@ -65,6 +65,7 @@ namespace ace::core {
             const auto old_runners = std::move(_runners);
             std::vector<runner> new_runners;
             new_runners.resize(_balancer_config._runners_amount);
+            _workers_states.resize(_balancer_config._runners_amount);
             _runners = std::move(new_runners);
             if (new_runners.size() not_eq old_runners.size()) {
                 for (auto& runner : old_runners)
@@ -106,26 +107,26 @@ namespace ace::core {
             // NOTE: Launching
             const int workers_amount = static_cast<int>(_balancer_config._runners_amount);
             workers.reserve(workers_amount - 1);
-            for (std::size_t worker_id = 1; worker_id < workers_amount; ++worker_id) {
+            for (int worker_id = 1; worker_id < workers_amount; ++worker_id) {
                 workers.emplace_back(std::bind_front(&balancer::worker_tf, this), worker_id);
                 // std::cout << "Launching worker " << worker_id << "\n";
             }
 
             // NOTE: Polling
-            while (true) {
+            bool finished { false };
+            while (not finished) {
                 // NOTE: Doing main thread job
                 // std::cout << "Doing main thread job\n";
-                yank_worker(0);
                 if (++_service_skips < _min_service_skips) {
                     _service_runner.run();
                     _service_skips = 0;
                 }
+                yank_worker(0);
                 // NOTE: Checking other threads for finish
                 // std::cout << "Checking other workers for finish\n";
-                bool finished = _service_runner.empty() and _runners[0].empty();
-                for (int worker_id = 1; finished and worker_id < workers_amount; ++worker_id)
+                finished = _service_runner.empty();
+                for (int worker_id = 0; finished and worker_id < workers_amount; ++worker_id)
                     finished = (_workers_states.cbegin() + worker_id)->_pending;
-                if (finished) break;
             }
         }
 

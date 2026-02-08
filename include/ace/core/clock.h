@@ -349,7 +349,7 @@ namespace ace::core {
             _multithreading = false;
             input_record_t record;
             while (_threadsafe_input.pop(record))
-                subscribe(std::move(std::get<async<>>(record)), std::get<duration_t>(record));
+                subscribe(std::forward<async<>>(std::get<async<>>(record)), std::get<duration_t>(record));
         }
 
         [[nodiscard]] bool empty() const {

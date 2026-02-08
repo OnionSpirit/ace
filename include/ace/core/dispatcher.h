@@ -63,7 +63,7 @@ public:
     /**
      * @brief Reloads balancer configuration
      */
-    void reconfigure() noexcept { _balancer.reload(); }
+    void reload() noexcept { _balancer.reload(); }
 
 };
 
@@ -96,7 +96,7 @@ namespace ace {
      * @brief Reloads dispatcher configurations
      */
     inline void reload() noexcept {
-        core::dispatcher::get_instance().reconfigure();
+        core::dispatcher::get_instance().reload();
     }
 
 } // end namespace ace

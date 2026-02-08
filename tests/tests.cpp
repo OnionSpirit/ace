@@ -53,6 +53,10 @@ TEST(futures, do_dynamic_channel_on_runner_test) {
 }
 
 TEST(futures, do_timer_on_runner_test) {
+    ace::core::s_balancer_config._runners_amount = 1;
+    ace::core::clock::get_instance().enable_multithreading();
+    ace::reload();
+
     ace::futures::channel_dyn<int> _channel {};
 
     // NOTE: Spawning waiters with different duration and waited time count return
@@ -86,13 +90,13 @@ TEST(futures, do_timer_on_runner_test) {
     // NOTE: without additional delay. This proves that the expiration sequence is ordered.
     for (std::size_t i = 1; i < res.size(); ++i)
         ASSERT_TRUE(res.at(i) >= res.at(i - 1));
+
+    ace::core::s_balancer_config._runners_amount = 1;
+    ace::core::clock::get_instance().disable_multithreading();
+    ace::reload();
 }
 
 TEST(futures, do_timer_on_runner_parallel_test) {
-    // ace::core::s_balancer_config._runners_amount = 1;
-    // ace::core::clock::get_instance().enable_multithreading();
-    // ace::reload();
-
     for (int i = 0; i < 1000000; ++i) {
         for (int q = 0; q < 500; q += 50)
             ace::spawn(timer_waiter(std::chrono::milliseconds(q)));
@@ -105,10 +109,6 @@ TEST(futures, do_timer_on_runner_parallel_test) {
     std::cout << "Timers released after: " << ms_time << "ms" << std::endl;
     // NOTE: Check for parallel processing
     ASSERT_TRUE(ace::empty());
-
-    // ace::core::s_balancer_config._runners_amount = 1;
-    // ace::core::clock::get_instance().disable_multithreading();
-    // ace::reload();
 }
 
 TEST(futures, do_expire_on_runner_test) {

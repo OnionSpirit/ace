@@ -6,6 +6,7 @@
 #define ACE_RUNNER_H
 #include <queue>
 
+#include "ace/common/terms.h"
 #include "ace/coroutines/context.h"
 
 
@@ -18,8 +19,9 @@ namespace ace::core {
  * @tparam Policies Pools policies, each policy provides independent
  * pool for coroutines
  */
-class runner // : public ace::meta::technical::scheduler_id
-    {
+class alignas(ACE_CACHE_LINE_SIZE) runner {
+
+    ACE_CACHE_LINE(0)
 
     mutable runner_pool_t _pool; // Note: pool of task queue
     // Note: mpsc queue to emplace task from another runner or spawning

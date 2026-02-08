@@ -148,7 +148,9 @@ TEST(futures, do_timer_on_runner_parallel_test) {
         ace::run();
     const auto end_time = std::chrono::_V2::steady_clock::now();
     const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-    std::cout << "Timers released after: " << ms_time << "ms" << std::endl;
+    std::cout << "Timers released after: " << ms_time << "ms.\n\t"
+                 "Timers amount: " << sets_count * set_size << ".\n\t"
+                 "Durations range: [" << set_step << "ms, " << max_in_set << "ms], step: " << set_step << std::endl;
     // NOTE: Check for parallel processing
     ASSERT_TRUE(ace::empty());
 

@@ -57,9 +57,14 @@ namespace ace::core {
 
     public:
 
-        static derived_t& get_instance(runner_pool_t* rnr = nullptr) {
+        static derived_t& attach(runner_pool_t* rnr = nullptr) {
             static derived_t instance;
             if (instance._detached) instance.respawn(reinterpret_cast<runner*>(rnr));
+            return instance;
+        }
+
+        static derived_t& get_instance() {
+            static derived_t instance;
             return instance;
         }
 

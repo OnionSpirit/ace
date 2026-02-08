@@ -352,7 +352,7 @@ namespace ace::core {
         }
 
         static void subscribe(async<>&& ctx, const duration_t dur) {
-            get_instance(ctx._coroutine.promise()._runner_pool)._core.subscribe(std::forward<async<>>(ctx), dur);
+            attach(ctx._coroutine.promise()._runner_pool)._core.subscribe(std::forward<async<>>(ctx), dur);
         };
 
         static auto current_time() {

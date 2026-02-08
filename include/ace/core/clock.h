@@ -245,7 +245,6 @@ namespace ace::core {
         int _release_limit {1024};
         std::size_t _total_records {0};
         nukes::dynamic::mpsc_queue<input_record_t> _threadsafe_input;
-        bool _multithreading { false };
 
         static std::size_t fast_log2(std::size_t x) {
             if (x == 0) [[unlikely]] throw std::runtime_error("can't calculate <log> from 0");
@@ -274,16 +273,6 @@ namespace ace::core {
             _release_bound_ts += passed_interval;
         }
 
-        void inject(async<>&& ctx, duration_t dur) {
-            const auto idx = calc_wheel(dur);
-            if (not idx) [[unlikely]] {
-                runner::schedule(std::move(ctx));
-                return;
-            }
-            ++_total_records;
-            _wheels[idx.value()].inject_raw(std::forward<async<>>(ctx), dur);
-        };
-
         void fetch(const duration_t& passed) {
             input_record_t input_record;
             for (int i = 0; i < _release_limit and _threadsafe_input.pop(input_record); ++i) {
@@ -293,7 +282,7 @@ namespace ace::core {
                     --_release_counter;
                     continue;
                 }
-                inject(std::move(ctx), dur);
+                subscribe(std::move(ctx), dur);
             }
         }
 
@@ -335,24 +324,16 @@ namespace ace::core {
         };
 
         void subscribe(async<>&& ctx, duration_t dur) {
-            if (_multithreading)
-                _threadsafe_input.push({std::forward<async<>>(ctx), dur});
-            else
-                inject(std::forward<async<>>(ctx), dur);
+            const auto idx = calc_wheel(dur);
+            if (not idx) [[unlikely]] {
+                runner::schedule(std::move(ctx));
+                return;
+            }
+            ++_total_records;
+            _wheels[idx.value()].inject_raw(std::forward<async<>>(ctx), dur);
         };
 
         [[nodiscard]] auto current_time() const { return _current_ts; }
-
-        void enable_multithreading() { _multithreading = true; }
-
-        void disable_multithreading() {
-            _multithreading = false;
-            input_record_t record;
-            while (_threadsafe_input.pop(record)) {
-                auto [ctx, dur] = std::forward<input_record_t>(record);
-                inject(std::forward<async<>>(ctx), dur);
-            }
-        }
 
         [[nodiscard]] bool empty() const {
             return _total_records == 0;
@@ -360,30 +341,28 @@ namespace ace::core {
 
     };
 
-    struct clock : singleton_service_traits<clock> {
+    struct clock : service_traits<clock> {
 
         clock() = default;
 
         // TODO: Add record detach
-        promise<bool> service_yank() {
+        static promise<bool> service_yank() {
             _core.release();
             co_return _core.empty();
         }
 
-        void subscribe(async<>&& ctx, duration_t dur) {
-            _core.subscribe(std::forward<async<>>(ctx), dur);
+        static void subscribe(async<>&& ctx, const duration_t dur) {
+            get_instance(ctx._coroutine.promise()._runner_pool)._core.subscribe(std::forward<async<>>(ctx), dur);
         };
 
         static auto current_time() {
             return get_instance()._core.current_time();
         }
 
-        void enable_multithreading() { _core.enable_multithreading(); }
-
-        void disable_multithreading() { _core.disable_multithreading(); }
-
-        wheel_cascade _core{std::chrono::milliseconds(1), 256};
+        static thread_local wheel_cascade _core;
     };
+
+    thread_local wheel_cascade clock::_core = wheel_cascade{std::chrono::milliseconds(1), 256};
 
 }
 

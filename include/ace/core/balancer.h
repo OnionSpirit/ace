@@ -27,9 +27,6 @@ namespace ace::core {
         std::vector<runner> _runners {};
         std::vector<worker_state> _workers_states {};
 
-        runner _service_runner {};
-        uint8_t _service_skips {};
-
         // std::stop_token stoken
 
         void yank_worker(int worker_id) {
@@ -60,14 +57,14 @@ namespace ace::core {
             _workers_states.resize(_balancer_config._runners_amount);
         };
 
-        void reload() noexcept {
-            for (auto& runner : _runners)
-                if (not runner.empty()) return;
+        bool reload() noexcept {
+            if (not empty()) return false;
             fetch_config();
             _runners.clear();
             _runners.resize(_balancer_config._runners_amount);
             _workers_states.clear();
             _workers_states.resize(_balancer_config._runners_amount);
+            return true;
             // const auto old_runners = std::move(_runners);
             // std::vector<runner> new_runners;
             // new_runners.resize(_balancer_config._runners_amount);
@@ -84,20 +81,16 @@ namespace ace::core {
         /**
          * @details Function to spawn task at the dispatcher
          * @param new_task Task to be pushed into the dispatcher
+         * @param rnr Specific runner to spawn on
          * @return void
          */
-        void spawn(async<>&& new_task) noexcept {
-            const auto runner_id = _runner_selector.fetch_add(1, std::memory_order_relaxed);
-            _runners[runner_id % _balancer_config._runners_amount].spawn(std::forward<async<>>(new_task));
-        }
-
-        /**
-         * @details Function to spawn task at the dispatcher
-         * @param new_service Task to be pushed into the dispatcher
-         * @return void
-         */
-        void spawn_service(async<>&& new_service) const noexcept {
-            _service_runner.spawn(std::forward<async<>>(new_service));
+        void spawn(async<>&& new_task, runner* rnr = nullptr) noexcept {
+            if (not rnr) {
+                const auto runner_id = _runner_selector.fetch_add(1, std::memory_order_relaxed);
+                _runners[runner_id % _balancer_config._runners_amount].spawn(std::forward<async<>>(new_task));
+            } else {
+                rnr->spawn(std::forward<async<>>(new_task));
+            }
         }
 
         /**
@@ -117,19 +110,13 @@ namespace ace::core {
                 workers.emplace_back(std::bind_front(&balancer::worker_tf, this), worker_id);
 
             // NOTE: Polling
-            bool finished { false };
-            while (not finished) {
+            bool is_running { true };
+            while (is_running) {
                 // NOTE: Doing main thread job
-                // std::cout << "Doing main thread job\n";
-                if (++_service_skips < _min_service_skips) {
-                    _service_runner.run();
-                    _service_skips = 0;
-                }
                 yank_worker(0);
                 // NOTE: Checking other threads for finish
-                finished = _service_runner.empty();
-                for (int worker_id = 0; finished and worker_id < workers_amount; ++worker_id)
-                    finished = (_workers_states.cbegin() + worker_id)->_pending;
+                for (int worker_id = 0; is_running and worker_id < workers_amount; ++worker_id)
+                    is_running = not (_workers_states.cbegin() + worker_id)->_pending;
             }
         }
 
@@ -138,7 +125,7 @@ namespace ace::core {
          * @return @b true if empty, @b false otherwise
          */
         [[nodiscard]] bool empty() const noexcept {
-            bool res { _service_runner.empty() };
+            bool res { true };
             for (std::size_t runner_id = 0; runner_id < _runners.size() and res; ++runner_id)
                 res &= _runners[runner_id].empty();
             return res;

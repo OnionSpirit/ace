@@ -128,8 +128,7 @@ TEST(futures, do_expire_on_runner_test) {
 
 // TODO: Fix breaking something after run
 TEST(futures, do_timer_on_runner_parallel_test) {
-    ace::core::s_balancer_config._runners_amount = 2;
-    ace::core::clock::get_instance().enable_multithreading();
+    ace::core::s_balancer_config._runners_amount = 4;
     ace::reload();
 
     for (int i = 0; i < 1000000; ++i) {
@@ -147,7 +146,6 @@ TEST(futures, do_timer_on_runner_parallel_test) {
     ASSERT_TRUE(ace::empty());
 
     ace::core::s_balancer_config._runners_amount = 1;
-    ace::core::clock::get_instance().disable_multithreading();
     ace::reload();
 }
 

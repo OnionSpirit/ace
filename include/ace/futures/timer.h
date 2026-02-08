@@ -72,7 +72,7 @@ struct ACE_FUTURE_TIMER_SPACE timer_conductor : conductor_handler_t {
         // NOTE: Because await_ready() will be called after context retreatment to runner.
         // NOTE: And retreatment will happen only when timer actually expired
         _timer->_released = true;
-        core::clock::get_instance().subscribe(std::move(ctx), _timer->_duration);
+        core::clock::subscribe(std::move(ctx), _timer->_duration);
     }
 
     ~timer_conductor() override = default;

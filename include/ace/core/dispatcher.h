@@ -34,19 +34,11 @@ public:
     /**
      * @details Function to spawn task at the dispatcher
      * @param new_task Task to be pushed into the dispatcher
+     * @param rnr Specific runner to spawn on
      * @return void
      */
-    void spawn(async<>&& new_task) noexcept {
-        _balancer.spawn(std::forward<async<>>(new_task));
-    }
-
-    /**
-     * @details Function to spawn task at the dispatcher
-     * @param new_service Task to be pushed into the dispatcher
-     * @return void
-     */
-    void spawn_service(async<>&& new_service) const noexcept {
-        _balancer.spawn_service(std::forward<async<>>(new_service));
+    void spawn(async<>&& new_task, runner* rnr = nullptr) noexcept {
+        _balancer.spawn(std::forward<async<>>(new_task), rnr);
     }
 
     /**
@@ -63,7 +55,7 @@ public:
     /**
      * @brief Reloads balancer configuration
      */
-    void reload() noexcept { _balancer.reload(); }
+    void reload() noexcept { while (not _balancer.reload()); }
 
 };
 
@@ -75,10 +67,11 @@ namespace ace {
     /**
      * @details Function to spawn task
      * @param new_task Task to be pushed into the dispatcher
+     * @param rnr Specific runner to spawn on
      * @return void
      */
-    static void spawn(async<>&& new_task) noexcept {
-        core::dispatcher::get_instance().spawn(std::forward<async<>>(new_task));
+    static void spawn(async<>&& new_task, core::runner* rnr = nullptr) noexcept {
+        core::dispatcher::get_instance().spawn(std::forward<async<>>(new_task), rnr);
     }
 
     /**

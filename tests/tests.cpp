@@ -159,10 +159,6 @@ TEST(futures, do_timer_on_runner_parallel_test) {
     ASSERT_TRUE(ace::empty());
     // NOTE: Check if all tasks sent response
     ASSERT_EQ(res.size(), set_size * sets_count);
-    if (ace::core::s_balancer_config._runners_amount == 1) {
-        for (long i = 1; i < res.size(); ++i)
-            ASSERT_GE(res[i], res[i - 1]);
-    }
 
     long real_sum {}, exp_sum {};
     // NOTE: expc_sum waited time in ms

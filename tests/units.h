@@ -70,9 +70,9 @@ struct channel_abuser {
 
 template<typename Rep, typename Period>
 ace::async<> timer_waiter(std::chrono::duration<Rep, Period> wait_time, ace::futures::channel_dyn<long>& ch) {
-    auto start = ace::core::clock::current_time();
+    const auto start = ace::core::clock::current_time();
     co_await ace::futures::timer(wait_time);
-    auto end = ace::core::clock::current_time();
+    const auto end = ace::core::clock::current_time();
     ch << (end - start).count();
     co_return;
 }

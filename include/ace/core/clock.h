@@ -338,7 +338,7 @@ namespace ace::core {
             if (_multithreading)
                 _threadsafe_input.push({std::forward<async<>>(ctx), dur});
             else
-                inject(std::move(ctx), dur);
+                inject(std::forward<async<>>(ctx), dur);
         };
 
         [[nodiscard]] auto current_time() const { return _current_ts; }
@@ -348,8 +348,10 @@ namespace ace::core {
         void disable_multithreading() {
             _multithreading = false;
             input_record_t record;
-            while (_threadsafe_input.pop(record))
-                subscribe(std::forward<async<>>(std::get<async<>>(record)), std::get<duration_t>(record));
+            while (_threadsafe_input.pop(record)) {
+                auto [ctx, dur] = std::forward<input_record_t>(record);
+                inject(std::forward<async<>>(ctx), dur);
+            }
         }
 
         [[nodiscard]] bool empty() const {

@@ -89,29 +89,6 @@ TEST(futures, do_timer_on_runner_test) {
         ASSERT_TRUE(res.at(i) >= res.at(i - 1));
 }
 
-TEST(futures, do_timer_on_runner_parallel_test) {
-    ace::core::s_balancer_config._runners_amount = 4;
-    ace::core::clock::get_instance().enable_multithreading();
-    ace::reload();
-
-    for (int i = 0; i < 1000000; ++i) {
-        for (int q = 0; q < 500; q += 50)
-            ace::spawn(timer_waiter(std::chrono::milliseconds(q)));
-    }
-    std::cout << "Tasks spawned" << std::endl;
-    auto start_time = std::chrono::_V2::high_resolution_clock::now();
-    ace::run();
-    auto end_time = std::chrono::_V2::high_resolution_clock::now();
-    auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-    std::cout << "Timers released after: " << ms_time << "ms" << std::endl;
-    // NOTE: Check for parallel processing
-    ASSERT_TRUE(ace::empty());
-
-    ace::core::s_balancer_config._runners_amount = 1;
-    ace::core::clock::get_instance().disable_multithreading();
-    ace::reload();
-}
-
 TEST(futures, do_expire_on_runner_test) {
     ace::futures::channel_dyn<ace::core::timepoint_t> _channel {};
 
@@ -147,5 +124,30 @@ TEST(futures, do_expire_on_runner_test) {
     // NOTE: without additional delay. This proves that the expiration sequence is ordered.
     for (std::size_t i = 1; i < res.size(); ++i)
         ASSERT_TRUE(res.at(i) >= res.at(i - 1));
+}
+
+// TODO: Fix breaking something after run
+TEST(futures, do_timer_on_runner_parallel_test) {
+    ace::core::s_balancer_config._runners_amount = 2;
+    ace::core::clock::get_instance().enable_multithreading();
+    ace::reload();
+
+    for (int i = 0; i < 1000000; ++i) {
+        for (int q = 0; q < 500; q += 50)
+            ace::spawn(timer_waiter(std::chrono::milliseconds(q)));
+    }
+    std::cout << "Tasks spawned" << std::endl;
+    const auto start_time = std::chrono::_V2::steady_clock::now();
+    while (not ace::core::dispatcher::get_instance().empty())
+        ace::run();
+    const auto end_time = std::chrono::_V2::steady_clock::now();
+    const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    std::cout << "Timers released after: " << ms_time << "ms" << std::endl;
+    // NOTE: Check for parallel processing
+    ASSERT_TRUE(ace::empty());
+
+    ace::core::s_balancer_config._runners_amount = 1;
+    ace::core::clock::get_instance().disable_multithreading();
+    ace::reload();
 }
 

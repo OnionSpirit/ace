@@ -61,17 +61,23 @@ namespace ace::core {
         };
 
         void reload() noexcept {
+            for (auto& runner : _runners)
+                if (not runner.empty()) return;
             fetch_config();
-            const auto old_runners = std::move(_runners);
-            std::vector<runner> new_runners;
-            new_runners.resize(_balancer_config._runners_amount);
+            _runners.clear();
+            _runners.resize(_balancer_config._runners_amount);
+            _workers_states.clear();
             _workers_states.resize(_balancer_config._runners_amount);
-            _runners = std::move(new_runners);
-            if (new_runners.size() not_eq old_runners.size()) {
-                for (auto& runner : old_runners)
-                    while (auto ejected = runner.eject())
-                        spawn(std::forward<async<>>(ejected.value()));
-            }
+            // const auto old_runners = std::move(_runners);
+            // std::vector<runner> new_runners;
+            // new_runners.resize(_balancer_config._runners_amount);
+            // _workers_states.resize(_balancer_config._runners_amount);
+            // _runners = std::move(new_runners);
+            // if (new_runners.size() not_eq old_runners.size()) {
+            //     for (auto& runner : old_runners)
+            //         while (auto ejected = runner.eject())
+            //             spawn(std::forward<async<>>(ejected.value()));
+            // }
         }
 
         // TODO: Make return type as 'join_handler' future type, when I will write it
@@ -107,10 +113,8 @@ namespace ace::core {
             // NOTE: Launching
             const int workers_amount = static_cast<int>(_balancer_config._runners_amount);
             workers.reserve(workers_amount - 1);
-            for (int worker_id = 1; worker_id < workers_amount; ++worker_id) {
+            for (int worker_id = 1; worker_id < workers_amount; ++worker_id)
                 workers.emplace_back(std::bind_front(&balancer::worker_tf, this), worker_id);
-                // std::cout << "Launching worker " << worker_id << "\n";
-            }
 
             // NOTE: Polling
             bool finished { false };
@@ -123,7 +127,6 @@ namespace ace::core {
                 }
                 yank_worker(0);
                 // NOTE: Checking other threads for finish
-                // std::cout << "Checking other workers for finish\n";
                 finished = _service_runner.empty();
                 for (int worker_id = 0; finished and worker_id < workers_amount; ++worker_id)
                     finished = (_workers_states.cbegin() + worker_id)->_pending;

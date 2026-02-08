@@ -73,7 +73,7 @@ namespace ace::coroutines {
 
         promise_touch_result _status { e_blocked };
 
-        auto return_void() { return std::suspend_never{}; }
+        static auto return_void() { return std::suspend_never{}; }
     };
 
     template <typename return_t>

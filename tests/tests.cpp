@@ -86,7 +86,7 @@ TEST(futures, do_timer_on_runner_test) {
     // NOTE: This means that timers are processed according to the sequence of expiration timestamps
     // NOTE: without additional delay. This proves that the expiration sequence is ordered.
     for (std::size_t i = 1; i < res.size(); ++i)
-        ASSERT_TRUE(res.at(i) >= res.at(i - 1));
+        ASSERT_GE(res[i], res[i - 1]);
 }
 
 TEST(futures, do_expire_on_runner_test) {
@@ -123,7 +123,7 @@ TEST(futures, do_expire_on_runner_test) {
     // NOTE: This means that timers are processed according to the sequence of expiration timestamps
     // NOTE: without additional delay. This proves that the expiration sequence is ordered.
     for (std::size_t i = 1; i < res.size(); ++i)
-        ASSERT_GE(res.at(i), res.at(i - 1));
+        ASSERT_GE(res[i], res[i - 1]);
 }
 
 // TODO: Fix breaking something after run
@@ -159,6 +159,10 @@ TEST(futures, do_timer_on_runner_parallel_test) {
     ASSERT_TRUE(ace::empty());
     // NOTE: Check if all tasks sent response
     ASSERT_EQ(res.size(), set_size * sets_count);
+    if (ace::core::s_balancer_config._runners_amount == 1) {
+        for (long i = 1; i < res.size(); ++i)
+            ASSERT_GE(res[i], res[i - 1]);
+    }
 
     long real_sum {}, exp_sum {};
     // NOTE: expc_sum waited time in ms
@@ -168,9 +172,9 @@ TEST(futures, do_timer_on_runner_parallel_test) {
     // NOTE: real_sum waited time in ms
     for (auto r : res) real_sum += r;
 
-    // NOTE: real_sum greater than exp_sum, but not twice (Condition for <4 threads Ryzen 5 7500F, 64GB RAM DDR5>)
+    // NOTE: real_sum greater than exp_sum, but not 8 / thr_num (Condition for <Ryzen 5 7500F, 64GB RAM DDR5>)
     EXPECT_GT(real_sum, exp_sum);
-    EXPECT_LT(real_sum, 2 * exp_sum);
+    EXPECT_LT(real_sum, 8 / ace::core::s_balancer_config._runners_amount * exp_sum);
 
     ace::core::s_balancer_config._runners_amount = 1;
     ace::reload();

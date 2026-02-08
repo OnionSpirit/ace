@@ -15,14 +15,14 @@
 #include "ace/futures/future.h"
 #include <memory>
 
-namespace ace::futures {
+namespace ace::commands {
 
     /**
      * @details Trait class for command objects
      * @tparam derivedT Derived type
      */
     template <typename derivedT>
-    struct command_traits : future_handler {
+    struct command_traits : futures::future_handler {
 
         using derived_command_t = derivedT;
 
@@ -36,13 +36,15 @@ namespace ace::futures {
             return std::move(*static_cast<derived_command_t*>(this));
         }
 
+        bool await_ready() final { return false; };
+
         /**
          * @details Default destructor
          */
         ~command_traits() override = default;
     };
 
-    #define DECLARE_COMMAND(command_t) typedef ace::future::command_traits<command_t> command_traits_t;
+    #define DECLARE_COMMAND(command_t) typedef ace::commands::command_traits<command_t> command_traits_t;
 
     #define IMPORT_COMMAND_ENV using typename command_traits_t::derived_command_t;
 

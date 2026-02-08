@@ -168,9 +168,10 @@ TEST(futures, do_timer_on_runner_parallel_test) {
     // NOTE: real_sum waited time in ms
     for (auto r : res) real_sum += r;
 
-    // NOTE: real_sum greater than exp_sum, but not 8 / thr_num (Condition for <Ryzen 5 7500F, 64GB RAM DDR5>)
+    // NOTE: real_sum greater than exp_sum
     EXPECT_GT(real_sum, exp_sum);
-    EXPECT_LT(real_sum, 8 / ace::core::s_balancer_config._runners_amount * exp_sum);
+    // NOTE: real_sum not greater than (exp_sum * 8 / thr_num) (Condition for <Ryzen 5 7500F, 64GB RAM DDR5>)
+    EXPECT_LT(real_sum, exp_sum * 8 / ace::core::s_balancer_config._runners_amount);
 
     ace::core::s_balancer_config._runners_amount = 1;
     ace::reload();

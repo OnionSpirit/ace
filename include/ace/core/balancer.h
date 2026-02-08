@@ -35,11 +35,12 @@ namespace ace::core {
         void yank_worker(std::size_t worker_id) {
             _workers_states[worker_id]._worker_id = worker_id;
             if (not _runners[worker_id].empty()) {
-                _runners[worker_id].run();
                 _workers_states[worker_id]._pending = false;
+                _runners[worker_id].run();
+            } else {
+                _workers_states[worker_id]._pending = true;
+                std::this_thread::sleep_for(std::chrono::milliseconds(0));
             }
-            _workers_states[worker_id]._pending = true;
-            std::this_thread::sleep_for(std::chrono::milliseconds(0));
         }
 
         void worker_tf(std::stop_token stoken, std::size_t worker_id) {
@@ -99,35 +100,32 @@ namespace ace::core {
 
             // std::cout << "Starting run\n";
 
-            // NOTE: Launching
+            // NOTE: Initiating
             std::vector<std::jthread> workers {};
-            const int runners_amount = static_cast<int>(_balancer_config._runners_amount);
-            const size_t workers_amount = runners_amount - 1;
-            workers.reserve(_balancer_config._runners_amount);
+
+            // NOTE: Launching
+            const int workers_amount = static_cast<int>(_balancer_config._runners_amount);
+            workers.reserve(workers_amount - 1);
             for (std::size_t worker_id = 1; worker_id < workers_amount; ++worker_id) {
                 workers.emplace_back(std::bind_front(&balancer::worker_tf, this), worker_id);
                 // std::cout << "Launching worker " << worker_id << "\n";
             }
 
-            bool finished { false };
             // NOTE: Polling
-            while (not _service_runner.empty() or not _runners[0].empty() or not finished) {
+            while (true) {
                 // NOTE: Doing main thread job
-                {
-                    // std::cout << "Doing main thread job\n";
-                    if (++_service_skips < _min_service_skips) {
-                        _service_runner.run();
-                        _service_skips = 0;
-                        finished = true;
-                    }
-                    yank_worker(0);
+                // std::cout << "Doing main thread job\n";
+                yank_worker(0);
+                if (++_service_skips < _min_service_skips) {
+                    _service_runner.run();
+                    _service_skips = 0;
                 }
                 // NOTE: Checking other threads for finish
-                {
-                    // std::cout << "Checking other workers for finish\n";
-                    for (int runner_id = 0; finished and runner_id < runners_amount; ++runner_id)
-                        finished = (_workers_states.cbegin() + runner_id)->_pending;
-                }
+                // std::cout << "Checking other workers for finish\n";
+                bool finished = _service_runner.empty() and _runners[0].empty();
+                for (int worker_id = 1; finished and worker_id < workers_amount; ++worker_id)
+                    finished = (_workers_states.cbegin() + worker_id)->_pending;
+                if (finished) break;
             }
         }
 

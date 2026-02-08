@@ -8,8 +8,12 @@ cmake = import('cmake')
 nukes = cmake.subproject('nukes')
 nukes = nukes.dependency('nukes')
 
+# Объявляем mimalloc
+mimalloc_dep = dependency('mimalloc', fallback : ['mimalloc', 'mimalloc_dep'], required : true)
+
 # Декларируем интерфейсную библеотеку
-ace = declare_dependency(include_directories: include_dir, dependencies: nukes)
+ace = declare_dependency(include_directories: include_dir, dependencies: [ nukes, mimalloc_dep ])
+
 
 # # Создаем артифактную библиотеку
 # example_lib = library(

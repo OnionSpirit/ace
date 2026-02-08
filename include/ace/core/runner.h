@@ -52,13 +52,14 @@ public:
 
     /**
      * @details Resumes only one ready task
+     * @return @b true if task was processed, @b false otherwise
      */
-    void yank() const noexcept {
+    bool yank() const noexcept {
         coroutines::promise_touch_result touch_result = coroutines::promise_touch_result::e_blocked;
         auto* async_n = _pool.pop_node();
 
         /// NOTE: Pulling new context from queue
-        if (not async_n) [[unlikely]] return;
+        if (not async_n) [[unlikely]] return false;
 
         // NOTE: Proceeding context
         async_n->_data.awake(&touch_result);
@@ -85,6 +86,8 @@ public:
         // NOTE: Managing nodes depending on checks
         if (is_idle) _pool.release_node(async_n);
         else _pool.push_node(async_n);
+
+        return true;
     }
 
     /**
@@ -98,9 +101,15 @@ public:
     }
 
     /**
-     * @details Resumes all tasks from the ready task pool until it is empty.
+     * @details Resumes tasks from the ready task pool until it is empty, or limit (1024) reached.
+     * @return @b true if runner still has tasks after run, @b false otherwise
      */
-    void run() const noexcept { while(not _pool.empty()) yank(); }
+    bool run() const noexcept {
+        int i = 0;
+        constexpr int yank_limit = 1024;
+        while (i < yank_limit and yank()) ++i;
+        return i == yank_limit;
+    }
 
     // TODO: Make return type as 'join_handler' future type, when I will write it
     /**

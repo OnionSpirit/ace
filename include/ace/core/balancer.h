@@ -3,7 +3,6 @@
 
 #include <cstddef>
 #include <thread>
-#include <unordered_set>
 
 #include "runner.h"
 #include "ace/common/terms.h"
@@ -12,6 +11,7 @@ namespace ace::core {
 
     struct balancer_config {
         std::size_t _runners_amount { 1 };
+        bool operator==(const balancer_config & balancer_config) const = default;
     } inline s_balancer_config {};
 
     class balancer {
@@ -21,28 +21,21 @@ namespace ace::core {
             bool _pending { false };
         };
 
+        std::vector<runner> _runners {};
         balancer_config _balancer_config {};
+        std::vector<worker_state> _workers_states {};
         std::atomic<std::size_t> _runner_selector {};
 
-        std::vector<runner> _runners {};
-        std::vector<worker_state> _workers_states {};
-
-        // std::stop_token stoken
-
-        void yank_worker(int worker_id) {
-            if (not _runners[worker_id].empty()) {
-                _workers_states[worker_id]._pending = false;
-                _runners[worker_id].run();
-            } else {
-                _workers_states[worker_id]._pending = true;
-                std::this_thread::sleep_for(std::chrono::milliseconds(0));
-            }
+        void worker_round(const int worker_id) {
+            _workers_states[worker_id]._pending = not _runners[worker_id].run();
+            std::this_thread::sleep_for(std::chrono::milliseconds(0));
         }
 
-        void worker_tf(std::stop_token stoken, int worker_id) {
+        void worker_tf(const std::stop_token& stoken, const int worker_id) {
             _workers_states[worker_id]._worker_id = worker_id;
+            _workers_states[worker_id]._pending = false;
             while (not stoken.stop_requested())
-                yank_worker(worker_id);
+                worker_round(worker_id);
         }
 
         void fetch_config() noexcept { _balancer_config = s_balancer_config; }
@@ -58,6 +51,7 @@ namespace ace::core {
         };
 
         bool reload() noexcept {
+            if (_balancer_config == s_balancer_config) return true;
             if (not empty()) return false;
             fetch_config();
             _runners.clear();
@@ -65,16 +59,6 @@ namespace ace::core {
             _workers_states.clear();
             _workers_states.resize(_balancer_config._runners_amount);
             return true;
-            // const auto old_runners = std::move(_runners);
-            // std::vector<runner> new_runners;
-            // new_runners.resize(_balancer_config._runners_amount);
-            // _workers_states.resize(_balancer_config._runners_amount);
-            // _runners = std::move(new_runners);
-            // if (new_runners.size() not_eq old_runners.size()) {
-            //     for (auto& runner : old_runners)
-            //         while (auto ejected = runner.eject())
-            //             spawn(std::forward<async<>>(ejected.value()));
-            // }
         }
 
         // TODO: Make return type as 'join_handler' future type, when I will write it
@@ -97,9 +81,6 @@ namespace ace::core {
          * @details Resumes all tasks from the ready task pool until it is empty.
          */
         void run() noexcept {
-
-            // std::cout << "Starting run\n";
-
             // NOTE: Initiating
             std::vector<std::jthread> workers {};
 
@@ -113,10 +94,13 @@ namespace ace::core {
             bool is_running { true };
             while (is_running) {
                 // NOTE: Doing main thread job
-                yank_worker(0);
+                worker_round(0);
                 // NOTE: Checking other threads for finish
-                for (int worker_id = 0; is_running and worker_id < workers_amount; ++worker_id)
-                    is_running = not (_workers_states.cbegin() + worker_id)->_pending;
+                bool is_pending { true };
+                for (int worker_id = 0; is_pending and worker_id < workers_amount; ++worker_id) {
+                    is_pending = _workers_states[worker_id]._pending;
+                    is_running = not is_pending or worker_id not_eq workers_amount - 1;
+                }
             }
         }
 

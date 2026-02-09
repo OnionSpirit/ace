@@ -44,7 +44,11 @@ public:
         return *this;
     };
 
-    static void schedule(async<>&& ctx) {
+    /**
+     * @brief Returns task into source @b runner
+     * @param ctx Task to be reattached into @b runner
+     */
+    static void reattach(async<>&& ctx) {
         if (not ctx.is_resumable() or not ctx._coroutine.promise()._runner_pool)
             return;
         ctx._coroutine.promise()._runner_pool->push(std::move(ctx));
@@ -113,12 +117,12 @@ public:
 
     // TODO: Make return type as 'join_handler' future type, when I will write it
     /**
-     * @details Function to spawn task at the runner
+     * @details Function to attach task to the runner
      * @param new_task Task to be pushed into the runner
      * @return void
      */
     template <typename async_return_t>
-    void spawn(async<async_return_t>&& new_task) const noexcept {
+    void attach(async<async_return_t>&& new_task) const noexcept {
         new_task._coroutine.promise()._runner_pool = &_pool;
         _pool.push(std::forward<async<>>(async_wrap(std::forward<async<async_return_t>>(new_task))));
     }
@@ -131,7 +135,7 @@ public:
 };
 
 template <>
-inline void runner::spawn<void>(async<>&& new_task) const noexcept {
+inline void runner::attach<void>(async<>&& new_task) const noexcept {
     new_task._coroutine.promise()._runner_pool = &_pool;
     _pool.push(std::forward<async<>>(new_task));
 }

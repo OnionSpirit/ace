@@ -38,6 +38,8 @@ class timer : public future_traits<timer> {
 
         static void await_resume() {}
 
+        void reset() { _released = false; }
+
         // TODO: Support detatch later
         // void detach() { _detached = true; }
         //

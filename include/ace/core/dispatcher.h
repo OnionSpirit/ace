@@ -1,7 +1,7 @@
 /**
 * @file
  * @details This file contains a @b dispatcher singleton object,
- * allows to spawn tasks from any place, execute them.
+ * allows to schedule tasks from any place, execute them.
  * Provides necessary services for active futures
  */
 
@@ -32,13 +32,13 @@ public:
     }
 
     /**
-     * @details Function to spawn task at the dispatcher
+     * @details Function to schedule task at the dispatcher
      * @param new_task Task to be pushed into the dispatcher
-     * @param rnr Specific runner to spawn on
+     * @param rnr Specific runner to schedule on
      * @return void
      */
-    void spawn(async<>&& new_task, runner* rnr = nullptr) noexcept {
-        _balancer.spawn(std::forward<async<>>(new_task), rnr);
+    void schedule(async<>&& new_task, const runner* rnr = nullptr) noexcept {
+        _balancer.schedule(std::forward<async<>>(new_task), rnr);
     }
 
     /**
@@ -65,13 +65,13 @@ public:
 namespace ace {
 
     /**
-     * @details Function to spawn task
+     * @details Function to schedule task
      * @param new_task Task to be pushed into the dispatcher
-     * @param rnr Specific runner to spawn on
+     * @param rnr Specific runner to schedule on
      * @return void
      */
-    static void spawn(async<>&& new_task, core::runner* rnr = nullptr) noexcept {
-        core::dispatcher::get_instance().spawn(std::forward<async<>>(new_task), rnr);
+    static void schedule(async<>&& new_task, const core::runner* rnr = nullptr) noexcept {
+        core::dispatcher::get_instance().schedule(std::forward<async<>>(new_task), rnr);
     }
 
     /**
@@ -81,7 +81,7 @@ namespace ace {
     inline bool empty() noexcept { return core::dispatcher::get_instance().empty(); }
 
     /**
-     * @details Processing all spawned tasks.
+     * @details Processing all scheduled tasks.
      */
     inline void run() noexcept { core::dispatcher::get_instance().run(); }
 

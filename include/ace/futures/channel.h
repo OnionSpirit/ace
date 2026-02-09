@@ -5,8 +5,6 @@
 #ifndef ACE_FUTURE_CHANNEL_H
 #define ACE_FUTURE_CHANNEL_H
 
-#include <future>
-
 #include "future.h"
 #include "ace/common/selection.h"
 #include <nukes/dynamic/mpsc_queue.h>
@@ -217,7 +215,7 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_conductor : conductor_handler_t {
 
 ACE_FUTURE_CHANNEL_MEMBER(void) reset() {
     if (async<> ctx; _waiters.pop(ctx)) [[likely]]
-        core::runner::schedule(std::move(ctx));
+        core::runner::reattach(std::move(ctx));
 }
 
 

@@ -152,6 +152,7 @@ namespace ace::coroutines {
 
             // TODO: Wrap into weak hazard ptr, when I will write it
             runner_pool_t* _runner_pool {nullptr};
+            bool _roaming { true };
             conductor_carry _conductor {};
         };
 

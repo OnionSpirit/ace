@@ -39,7 +39,11 @@ if tests_enabled
   test_executable = executable (
       'ace_tests',
       sources: test_sources,
-      cpp_args: ['-std=c++23', '-fconcepts-diagnostics-depth=2', '-fmodules'],
+      cpp_args: [
+        '-std=c++23',
+#        '-fconcepts-diagnostics-depth=2',
+        '-fmodules'
+      ],
       dependencies: [
           gtest_dep,
           ace,

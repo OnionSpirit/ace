@@ -63,17 +63,17 @@ namespace ace::core {
 
         // TODO: Make return type as 'join_handler' future type, when I will write it
         /**
-         * @details Function to spawn task at the dispatcher
+         * @details Function to schedule task at the dispatcher
          * @param new_task Task to be pushed into the dispatcher
-         * @param rnr Specific runner to spawn on
+         * @param rnr Specific runner to schedule on
          * @return void
          */
-        void spawn(async<>&& new_task, runner* rnr = nullptr) noexcept {
+        void schedule(async<>&& new_task, const runner* rnr = nullptr) noexcept {
             if (not rnr) {
                 const auto runner_id = _runner_selector.fetch_add(1, std::memory_order_relaxed);
-                _runners[runner_id % _balancer_config._runners_amount].spawn(std::forward<async<>>(new_task));
+                _runners[runner_id % _balancer_config._runners_amount].attach(std::forward<async<>>(new_task));
             } else {
-                rnr->spawn(std::forward<async<>>(new_task));
+                rnr->attach(std::forward<async<>>(new_task));
             }
         }
 

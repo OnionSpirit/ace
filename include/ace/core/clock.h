@@ -89,7 +89,7 @@ namespace ace::core {
          * @warning May cause cross-runner roaming in future updates
          */
         static void release_record(clock_record&& record) {
-            runner::schedule(std::move(record._context));
+            runner::reattach(std::move(record._context));
         }
 
         /**
@@ -278,7 +278,7 @@ namespace ace::core {
             for (int i = 0; i < _release_limit and _threadsafe_input.pop(input_record); ++i) {
                 auto [ctx, dur] = std::forward<input_record_t>(input_record);
                 if (passed > dur) [[unlikely]] {
-                    runner::schedule(std::forward<async<>>(ctx));
+                    runner::reattach(std::forward<async<>>(ctx));
                     --_release_counter;
                     continue;
                 }
@@ -326,7 +326,7 @@ namespace ace::core {
         void subscribe(async<>&& ctx, duration_t dur) {
             const auto idx = calc_wheel(dur);
             if (not idx) [[unlikely]] {
-                runner::schedule(std::move(ctx));
+                runner::reattach(std::move(ctx));
                 return;
             }
             ++_total_records;

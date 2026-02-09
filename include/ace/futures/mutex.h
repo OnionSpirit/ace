@@ -103,7 +103,7 @@ ACE_FUTURE_MUTEX_MEMBER(bool)
 notify_one() noexcept {
     if (async<> _waiter; _waiters.pop(_waiter)) [[likely]] {
         _pending.store(true, std::memory_order_release);
-        core::runner::schedule(std::move(_waiter));
+        core::runner::reattach(std::move(_waiter));
         return true; // NOTE: One notified
     }
     return false; // NOTE: Noone is notified

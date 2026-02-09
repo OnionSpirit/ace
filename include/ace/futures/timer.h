@@ -56,6 +56,7 @@ struct expire : timer {
 
 //==============================- DEFINITIONS -==================================
 
+
 #define ACE_FUTURE_TIMER_SPACE \
 ace::futures::timer::
 

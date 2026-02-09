@@ -2,7 +2,6 @@
 #define ACE_COMMANDS_GET_RUNNER_H
 
 #include "command.h"
-#include "ace/core/balancer.h"
 
 namespace ace::commands {
 
@@ -14,11 +13,11 @@ namespace ace::commands {
         IMPORT_COMMAND_ENV
 
         bool await_suspend(auto coroutine) {
-            _ptr = reinterpret_cast<core::runner*>(coroutine.promise()._runner_pool);
-            return true;
+            _ptr = core::pool_to_runner(coroutine.promise()._runner_pool);
+            return false;
         }
 
-        core::runner* await_resume() const {
+        [[nodiscard]] core::runner* await_resume() const {
             return _ptr;
         }
     };

@@ -2,6 +2,9 @@
 #define UNITS_H
 
 #include <ace/ace.h>
+
+#include "ace/commands/get_runner.h"
+#include "ace/commands/spawn.h"
 #include "ace/futures/future.h"
 #include "ace/futures/channel.h"
 #include "ace/futures/timer.h"
@@ -103,6 +106,16 @@ ace::async<> channel_fetcher(ace::futures::channel_dyn<channel_t>& ch, std::vect
     co_return;
 }
 
+inline ace::async<> to_spawn(ace::futures::channel_dyn<ace::core::runner*>& output) {
+    auto curr_runner = co_await ace::commands::get_runner();
+    output << curr_runner;
+}
+
+inline ace::async<> spawner(ace::futures::channel_dyn<ace::core::runner*>& output) {
+    auto curr_runner = co_await ace::commands::get_runner();
+    output << curr_runner;
+    co_await ace::spawn(to_spawn(output));
+}
 
 
 #endif // UNITS_H

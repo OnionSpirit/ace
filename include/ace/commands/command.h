@@ -36,7 +36,7 @@ namespace ace::commands {
             return std::move(*static_cast<derived_command_t*>(this));
         }
 
-        bool await_ready() final { return false; };
+        bool await_ready() override { return false; };
 
         /**
          * @details Default destructor

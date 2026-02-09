@@ -19,19 +19,17 @@ namespace ace::core {
  * @tparam Policies Pools policies, each policy provides independent
  * pool for coroutines
  */
-class alignas(ACE_CACHE_LINE_SIZE) runner {
+struct alignas(ACE_CACHE_LINE_SIZE) runner {
 
     ACE_CACHE_LINE(0)
 
     mutable runner_pool_t _pool; // Note: pool of task queue
-    // Note: mpsc queue to emplace task from another runner or spawning
-    // std::queue<ace::promise::async<>> _input;
-    // Note: signaling queue for external control
-    // pool_t<int> _signals;
 
-public:
 
-    runner() =default;
+    runner() {
+        static_assert(offsetof(runner, _pool) == 0,
+            "'_pool' must be the first member of runner. Stop touching not your code idiot");
+    };
 
     ~runner() =default;
 
@@ -138,6 +136,10 @@ template <>
 inline void runner::attach<void>(async<>&& new_task) const noexcept {
     new_task._coroutine.promise()._runner_pool = &_pool;
     _pool.push(std::forward<async<>>(new_task));
+}
+
+inline auto pool_to_runner(runner_pool_t* pool) noexcept {
+    return reinterpret_cast<runner*>(pool);
 }
 
 } // end namespace ace::core

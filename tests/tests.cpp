@@ -92,7 +92,7 @@ TEST(futures, do_timer_on_runner_test) {
 TEST(futures, do_expire_on_runner_test) {
     ace::futures::channel_dyn<ace::core::timepoint_t> _channel {};
 
-    auto now = ace::core::clock::current_time();
+    const auto now = ace::core::clock::current_time();
     // NOTE: Spawning waiters with different duration and waited time count return
     ace::schedule(expire_waiter_valued(now + 501ms, _channel));
     ace::schedule(expire_waiter_valued(now + 500ms, _channel));
@@ -177,5 +177,21 @@ TEST(futures, do_timer_on_runner_parallel_test) {
 
     ace::core::s_balancer_config._runners_amount = 1;
     ace::reload();
+}
+
+TEST(commands, check_spawn_command) {
+    ace::futures::channel_dyn<ace::core::runner*> channel_ {};
+    ace::schedule(spawner(channel_));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    // NOTE: Collecting waited time sequence
+    std::vector<ace::core::runner*> res{};
+    ace::schedule(channel_fetcher(channel_, res));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    ASSERT_EQ(res.size(), 2);
+    ASSERT_NE(res[0], nullptr);
+    ASSERT_NE(res[1], nullptr);
+    ASSERT_EQ(res[0], res[1]);
 }
 

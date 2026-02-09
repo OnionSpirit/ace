@@ -8,6 +8,7 @@
 #ifndef ACE_CORE_DISPATCHER_H
 #define ACE_CORE_DISPATCHER_H
 
+#include "ace/commands/spawn.h"
 #include "ace/core/signal.h"
 #include "ace/core/balancer.h"
 
@@ -72,6 +73,15 @@ namespace ace {
      */
     static void schedule(async<>&& new_task, const core::runner* rnr = nullptr) noexcept {
         core::dispatcher::get_instance().schedule(std::forward<async<>>(new_task), rnr);
+    }
+
+    /**
+     * @details Function to spawn parallel task from calling task
+     * @param new_task Task to be pushed into the same runner as calling task
+     * @return @b 'ace::core::commands::spawn' awaitable entity
+     */
+    static commands::spawn spawn(async<>&& new_task) noexcept {
+        return commands::spawn(std::move(new_task));
     }
 
     /**

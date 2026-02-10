@@ -44,7 +44,7 @@ namespace ace::futures {
 
         public:
 
-        auto capture() noexcept -> const mutex_locker &;
+        auto capture() noexcept -> mutex_locker&;
 
         bool try_capture() noexcept;
 
@@ -115,7 +115,7 @@ resolve() noexcept {
         notify_one();
 }
 
-ACE_FUTURE_MUTEX_MEMBER(const ace::futures::mutex_locker&)
+ACE_FUTURE_MUTEX_MEMBER(ace::futures::mutex_locker&)
 capture() noexcept {
     return *static_cast<mutex_locker*>(this);
 }

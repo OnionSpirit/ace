@@ -42,7 +42,7 @@ if tests_enabled
       cpp_args: [
         '-std=c++23',
         '-Wno-invalid-offsetof',
-        '-fmodules',
+#        '-Mmodules',
         #        '-fconcepts-diagnostics-depth=2'
       ],
       dependencies: [

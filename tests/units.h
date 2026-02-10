@@ -117,5 +117,14 @@ inline ace::async<> spawner(ace::futures::channel_dyn<ace::core::runner*>& outpu
     co_await ace::spawn(to_spawn(output));
 }
 
+inline ace::async<> racer(const int& max, int& shared_counter, ace::futures::mutex& mtx) {
+    for (int i = 0; i < max; ++i) {
+        co_await mtx.capture();
+        ++shared_counter;
+        mtx.sync();
+    }
+    std::cout << "race finished\n";
+}
+
 
 #endif // UNITS_H

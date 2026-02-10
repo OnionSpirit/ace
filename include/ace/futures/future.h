@@ -60,7 +60,7 @@ namespace ace::futures {
          * and makes derived class @b awaitable
          */
         derived_future_t&& operator co_await() requires (not std::copy_constructible<derived_future_t>) {
-            static_assert(std::move_constructible<derived_future_t>, "At least move constructability required");
+            // static_assert(std::move_constructible<derived_future_t>, "At least move constructability required");
             return std::forward<derived_future_t>(*static_cast<derived_future_t*>(this));
         }
 

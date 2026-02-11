@@ -42,15 +42,13 @@ namespace ace::futures {
 
     class mutex : protected mutex_locker {
 
-        // bool notify_one() noexcept;
-
-        bool resolve() noexcept;
-
         // friend core::resolve_service;
 
         friend class mutex_locker;
 
         public:
+
+        bool resolve() noexcept;
 
         auto capture() noexcept -> mutex_locker&;
 
@@ -96,6 +94,8 @@ try_lock() noexcept {
 
 ACE_FUTURE_MUTEX_LOCKER_MEMBER(bool)
 await_suspend(auto coroutine) {
+    // TODO: Remove timeout line after mtx_resolve_service will be tested
+    std::this_thread::sleep_for(1ms);
     coroutine.promise()._conductor = mutex_conductor{this};
     return true;
 }

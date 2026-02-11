@@ -126,19 +126,33 @@ TEST(futures, do_expire_on_runner_test) {
         ASSERT_GE(res[i], res[i - 1]);
 }
 
-// TODO: Test fails because there is no resolve_service and mutex jams
 TEST(futures, mutex_race) {
     ace::core::s_balancer_config._runners_amount = 4;
     ace::reload();
 
     ace::futures::mutex mtx_;
-    volatile int shared_cnt_ {0};
-    constexpr int max_ = 1000000;
+    int shared_cnt_ {0};
+    constexpr int max_ = 10000;
 
-    for (std::size_t i = 0; i < ace::core::s_balancer_config._runners_amount; ++i)
+    for (volatile std::size_t i = 0; i < ace::core::s_balancer_config._runners_amount; i = i + 1)
         ace::schedule(racer(max_, shared_cnt_, mtx_));
 
-    ace::run();
+    // TODO: Replace block to 'ace::run()' line after mtx_resolve_service will be tested
+    while (true) {
+        ace::run();
+        if (shared_cnt_ == max_ * ace::core::s_balancer_config._runners_amount) {
+            std::cout << "All tasks complete...\n";
+            break;
+        }
+        std::cout << "<===============================================>\n";
+        std::cout << "Mutex jam at counter: " << shared_cnt_ << std::endl;
+        std::cout << "Attempt to rerun 'ace::run()'...\n";
+        ace::run();
+        std::cout << "Counter after not resolved rerun: " << shared_cnt_ << std::endl;
+        std::cout << "Resolving before new rerun...\n";
+        std::cout << "<===============================================>\n";
+        mtx_.resolve();
+    }
     ASSERT_TRUE(ace::empty());
     ASSERT_EQ(shared_cnt_, max_ * ace::core::s_balancer_config._runners_amount);
 

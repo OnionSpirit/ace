@@ -130,12 +130,12 @@ TEST(futures, mutex_race) {
     ace::core::s_balancer_config._runners_amount = 4;
     ace::reload();
 
-    ace::futures::mutex mtx_;
+    ace::futures::cutex cutx_;
     int shared_cnt_ {0};
     constexpr int max_ = 10000;
 
     for (volatile std::size_t i = 0; i < ace::core::s_balancer_config._runners_amount; i = i + 1)
-        ace::schedule(racer(max_, shared_cnt_, mtx_));
+        ace::schedule(racer(max_, shared_cnt_, cutx_));
 
     // TODO: Replace block to 'ace::run()' line after mtx_resolve_service will be tested
     while (true) {
@@ -151,7 +151,7 @@ TEST(futures, mutex_race) {
         std::cout << "Counter after not resolved rerun: " << shared_cnt_ << std::endl;
         std::cout << "Resolving before new rerun...\n";
         std::cout << "<===============================================>\n";
-        mtx_.resolve();
+        cutx_.resolve();
     }
     ASSERT_TRUE(ace::empty());
     ASSERT_EQ(shared_cnt_, max_ * ace::core::s_balancer_config._runners_amount);

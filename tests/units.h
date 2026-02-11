@@ -8,7 +8,7 @@
 #include "ace/futures/future.h"
 #include "ace/futures/channel.h"
 #include "ace/futures/timer.h"
-#include "ace/futures/mutex.h"
+#include "ace/futures/cutex.h"
 
 struct once_suspend : ace::futures::future_traits<once_suspend> {
 
@@ -117,11 +117,11 @@ inline ace::async<> spawner(ace::futures::channel_dyn<ace::core::runner*>& outpu
     co_await ace::spawn(to_spawn(output));
 }
 
-inline ace::async<> racer(const int& max, int& shared_counter, ace::futures::mutex& mtx) {
+inline ace::async<> racer(const int& max, int& shared_counter, ace::futures::cutex& cutx) {
     for (volatile int i = 0; i < max; i = i + 1) {
-        co_await mtx.capture();
+        co_await cutx.capture();
         shared_counter = shared_counter + 1;
-        mtx.sync();
+        cutx.sync();
     }
     std::cout << "'racer' finished\n";
 }

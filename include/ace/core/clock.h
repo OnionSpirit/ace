@@ -3,8 +3,8 @@
  * @details This file contains a @b clock class, that provides service for time-dependent operations.
  * Clock handles global timestamp and releases passed tasks to those runners when time comes.
  */
-#ifndef ACE_CLOCK_H
-#define ACE_CLOCK_H
+#ifndef ACE_CORE_CLOCK_H
+#define ACE_CORE_CLOCK_H
 #include <chrono>
 #include <complex>
 
@@ -366,4 +366,4 @@ namespace ace::core {
 
 }
 
-#endif //ACE_CLOCK_H
+#endif //ACE_CORE_CLOCK_H

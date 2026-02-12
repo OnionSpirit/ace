@@ -43,6 +43,7 @@ namespace ace::core {
             while (not _detached) {
                 _detached = co_await static_cast<derived_t*>(this)->service_yank();
                 if (sig_pipe.pop(sig)) [[unlikely]] {
+                    sig_pipe.push(std::move(sig));
                     switch (co_await sig->action()) {
                         case e_break: co_await std::suspend_always{};
                         case e_shutdown: co_return;

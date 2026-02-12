@@ -51,20 +51,42 @@ namespace ace::futures {
 
         bool resolve() noexcept;
 
-        public:
+    public:
 
-        cutex() { core::fixer::attach_cutex(this); }
+        cutex() = default;
 
         ~cutex() override = default;
 
-        auto capture() noexcept -> cutex_future&;
+        [[nodiscard]] auto capture() noexcept -> cutex_future&;
 
-        bool try_capture() noexcept;
+        [[nodiscard]] bool try_capture() noexcept;
 
         void sync() noexcept;
     };
 
+    class secure_capture {
+
+        cutex& _cutex;
+
+    public:
+
+        secure_capture() = delete;
+
+        explicit secure_capture(cutex& cx) : _cutex(cx) {}
+
+        [[nodiscard]] auto capture() const noexcept -> cutex_future& { return _cutex.capture(); };
+
+        void sync() const noexcept { _cutex.sync(); };
+
+        ~secure_capture() { sync(); }
+    };
+
 } // end namespace ace::futures
+
+namespace ace {
+    using futures::cutex;
+    using futures::secure_capture;
+}
 
 //==============================- DEFINITIONS -==================================
 
@@ -177,7 +199,8 @@ sync() noexcept {
 inline bool ace::core::fixer::resolve(futures::cutex* cutex_) noexcept { return cutex_->resolve(); }
 
 inline bool ace::core::fixer::is_empty_cutex(const futures::cutex* cutex_) noexcept {
-    return cutex_->_core->_waiters.empty();
+    return cutex_->_core->_waiters.empty()
+        and cutex_->_core->_state.load(std::memory_order_acquire) == futures::cutex_state::e_vacant;
 }
 
 #endif //ACE_FUTURE_CUTEX_H

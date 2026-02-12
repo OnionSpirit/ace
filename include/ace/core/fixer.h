@@ -14,6 +14,7 @@
 namespace ace::futures { class cutex; }
 namespace ace::core {
 
+    // TODO: FIX THIS SHIT
     class fixer : public service_traits<fixer> {
 
         fixer() = default;
@@ -24,23 +25,28 @@ namespace ace::core {
 
         promise<bool> service_yank() {
             futures::cutex* cutex_;
-            bool is_empty { true };
+            while (_detache.pop(cutex_)) _pool.erase(cutex_);
             while (_attache.pop(cutex_)) _pool.insert(cutex_);
             for (auto* cutex__ : _pool) {
+                co_await futures::timer(1ms);
                 resolve(cutex__);
-                co_await futures::timer(15ms);
-                is_empty = is_empty and is_empty_cutex(cutex__);
             }
-            co_return is_empty;
+            co_return _pool.empty();
         }
 
         static void attach_cutex(futures::cutex* cutx) {
+            if (not get_instance()._pool.contains(cutx))
+                get_instance()._attache.push(std::forward<futures::cutex*>(cutx));
+        }
+
+        static void detach_cutex(futures::cutex* cutx) {
             // if (not get_instance()._pool.contains(cutx))
-                get_instance()._attache.push(std::move(cutx));
+            get_instance()._detache.push(std::forward<futures::cutex*>(cutx));
         }
 
         std::set<futures::cutex*> _pool;
         nukes::dynamic::mpsc_queue<futures::cutex*> _attache;
+        nukes::dynamic::mpsc_queue<futures::cutex*> _detache;
 
         static inline bool resolve(futures::cutex* cutex_) noexcept;
 

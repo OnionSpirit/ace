@@ -71,6 +71,8 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
             and async_n->_data
         };
 
+        // TODO: Add reattach for task waiters if there are some
+
         // NOTE: Checking if the context shall be forwarded via passed conductor
         const bool is_conducted {
             is_resumable
@@ -81,7 +83,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
         const bool is_idle = not is_resumable or is_conducted;
 
         // NOTE: Forwarding via conductor if needed
-        if (is_conducted)
+        if (is_conducted) [[likely]]
             async_n->_data._coroutine.promise()._conductor->forward(std::forward<async<>>(async_n->_data));
 
         // NOTE: Managing nodes depending on checks

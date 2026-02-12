@@ -25,6 +25,8 @@ namespace ace::coroutines {
 
         virtual void forward(runner_context_t&& context) = 0;
 
+        // virtual void cancel() = 0;
+
         virtual ~conductor_traits() = default;
     };
 

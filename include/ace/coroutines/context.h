@@ -152,6 +152,7 @@ namespace ace::coroutines {
 
             // TODO: Wrap into weak hazard ptr, when I will write it
             runner_pool_t* _runner_pool {nullptr};
+            std::atomic<std::shared_ptr<runner_pool_t>> _waiters;
             bool _roaming { false };
             conductor_carry _conductor {};
         };
@@ -204,6 +205,39 @@ namespace ace::coroutines {
                 return _coroutine.promise().setup_trace();
             return std::unexpected("context is already dead.");
         }
+    };
+
+    // TODO: Need to replace it into unique file and finish its conductor
+    template <typename promise_t>
+    class join_handler : futures::future_traits<join_handler<promise_t>> {
+
+        DECLARE_FUTURE(join_handler)
+        IMPORT_FUTURE_ENV
+
+        std::coroutine_handle<promise_t>& _coroutine;
+
+        class join_handler_conductor;
+        friend class join_handler_conductor;
+
+    public:
+
+        join_handler() = delete;
+
+        explicit join_handler(const std::coroutine_handle<promise_t>& coroutine)
+            : _coroutine{coroutine} {
+            if (not _coroutine.promise()._waiter.load(std::memory_order_acquire))
+                _coroutine.promise()._waiter.store(std::make_shared<context<>::runner_pool_t>(), std::memory_order_release);
+        }
+
+        bool await_ready() override { return _coroutine.done(); }
+
+        template<typename promise_u>
+        bool await_suspend(std::coroutine_handle<promise_u> outer) {
+            outer.promise()._conductor = join_handler_conductor{_coroutine};
+            return false;
+        }
+
+        bool await_resume() { return _coroutine.done(); }
     };
 
 }

@@ -59,14 +59,13 @@ namespace ace::coroutines {
         explicit context(coroutine_t &&handler) : _coroutine{handler} {};
 
         // NOTE: Checks if context is resumable
-        [[nodiscard]] bool is_resumable() const noexcept { return _coroutine and not _coroutine.done(); }
+        [[nodiscard]] bool is_resumable() const noexcept {
+            return _coroutine and not _coroutine.done() and not control_block::disowned(_coroutine.address());
+        }
 
         explicit operator bool() const { return is_resumable(); }
 
-        ~context() override {
-            if (_coroutine) _coroutine.destroy();
-        };
-
+        ~context() override { if (_coroutine) _coroutine.destroy(); };
 
         // NOTE: Type to store conductor and pass it to outer promise
         struct conductor_carry {
@@ -164,6 +163,27 @@ namespace ace::coroutines {
             conductor_carry _conductor {};
         };
 
+        class access : public access_handle {
+
+            void* _address;
+
+        public:
+
+            access() = delete;
+
+            explicit access(const coroutine_t& coroutine)
+                : _address(coroutine.address()) {}
+
+            void cancel() noexcept override {
+                auto handle = coroutine_t::from_address(_address);
+                if (handle and handle.promise()._conductor)
+                    handle.promise()._conductor->cancel();
+                handle.destroy();
+            }
+
+            ~access() override = default;
+        };
+
         bool await_ready() override {
             if (_coroutine.done()) return true;
             if (_coroutine.promise()._future and _coroutine.promise()._future->await_ready())
@@ -178,8 +198,7 @@ namespace ace::coroutines {
             if (is_resumable() and _coroutine.promise()._conductor)
                 outer.promise()._conductor = std::move(_coroutine.promise()._conductor);
             // NOTE: Suspending if not idle
-            if (is_resumable())
-                return false;
+            else if (is_resumable()) return false;
             return true;
         }
 
@@ -209,10 +228,11 @@ namespace ace::coroutines {
 
         control_block_handle observe() {
             _coroutine.promise()._block = control_block::get_block_from_address(_coroutine.address());
+            _coroutine.promise()._block->_access = new access(_coroutine);
             return control_block_handle{ _coroutine };
         }
 
-        std::expected<std::size_t, std::string_view> trace() {
+        std::expected<std::size_t, std::string_view> track() {
             if (_coroutine)
                 return _coroutine.promise().setup_trace();
             return std::unexpected("context is already dead.");

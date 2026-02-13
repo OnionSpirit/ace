@@ -147,7 +147,7 @@ namespace ace::coroutines {
             void* base_ptr = control_block::get_block_from_address(mem_ptr);
             // NOTE: Trying to disown, and if it's untracked do delete
             if (control_block::disown(base_ptr))
-                ::operator delete(base_ptr);
+                delete static_cast<control_block*>(base_ptr);
         }
 
         std::size_t setup_trace() {

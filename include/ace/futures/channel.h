@@ -207,6 +207,9 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_conductor : conductor_handler_t {
 
     void forward(async<>&& ctx) override { _waiters->push(std::move(ctx)); }
 
+    // TODO: Finish later
+    void cancel() override {  }
+
     ~channel_conductor() override = default;
 
     waiters_storage_t* _waiters;

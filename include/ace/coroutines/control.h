@@ -1,17 +1,30 @@
 #ifndef ACE_CONTROL_H
 #define ACE_CONTROL_H
 
+#include <atomic>
+#include <cstddef>
+
+#include "conductor.h"
+
 namespace ace::coroutines {
+
+    struct access_handle {
+
+        virtual void cancel() noexcept = 0;
+
+        virtual ~access_handle() = default;
+    };
 
     struct control_block {
 
         std::atomic<uint64_t> _weak_refcount {1};
         std::atomic<uint64_t> _strong_refcount {1};
         std::atomic<bool> _exists {true};
+        access_handle* _access { nullptr };
 
         control_block() = default;
 
-        ~control_block() = default;
+        ~control_block() { delete _access; };
 
         static bool is_untracked(void* v_block);
 
@@ -20,6 +33,8 @@ namespace ace::coroutines {
         static bool watch(void* v_block);
 
         static bool unwatch(void* v_block);
+
+        static bool disowned(void* address);
 
         static control_block* get_block_from_address(void* address);
 
@@ -48,11 +63,17 @@ namespace ace::coroutines {
         template <is_controled_promise promise_t>
         explicit control_block_handle(const std::coroutine_handle<promise_t>& promise) {
             _block = promise.promise()._block;
+            control_block::watch(_block);
         }
 
         ~control_block_handle() {
             if (control_block::unwatch(_block))
                 delete _block;
+        }
+
+        void cancel() const {
+            if (not done() and _block->_access) [[likely]]
+                _block->_access->cancel();
         }
 
         [[nodiscard]] bool done() const {
@@ -91,6 +112,10 @@ namespace ace::coroutines {
         const auto block = static_cast<control_block*>(v_block);
         block->_weak_refcount.fetch_sub(1, std::memory_order_relaxed);
         return is_untracked(block);
+    }
+
+    inline bool control_block::disowned(void* address) {
+        return not get_block_from_address(address)->_exists.load(std::memory_order_acquire);
     }
 
     inline control_block* control_block::get_block_from_address(void* address) {

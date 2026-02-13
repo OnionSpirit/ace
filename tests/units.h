@@ -117,12 +117,32 @@ inline ace::async<> to_spawn(ace::futures::channel_dyn<ace::core::runner*>& outp
 inline ace::async<> spawner(ace::futures::channel_dyn<ace::core::runner*>& output) {
     auto curr_runner = co_await ace::commands::get_runner();
     output << curr_runner;
-    const auto handle = co_await ace::spawn(to_spawn(output));
+    // TODO: Temp
+    const ace::coroutines::control_block_handle handle = co_await ace::spawn(to_spawn(output));
     while (not handle.done()) {
         std::cout << "Spawned not done\n";
         co_await ace::futures::timer(10ms);
     }
     std::cout << "Spawned done!!!\n";
+}
+
+inline ace::async<> to_spawn_cancel(ace::futures::channel_dyn<ace::core::runner*>& output) {
+    auto curr_runner = co_await ace::commands::get_runner();
+    co_await ace::futures::timer(10ms);
+    std::cout << "Not canceled\n";
+    output << curr_runner;
+    co_return;
+}
+
+inline ace::async<> spawner_cancel(ace::futures::channel_dyn<ace::core::runner*>& output) {
+    auto curr_runner = co_await ace::commands::get_runner();
+    output << curr_runner;
+    // TODO: Temp
+    const ace::coroutines::control_block_handle handle = co_await ace::spawn(to_spawn_cancel(output));
+    handle.cancel();
+    co_await ace::futures::timer(100ms);
+    if (handle.done())
+        std::cout << "Cancel done!!!\n";
 }
 
 inline ace::async<> racer(const int& max, int& shared_counter, ace::cutex& cutx,

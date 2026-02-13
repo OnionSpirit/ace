@@ -108,6 +108,9 @@ struct ACE_FUTURE_CUTEX_FUTURE_SPACE cutex_conductor : conductor_handler_t {
         _cutex->_core->_waiters.push(std::move(ctx));
     }
 
+    // TODO: Finish later
+    void cancel() override {  }
+
     ~cutex_conductor() override = default;
 
     const cutex_future* _cutex;

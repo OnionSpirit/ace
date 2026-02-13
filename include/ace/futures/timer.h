@@ -78,6 +78,9 @@ struct ACE_FUTURE_TIMER_SPACE timer_conductor : conductor_handler_t {
         core::clock::subscribe(std::move(ctx), _timer->_duration);
     }
 
+    // TODO: Finish later
+    void cancel() override {  }
+
     ~timer_conductor() override = default;
 
     timer* const _timer;

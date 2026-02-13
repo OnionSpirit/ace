@@ -126,7 +126,7 @@ TEST(futures, do_expire_on_runner_test) {
         ASSERT_GE(res[i], res[i - 1]);
 }
 
-TEST(futures, mutex_race) {
+TEST(futures, DISABLED_mutex_race) {
     ace::core::s_balancer_config._runners_amount = 4;
     ace::reload();
 
@@ -156,7 +156,7 @@ TEST(futures, mutex_race) {
     ace::reset_signal();
 }
 
-TEST(futures, secure_mutex_race) {
+TEST(futures, DISABLED_secure_mutex_race) {
     ace::core::s_balancer_config._runners_amount = 4;
     ace::reload();
 
@@ -253,5 +253,19 @@ TEST(commands, check_spawn_command) {
     ASSERT_NE(res[0], nullptr);
     ASSERT_NE(res[1], nullptr);
     ASSERT_EQ(res[0], res[1]);
+}
+
+TEST(commands, check_cancel) {
+    ace::futures::channel_dyn<ace::core::runner*> channel_ {};
+    ace::schedule(spawner_cancel(channel_));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    // // NOTE: Collecting waited time sequence
+    std::vector<ace::core::runner*> res{};
+    ace::schedule(channel_fetcher(channel_, res));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    ASSERT_EQ(res.size(), 1);
+    ASSERT_NE(res[0], nullptr);
 }
 

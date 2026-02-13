@@ -67,8 +67,10 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
 
         // NOTE: Checking if context can be resumed
         const bool is_resumable {
-            touch_result not_eq coroutines::promise_touch_result::e_failed
-            and async_n->_data
+                async_n->_data
+            and touch_result not_eq coroutines::promise_touch_result::e_failed
+            and touch_result not_eq coroutines::promise_touch_result::e_finished
+            and touch_result not_eq coroutines::promise_touch_result::e_detached
         };
 
         // TODO: Add reattach for task waiters if there are some

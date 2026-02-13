@@ -36,7 +36,7 @@ namespace ace::futures {
 
         bool await_suspend(auto coroutine);
 
-        static void await_resume() {}
+        void await_resume() {}
 
         std::shared_ptr<cutex_core> _core = std::make_shared<cutex_core>();
 

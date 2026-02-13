@@ -111,6 +111,7 @@ inline ace::async<> to_spawn(ace::futures::channel_dyn<ace::core::runner*>& outp
     co_await ace::futures::timer(500ms);
     std::cout << "Spawned runned out\n";
     output << curr_runner;
+    co_return;
 }
 
 inline ace::async<> spawner(ace::futures::channel_dyn<ace::core::runner*>& output) {
@@ -119,8 +120,8 @@ inline ace::async<> spawner(ace::futures::channel_dyn<ace::core::runner*>& outpu
     const auto handle = co_await ace::spawn(to_spawn(output));
     while (not handle.done()) {
         std::cout << "Spawned not done\n";
-        co_await std::suspend_always{};
         co_await ace::futures::timer(100ms);
+        co_await std::suspend_always{};
     }
     std::cout << "Spawned done!!!\n";
 }

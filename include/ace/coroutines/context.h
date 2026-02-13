@@ -26,7 +26,6 @@ namespace ace::coroutines {
     class control_handle {
 
         promise_control_block* _block { nullptr };
-        // void (*_destroyer)(void*) { nullptr };
 
     public:
 
@@ -34,27 +33,18 @@ namespace ace::coroutines {
 
         control_handle(const control_handle& h) {
             this->_block = h._block;
-            // this->_destroyer = h._destroyer;
             promise_control_block::inc_weak(_block);
         }
 
         template <typename promise_t>
         explicit control_handle(const std::coroutine_handle<promise_t>& promise) {
-            _block = promise_control_block::get_block_from_address(promise.address());
-            // _destroyer = cast_and_delete<promise_t>;
+            _block = promise.promise()._block;
         }
 
         ~control_handle() {
             if (promise_control_block::dec_weak(_block))
                 delete _block;
-                // _destroyer(_block->_frame_ptr);
         }
-
-        // template <typename promise_t>
-        // static void cast_and_delete(void* frame_ptr) {
-        //     auto* promise = static_cast<promise_t*>(frame_ptr);
-        //     delete promise_control_block::get_block_from_address(promise);
-        // }
 
         [[nodiscard]] bool done() const {
             return not _block or not _block->_exists.load(std::memory_order_relaxed);
@@ -102,7 +92,6 @@ namespace ace::coroutines {
 
         ~context() override {
             if (_coroutine) _coroutine.destroy();
-            else { std::cout << "LOST COROUTINE FAGGOTS\n"; }
         };
 
 
@@ -175,17 +164,34 @@ namespace ace::coroutines {
                 return launch_ruleT::action();
             }
 
-            static auto final_suspend() noexcept { return std::suspend_always{}; }
+            auto final_suspend() const noexcept {
+                if (_block) promise_control_block::dec_strong(_block);
+                return std::suspend_always{};
+            }
 
             void unhandled_exception() {
                 _status = e_failed;
                 interrupt("Unhandled exception.");
             }
 
-            static void interrupt(const std::string_view &&str) {
+            void interrupt(const std::string_view &&str) {
                 std::cerr << str << std::endl;
                 final_suspend();
             };
+
+            // TODO: Define in future to attach custom allocator
+            void* operator new(size_t mem_size) noexcept {
+                const auto ptr = static_cast<uint8_t*>(::operator new(mem_size + promise_control_block_size));
+                void* mem_ptr = ptr + promise_control_block_size;
+                new (ptr) promise_control_block();
+                return mem_ptr;
+            }
+
+            void operator delete(void* mem_ptr) noexcept {
+                void* base_ptr = promise_control_block::get_block_from_address(mem_ptr);
+                if (promise_control_block::is_untracked(base_ptr))
+                    ::operator delete(base_ptr);
+            }
 
             auto get_return_object() noexcept { return context{coroutine_t::from_promise(*this)}; }
 
@@ -196,6 +202,7 @@ namespace ace::coroutines {
             std::atomic<std::shared_ptr<runner_pool_t>> _waiters;
             bool _roaming { false };
             conductor_carry _conductor {};
+            promise_control_block* _block { nullptr };
         };
 
         bool await_ready() override {
@@ -241,7 +248,10 @@ namespace ace::coroutines {
             else return;
         }
 
-        control_handle observe() { return control_handle{ _coroutine }; }
+        control_handle observe() {
+            _coroutine.promise()._block = promise_control_block::get_block_from_address(_coroutine.address());
+            return control_handle{ _coroutine };
+        }
 
         std::expected<std::size_t, std::string_view> trace() {
             if (_coroutine)

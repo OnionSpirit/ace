@@ -36,7 +36,7 @@ class timer : public future_traits<timer> {
 
         bool await_suspend(auto coroutine);
 
-        static void await_resume() {}
+        void await_resume() {}
 
         void reset() { _released = false; }
 

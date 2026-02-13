@@ -23,6 +23,44 @@
 // ToDo: yield операцию преретащить в генератор/ пусть генератор имеет перегрузку итераторов чтобы запускать его в цикле for
 namespace ace::coroutines {
 
+    class control_handle {
+
+        promise_control_block* _block { nullptr };
+        // void (*_destroyer)(void*) { nullptr };
+
+    public:
+
+        control_handle() = default;
+
+        control_handle(const control_handle& h) {
+            this->_block = h._block;
+            // this->_destroyer = h._destroyer;
+            promise_control_block::inc_weak(_block);
+        }
+
+        template <typename promise_t>
+        explicit control_handle(const std::coroutine_handle<promise_t>& promise) {
+            _block = promise_control_block::get_block_from_address(promise.address());
+            // _destroyer = cast_and_delete<promise_t>;
+        }
+
+        ~control_handle() {
+            if (promise_control_block::dec_weak(_block))
+                delete _block;
+                // _destroyer(_block->_frame_ptr);
+        }
+
+        // template <typename promise_t>
+        // static void cast_and_delete(void* frame_ptr) {
+        //     auto* promise = static_cast<promise_t*>(frame_ptr);
+        //     delete promise_control_block::get_block_from_address(promise);
+        // }
+
+        [[nodiscard]] bool done() const {
+            return not _block or not _block->_exists.load(std::memory_order_relaxed);
+        }
+    };
+
     template<typename returnT =void, is_promise_rule launch_ruleT =differed>
     struct context : futures::future_traits<context<returnT, launch_ruleT>> {
         DECLARE_FUTURE(context)
@@ -62,7 +100,10 @@ namespace ace::coroutines {
 
         explicit operator bool() const { return is_resumable(); }
 
-        ~context() override { if (_coroutine) _coroutine.destroy(); };
+        ~context() override {
+            if (_coroutine) _coroutine.destroy();
+            else { std::cout << "LOST COROUTINE FAGGOTS\n"; }
+        };
 
 
         // NOTE: Type to store conductor and pass it to outer promise
@@ -200,12 +241,15 @@ namespace ace::coroutines {
             else return;
         }
 
+        control_handle observe() { return control_handle{ _coroutine }; }
+
         std::expected<std::size_t, std::string_view> trace() {
             if (_coroutine)
                 return _coroutine.promise().setup_trace();
             return std::unexpected("context is already dead.");
         }
     };
+
 
     // TODO: Need to replace it into unique file and finish its conductor
     template <typename promise_t>
@@ -214,16 +258,23 @@ namespace ace::coroutines {
         DECLARE_FUTURE(join_handler)
         IMPORT_FUTURE_ENV
 
-        std::coroutine_handle<promise_t>& _coroutine;
+        std::weak_ptr<std::coroutine_handle<promise_t>> _coroutine;
 
         class join_handler_conductor;
         friend class join_handler_conductor;
+
+        class join_handler_conductor : conductor_traits<join_handler_conductor> {
+        public:
+
+            join_handler_conductor() = delete;
+
+        };
 
     public:
 
         join_handler() = delete;
 
-        explicit join_handler(const std::coroutine_handle<promise_t>& coroutine)
+        explicit join_handler(const std::coroutine_handle<promise_t> coroutine)
             : _coroutine{coroutine} {
             if (not _coroutine.promise()._waiter.load(std::memory_order_acquire))
                 _coroutine.promise()._waiter.store(std::make_shared<context<>::runner_pool_t>(), std::memory_order_release);

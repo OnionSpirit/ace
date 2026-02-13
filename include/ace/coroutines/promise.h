@@ -25,7 +25,84 @@ namespace ace::coroutines {
         e_executed,
         e_executed_with_value,
         e_finished,
+        e_detached,
     };
+
+    struct promise_control_block {
+
+        std::atomic<uint64_t> _weak_refcount {0};
+        std::atomic<uint64_t> _strong_refcount {0};
+        std::atomic<bool> _exists {false};
+        void* _frame_ptr { nullptr };
+
+        promise_control_block() = delete;
+
+        explicit promise_control_block(void* _frame_ptr)
+            : _frame_ptr(_frame_ptr) {
+            _weak_refcount.store(1, std::memory_order_release);
+            _strong_refcount.store(1, std::memory_order_release);
+            _exists.store(true, std::memory_order_release);
+            // std::cout << "Control block inited\n";
+        };
+
+        ~promise_control_block() = default;
+        // {
+        //     std::cout << "Control block destroyed\n";
+        // };
+
+        static bool clear(void* v_block);
+
+        static bool dec_strong(void* v_block);
+
+        static bool inc_weak(void* v_block);
+
+        static bool dec_weak(void* v_block);
+
+        static promise_control_block* get_block_from_address(void* address);
+
+    };
+
+    inline constexpr std::size_t promise_control_block_size = sizeof(promise_control_block);
+
+    inline bool promise_control_block::clear(void* v_block) {
+        const auto block = static_cast<promise_control_block*>(v_block);
+        const bool is_lost {
+            block->_weak_refcount.load(std::memory_order_acquire) == 0
+            and block->_strong_refcount.load(std::memory_order_acquire) == 0
+        };
+        if (is_lost) {
+            block->~promise_control_block();
+            return true;
+        }
+        return false;
+    }
+
+    inline bool promise_control_block::dec_strong(void* v_block) {
+        const auto block = static_cast<promise_control_block*>(v_block);
+        if (not block->_exists.load(std::memory_order_relaxed)) [[unlikely]] return false;
+        block->_strong_refcount.fetch_sub(1, std::memory_order_relaxed);
+        block->_weak_refcount.fetch_sub(1, std::memory_order_relaxed);
+        block->_exists.store(false, std::memory_order_release);
+        return clear(block);
+    }
+
+    inline bool promise_control_block::inc_weak(void* v_block) {
+        const auto block = static_cast<promise_control_block*>(v_block);
+        if (block->_weak_refcount.load(std::memory_order_acquire) == 0) return false;
+        block->_weak_refcount.fetch_add(1, std::memory_order_release);
+        return true;
+    }
+
+    inline bool promise_control_block::dec_weak(void* v_block) {
+        const auto block = static_cast<promise_control_block*>(v_block);
+        block->_weak_refcount.fetch_sub(1, std::memory_order_relaxed);
+        return clear(block);
+    }
+
+    inline promise_control_block* promise_control_block::get_block_from_address(void* address) {
+        return reinterpret_cast<promise_control_block*>(static_cast<uint8_t*>(address) - promise_control_block_size);
+    }
+
 
     struct promise_rule_traits { struct e_promise_rule {}; };
 
@@ -83,7 +160,7 @@ namespace ace::coroutines {
         typedef promise_return_traits<promise_traits, return_t> promise_return_traits_t;
         using promise_return_traits_t::_status;
 
-        promise_traits() =default;
+        promise_traits() = default;
 
         ~promise_traits() {
             if (_trace_id) [[unlikely]]
@@ -140,9 +217,18 @@ namespace ace::coroutines {
         }
 
         // TODO: Define in future to attach custom allocator
-        /* static inline void* operator new(size_t memsize) noexcept; */
+        void* operator new(size_t mem_size) noexcept {
+            const auto ptr = static_cast<uint8_t*>(::operator new(mem_size + promise_control_block_size));
+            void* mem_ptr = ptr + promise_control_block_size;
+            new (ptr) promise_control_block(mem_ptr);
+            return mem_ptr;
+        }
 
-        /* static inline void operator delete(void* memptr, size_t memsize) noexcept; */
+        void operator delete(void* mem_ptr, size_t mem_size) noexcept {
+            if (void* base_ptr = promise_control_block::get_block_from_address(mem_ptr);
+                promise_control_block::dec_strong(base_ptr))
+                ::operator delete(base_ptr);
+        }
 
         future_handler_ptr_t _future { nullptr };
         std::optional<std::size_t> _trace_id;

@@ -108,13 +108,21 @@ ace::async<> channel_fetcher(ace::futures::channel_dyn<channel_t>& ch, std::vect
 
 inline ace::async<> to_spawn(ace::futures::channel_dyn<ace::core::runner*>& output) {
     auto curr_runner = co_await ace::commands::get_runner();
+    co_await ace::futures::timer(500ms);
+    std::cout << "Spawned runned out\n";
     output << curr_runner;
 }
 
 inline ace::async<> spawner(ace::futures::channel_dyn<ace::core::runner*>& output) {
     auto curr_runner = co_await ace::commands::get_runner();
     output << curr_runner;
-    co_await ace::spawn(to_spawn(output));
+    const auto handle = co_await ace::spawn(to_spawn(output));
+    while (not handle.done()) {
+        std::cout << "Spawned not done\n";
+        co_await std::suspend_always{};
+        co_await ace::futures::timer(100ms);
+    }
+    std::cout << "Spawned done!!!\n";
 }
 
 inline ace::async<> racer(const int& max, int& shared_counter, ace::cutex& cutx,

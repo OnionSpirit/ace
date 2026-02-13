@@ -9,6 +9,7 @@ namespace ace::commands {
     class spawn : public command_traits<spawn> {
 
         async<> _task {};
+        coroutines::control_handle _handle;
 
     public:
 
@@ -19,9 +20,9 @@ namespace ace::commands {
         spawn(const spawn&) = delete;
         spawn& operator=(const spawn&) = delete;
 
-        explicit spawn(async<>&& new_task) {
-            _task = std::move(new_task);
-        }
+        explicit spawn(async<>&& new_task)
+            : _task(std::move(new_task))
+            , _handle(_task.observe()) {}
 
         bool await_suspend(auto coroutine) {
             const auto* runner_ptr = core::pool_to_runner(coroutine.promise()._runner_pool);
@@ -31,7 +32,7 @@ namespace ace::commands {
         }
 
         // TODO: Make return type as 'join_handler' future type, when I will write it
-        static void await_resume() { }
+        coroutines::control_handle await_resume() { return _handle; }
 
     };
 

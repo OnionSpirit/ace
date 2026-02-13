@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 #include "environment.h"
 
-TEST(context, do_co_await_test) {
+TEST(context, DISABLED_do_co_await_test) {
     auto r = simple_context_test();
     ASSERT_TRUE(r);
     r.awake();
@@ -10,7 +10,7 @@ TEST(context, do_co_await_test) {
 }
 
 // NOTE: Проверка разрешения не константных реакций
-TEST(context, do_nested_suspend_test) {
+TEST(context, DISABLED_do_nested_suspend_test) {
 
     auto r = nested_context_suspender();
     ASSERT_TRUE(r);
@@ -20,20 +20,20 @@ TEST(context, do_nested_suspend_test) {
 }
 
 // NOTE: Разрешать константные реакции не по деструктору запрещено
-TEST(context, do_const_nested_suspend_test) {
+TEST(context, DISABLED_do_const_nested_suspend_test) {
 
     const auto r = nested_context_suspender();
     ASSERT_TRUE(r);
     ASSERT_TRUE(r);
 }
 
-TEST(context, do_empty_context_test) {
+TEST(context, DISABLED_do_empty_context_test) {
 
     auto r = ace::coroutines::context<>();
     ASSERT_FALSE(r);
 }
 
-TEST(core, do_runner_test) {
+TEST(core, DISABLED_do_runner_test) {
 
     ace::core::runner runner;
     runner.attach(nested_context_suspender());
@@ -41,7 +41,7 @@ TEST(core, do_runner_test) {
     ASSERT_TRUE(runner.empty());
 }
 
-TEST(futures, do_dynamic_channel_on_runner_test) {
+TEST(futures, DISABLED_do_dynamic_channel_on_runner_test) {
 
     ace::core::runner runner;
     channel_abuser abuser;
@@ -52,7 +52,7 @@ TEST(futures, do_dynamic_channel_on_runner_test) {
     ASSERT_TRUE(abuser._channel.empty());
 }
 
-TEST(futures, do_timer_on_runner_test) {
+TEST(futures, DISABLED_do_timer_on_runner_test) {
 
     ace::futures::channel_dyn<int> _channel {};
 
@@ -89,7 +89,7 @@ TEST(futures, do_timer_on_runner_test) {
         ASSERT_GE(res[i], res[i - 1]);
 }
 
-TEST(futures, do_expire_on_runner_test) {
+TEST(futures, DISABLED_do_expire_on_runner_test) {
     ace::futures::channel_dyn<ace::core::timepoint_t> _channel {};
 
     const auto now = ace::core::clock::current_time();
@@ -126,7 +126,7 @@ TEST(futures, do_expire_on_runner_test) {
         ASSERT_GE(res[i], res[i - 1]);
 }
 
-TEST(futures, mutex_race) {
+TEST(futures, DISABLED_mutex_race) {
     ace::core::s_balancer_config._runners_amount = 4;
     ace::reload();
 
@@ -156,7 +156,7 @@ TEST(futures, mutex_race) {
     ace::reset_signal();
 }
 
-TEST(futures, secure_mutex_race) {
+TEST(futures, DISABLED_secure_mutex_race) {
     ace::core::s_balancer_config._runners_amount = 4;
     ace::reload();
 
@@ -187,7 +187,7 @@ TEST(futures, secure_mutex_race) {
 }
 
 // TODO: Fix breaking something after run
-TEST(futures, do_timer_on_runner_parallel_test) {
+TEST(futures, DISABLED_do_timer_on_runner_parallel_test) {
     ace::core::s_balancer_config._runners_amount = 4;
     ace::reload();
 

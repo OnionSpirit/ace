@@ -14,7 +14,7 @@ namespace ace::commands {
         DECLARE_COMMAND(roaming)
         IMPORT_COMMAND_ENV
 
-        roaming() = delete;
+        roaming() = default;
         explicit roaming(const bool is_roaming) : _is_roaming{is_roaming} {};
 
         roaming(const roaming&) = delete;

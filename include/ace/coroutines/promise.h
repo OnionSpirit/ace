@@ -10,12 +10,13 @@
 
 #include "ace/futures/future.h"
 #include "ace/common/dispatch.h"
+#include "ace/common/id_alloc.h"
 
 #include <concepts>
 #include <coroutine>
 #include <type_traits>
 
-#include "ace/common/id_alloc.h"
+#include "control.h"
 
 namespace ace::coroutines {
 
@@ -27,67 +28,6 @@ namespace ace::coroutines {
         e_finished,
         e_detached,
     };
-
-    struct promise_control_block {
-
-        std::atomic<uint64_t> _weak_refcount {1};
-        std::atomic<uint64_t> _strong_refcount {1};
-        std::atomic<bool> _exists {true};
-
-        promise_control_block() = default;
-
-        ~promise_control_block() = default;
-
-        static bool is_untracked(void* v_block);
-
-        static bool dec_strong(void* v_block);
-
-        static bool inc_weak(void* v_block);
-
-        static bool dec_weak(void* v_block);
-
-        static promise_control_block* get_block_from_address(void* address);
-
-    };
-
-    inline constexpr std::size_t promise_control_block_size = sizeof(promise_control_block);
-
-    inline bool promise_control_block::is_untracked(void* v_block) {
-        const auto block = static_cast<promise_control_block*>(v_block);
-        const bool is_untracked {
-            block->_weak_refcount.load(std::memory_order_acquire) == 0
-            and block->_strong_refcount.load(std::memory_order_acquire) == 0
-        };
-        return is_untracked;
-    }
-
-    inline bool promise_control_block::dec_strong(void* v_block) {
-        const auto block = static_cast<promise_control_block*>(v_block);
-        if (not block->_exists.load(std::memory_order_relaxed)) [[unlikely]]
-            return is_untracked(block);
-        block->_strong_refcount.fetch_sub(1, std::memory_order_relaxed);
-        block->_weak_refcount.fetch_sub(1, std::memory_order_relaxed);
-        block->_exists.store(false, std::memory_order_release);
-        return is_untracked(block);
-    }
-
-    inline bool promise_control_block::inc_weak(void* v_block) {
-        const auto block = static_cast<promise_control_block*>(v_block);
-        if (block->_weak_refcount.load(std::memory_order_acquire) == 0) return is_untracked(block);
-        block->_weak_refcount.fetch_add(1, std::memory_order_release);
-        return is_untracked(block);
-    }
-
-    inline bool promise_control_block::dec_weak(void* v_block) {
-        const auto block = static_cast<promise_control_block*>(v_block);
-        block->_weak_refcount.fetch_sub(1, std::memory_order_relaxed);
-        return is_untracked(block);
-    }
-
-    inline promise_control_block* promise_control_block::get_block_from_address(void* address) {
-        return reinterpret_cast<promise_control_block*>(static_cast<uint8_t*>(address) - promise_control_block_size);
-    }
-
 
     struct promise_rule_traits { struct e_promise_rule {}; };
 
@@ -196,6 +136,20 @@ namespace ace::coroutines {
             return command;
         }
 
+        void* operator new(size_t mem_size) noexcept {
+            const auto ptr = static_cast<uint8_t*>(::operator new(mem_size + control_block_size));
+            void* mem_ptr = ptr + control_block_size;
+            new (ptr) control_block();
+            return mem_ptr;
+        }
+
+        void operator delete(void* mem_ptr) noexcept {
+            void* base_ptr = control_block::get_block_from_address(mem_ptr);
+            // NOTE: Trying to disown, and if it's untracked do delete
+            if (control_block::disown(base_ptr))
+                ::operator delete(base_ptr);
+        }
+
         std::size_t setup_trace() {
             _trace_id = common::context_id_allocator::get_instance().id_alloc();
             return _trace_id.value();
@@ -203,12 +157,14 @@ namespace ace::coroutines {
 
         future_handler_ptr_t _future { nullptr };
         std::optional<std::size_t> _trace_id;
+        control_block* _block { nullptr };
     };
 
 #define DECLARE_PROMISE_TRAITS(return_type_t) typedef coroutines::promise_traits<return_type_t> promise_traits_t;
 
 #define IMPORT_PROMISE_TRAITS_ENV               \
     using promise_traits_t::_future;            \
+    using promise_traits_t::_block;             \
     using promise_traits_t::_status;
 
 }

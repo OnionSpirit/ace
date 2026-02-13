@@ -9,7 +9,7 @@ namespace ace::commands {
     class spawn : public command_traits<spawn> {
 
         async<> _task {};
-        coroutines::control_handle _handle;
+        coroutines::control_block_handle _handle;
 
     public:
 
@@ -32,7 +32,7 @@ namespace ace::commands {
         }
 
         // TODO: Make return type as 'join_handler' future type, when I will write it
-        coroutines::control_handle await_resume() { return _handle; }
+        coroutines::control_block_handle await_resume() { return _handle; }
 
     };
 

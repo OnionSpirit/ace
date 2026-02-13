@@ -15,6 +15,7 @@
 #include <expected>
 
 #include "conductor.h"
+#include "control.h"
 
 #ifndef ACE_CONDUCTOR_MEM_SIZE
 #define ACE_CONDUCTOR_MEM_SIZE std::hardware_constructive_interference_size // Size of cacheline
@@ -22,34 +23,6 @@
 
 // ToDo: yield операцию преретащить в генератор/ пусть генератор имеет перегрузку итераторов чтобы запускать его в цикле for
 namespace ace::coroutines {
-
-    class control_handle {
-
-        promise_control_block* _block { nullptr };
-
-    public:
-
-        control_handle() = default;
-
-        control_handle(const control_handle& h) {
-            this->_block = h._block;
-            promise_control_block::inc_weak(_block);
-        }
-
-        template <typename promise_t>
-        explicit control_handle(const std::coroutine_handle<promise_t>& promise) {
-            _block = promise.promise()._block;
-        }
-
-        ~control_handle() {
-            if (promise_control_block::dec_weak(_block))
-                delete _block;
-        }
-
-        [[nodiscard]] bool done() const {
-            return not _block or not _block->_exists.load(std::memory_order_relaxed);
-        }
-    };
 
     template<typename returnT =void, is_promise_rule launch_ruleT =differed>
     struct context : futures::future_traits<context<returnT, launch_ruleT>> {
@@ -165,7 +138,8 @@ namespace ace::coroutines {
             }
 
             auto final_suspend() const noexcept {
-                if (_block) promise_control_block::dec_strong(_block);
+                // NOTE: Decreasing strong counter on finish
+                if (_block) control_block::disown(_block);
                 return std::suspend_always{};
             }
 
@@ -179,20 +153,6 @@ namespace ace::coroutines {
                 final_suspend();
             };
 
-            // TODO: Define in future to attach custom allocator
-            void* operator new(size_t mem_size) noexcept {
-                const auto ptr = static_cast<uint8_t*>(::operator new(mem_size + promise_control_block_size));
-                void* mem_ptr = ptr + promise_control_block_size;
-                new (ptr) promise_control_block();
-                return mem_ptr;
-            }
-
-            void operator delete(void* mem_ptr) noexcept {
-                void* base_ptr = promise_control_block::get_block_from_address(mem_ptr);
-                if (promise_control_block::is_untracked(base_ptr))
-                    ::operator delete(base_ptr);
-            }
-
             auto get_return_object() noexcept { return context{coroutine_t::from_promise(*this)}; }
 
             static auto get_return_object_on_allocation_failure() { return context(nullptr); }
@@ -202,7 +162,6 @@ namespace ace::coroutines {
             std::atomic<std::shared_ptr<runner_pool_t>> _waiters;
             bool _roaming { false };
             conductor_carry _conductor {};
-            promise_control_block* _block { nullptr };
         };
 
         bool await_ready() override {
@@ -248,9 +207,9 @@ namespace ace::coroutines {
             else return;
         }
 
-        control_handle observe() {
-            _coroutine.promise()._block = promise_control_block::get_block_from_address(_coroutine.address());
-            return control_handle{ _coroutine };
+        control_block_handle observe() {
+            _coroutine.promise()._block = control_block::get_block_from_address(_coroutine.address());
+            return control_block_handle{ _coroutine };
         }
 
         std::expected<std::size_t, std::string_view> trace() {

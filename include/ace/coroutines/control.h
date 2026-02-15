@@ -82,7 +82,8 @@ namespace ace::coroutines {
         }
 
         [[nodiscard]] bool done() const {
-            return not _block or not _block->_exists;
+            if (not _block) [[unlikely]] return false;
+            return not _block->_exists;
         }
     };
 

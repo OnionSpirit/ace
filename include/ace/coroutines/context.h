@@ -66,7 +66,7 @@ namespace ace::coroutines {
 
         explicit operator bool() const { return is_resumable(); }
 
-        ~context() override { if (_coroutine and control_block::is_untracked(_coroutine.address())) _coroutine.destroy(); };
+        ~context() override { if (_coroutine) _coroutine.destroy(); };
 
         // NOTE: Type to store conductor and pass it to outer promise
         struct conductor_carry {
@@ -137,13 +137,15 @@ namespace ace::coroutines {
                 : _address(coroutine.address()) {}
 
             void cancel() noexcept override {
-                if (not _address) return;
+                if (not _address) [[unlikely]] return;
                 auto handle = coroutine_t::from_address(_address);
-                if (handle and handle.promise()._future_conductor)
+                if (handle and handle.promise()._future_conductor) [[likely]] {
                     handle.promise()._future_conductor->cancel();
+                    handle.promise()._future_conductor.release();
+                }
                 if (handle and handle.promise()._nested_promise_conductor)
                     handle.promise()._nested_promise_conductor->cancel();
-                handle.destroy();
+                handle.promise()._status = e_detached;
             }
 
             ~promise_conductor() override = default;
@@ -243,12 +245,17 @@ namespace ace::coroutines {
         }
 
         returnT awake(promise_touch_result *const _res = nullptr) noexcept {
+            // NOTE: Checking if promise are ready
             const bool is_ready {
                 is_resumable()
+                and _coroutine.promise()._status not_eq e_failed
+                and _coroutine.promise()._status not_eq e_finished
+                and _coroutine.promise()._status not_eq e_detached
                 and (not _coroutine.promise()._future or _coroutine.promise()._future->await_ready())
             };
-            // NOTE: Clear future ptr and resume context
+            // NOTE: Clear future and resume context
             if (is_ready) {
+                _coroutine.promise()._future_conductor.release();
                 _coroutine.promise()._future = nullptr;
                 _coroutine.resume();
             }
@@ -338,6 +345,9 @@ namespace ace {
 
     // NOTE: Type of a conductor handler for runner and future objects [Relates 'future' and 'runner']
     typedef async<>::conductor_handler_t conductor_handler_t;
+
+    // NOTE: Type alias for std standard type
+    typedef std::suspend_always suspend;
 }
 
 // Говно нахуй не нужное, но

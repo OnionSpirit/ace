@@ -56,7 +56,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
      * @return @b true if task was processed, @b false otherwise
      */
     bool yank() const noexcept {
-        coroutines::promise_touch_result touch_result = coroutines::promise_touch_result::e_blocked;
+        coroutines::promise_touch_result touch_result = coroutines::promise_touch_result::e_executed;
         auto* async_n = _pool.pop_node();
 
         /// NOTE: Pulling new context from queue

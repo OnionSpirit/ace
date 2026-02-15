@@ -130,50 +130,46 @@ inline ace::async<> spawner(ace::futures::channel_dyn<ace::core::runner*>& outpu
 
 struct destruct_on_cancel_checker {
 
-    std::string _msg;
+    std::string _name;
 
-    explicit destruct_on_cancel_checker(const std::string_view msg) : _msg(msg) {};
+    explicit destruct_on_cancel_checker(const std::string_view name) : _name(name) {};
 
-    ~destruct_on_cancel_checker() { std::cout << _msg << std::endl; }
+    ~destruct_on_cancel_checker() { std::cout << _name << " destroyed" << std::endl; }
 };
 
 inline ace::promise<> to_spawn_nested(ace::futures::channel_dyn<ace::core::runner*>& output) {
     std::cout << "'parallel-nested' started\n";
-    const std::unique_ptr<destruct_on_cancel_checker> _check
-        = std::make_unique<destruct_on_cancel_checker>("'parallel-nested' destroyed");
     auto curr_runner = co_await ace::commands::get_runner();
-    co_await ace::futures::timer(100ms);
-    co_await std::suspend_always{};
+    co_await ace::suspend();
+    const std::unique_ptr<destruct_on_cancel_checker> _check
+        = std::make_unique<destruct_on_cancel_checker>("'parallel-nested'");
+    co_await ace::suspend();
     output << curr_runner;
-    std::cout << "'parallel-nested' done\n";
-    std::cout << _check << " not destroyed\n";
+    std::cout << _check->_name << " reached end\n";
     co_return;
 }
 
 inline ace::async<> to_spawn_cancel(ace::futures::channel_dyn<ace::core::runner*>& output) {
     std::cout << "'parallel' started\n";
-    const std::unique_ptr<destruct_on_cancel_checker> _check
-        = std::make_unique<destruct_on_cancel_checker>("'parallel' destroyed");
-    co_await to_spawn_nested(output);
     auto curr_runner = co_await ace::commands::get_runner();
-    co_await ace::futures::timer(100ms);
-    co_await std::suspend_always{};
+    const std::unique_ptr<destruct_on_cancel_checker> _check
+        = std::make_unique<destruct_on_cancel_checker>("'parallel'");
+    co_await to_spawn_nested(output);
     output << curr_runner;
-    std::cout << "'parallel' finished\n";
-    std::cout << _check << " not destroyed\n";
+    std::cout << _check->_name << " reached end\n";
     co_return;
 }
 
 inline ace::async<> spawner_cancel(ace::futures::channel_dyn<ace::core::runner*>& output) {
+    std::cout << "'spawner' started\n";
     auto curr_runner = co_await ace::commands::get_runner();
-    output << curr_runner;
     // TODO: Temp
-    const ace::coroutines::control_block_handle handle = co_await ace::spawn(to_spawn_cancel(output));
-    co_await ace::futures::timer(10ms);
+    ace::coroutines::control_block_handle handle = co_await ace::spawn(to_spawn_cancel(output));
+    co_await ace::suspend();
     std::cout << "'spawner' awake, canceling...\n";
     handle.cancel();
-    std::cout << "'spawner' canceled by handler\n";
-    co_await ace::futures::timer(10ms);
+    co_await ace::suspend();
+    output << curr_runner;
     std::cout << "'spawner' finished\n";
 }
 
@@ -200,6 +196,7 @@ inline ace::async<> secure_racer(const int& max, int& shared_counter, ace::cutex
 }
 
 // NOTE: Helper function for tests
+// TODO: Detach cutex instead of terminate
 inline ace::async<> cutex_detacher(ace::cutex& cutx, const int racers_count,
         ace::futures::channel_dyn<char>& racer_output) {
     for (int i = 0; i < racers_count; ++i)

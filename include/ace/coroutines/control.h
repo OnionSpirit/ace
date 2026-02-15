@@ -51,6 +51,12 @@ namespace ace::coroutines {
 
         control_block* _block { nullptr };
 
+        void release() {
+            if (control_block::unwatch(_block))
+                delete _block;
+            _block = nullptr;
+        }
+
     public:
 
         control_block_handle() = default;
@@ -66,14 +72,13 @@ namespace ace::coroutines {
             control_block::watch(_block);
         }
 
-        ~control_block_handle() {
-            if (control_block::unwatch(_block))
-                delete _block;
-        }
+        ~control_block_handle() { release(); }
 
-        void cancel() const {
-            if (not done() and _block->_promise_conductor) [[likely]]
-                _block->_promise_conductor->cancel();
+        void cancel() {
+            if (done() or not _block->_promise_conductor) [[unlikely]]
+                return;
+            _block->_promise_conductor->cancel();
+            release();
         }
 
         [[nodiscard]] bool done() const {

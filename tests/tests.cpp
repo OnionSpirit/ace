@@ -37,7 +37,7 @@ TEST(core, do_runner_test) {
 
     ace::core::runner runner;
     runner.attach(nested_context_suspender());
-    runner.run();
+    ASSERT_FALSE(runner.run());
     ASSERT_TRUE(runner.empty());
 }
 
@@ -47,7 +47,7 @@ TEST(futures, do_dynamic_channel_on_runner_test) {
     channel_abuser abuser;
     runner.attach(abuser.channel_receiver());
     runner.attach(abuser.channel_sender());
-    runner.run();
+    ASSERT_FALSE(runner.run());
     ASSERT_TRUE(runner.empty());
     ASSERT_TRUE(abuser._channel.empty());
 }
@@ -126,7 +126,7 @@ TEST(futures, do_expire_on_runner_test) {
         ASSERT_GE(res[i], res[i - 1]);
 }
 
-TEST(futures, DISABLED_mutex_race) {
+TEST(futures, cutex_race) {
     ace::core::s_balancer_config._runners_amount = 4;
     ace::reload();
 
@@ -156,7 +156,7 @@ TEST(futures, DISABLED_mutex_race) {
     ace::reset_signal();
 }
 
-TEST(futures, DISABLED_secure_mutex_race) {
+TEST(futures, secure_cutex_race) {
     ace::core::s_balancer_config._runners_amount = 4;
     ace::reload();
 

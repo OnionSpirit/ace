@@ -23,7 +23,6 @@ namespace ace::coroutines {
 
     enum promise_touch_result : uint8_t  {
         e_failed,
-        e_blocked,
         e_executed,
         e_executed_with_value,
         e_finished,
@@ -50,7 +49,7 @@ namespace ace::coroutines {
 
         promiseT* _derived = static_cast<promiseT*>(this);
 
-        promise_touch_result _status { e_blocked };
+        promise_touch_result _status { e_executed };
 
         returnT _return_value {};
 
@@ -73,7 +72,7 @@ namespace ace::coroutines {
 
         promiseT* _derived = static_cast<promiseT*>(this);
 
-        promise_touch_result _status { e_blocked };
+        promise_touch_result _status { e_executed };
 
         auto return_void() { return std::suspend_never{}; }
     };
@@ -107,7 +106,7 @@ namespace ace::coroutines {
         template <typename futureT>
         requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, return_t>
         futureT& await_transform(futureT& future) {
-            _status = e_blocked;
+            _status = e_executed;
             _future = &future;
             return future;
         }
@@ -115,7 +114,7 @@ namespace ace::coroutines {
         template <typename futureT>
         requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, return_t>
         futureT&& await_transform(futureT&& future) {
-            _status = e_blocked;
+            _status = e_executed;
             _future = &future;
             return std::forward<futureT>(future);
         }

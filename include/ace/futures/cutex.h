@@ -129,7 +129,7 @@ await_suspend(auto coroutine) {
     if (try_lock()) return false;
     // // TODO: Remove timeout line after mtx_resolve_service will be tested
     // std::this_thread::sleep_for(1ms);
-    coroutine.promise()._conductor = cutex_conductor{this};
+    coroutine.promise()._future_conductor = cutex_conductor{this};
     return true;
 }
 

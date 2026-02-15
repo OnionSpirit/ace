@@ -16,6 +16,7 @@
 
 #include "conductor.h"
 #include "control.h"
+#include "ace/common/terms.h"
 
 #ifndef ACE_CONDUCTOR_MEM_SIZE
 #define ACE_CONDUCTOR_MEM_SIZE std::hardware_constructive_interference_size // Size of cacheline
@@ -24,8 +25,8 @@
 // ToDo: yield операцию преретащить в генератор/ пусть генератор имеет перегрузку итераторов чтобы запускать его в цикле for
 namespace ace::coroutines {
 
-    template<typename returnT =void, is_promise_rule launch_ruleT =differed>
-    struct context : futures::future_traits<context<returnT, launch_ruleT>> {
+    template<typename returnT =void, is_promise_rule promise_rule_t =differed>
+    struct context : futures::future_traits<context<returnT, promise_rule_t>> {
         DECLARE_FUTURE(context)
         IMPORT_FUTURE_ENV
 
@@ -60,12 +61,12 @@ namespace ace::coroutines {
 
         // NOTE: Checks if context is resumable
         [[nodiscard]] bool is_resumable() const noexcept {
-            return _coroutine and not _coroutine.done() and not control_block::disowned(_coroutine.address());
+            return _coroutine and not _coroutine.done() and not control_block::is_disowned(_coroutine.address());
         }
 
         explicit operator bool() const { return is_resumable(); }
 
-        ~context() override { if (_coroutine) _coroutine.destroy(); };
+        ~context() override { if (_coroutine and control_block::is_disowned(_coroutine.address())) _coroutine.destroy(); };
 
         // NOTE: Type to store conductor and pass it to outer promise
         struct conductor_carry {
@@ -124,6 +125,28 @@ namespace ace::coroutines {
             uint8_t _conductor_area [ACE_CONDUCTOR_MEM_SIZE] {};
         };
 
+        class promise_conductor : public promise_conductor_handle {
+
+            void* _address { nullptr };
+
+        public:
+
+            promise_conductor() = default;
+
+            explicit promise_conductor(const coroutine_t& coroutine)
+                : _address(coroutine.address()) {}
+
+            void cancel() noexcept override {
+                if (not _address) return;
+                auto handle = coroutine_t::from_address(_address);
+                if (handle and handle.promise()._future_conductor)
+                    handle.promise()._future_conductor->cancel();
+                handle.destroy();
+            }
+
+            ~promise_conductor() override = default;
+        };
+
         struct promise_type : promise_traits<returnT> {
             DECLARE_PROMISE_TRAITS(returnT)
             IMPORT_PROMISE_TRAITS_ENV
@@ -133,7 +156,7 @@ namespace ace::coroutines {
             ~promise_type() = default;
 
             [[nodiscard]] auto initial_suspend() const noexcept {
-                return launch_ruleT::action();
+                return promise_rule_t::action();
             }
 
             auto final_suspend() const noexcept {
@@ -156,32 +179,24 @@ namespace ace::coroutines {
 
             static auto get_return_object_on_allocation_failure() { return context(nullptr); }
 
+            // NOTE: Set ups control block settings from extern coroutine_handle object
+            template <typename promise_t>
+            requires std::same_as<differed, promise_rule_t>
+            void setup_control_block(const std::coroutine_handle<promise_t>& c) {
+                // NOTE: Getting control block address
+                _block = control_block::get_block_from_address(c.address());
+                // NOTE: Initiating promise conductor
+                _promise_conductor = promise_conductor(c);
+                // NOTE: Setting promise conductor
+                _block->_promise_conductor = &c.promise()._promise_conductor;
+            }
+
             // TODO: Wrap into weak hazard ptr, when I will write it
             runner_pool_t* _runner_pool {nullptr};
             std::atomic<std::shared_ptr<runner_pool_t>> _waiters;
             bool _roaming { false };
-            conductor_carry _conductor {};
-        };
-
-        class access : public access_handle {
-
-            void* _address;
-
-        public:
-
-            access() = delete;
-
-            explicit access(const coroutine_t& coroutine)
-                : _address(coroutine.address()) {}
-
-            void cancel() noexcept override {
-                auto handle = coroutine_t::from_address(_address);
-                if (handle and handle.promise()._conductor)
-                    handle.promise()._conductor->cancel();
-                handle.destroy();
-            }
-
-            ~access() override = default;
+            conductor_carry _future_conductor {}; ///< Carry object needed because few futures can be awaited during context run
+            on_differed<promise_conductor, promise_rule_t> _promise_conductor; ///< Context owns only one promise. Extra carry object is unnecessary
         };
 
         bool await_ready() override {
@@ -194,11 +209,12 @@ namespace ace::coroutines {
 
         template<typename promiseT>
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
-            // NOTE: Passing conductor to outer
-            if (is_resumable() and _coroutine.promise()._conductor)
-                outer.promise()._conductor = std::move(_coroutine.promise()._conductor);
+            const bool is_not_done = is_resumable();
+            // NOTE: Passing future conductor to outer
+            if (is_not_done and _coroutine.promise()._future_conductor)
+                outer.promise()._future_conductor = std::move(_coroutine.promise()._future_conductor);
             // NOTE: Suspending if not idle
-            else if (is_resumable()) return false;
+            if (is_not_done) return false;
             return true;
         }
 
@@ -227,8 +243,8 @@ namespace ace::coroutines {
         }
 
         control_block_handle observe() {
-            _coroutine.promise()._block = control_block::get_block_from_address(_coroutine.address());
-            _coroutine.promise()._block->_access = new access(_coroutine);
+            // NOTE: Setting up promise block by coroutine
+            _coroutine.promise().setup_control_block(_coroutine);
             return control_block_handle{ _coroutine };
         }
 
@@ -273,7 +289,7 @@ namespace ace::coroutines {
 
         template<typename promise_u>
         bool await_suspend(std::coroutine_handle<promise_u> outer) {
-            outer.promise()._conductor = join_handler_conductor{_coroutine};
+            outer.promise()._future_conductor = join_handler_conductor{_coroutine};
             return false;
         }
 

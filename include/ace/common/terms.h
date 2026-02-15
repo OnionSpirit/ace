@@ -7,4 +7,6 @@
 
 #define ACE_CACHE_LINE(number) [[maybe_unused]] struct {} _cache_line_##number[0] {};
 
+typedef struct {} ACE_EMPTY_TYPE;
+
 #endif // ACE_COMMON_TERMS_H

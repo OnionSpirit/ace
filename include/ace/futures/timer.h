@@ -89,7 +89,7 @@ struct ACE_FUTURE_TIMER_SPACE timer_conductor : conductor_handler_t {
 
 ACE_FUTURE_TIMER_MEMBER(bool)
 await_suspend(auto coroutine) {
-    coroutine.promise()._conductor = timer_conductor{this};
+    coroutine.promise()._future_conductor = timer_conductor{this};
     return true;
 }
 

@@ -78,7 +78,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
         // NOTE: Checking if the context shall be forwarded via passed conductor
         const bool is_conducted {
             is_resumable
-            and async_n->_data._coroutine.promise()._conductor
+            and async_n->_data._coroutine.promise()._future_conductor
         };
 
         // NOTE: Decision if node shall be released or pushed back
@@ -86,7 +86,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
 
         // NOTE: Forwarding via conductor if needed
         if (is_conducted) [[likely]]
-            async_n->_data._coroutine.promise()._conductor->forward(std::forward<async<>>(async_n->_data));
+            async_n->_data._coroutine.promise()._future_conductor->forward(std::forward<async<>>(async_n->_data));
 
         // NOTE: Managing nodes depending on checks
         if (is_idle) _pool.release_node(async_n);

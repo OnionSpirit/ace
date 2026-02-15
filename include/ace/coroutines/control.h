@@ -8,11 +8,11 @@
 
 namespace ace::coroutines {
 
-    struct access_handle {
+    struct promise_conductor_handle {
 
         virtual void cancel() noexcept = 0;
 
-        virtual ~access_handle() = default;
+        virtual ~promise_conductor_handle() = default;
     };
 
     struct control_block {
@@ -20,11 +20,11 @@ namespace ace::coroutines {
         std::atomic<uint64_t> _weak_refcount {1};
         std::atomic<uint64_t> _strong_refcount {1};
         std::atomic<bool> _exists {true};
-        access_handle* _access { nullptr };
+        promise_conductor_handle* _promise_conductor { nullptr };
 
         control_block() = default;
 
-        ~control_block() { delete _access; };
+        ~control_block() = default;
 
         static bool is_untracked(void* v_block);
 
@@ -34,7 +34,7 @@ namespace ace::coroutines {
 
         static bool unwatch(void* v_block);
 
-        static bool disowned(void* address);
+        static bool is_disowned(void* address);
 
         static control_block* get_block_from_address(void* address);
 
@@ -72,8 +72,8 @@ namespace ace::coroutines {
         }
 
         void cancel() const {
-            if (not done() and _block->_access) [[likely]]
-                _block->_access->cancel();
+            if (not done() and _block->_promise_conductor) [[likely]]
+                _block->_promise_conductor->cancel();
         }
 
         [[nodiscard]] bool done() const {
@@ -82,6 +82,7 @@ namespace ace::coroutines {
     };
 
 
+    // NOTE: Checks if there are no watchers or owners at the control block
     inline bool control_block::is_untracked(void* v_block) {
         if (v_block == nullptr) [[unlikely]] return false;
         const auto block = static_cast<control_block*>(v_block);
@@ -89,6 +90,7 @@ namespace ace::coroutines {
             and block->_strong_refcount.load(std::memory_order_acquire) == 0;
     }
 
+    // NOTE: Detaches owner from the control block
     inline bool control_block::disown(void* v_block) {
         if (v_block == nullptr) [[unlikely]] return false;
         const auto block = static_cast<control_block*>(v_block);
@@ -99,6 +101,7 @@ namespace ace::coroutines {
         end: return is_untracked(block);
     }
 
+    // NOTE: Attaches spectator (not owner) to the control block
     inline bool control_block::watch(void* v_block) {
         if (v_block == nullptr) [[unlikely]] return false;
         const auto block = static_cast<control_block*>(v_block);
@@ -107,6 +110,7 @@ namespace ace::coroutines {
         end: return is_untracked(block);
     }
 
+    // NOTE: Detaches spectator (not owner) from the control block
     inline bool control_block::unwatch(void* v_block) {
         if (v_block == nullptr) [[unlikely]] return false;
         const auto block = static_cast<control_block*>(v_block);
@@ -114,10 +118,12 @@ namespace ace::coroutines {
         return is_untracked(block);
     }
 
-    inline bool control_block::disowned(void* address) {
+    // NOTE: Gets control block of passed promise address, and checks ownership status
+    inline bool control_block::is_disowned(void* address) {
         return not get_block_from_address(address)->_exists.load(std::memory_order_acquire);
     }
 
+    // NOTE: Gets control block pointer from the raw promise address
     inline control_block* control_block::get_block_from_address(void* address) {
         return reinterpret_cast<control_block*>(static_cast<uint8_t*>(address) - control_block_size);
     }

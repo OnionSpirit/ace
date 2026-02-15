@@ -109,7 +109,7 @@ ace::async<> channel_fetcher(ace::futures::channel_dyn<channel_t>& ch, std::vect
 inline ace::async<> to_spawn(ace::futures::channel_dyn<ace::core::runner*>& output) {
     auto curr_runner = co_await ace::commands::get_runner();
     co_await ace::futures::timer(100ms);
-    std::cout << "Spawned runned out\n";
+    std::cout << "'spawned' runned out\n";
     output << curr_runner;
     co_return;
 }
@@ -120,10 +120,10 @@ inline ace::async<> spawner(ace::futures::channel_dyn<ace::core::runner*>& outpu
     // TODO: Temp
     const ace::coroutines::control_block_handle handle = co_await ace::spawn(to_spawn(output));
     while (not handle.done()) {
-        std::cout << "Spawned not done\n";
+        std::cout << "'spawned' not done\n";
         co_await ace::futures::timer(10ms);
     }
-    std::cout << "Spawned done!!!\n";
+    std::cout << "'spawned' done!!!\n";
 }
 
 inline ace::async<> to_spawn_cancel(ace::futures::channel_dyn<ace::core::runner*>& output) {

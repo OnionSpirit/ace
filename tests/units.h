@@ -126,11 +126,24 @@ inline ace::async<> spawner(ace::futures::channel_dyn<ace::core::runner*>& outpu
     std::cout << "'spawned' done!!!\n";
 }
 
-inline ace::async<> to_spawn_cancel(ace::futures::channel_dyn<ace::core::runner*>& output) {
+inline ace::promise<> to_spawn_nested(ace::futures::channel_dyn<ace::core::runner*>& output) {
+    std::cout << "'parallel-nested' started\n";
     auto curr_runner = co_await ace::commands::get_runner();
-    co_await ace::futures::timer(10ms);
-    std::cout << "Not canceled\n";
+    co_await ace::futures::timer(100ms);
+    co_await std::suspend_always{};
     output << curr_runner;
+    std::cout << "'parallel-nested' done\n";
+    co_return;
+}
+
+inline ace::async<> to_spawn_cancel(ace::futures::channel_dyn<ace::core::runner*>& output) {
+    std::cout << "'parallel' started\n";
+    co_await to_spawn_nested(output);
+    auto curr_runner = co_await ace::commands::get_runner();
+    co_await ace::futures::timer(100ms);
+    co_await std::suspend_always{};
+    output << curr_runner;
+    std::cout << "'parallel' finished\n";
     co_return;
 }
 
@@ -139,10 +152,14 @@ inline ace::async<> spawner_cancel(ace::futures::channel_dyn<ace::core::runner*>
     output << curr_runner;
     // TODO: Temp
     const ace::coroutines::control_block_handle handle = co_await ace::spawn(to_spawn_cancel(output));
+    co_await ace::futures::timer(10ms);
+    std::cout << "'spawner' awake\n";
     handle.cancel();
-    co_await ace::futures::timer(100ms);
+    std::cout << "'spawner' sent cancel signal\n";
+    co_await ace::futures::timer(10ms);
     if (handle.done())
         std::cout << "Cancel done!!!\n";
+    std::cout << "'spawner' finished\n";
 }
 
 inline ace::async<> racer(const int& max, int& shared_counter, ace::cutex& cutx,

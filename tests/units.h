@@ -132,7 +132,9 @@ struct destruct_on_cancel_checker {
 
     std::string _name;
 
-    explicit destruct_on_cancel_checker(const std::string_view name) : _name(name) {};
+    explicit destruct_on_cancel_checker(const std::string_view name) : _name(name) {
+        std::cout << _name << " constructed" << std::endl;
+    };
 
     ~destruct_on_cancel_checker() { std::cout << _name << " destroyed" << std::endl; }
 };
@@ -145,7 +147,7 @@ inline ace::promise<> to_spawn_nested(ace::futures::channel_dyn<ace::core::runne
         = std::make_unique<destruct_on_cancel_checker>("'parallel-nested'");
     co_await ace::suspend();
     output << curr_runner;
-    std::cout << _check->_name << " reached end\n";
+    std::cout << _check->_name << " finished\n";
     co_return;
 }
 
@@ -156,7 +158,7 @@ inline ace::async<> to_spawn_cancel(ace::futures::channel_dyn<ace::core::runner*
         = std::make_unique<destruct_on_cancel_checker>("'parallel'");
     co_await to_spawn_nested(output);
     output << curr_runner;
-    std::cout << _check->_name << " reached end\n";
+    std::cout << _check->_name << " finished\n";
     co_return;
 }
 

@@ -17,9 +17,9 @@ namespace ace::coroutines {
 
     struct control_block {
 
-        std::atomic<uint64_t> _weak_refcount {1};
-        std::atomic<uint64_t> _strong_refcount {1};
-        std::atomic<bool> _exists {true};
+        uint64_t _weak_refcount {1};
+        uint64_t _strong_refcount {1};
+        bool _exists {true};
         promise_conductor_handle* _promise_conductor { nullptr };
 
         control_block() = default;
@@ -82,7 +82,7 @@ namespace ace::coroutines {
         }
 
         [[nodiscard]] bool done() const {
-            return not _block or not _block->_exists.load(std::memory_order_relaxed);
+            return not _block or not _block->_exists;
         }
     };
 
@@ -91,18 +91,18 @@ namespace ace::coroutines {
     inline bool control_block::is_untracked(void* v_block) {
         if (v_block == nullptr) [[unlikely]] return false;
         const auto block = static_cast<control_block*>(v_block);
-        return  block->_weak_refcount.load(std::memory_order_acquire) == 0
-            and block->_strong_refcount.load(std::memory_order_acquire) == 0;
+        return  block->_weak_refcount == 0
+            and block->_strong_refcount == 0;
     }
 
     // NOTE: Detaches owner from the control block
     inline bool control_block::disown(void* v_block) {
         if (v_block == nullptr) [[unlikely]] return false;
         const auto block = static_cast<control_block*>(v_block);
-        if (not block->_exists.load(std::memory_order_relaxed)) [[unlikely]] goto end;
-        block->_strong_refcount.fetch_sub(1, std::memory_order_relaxed);
-        block->_weak_refcount.fetch_sub(1, std::memory_order_relaxed);
-        block->_exists.store(false, std::memory_order_release);
+        if (not block->_exists) [[unlikely]] goto end;
+        --block->_strong_refcount;
+        --block->_weak_refcount;
+        block->_exists = false;
         end: return is_untracked(block);
     }
 
@@ -110,8 +110,8 @@ namespace ace::coroutines {
     inline bool control_block::watch(void* v_block) {
         if (v_block == nullptr) [[unlikely]] return false;
         const auto block = static_cast<control_block*>(v_block);
-        if (block->_weak_refcount.load(std::memory_order_acquire) == 0) [[unlikely]] goto end;
-        block->_weak_refcount.fetch_add(1, std::memory_order_release);
+        if (block->_weak_refcount == 0) [[unlikely]] goto end;
+        ++block->_weak_refcount;
         end: return is_untracked(block);
     }
 
@@ -119,13 +119,13 @@ namespace ace::coroutines {
     inline bool control_block::unwatch(void* v_block) {
         if (v_block == nullptr) [[unlikely]] return false;
         const auto block = static_cast<control_block*>(v_block);
-        block->_weak_refcount.fetch_sub(1, std::memory_order_relaxed);
+        --block->_weak_refcount;
         return is_untracked(block);
     }
 
     // NOTE: Gets control block of passed promise address, and checks ownership status
     inline bool control_block::is_disowned(void* address) {
-        return not get_block_from_address(address)->_exists.load(std::memory_order_acquire);
+        return not get_block_from_address(address)->_exists;
     }
 
     // NOTE: Gets control block pointer from the raw promise address

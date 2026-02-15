@@ -45,15 +45,6 @@ namespace ace::coroutines {
         and (std::same_as<decltype(modeT::action()), std::suspend_never>
         or std::same_as<decltype(modeT::action()), std::suspend_always>);
 
-    template <typename type_t, is_promise_rule rule_t, is_promise_rule brule_t>
-    using rule_dependent_fields = std::conditional_t<std::same_as<rule_t, brule_t>, type_t, ACE_EMPTY_TYPE>;
-
-    template <typename type_t, is_promise_rule rule_t>
-    using on_differed = rule_dependent_fields<type_t, rule_t, differed>;
-
-    template <typename type_t, is_promise_rule rule_t>
-    using on_permanent = rule_dependent_fields<type_t, rule_t, permanent>;
-
     template <typename promiseT, typename returnT>
     struct promise_return_traits {
 

@@ -66,7 +66,7 @@ namespace ace::coroutines {
 
         explicit operator bool() const { return is_resumable(); }
 
-        ~context() override { if (_coroutine and control_block::is_disowned(_coroutine.address())) _coroutine.destroy(); };
+        ~context() override { if (_coroutine and control_block::is_untracked(_coroutine.address())) _coroutine.destroy(); };
 
         // NOTE: Type to store conductor and pass it to outer promise
         struct conductor_carry {
@@ -141,6 +141,8 @@ namespace ace::coroutines {
                 auto handle = coroutine_t::from_address(_address);
                 if (handle and handle.promise()._future_conductor)
                     handle.promise()._future_conductor->cancel();
+                if (handle and handle.promise()._nested_promise_conductor)
+                    handle.promise()._nested_promise_conductor->cancel();
                 handle.destroy();
             }
 
@@ -186,17 +188,31 @@ namespace ace::coroutines {
                 // NOTE: Getting control block address
                 _block = control_block::get_block_from_address(c.address());
                 // NOTE: Initiating promise conductor
-                _promise_conductor = promise_conductor(c);
+                _current_promise_conductor = promise_conductor(c);
                 // NOTE: Setting promise conductor
-                _block->_promise_conductor = &c.promise()._promise_conductor;
+                _block->_promise_conductor = &c.promise()._current_promise_conductor.value();
+            }
+
+            template <typename promise_t>
+            promise_conductor_handle* get_promise_conductor(const std::coroutine_handle<promise_t>& c) {
+                // NOTE: Initiating promise conductor
+                _current_promise_conductor = promise_conductor(c);
+                return &_current_promise_conductor.value();
             }
 
             // TODO: Wrap into weak hazard ptr, when I will write it
             runner_pool_t* _runner_pool {nullptr};
             std::atomic<std::shared_ptr<runner_pool_t>> _waiters;
             bool _roaming { false };
-            conductor_carry _future_conductor {}; ///< Carry object needed because few futures can be awaited during context run
-            on_differed<promise_conductor, promise_rule_t> _promise_conductor; ///< Context owns only one promise. Extra carry object is unnecessary
+            // NOTE: Conductor to manage futures on suspended state.
+            // NOTE: Carry object needed because few futures can be awaited during context run
+            conductor_carry _future_conductor {};
+            // NOTE: Conductor to manage promise on suspended state.
+            // NOTE: Context owns only one promise. Extra carry object is unnecessary
+            std::optional<promise_conductor> _current_promise_conductor;
+            // NOTE: Conductor to manage nested promise, if it's exists, on suspended state
+            // NOTE: Promise may have only one nested promise. Extra carry object is unnecessary
+            promise_conductor_handle* _nested_promise_conductor { nullptr };
         };
 
         bool await_ready() override {
@@ -209,12 +225,14 @@ namespace ace::coroutines {
 
         template<typename promiseT>
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
-            const bool is_not_done = is_resumable();
+            // NOTE: If context is dead, don't block
+            if (not is_resumable()) return false;
             // NOTE: Passing future conductor to outer
-            if (is_not_done and _coroutine.promise()._future_conductor)
+            if (_coroutine.promise()._future_conductor)
                 outer.promise()._future_conductor = std::move(_coroutine.promise()._future_conductor);
-            // NOTE: Suspending if not idle
-            if (is_not_done) return false;
+            // NOTE: If outer task is observed, initialize local promise conductor and pass it as nested
+            if (outer.promise()._current_promise_conductor)
+                outer.promise()._nested_promise_conductor = _coroutine.promise().get_promise_conductor(_coroutine);
             return true;
         }
 

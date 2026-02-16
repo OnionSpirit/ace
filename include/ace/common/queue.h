@@ -140,6 +140,16 @@ namespace ace::common {
             return node;
         }
 
+        q_node<T>* enqueue(q_node<T>&& node) {
+            node.owning_queue = this;
+            node.prev = tail;
+            node.next = nullptr;
+            if (tail) tail->next = &node;
+            else head = &node;
+            tail = &node;
+            return &node;
+        }
+
         [[nodiscard]] bool empty() const { return head == nullptr; }
 
         T dequeue() {
@@ -148,6 +158,12 @@ namespace ace::common {
             T val = std::forward<T>(*node->data());
             remove_node(node);
             return val;
+        }
+
+        q_node<T>&& pop() {
+            q_node<T>* node = head;
+            unlink(node);
+            return std::move(*node);
         }
     };
 

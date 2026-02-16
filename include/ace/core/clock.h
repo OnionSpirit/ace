@@ -166,13 +166,13 @@ namespace ace::core {
 
         /**
          * @brief Injects record to the wheel. Slot will be selected by duration
-         * @param [in] record Record to inject
+         * @param [in] node Record node to inject
          * @return Injected node ptr
          */
-        clock_node* inject_record(clock_record&& record) {
-            const auto arrow_offset = (record._duration / _tick_duration + 1) % _tick_count;
+        clock_node* inject_record(clock_node&& node) {
+            const auto arrow_offset = (node.data()->_duration / _tick_duration + 1) % _tick_count;
             const auto arrow = (_arrow + arrow_offset) % _tick_count;
-            return _dial.at(arrow)._records.enqueue(std::forward<clock_record>(record));
+            return _dial.at(arrow)._records.enqueue(std::forward<clock_node>(node));
         }
 
         /**
@@ -216,7 +216,7 @@ namespace ace::core {
         void advance_arrow(time_wheel* lower_wheel) {
             auto&& records = std::move(_dial[_arrow % _tick_count]._records);
             while(not records.empty())
-                lower_wheel->inject_record(std::forward<clock_record>(records.dequeue()));
+                lower_wheel->inject_record(std::forward<clock_node>(records.pop()));
             migrate();
             ++_arrow;
         }

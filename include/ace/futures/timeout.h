@@ -75,14 +75,17 @@ struct ACE_FUTURE_TIMEOUT_SPACE timeout_conductor : conductor_handler_t {
         // NOTE: Because await_ready() will be called after context retreatment to runner.
         // NOTE: And retreatment will happen only when timeout actually expired
         _timeout->_released = true;
-        core::clock::subscribe(std::move(ctx), _timeout->_duration);
+        _injected_node = core::clock::subscribe(std::move(ctx), _timeout->_duration);
     }
 
-    // TODO: Finish later
-    void cancel() override {  }
+    void cancel() override {
+        if (_injected_node)
+            core::clock::detach(_injected_node);
+    }
 
     ~timeout_conductor() override = default;
 
+    core::clock_node* _injected_node = nullptr;
     timeout* const _timeout;
 };
 

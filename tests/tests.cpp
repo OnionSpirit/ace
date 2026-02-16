@@ -255,16 +255,19 @@ TEST(commands, check_spawn_command) {
 }
 
 TEST(commands, check_cancel) {
+    const auto start_time = std::chrono::_V2::steady_clock::now();
     ace::futures::channel_dyn<ace::core::runner*> channel_ {};
     ace::schedule(spawner_cancel(channel_));
     ace::run();
     ASSERT_TRUE(ace::empty());
+    const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::_V2::steady_clock::now() - start_time).count();
     // // NOTE: Collecting waited time sequence
     std::vector<ace::core::runner*> res{};
     ace::schedule(channel_fetcher(channel_, res));
     ace::run();
     ASSERT_TRUE(ace::empty());
-    ASSERT_EQ(res.size(), 1);
-    ASSERT_NE(res[0], nullptr);
+    EXPECT_EQ(res.size(), 1);
+    EXPECT_NE(res[0], nullptr);
+    EXPECT_LT(ms_time, 900);
 }
 

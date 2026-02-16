@@ -9,8 +9,9 @@
 #include <complex>
 #include <list>
 
-#include "vortex.h"
+#include "ace/core/vortex.h"
 #include "ace/coroutines/context.h"
+#include "ace/common/queue.h"
 
 namespace ace::core {
 
@@ -61,8 +62,10 @@ namespace ace::core {
             : _duration(dur)
             , _context(std::forward<async<>>(ctx)) {}
 
+        static thread_local common::slab_mempool<clock_record> _clock_record_mempool;
     };
 
+    using clock_node = common::q_node<clock_record>;
 
     /**
      * @brief Represents time wheel slot. Storing records with same expiration time and provides release functionality
@@ -74,15 +77,6 @@ namespace ace::core {
         time_slot(const time_slot& x) =delete;
 
         time_slot& operator=(const time_slot& x) =delete;
-
-        time_slot(time_slot&& x) noexcept {
-            this->_records = std::move(x._records);
-        }
-
-        time_slot& operator=(time_slot&& x) noexcept {
-            this->_records = std::move(x._records);
-            return *this;
-        }
 
         /**
          * @brief Releases passed record to scheduler
@@ -101,8 +95,7 @@ namespace ace::core {
         int release_slot(int allowed_releases) {
             int released =0;
             while (not _records.empty() and released < allowed_releases) {
-                release_record(std::forward<clock_record>(_records.front()));
-                _records.pop();
+                release_record(std::forward<clock_record>(_records.dequeue()));
                 ++released;
             }
             return released;
@@ -112,10 +105,8 @@ namespace ace::core {
          * @brief Releases all stored records
          */
         void release_slot() {
-            while (not _records.empty()) {
-                release_record(std::forward<clock_record>(_records.front()));
-                _records.pop();
-            }
+            while (not _records.empty())
+                release_record(std::forward<clock_record>(_records.dequeue()));
         }
 
         /**
@@ -124,7 +115,7 @@ namespace ace::core {
          */
         [[nodiscard]] bool empty() const { return _records.empty(); }
 
-        std::queue<clock_record> _records; ///< Queue of stored records
+        common::queue<clock_record> _records{clock_record::_clock_record_mempool}; ///< Queue of stored records
     };
 
     /**
@@ -165,21 +156,23 @@ namespace ace::core {
          * @brief Injects context to the wheel. Slot will be selected by duration
          * @param [in] ctx Context to await
          * @param [in] dur Duration of awaiting
+         * @return Injected node ptr
          */
-        void inject_raw(async<>&& ctx, duration_t dur) {
+        clock_node* inject_raw(async<>&& ctx, duration_t dur) {
             const auto arrow_offset = (dur / _tick_duration) % _tick_count;
             const auto arrow = (_arrow + arrow_offset) % _tick_count;
-            _dial.at(arrow)._records.push(std::forward<clock_record>({std::forward<async<>>(ctx), dur}));
+            return _dial.at(arrow)._records.enqueue(std::forward<clock_record>({std::forward<async<>>(ctx), dur}));
         }
 
         /**
          * @brief Injects record to the wheel. Slot will be selected by duration
          * @param [in] record Record to inject
+         * @return Injected node ptr
          */
-        void inject_record(clock_record&& record) {
+        clock_node* inject_record(clock_record&& record) {
             const auto arrow_offset = (record._duration / _tick_duration + 1) % _tick_count;
             const auto arrow = (_arrow + arrow_offset) % _tick_count;
-            _dial.at(arrow)._records.push(std::forward<clock_record>(record));
+            return _dial.at(arrow)._records.enqueue(std::forward<clock_record>(record));
         }
 
         /**
@@ -222,10 +215,8 @@ namespace ace::core {
 
         void advance_arrow(time_wheel* lower_wheel) {
             auto&& records = std::move(_dial[_arrow % _tick_count]._records);
-            while(not records.empty()) {
-                lower_wheel->inject_record(std::forward<clock_record>(records.front()));
-                records.pop();
-            }
+            while(not records.empty())
+                lower_wheel->inject_record(std::forward<clock_record>(records.dequeue()));
             migrate();
             ++_arrow;
         }
@@ -326,18 +317,19 @@ namespace ace::core {
         };
 
         /**
-         * @brief Subscribes context to wheel by it's current duration
+         * @brief Subscribes context to wheel by passed current duration
          * @param [in] ctx context to subscribe
          * @param [in] dur subscription duration
+         * @return Injected node ptr
          */
-        void subscribe(async<>&& ctx, duration_t dur) {
+        clock_node* subscribe(async<>&& ctx, duration_t dur) {
             const auto idx = calc_wheel(dur);
             if (not idx) [[unlikely]] {
                 runner::reattach(std::move(ctx));
-                return;
+                return nullptr;
             }
             ++_total_records;
-            _wheels[idx.value()].inject_raw(std::forward<async<>>(ctx), dur);
+            return _wheels[idx.value()].inject_raw(std::forward<async<>>(ctx), dur);
         };
 
         /**
@@ -362,6 +354,8 @@ namespace ace::core {
             return _total_records == 0;
         }
 
+        void detach_record(clock_node* node) { if (node->remove()) --_total_records; }
+
     };
 
     struct clock : vortex_traits<clock> {
@@ -383,18 +377,20 @@ namespace ace::core {
             } co_return true;
         }
 
-        static void subscribe(async<>&& ctx, const duration_t dur) {
-            attach(ctx._coroutine.promise()._runner_pool)._core.subscribe(std::forward<async<>>(ctx), dur);
+        [[nodiscard]] static clock_node* subscribe(async<>&& ctx, const duration_t dur) {
+            return attach(ctx._coroutine.promise()._runner_pool)._core.subscribe(std::forward<async<>>(ctx), dur);
         };
 
-        static auto current_time() {
-            return get_instance()._core.current_time();
-        }
+        static auto current_time() { return get_instance()._core.current_time(); }
+
+        static auto detach(clock_node* node) { get_instance()._core.detach_record(node); }
 
         static thread_local wheel_cascade _core;
     };
 
     thread_local wheel_cascade clock::_core = wheel_cascade{std::chrono::milliseconds(1), 256};
+
+    thread_local common::slab_mempool<clock_record> clock_record::_clock_record_mempool = common::slab_mempool<clock_record>();
 
 }
 

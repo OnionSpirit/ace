@@ -153,7 +153,7 @@ inline ace::promise<> to_spawn_nested(ace::futures::channel_dyn<ace::core::runne
     auto curr_runner = co_await ace::commands::get_runner();
     co_await ace::suspend();
     const auto _check = std::make_unique<destruct_on_cancel_checker>("'parallel-nested'");
-    co_await ace::futures::timeout(100ms);
+    co_await ace::futures::timeout(1000ms);
     output << curr_runner;
     std::cout << _check->_name << " finished\n";
     co_return;
@@ -165,7 +165,7 @@ inline ace::async<> to_spawn_cancel(ace::futures::channel_dyn<ace::core::runner*
     auto curr_runner = co_await ace::commands::get_runner();
     const auto _check = std::make_unique<destruct_on_cancel_checker>("'parallel'");
     co_await to_spawn_nested(output);
-    co_await ace::futures::timeout(100ms);
+    co_await ace::futures::timeout(1000ms);
     output << curr_runner;
     std::cout << _check->_name << " finished\n";
     co_return;

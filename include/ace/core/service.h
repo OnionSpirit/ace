@@ -14,7 +14,7 @@ namespace ace::core {
 
     template <typename service_t>
     concept is_service_faced = requires(service_t s) {
-        { s.service_yank() } -> std::same_as<promise<bool>>;
+        { s.yank() } -> std::same_as<promise<bool>>;
     };
 
     template <typename derived_t>
@@ -41,7 +41,7 @@ namespace ace::core {
         async<> service(sig_pipe_t& sig_pipe) {
             std::unique_ptr<signal_handler> sig { nullptr };
             while (not _detached) {
-                _detached = co_await static_cast<derived_t*>(this)->service_yank();
+                _detached = not co_await static_cast<derived_t*>(this)->yank();
                 if (sig_pipe.pop(sig)) [[unlikely]] {
                     const auto action_result = co_await sig->action();
                     sig_pipe.push(std::move(sig));

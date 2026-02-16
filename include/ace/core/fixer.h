@@ -23,7 +23,7 @@ namespace ace::core {
 
     public:
 
-        promise<bool> service_yank() {
+        promise<bool> yank() {
             futures::cutex* cutex_;
             while (_detache.pop(cutex_)) _pool.erase(cutex_);
             while (_attache.pop(cutex_)) _pool.insert(cutex_);
@@ -31,7 +31,7 @@ namespace ace::core {
                 co_await futures::timer(1ms);
                 resolve(cutex__);
             }
-            co_return _pool.empty();
+            co_return true; // not _pool.empty();
         }
 
         static void attach_cutex(futures::cutex* cutx) {

@@ -335,6 +335,14 @@ namespace ace::core {
 
         [[nodiscard]] auto current_time() const { return _current_ts; }
 
+        /**
+         * @brief Adjusting the cascade after non-polling period
+         * @param last_touch Timestamp of the last cascade polling period
+         */
+        void adjust(timepoint_t last_touch) {
+            update_release_bound(clock_now() - last_touch);
+        }
+
         [[nodiscard]] bool empty() const {
             return _total_records == 0;
         }
@@ -345,10 +353,19 @@ namespace ace::core {
 
         clock() = default;
 
+        std::optional<timepoint_t> _last_touch {};
+
         // TODO: Add record detach
-        static promise<bool> service_yank() {
+        promise<bool> yank() {
+            if (_last_touch) {
+                _core.adjust(_last_touch.value());
+                _last_touch.reset();
+            }
             _core.release();
-            co_return _core.empty();
+            if (_core.empty()) {
+                _last_touch = _core.current_time();
+                co_return false;
+            } co_return true;
         }
 
         static void subscribe(async<>&& ctx, const duration_t dur) {

@@ -173,8 +173,8 @@ inline ace::async<> spawner_cancel(ace::futures::channel_dyn<ace::core::runner*>
     co_await ace::futures::timer(100ms);
     std::cout << "'spawner' awake, canceling...\n";
     handle.cancel();
-    co_await ace::suspend();
     output << curr_runner;
+    co_await ace::futures::timer(10ms);
     std::cout << "'spawner' finished\n";
 }
 

@@ -126,15 +126,19 @@ namespace ace::core {
      */
     struct dial {
 
-        const duration_t        _tick_duration;
-        const std::size_t       _tick_count;
-        const timepoint_t*      _current_ts;
-        const duration_t        _dial_round;
+        ACE_CACHE_LINE(0)
 
-        int*                    _release_counter;
-        dial*                   _upper_dial;
+        const std::size_t       _tick_count;
         std::vector<time_slot>  _dial;
+        const duration_t        _tick_duration;
+        const timepoint_t*      _current_ts;
+        int*                    _release_counter;
         std::size_t             _arrow {0};
+
+        ACE_CACHE_LINE(1)
+
+        const duration_t        _dial_round;
+        dial*                   _upper_dial;
 
         dial() = delete;
 
@@ -144,13 +148,13 @@ namespace ace::core {
                             const timepoint_t* current_ts,
                             int* release_counter,
                             dial* upper_dial = nullptr)
-            : _tick_duration(std::chrono::duration_cast<duration_t>(tick_duration))
-            , _tick_count((tick_count > 0) && ((tick_count & (tick_count - 1)) == 0) ? tick_count : std::bit_ceil(tick_count))
-            , _current_ts(current_ts)
-            , _dial_round(_tick_duration * _tick_count)
-            , _release_counter(release_counter)
-            , _upper_dial(upper_dial)
+            : _tick_count((tick_count > 0) && ((tick_count & (tick_count - 1)) == 0) ? tick_count : std::bit_ceil(tick_count))
             , _dial(_tick_count)
+            , _tick_duration(std::chrono::duration_cast<duration_t>(tick_duration))
+            , _current_ts(current_ts)
+            , _release_counter(release_counter)
+            , _dial_round(_tick_duration * _tick_count)
+            , _upper_dial(upper_dial)
             {};
 
         /**
@@ -237,16 +241,21 @@ namespace ace::core {
 
         typedef std::tuple<async<>, duration_t> input_record_t;
 
+        ACE_CACHE_LINE(0)
+
+        std::vector<dial>  _dials;
         timepoint_t        _current_ts;
         timepoint_t        _release_bound_ts { clock_now() }; ///< Time lower bound, higher than all released timers
         const duration_t   _tick_duration;
         const std::size_t  _tick_count;
         int                _release_counter  { };
         int                _release_limit    { 1024 };
-        std::size_t        _total_records    { 0 };
-        int                _stopped          { 0 };
 
-        std::vector<dial> _dials;
+        ACE_CACHE_LINE(1)
+
+        std::size_t        _total_records    { 0 };
+        bool               _stopped          { false };
+
 
         static std::size_t fast_log2(std::size_t x) {
 
@@ -372,8 +381,8 @@ namespace ace::core {
             _release_counter = _release_limit;
             // NOTE: If multi-dial didn't reach empty state and become stopped, then no effect.
             // NOTE: Else increasing with inactivity time
-            _release_bound_ts += ((_current_ts - _release_bound_ts) * _stopped);
-            _stopped = 0;
+            _release_bound_ts += ((_current_ts - _release_bound_ts) * (_stopped & 0b1));
+            _stopped = false;
         }
 
         /**
@@ -381,10 +390,10 @@ namespace ace::core {
          * @return Result of emptiness check operation
          */
         [[nodiscard]] bool empty() {
-            return _stopped = (_total_records == 0) & 0b1;
+            return _stopped = _total_records == 0;
         }
 
-        void detach_record(clock_node* node) { _total_records -= node->remove() & 0b1; }
+        void detach_record(clock_node* node) { _total_records -= (node->remove() & 0b1); }
 
     };
 

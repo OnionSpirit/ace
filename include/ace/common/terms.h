@@ -1,7 +1,11 @@
 #ifndef ACE_COMMON_TERMS_H
 #define ACE_COMMON_TERMS_H
 
-#define ACE_CONDUCTOR_MEM_SIZE std::hardware_constructive_interference_size // Size of cacheline
+#define ACE_BUS_SIZE sizeof(std::size_t)
+
+#ifndef ACE_CONDUCTOR_MEM_SIZE
+#define ACE_CONDUCTOR_MEM_SIZE std::hardware_constructive_interference_size - ACE_BUS_SIZE
+#endif
 
 #define ACE_CACHE_LINE_SIZE std::hardware_constructive_interference_size // Size of cacheline
 

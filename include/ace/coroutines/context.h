@@ -18,9 +18,6 @@
 #include "control.h"
 #include "ace/common/terms.h"
 
-#ifndef ACE_CONDUCTOR_MEM_SIZE
-#define ACE_CONDUCTOR_MEM_SIZE std::hardware_constructive_interference_size // Size of cacheline
-#endif
 
 // ToDo: yield операцию преретащить в генератор/ пусть генератор имеет перегрузку итераторов чтобы запускать его в цикле for
 namespace ace::coroutines {
@@ -121,7 +118,7 @@ namespace ace::coroutines {
             ~conductor_carry() { release(); };
 
             conductor_handler_t* _conductor {nullptr};
-            uint8_t _conductor_area [ACE_CONDUCTOR_MEM_SIZE] {};
+            alignas(8) uint8_t _conductor_area [ACE_CONDUCTOR_MEM_SIZE] {};
         };
 
         class promise_conductor : public promise_conductor_handle {
@@ -171,7 +168,7 @@ namespace ace::coroutines {
                 interrupt("Unhandled exception.");
             }
 
-            void interrupt(const std::string_view &&str) {
+            void interrupt(const std::string_view &&str) const {
                 std::cerr << str << std::endl;
                 final_suspend();
             };
@@ -199,16 +196,16 @@ namespace ace::coroutines {
                 return &_promise_conductor.value();
             }
 
-            // TODO: Wrap into weak hazard ptr, when I will write it
-            runner_pool_t* _runner_pool {nullptr};
-            std::atomic<std::shared_ptr<runner_pool_t>> _waiters;
-            bool _roaming { false };
             // NOTE: Conductor to manage futures on suspended state.
             // NOTE: Carry object needed because few futures can be awaited during context run
             conductor_carry _future_conductor {};
+            // TODO: Wrap into weak hazard ptr, when I will write it
+            runner_pool_t* _runner_pool {nullptr};
+            // std::atomic<std::shared_ptr<runner_pool_t>> _waiters;
             // NOTE: Conductor to manage promise on suspended state.
             // NOTE: Context owns only one promise. Extra carry object is unnecessary
             std::optional<promise_conductor> _promise_conductor;
+            alignas(ACE_BUS_SIZE) bool _roaming { false };
         };
 
         bool await_ready() override {

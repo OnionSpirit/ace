@@ -49,9 +49,9 @@ namespace ace::coroutines {
 
         promiseT* _derived = static_cast<promiseT*>(this);
 
-        promise_touch_result _status { e_executed };
+        alignas(ACE_BUS_SIZE) returnT _return_value {};
 
-        returnT _return_value {};
+        alignas(ACE_BUS_SIZE) promise_touch_result _status { e_executed };
 
         auto return_value(returnT return_value) {
             _return_value =return_value;
@@ -72,13 +72,13 @@ namespace ace::coroutines {
 
         promiseT* _derived = static_cast<promiseT*>(this);
 
-        promise_touch_result _status { e_executed };
+        alignas(ACE_BUS_SIZE) promise_touch_result _status { e_executed };
 
         auto return_void() { return std::suspend_never{}; }
     };
 
     template <typename return_t>
-        struct promise_traits : promise_return_traits<promise_traits<return_t>, return_t> {
+    struct promise_traits : promise_return_traits<promise_traits<return_t>, return_t> {
 
         typedef futures::future_handler* future_handler_ptr_t;
         typedef promise_return_traits<promise_traits, return_t> promise_return_traits_t;
@@ -154,9 +154,9 @@ namespace ace::coroutines {
             return _trace_id.value();
         }
 
-        future_handler_ptr_t _future { nullptr };
-        std::optional<std::size_t> _trace_id;
-        control_block* _block { nullptr };
+        future_handler_ptr_t        _future { nullptr };
+        control_block*              _block { nullptr };
+        std::optional<std::size_t>  _trace_id;
     };
 
 #define DECLARE_PROMISE_TRAITS(return_type_t) typedef coroutines::promise_traits<return_type_t> promise_traits_t;

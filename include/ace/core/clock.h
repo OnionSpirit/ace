@@ -359,7 +359,7 @@ namespace ace::core {
 
         clock() = default;
 
-        bool _stopped { false };
+        bool _stopped { true };
 
         // TODO: Add record detach
         promise<bool> yank() {

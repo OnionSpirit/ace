@@ -244,7 +244,7 @@ namespace ace::core {
         int                _release_counter  { };
         int                _release_limit    { 1024 };
         std::size_t        _total_records    { 0 };
-        bool               _stopped          { false };
+        int                _stopped          { 0 };
 
         std::vector<dial> _dials;
 
@@ -328,8 +328,6 @@ namespace ace::core {
         std::size_t release() {
 
             adjust();
-            _current_ts = clock_now();
-            _release_counter = _release_limit;
             const duration_t passed = calc_passed();
 
             if (passed < _tick_duration) [[unlikely]]
@@ -367,13 +365,15 @@ namespace ace::core {
         [[nodiscard]] auto current_time() const { return _current_ts; }
 
         /**
-         * @brief Adjusting the multi-dial after non-polling period
+         * @brief Adjusting the multi-dial before next release
          */
         void adjust() {
-            if (_stopped) [[unlikely]] {
-                update_release_bound(clock_now() - _release_bound_ts);
-                _stopped = false;
-            }
+            _current_ts = clock_now();
+            _release_counter = _release_limit;
+            // NOTE: If multi-dial didn't reach empty state and become stopped, then no effect.
+            // NOTE: Else increasing with inactivity time
+            _release_bound_ts += ((_current_ts - _release_bound_ts) * _stopped);
+            _stopped = 0;
         }
 
         /**
@@ -381,10 +381,10 @@ namespace ace::core {
          * @return Result of emptiness check operation
          */
         [[nodiscard]] bool empty() {
-            return _stopped = _total_records == 0;
+            return _stopped = (_total_records == 0) & 0b1;
         }
 
-        void detach_record(clock_node* node) { if (node->remove()) --_total_records; }
+        void detach_record(clock_node* node) { _total_records -= node->remove() & 0b1; }
 
     };
 
@@ -392,7 +392,6 @@ namespace ace::core {
 
         clock() = default;
 
-        // TODO: Add record detach
         static bool yank() {
             _multi_dial.release();
             return not _multi_dial.empty();

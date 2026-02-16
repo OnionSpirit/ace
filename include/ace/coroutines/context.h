@@ -90,10 +90,9 @@ namespace ace::coroutines {
 
             template<typename carry_t>
             requires requires { carry_t::_conductor; carry_t::_conductor_area; }
-            conductor_carry& operator =(carry_t&& carry) noexcept {
+            conductor_carry& operator <<(carry_t& carry) noexcept {
                 if (carry._conductor) {
                     _conductor = carry._conductor;
-                    memcpy(_conductor_area, carry._conductor_area, ACE_CONDUCTOR_MEM_SIZE);
                     carry._conductor = nullptr;
                 }
                 return *this;
@@ -224,14 +223,9 @@ namespace ace::coroutines {
 
         template<typename promiseT>
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
-            // NOTE: If context is dead, don't block
-            if (not is_resumable()) return false;
-            // NOTE: Passing future conductor to outer
-            if (_coroutine.promise()._future_conductor)
-                outer.promise()._future_conductor = std::move(_coroutine.promise()._future_conductor);
-            // TODO: Someday...
-            // outer.promise()._future_conductor._conductor = _coroutine.promise()._future_conductor._conductor;
-            // _coroutine.promise()._future_conductor._conductor = nullptr;
+            // NOTE: No extra checks needed, because function would be called once before suspending.
+            // NOTE: Just coping conductor ptr. Outer task will destroy conductor before current promise stack
+            outer.promise()._future_conductor << _coroutine.promise()._future_conductor;
             return true;
         }
 

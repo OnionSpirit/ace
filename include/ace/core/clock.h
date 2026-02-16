@@ -14,21 +14,21 @@
 namespace ace::core {
 
     using timepoint_t = decltype(
-        std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::high_resolution_clock, std::chrono::nanoseconds>(
-            std::chrono::high_resolution_clock::now()
+        std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now()
         )
     );
 
     using duration_t = decltype(
         std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::duration()
+            std::chrono::steady_clock::duration()
         )
     );
 
     inline auto clock_now() {
         return
-        std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::high_resolution_clock, std::chrono::nanoseconds>(
-            std::chrono::high_resolution_clock::now()
+        std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now()
         );
     }
 

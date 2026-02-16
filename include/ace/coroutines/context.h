@@ -219,8 +219,10 @@ namespace ace::coroutines {
 
         bool await_ready() override {
             if (_coroutine.done()) return true;
-            if (_coroutine.promise()._future and _coroutine.promise()._future->await_ready())
+            if (_coroutine.promise()._future and _coroutine.promise()._future->await_ready()) {
+                _coroutine.promise()._future_conductor.release();
                 _coroutine.promise()._future = nullptr;
+            }
             _coroutine.resume();
             return _coroutine.done();
         }

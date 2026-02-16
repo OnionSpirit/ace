@@ -16,9 +16,17 @@
 namespace ace::core {
 
     template <typename vortex_t>
-    concept is_vortex_compatible = requires(vortex_t v) {
+    concept is_vortex_routine = requires(vortex_t v) {
+        { v.yank() } -> std::same_as<bool>;
+    };
+
+    template <typename vortex_t>
+    concept is_vortex_promise = requires(vortex_t v) {
         { v.yank() } -> std::same_as<promise<bool>>;
     };
+
+    template <typename vortex_t>
+    concept is_vortex_compatible = is_vortex_promise<vortex_t> or is_vortex_routine<vortex_t>;
 
     template <typename derived_t>
     class vortex_traits {
@@ -44,7 +52,10 @@ namespace ace::core {
         async<> vortex(sig_pipe_t& sig_pipe) {
             std::unique_ptr<signal_handler> sig { nullptr };
             while (not _detached) {
-                _detached = not co_await static_cast<derived_t*>(this)->yank();
+                if constexpr (is_vortex_promise<derived_t>)
+                    _detached = not co_await static_cast<derived_t*>(this)->yank();
+                else if constexpr (is_vortex_routine<derived_t>)
+                    _detached = not static_cast<derived_t*>(this)->yank();
                 if (sig_pipe.pop(sig)) [[unlikely]] {
                     const auto action_result = co_await sig->action();
                     sig_pipe.push(std::move(sig));

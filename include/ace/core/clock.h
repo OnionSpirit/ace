@@ -170,7 +170,7 @@ namespace ace::core {
          * @param [in] node Record node to inject
          * @return Injected node ptr
          */
-        clock_node* inject_record(clock_node&& node) {
+        clock_node* inject_node(clock_node&& node) {
             const auto arrow_offset = (node.data()->_duration / _tick_duration + 1) % _tick_count;
             const auto arrow = (_arrow + arrow_offset) % _tick_count;
             return _dial.at(arrow)._records.enqueue(std::forward<clock_node>(node));
@@ -224,7 +224,7 @@ namespace ace::core {
                 std::move(_dial[_arrow % _tick_count]._records);
 
             while(not records.empty())
-                lower_dial->inject_record(std::forward<clock_node>(records.pop()));
+                lower_dial->inject_node(std::forward<clock_node>(records.pop()));
 
             migrate();
             ++_arrow;

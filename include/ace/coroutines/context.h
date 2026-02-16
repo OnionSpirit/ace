@@ -143,8 +143,6 @@ namespace ace::coroutines {
                     handle.promise()._future_conductor->cancel();
                     handle.promise()._future_conductor.release();
                 }
-                if (handle and handle.promise()._nested_promise_conductor)
-                    handle.promise()._nested_promise_conductor->cancel();
                 handle.promise()._status = e_detached;
             }
 
@@ -190,16 +188,16 @@ namespace ace::coroutines {
                 // NOTE: Getting control block address
                 _block = control_block::get_block_from_address(c.address());
                 // NOTE: Initiating promise conductor
-                _current_promise_conductor = promise_conductor(c);
+                _promise_conductor = promise_conductor(c);
                 // NOTE: Setting promise conductor
-                _block->_promise_conductor = &c.promise()._current_promise_conductor.value();
+                _block->_promise_conductor = &c.promise()._promise_conductor.value();
             }
 
             template <typename promise_t>
             promise_conductor_handle* get_promise_conductor(const std::coroutine_handle<promise_t>& c) {
                 // NOTE: Initiating promise conductor
-                _current_promise_conductor = promise_conductor(c);
-                return &_current_promise_conductor.value();
+                _promise_conductor = promise_conductor(c);
+                return &_promise_conductor.value();
             }
 
             // TODO: Wrap into weak hazard ptr, when I will write it
@@ -211,10 +209,7 @@ namespace ace::coroutines {
             conductor_carry _future_conductor {};
             // NOTE: Conductor to manage promise on suspended state.
             // NOTE: Context owns only one promise. Extra carry object is unnecessary
-            std::optional<promise_conductor> _current_promise_conductor;
-            // NOTE: Conductor to manage nested promise, if it's exists, on suspended state
-            // NOTE: Promise may have only one nested promise. Extra carry object is unnecessary
-            promise_conductor_handle* _nested_promise_conductor { nullptr };
+            std::optional<promise_conductor> _promise_conductor;
         };
 
         bool await_ready() override {
@@ -234,9 +229,9 @@ namespace ace::coroutines {
             // NOTE: Passing future conductor to outer
             if (_coroutine.promise()._future_conductor)
                 outer.promise()._future_conductor = std::move(_coroutine.promise()._future_conductor);
-            // NOTE: If outer task is observed, initialize local promise conductor and pass it as nested
-            if (outer.promise()._current_promise_conductor)
-                outer.promise()._nested_promise_conductor = _coroutine.promise().get_promise_conductor(_coroutine);
+            // TODO: Someday...
+            // outer.promise()._future_conductor._conductor = _coroutine.promise()._future_conductor._conductor;
+            // _coroutine.promise()._future_conductor._conductor = nullptr;
             return true;
         }
 

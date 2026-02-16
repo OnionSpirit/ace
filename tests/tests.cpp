@@ -186,7 +186,6 @@ TEST(futures, secure_cutex_race) {
     ace::reset_signal();
 }
 
-// TODO: Fix breaking something after run
 TEST(futures, do_timer_on_runner_parallel_test) {
     ace::core::s_balancer_config._runners_amount = 4;
     ace::reload();

@@ -47,7 +47,7 @@ namespace ace::coroutines {
     template <typename promiseT, typename returnT>
     struct promise_return_traits {
 
-        promiseT* _derived = static_cast<promiseT*>(this);
+        alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this);
 
         alignas(ACE_BUS_SIZE) returnT _return_value {};
 
@@ -70,7 +70,7 @@ namespace ace::coroutines {
     template <typename promiseT>
     struct promise_return_traits <promiseT, void> {
 
-        promiseT* _derived = static_cast<promiseT*>(this);
+        alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this);
 
         alignas(ACE_BUS_SIZE) promise_touch_result _status { e_executed };
 
@@ -155,7 +155,7 @@ namespace ace::coroutines {
         }
 
         future_handler_ptr_t        _future { nullptr };
-        control_block*              _block { nullptr };
+        control_block*              _block  { nullptr };
         std::optional<std::size_t>  _trace_id;
     };
 

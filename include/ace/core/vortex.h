@@ -1,10 +1,13 @@
 /**
  * @file
- * @details The file contains a service class definition.
- * Service is a special object with task to poll it in dispatcher service pool.
+ * @details The file contains a @b vortex class definition.
+ * @b vortex aggregates requests and helps to avoid busy-polling.
+ * Structurally, @b vortex is a special object with a promise for polling in the dispatcher.
+ * The @b vortex polling promise maintains a detach state to stop polling when @b vortex runs out of active requests.
+ * The return value of the @b yank() promise of the @b vortex derived type defines the detach state behavior.
  */
-#ifndef ACE_SERVICE_H
-#define ACE_SERVICE_H
+#ifndef ACE_CORE_VORTEX_H
+#define ACE_CORE_VORTEX_H
 
 #include "dispatcher.h"
 #include "ace/core/signal.h"
@@ -12,33 +15,33 @@
 
 namespace ace::core {
 
-    template <typename service_t>
-    concept is_service_faced = requires(service_t s) {
-        { s.yank() } -> std::same_as<promise<bool>>;
+    template <typename vortex_t>
+    concept is_vortex_compatible = requires(vortex_t v) {
+        { v.yank() } -> std::same_as<promise<bool>>;
     };
 
     template <typename derived_t>
-    class service_traits {
+    class vortex_traits {
 
         static void crtp_asserter() {
-            static_assert(is_service_faced<derived_t>,
-                "Derived type doesn't have 'service_yank()' function, "
+            static_assert(is_vortex_compatible<derived_t>,
+                "Derived type doesn't have 'yank()' function, "
                 "or it's return type is not 'ace::promise<bool>'");
-            static_assert(std::derived_from<derived_t, service_traits>,
-                "Derived type is not actually derived from 'service_traits<DerivedT>'");
+            static_assert(std::derived_from<derived_t, vortex_traits>,
+                "Derived type is not actually derived from 'vortex_traits<DerivedT>'");
         };
 
         static thread_local bool _detached;
         friend derived_t;
 
-        service_traits() { crtp_asserter(); respawn(); };
+        vortex_traits() { crtp_asserter(); respawn(); };
 
         void respawn(runner* rnr = nullptr) {
-            dispatcher::get_instance().schedule(service(dispatcher::get_sig_pipe()), rnr);
+            dispatcher::get_instance().schedule(vortex(dispatcher::get_sig_pipe()), rnr);
             _detached = false;
         }
 
-        async<> service(sig_pipe_t& sig_pipe) {
+        async<> vortex(sig_pipe_t& sig_pipe) {
             std::unique_ptr<signal_handler> sig { nullptr };
             while (not _detached) {
                 _detached = not co_await static_cast<derived_t*>(this)->yank();
@@ -73,11 +76,11 @@ namespace ace::core {
     };
 
     template <typename derived_t>
-    thread_local bool service_traits<derived_t>::_detached {true};
+    thread_local bool vortex_traits<derived_t>::_detached {true};
 
-    template <typename service_t>
-    concept is_service = is_service_faced<service_t>
-        and std::derived_from<service_t, service_traits<service_t>>;
+    template <typename vortex_t>
+    concept is_vortex = is_vortex_compatible<vortex_t>
+        and std::derived_from<vortex_t, vortex_traits<vortex_t>>;
 }
 
-#endif //ACE_SERVICE_H
+#endif // ACE_CORE_VORTEX_H

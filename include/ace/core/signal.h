@@ -1,6 +1,6 @@
 /**
  * @file
- * @details The file contains a signal class definition. Signal is a special object for service units control.
+ * @details The file contains a signal class definition. Signal is a special object for vortex units control.
  */
 #ifndef ACE_SIGNAL_H
 #define ACE_SIGNAL_H
@@ -15,7 +15,7 @@ namespace ace::core {
         e_break
     };
 
-    // NOTE: Special orders for services
+    // NOTE: Special orders for vortexes
     struct signal_handler {
 
         signal_handler() = default;

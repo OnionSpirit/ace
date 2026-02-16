@@ -7,7 +7,7 @@
 #define ACE_CORE_FIXER_H
 #include <set>
 
-#include "service.h"
+#include "vortex.h"
 #include "ace/coroutines/context.h"
 #include "ace/futures/timer.h"
 
@@ -15,11 +15,11 @@ namespace ace::futures { class cutex; }
 namespace ace::core {
 
     // TODO: FIX THIS SHIT
-    class fixer : public service_traits<fixer> {
+    class fixer : public vortex_traits<fixer> {
 
         fixer() = default;
 
-        friend service_traits;
+        friend vortex_traits;
 
     public:
 

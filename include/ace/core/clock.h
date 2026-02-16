@@ -8,7 +8,7 @@
 #include <chrono>
 #include <complex>
 
-#include "service.h"
+#include "vortex.h"
 #include "ace/coroutines/context.h"
 
 namespace ace::core {
@@ -349,7 +349,7 @@ namespace ace::core {
 
     };
 
-    struct clock : service_traits<clock> {
+    struct clock : vortex_traits<clock> {
 
         clock() = default;
 

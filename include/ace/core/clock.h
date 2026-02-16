@@ -242,8 +242,9 @@ namespace ace::core {
         const duration_t   _tick_duration;
         const std::size_t  _tick_count;
         int                _release_counter  { };
-        int                _release_limit    {1024};
-        std::size_t        _total_records    {0};
+        int                _release_limit    { 1024 };
+        std::size_t        _total_records    { 0 };
+        bool               _stopped          { false };
 
         std::vector<dial> _dials;
 
@@ -326,6 +327,7 @@ namespace ace::core {
          */
         std::size_t release() {
 
+            adjust();
             _current_ts = clock_now();
             _release_counter = _release_limit;
             const duration_t passed = calc_passed();
@@ -367,14 +369,19 @@ namespace ace::core {
         /**
          * @brief Adjusting the multi-dial after non-polling period
          */
-        void adjust() { update_release_bound(clock_now() - _release_bound_ts); }
+        void adjust() {
+            if (_stopped) [[unlikely]] {
+                update_release_bound(clock_now() - _release_bound_ts);
+                _stopped = false;
+            }
+        }
 
         /**
          * @brief @b ARE @b YOU @b DUMB @b ?!
          * @return Result of emptiness check operation
          */
-        [[nodiscard]] bool empty() const {
-            return _total_records == 0;
+        [[nodiscard]] bool empty() {
+            return _stopped = _total_records == 0;
         }
 
         void detach_record(clock_node* node) { if (node->remove()) --_total_records; }
@@ -385,16 +392,10 @@ namespace ace::core {
 
         clock() = default;
 
-        bool _stopped { true };
-
         // TODO: Add record detach
-        promise<bool> yank() {
-            if (_stopped)
-                _multi_dial.adjust();
-
+        static bool yank() {
             _multi_dial.release();
-            _stopped = _multi_dial.empty();
-            co_return not _stopped;
+            return not _multi_dial.empty();
         }
 
         [[nodiscard]] static clock_node* subscribe(async<>&& ctx, const duration_t dur) {

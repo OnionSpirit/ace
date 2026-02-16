@@ -9,7 +9,7 @@
 
 #include "vortex.h"
 #include "ace/coroutines/context.h"
-#include "ace/futures/timer.h"
+#include "ace/futures/timeout.h"
 
 namespace ace::futures { class cutex; }
 namespace ace::core {
@@ -28,7 +28,7 @@ namespace ace::core {
             while (_detache.pop(cutex_)) _pool.erase(cutex_);
             while (_attache.pop(cutex_)) _pool.insert(cutex_);
             for (auto* cutex__ : _pool) {
-                co_await futures::timer(1ms);
+                co_await futures::timeout(1ms);
                 resolve(cutex__);
             }
             co_return true; // not _pool.empty();

@@ -9,7 +9,7 @@
 #include "ace/commands/spawn.h"
 #include "ace/futures/future.h"
 #include "ace/futures/channel.h"
-#include "ace/futures/timer.h"
+#include "ace/futures/timeout.h"
 #include "ace/futures/cutex.h"
 
 struct once_suspend : ace::futures::future_traits<once_suspend> {
@@ -76,7 +76,7 @@ struct channel_abuser {
 template<typename Rep, typename Period>
 ace::async<> timer_waiter(std::chrono::duration<Rep, Period> wait_time, ace::futures::channel_dyn<long>& ch) {
     const auto start = ace::core::clock::current_time();
-    co_await ace::futures::timer(wait_time);
+    co_await ace::futures::timeout(wait_time);
     const auto end = ace::core::clock::current_time();
     ch << (end - start).count();
     co_return;
@@ -84,9 +84,9 @@ ace::async<> timer_waiter(std::chrono::duration<Rep, Period> wait_time, ace::fut
 
 template<typename Rep, typename Period>
 ace::async<> timer_waiter_valued(std::chrono::duration<Rep, Period> wait_time, ace::futures::channel_dyn<int>& ch) {
-    std::cout << "Timer launched for: " << wait_time << std::endl;
-    co_await ace::futures::timer(wait_time);
-    std::cout << "Timer released after: " << wait_time << std::endl;
+    std::cout << "Timeout launched for: " << wait_time << std::endl;
+    co_await ace::futures::timeout(wait_time);
+    std::cout << "Timeout released after: " << wait_time << std::endl;
     ch << wait_time.count();
     co_return;
 }
@@ -118,7 +118,7 @@ ace::async<> channel_fetcher(ace::futures::channel_dyn<channel_t>& ch, std::vect
 
 inline ace::async<> to_spawn(ace::futures::channel_dyn<ace::core::runner*>& output) {
     auto curr_runner = co_await ace::commands::get_runner();
-    co_await ace::futures::timer(100ms);
+    co_await ace::futures::timeout(100ms);
     std::cout << "'spawned' runned out\n";
     output << curr_runner;
     co_return;
@@ -131,7 +131,7 @@ inline ace::async<> spawner(ace::futures::channel_dyn<ace::core::runner*>& outpu
     const ace::coroutines::control_block_handle handle = co_await ace::spawn(to_spawn(output));
     while (not handle.done()) {
         std::cout << "'spawned' not done\n";
-        co_await ace::futures::timer(10ms);
+        co_await ace::futures::timeout(10ms);
     }
     std::cout << "'spawned' done!!!\n";
 }
@@ -149,12 +149,12 @@ struct destruct_on_cancel_checker {
 
 inline ace::promise<> to_spawn_nested(ace::futures::channel_dyn<ace::core::runner*>& output) {
     std::cout << "'parallel-nested' started\n";
-    co_await ace::futures::timer(10ms);
+    co_await ace::futures::timeout(10ms);
     auto curr_runner = co_await ace::commands::get_runner();
     co_await ace::suspend();
     const std::unique_ptr<destruct_on_cancel_checker> _check
         = std::make_unique<destruct_on_cancel_checker>("'parallel-nested'");
-    co_await ace::futures::timer(100ms);
+    co_await ace::futures::timeout(100ms);
     output << curr_runner;
     std::cout << _check->_name << " finished\n";
     co_return;
@@ -162,12 +162,12 @@ inline ace::promise<> to_spawn_nested(ace::futures::channel_dyn<ace::core::runne
 
 inline ace::async<> to_spawn_cancel(ace::futures::channel_dyn<ace::core::runner*>& output) {
     std::cout << "'parallel' started\n";
-    co_await ace::futures::timer(10ms);
+    co_await ace::futures::timeout(10ms);
     auto curr_runner = co_await ace::commands::get_runner();
     const std::unique_ptr<destruct_on_cancel_checker> _check
         = std::make_unique<destruct_on_cancel_checker>("'parallel'");
     co_await to_spawn_nested(output);
-    co_await ace::futures::timer(100ms);
+    co_await ace::futures::timeout(100ms);
     output << curr_runner;
     std::cout << _check->_name << " finished\n";
     co_return;
@@ -178,11 +178,11 @@ inline ace::async<> spawner_cancel(ace::futures::channel_dyn<ace::core::runner*>
     auto curr_runner = co_await ace::commands::get_runner();
     // TODO: Temp
     ace::coroutines::control_block_handle handle = co_await ace::spawn(to_spawn_cancel(output));
-    co_await ace::futures::timer(100ms);
+    co_await ace::futures::timeout(100ms);
     std::cout << "'spawner' awake, canceling...\n";
     handle.cancel();
     output << curr_runner;
-    co_await ace::futures::timer(10ms);
+    co_await ace::futures::timeout(10ms);
     std::cout << "'spawner' finished\n";
 }
 

@@ -1,5 +1,5 @@
-#ifndef ACE_FUTURE_TIMER_H
-#define ACE_FUTURE_TIMER_H
+#ifndef ACE_FUTURE_TIMEOUT_H
+#define ACE_FUTURE_TIMEOUT_H
 
 #include <future>
 
@@ -13,22 +13,22 @@ using namespace std::chrono_literals;
 namespace ace::futures {
 
 
-class timer : public future_traits<timer> {
+class timeout : public future_traits<timeout> {
 
     core::duration_t _duration;
     bool _released {false};
 
-    struct timer_conductor;
-    friend timer_conductor;
+    struct timeout_conductor;
+    friend timeout_conductor;
 
     public:
 
-        DECLARE_FUTURE(timer)
+        DECLARE_FUTURE(timeout)
         IMPORT_FUTURE_ENV
 
         template <typename I, typename T>
         requires std::is_integral_v<I>
-        explicit timer(std::chrono::duration<I, T> t) {
+        explicit timeout(std::chrono::duration<I, T> t) {
             _duration = std::chrono::duration_cast<std::chrono::milliseconds, uint64_t, std::milli>(t);
         };
 
@@ -46,9 +46,9 @@ class timer : public future_traits<timer> {
         // bool is_detached() { return _detached;}
 };
 
-struct expire : timer {
+struct expire : timeout {
     explicit expire(core::timepoint_t expires)
-        : timer(expires - core::clock::current_time()) {}
+        : timeout(expires - core::clock::current_time()) {}
 };
 
 } // end namespace ace::futures
@@ -57,42 +57,42 @@ struct expire : timer {
 //==============================- DEFINITIONS -==================================
 
 
-#define ACE_FUTURE_TIMER_SPACE \
-ace::futures::timer::
+#define ACE_FUTURE_TIMEOUT_SPACE \
+ace::futures::timeout::
 
-#define ACE_FUTURE_TIMER_MEMBER(returnT) \
-returnT ACE_FUTURE_TIMER_SPACE
+#define ACE_FUTURE_TIMEOUT_MEMBER(returnT) \
+returnT ACE_FUTURE_TIMEOUT_SPACE
 
-struct ACE_FUTURE_TIMER_SPACE timer_conductor : conductor_handler_t {
+struct ACE_FUTURE_TIMEOUT_SPACE timeout_conductor : conductor_handler_t {
 
-    timer_conductor() = delete;
+    timeout_conductor() = delete;
 
-    explicit timer_conductor(timer* timer_)
-        : _timer(timer_) {};
+    explicit timeout_conductor(timeout* timeout_)
+        : _timeout(timeout_) {};
 
     void forward(async<>&& ctx) override {
-        // NOTE: Marking timer released.
+        // NOTE: Marking timeout released.
         // NOTE: Because await_ready() will be called after context retreatment to runner.
-        // NOTE: And retreatment will happen only when timer actually expired
-        _timer->_released = true;
-        core::clock::subscribe(std::move(ctx), _timer->_duration);
+        // NOTE: And retreatment will happen only when timeout actually expired
+        _timeout->_released = true;
+        core::clock::subscribe(std::move(ctx), _timeout->_duration);
     }
 
     // TODO: Finish later
     void cancel() override {  }
 
-    ~timer_conductor() override = default;
+    ~timeout_conductor() override = default;
 
-    timer* const _timer;
+    timeout* const _timeout;
 };
 
 
-ACE_FUTURE_TIMER_MEMBER(bool)
+ACE_FUTURE_TIMEOUT_MEMBER(bool)
 await_suspend(auto coroutine) {
-    coroutine.promise()._future_conductor = timer_conductor{this};
+    coroutine.promise()._future_conductor = timeout_conductor{this};
     return true;
 }
 
-#undef ACE_FUTURE_TIMER_MEMBER
-#undef ACE_FUTURE_TIMER_SPACE
-#endif // ACE_FUTURE_TIMER_H
+#undef ACE_FUTURE_TIMEOUT_MEMBER
+#undef ACE_FUTURE_TIMEOUT_SPACE
+#endif // ACE_FUTURE_TIMEOUT_H

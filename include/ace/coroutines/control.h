@@ -5,6 +5,7 @@
 #include <cstddef>
 
 #include "conductor.h"
+#include "ace/common/terms.h"
 
 namespace ace::coroutines {
 
@@ -19,8 +20,8 @@ namespace ace::coroutines {
 
         uint64_t _weak_refcount {1};
         uint64_t _strong_refcount {1};
-        bool _exists {true};
         promise_conductor_handle* _promise_conductor { nullptr };
+        alignas(ACE_BUS_SIZE) bool _exists {true};
 
         control_block() = default;
 

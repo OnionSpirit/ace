@@ -118,7 +118,7 @@ namespace ace::coroutines {
             ~conductor_carry() { release(); };
 
             conductor_handler_t* _conductor {nullptr};
-            alignas(8) uint8_t _conductor_area [ACE_CONDUCTOR_MEM_SIZE] {};
+            alignas(ACE_BUS_SIZE) uint8_t _conductor_area [ACE_CONDUCTOR_MEM_SIZE] {};
         };
 
         class promise_conductor : public promise_conductor_handle {

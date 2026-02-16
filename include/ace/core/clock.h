@@ -7,6 +7,7 @@
 #define ACE_CORE_CLOCK_H
 #include <chrono>
 #include <complex>
+#include <list>
 
 #include "vortex.h"
 #include "ace/coroutines/context.h"
@@ -244,7 +245,6 @@ namespace ace::core {
         int _release_counter {};
         int _release_limit {1024};
         std::size_t _total_records {0};
-        nukes::dynamic::mpsc_queue<input_record_t> _threadsafe_input;
 
         static std::size_t fast_log2(std::size_t x) {
             if (x == 0) [[unlikely]] throw std::runtime_error("can't calculate <log> from 0");
@@ -256,6 +256,11 @@ namespace ace::core {
             return (fast_log2(x) / fast_log2(base));
         }
 
+        /**
+         * @brief Selects wheel depending on required duration
+         * @param [in] dur Required wait time interval
+         * @return wheel id
+         */
         [[nodiscard]] std::optional<std::size_t> calc_wheel(const duration_t dur) const {
             if (dur.count() == 0) [[unlikely]]
                 return std::nullopt;
@@ -265,25 +270,20 @@ namespace ace::core {
             return res;
         }
 
+        /**
+         * @brief Calculates passed time
+         * @return Passed time interval
+         */
         [[nodiscard]] auto calc_passed() const {
             return _current_ts.time_since_epoch() - _release_bound_ts.time_since_epoch();
         }
 
+        /**
+         * @brief Updates release bound
+         * @param [in] passed_interval Passed time interval to increase released bound timestamp
+         */
         void update_release_bound(duration_t passed_interval) {
             _release_bound_ts += passed_interval;
-        }
-
-        void fetch(const duration_t& passed) {
-            input_record_t input_record;
-            for (int i = 0; i < _release_limit and _threadsafe_input.pop(input_record); ++i) {
-                auto [ctx, dur] = std::forward<input_record_t>(input_record);
-                if (passed > dur) [[unlikely]] {
-                    runner::reattach(std::forward<async<>>(ctx));
-                    --_release_counter;
-                    continue;
-                }
-                subscribe(std::move(ctx), dur);
-            }
         }
 
     public:
@@ -308,14 +308,16 @@ namespace ace::core {
                 _wheels[i]._upper_wheel = &_wheels[i + 1];
         };
 
+
+        /**
+         * @brief Releases portion of subscribers depending on those expiration time
+         * @return amount of the released subscribers
+         */
         std::size_t release() {
             _current_ts = clock_now();
             const duration_t passed = calc_passed();
             _release_counter = _release_limit;
-            if (passed < _tick_duration) [[unlikely]] {
-                fetch(passed);
-                return 0;
-            }
+            if (passed < _tick_duration) [[unlikely]] return 0;
             const auto released_ticks = _wheels[0].release(passed);
             update_release_bound(_tick_duration * released_ticks);
             const auto released = _release_limit - _release_counter;
@@ -323,6 +325,11 @@ namespace ace::core {
             return released;
         };
 
+        /**
+         * @brief Subscribes context to wheel by it's current duration
+         * @param [in] ctx context to subscribe
+         * @param [in] dur subscription duration
+         */
         void subscribe(async<>&& ctx, duration_t dur) {
             const auto idx = calc_wheel(dur);
             if (not idx) [[unlikely]] {
@@ -333,6 +340,10 @@ namespace ace::core {
             _wheels[idx.value()].inject_raw(std::forward<async<>>(ctx), dur);
         };
 
+        /**
+         * @brief Gets current timepoint
+         * @return current timepoint
+         */
         [[nodiscard]] auto current_time() const { return _current_ts; }
 
         /**
@@ -343,6 +354,10 @@ namespace ace::core {
             update_release_bound(clock_now() - last_touch);
         }
 
+        /**
+         * @brief @b ARE @b YOU @b DUMB @b ?!
+         * @return Result of emptiness check operation
+         */
         [[nodiscard]] bool empty() const {
             return _total_records == 0;
         }

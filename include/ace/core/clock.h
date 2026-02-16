@@ -340,11 +340,8 @@ namespace ace::core {
 
         /**
          * @brief Adjusting the cascade after non-polling period
-         * @param last_touch Timestamp of the last cascade polling period
          */
-        void adjust(timepoint_t last_touch) {
-            update_release_bound(clock_now() - last_touch);
-        }
+        void adjust() { update_release_bound(clock_now() - _release_bound_ts); }
 
         /**
          * @brief @b ARE @b YOU @b DUMB @b ?!
@@ -362,19 +359,14 @@ namespace ace::core {
 
         clock() = default;
 
-        std::optional<timepoint_t> _last_touch {};
+        bool _stopped { false };
 
         // TODO: Add record detach
         promise<bool> yank() {
-            if (_last_touch) {
-                _core.adjust(_last_touch.value());
-                _last_touch.reset();
-            }
+            if (_stopped) { _core.adjust(); _stopped = false; }
             _core.release();
-            if (_core.empty()) {
-                _last_touch = _core.current_time();
-                co_return false;
-            } co_return true;
+            if (_core.empty()) { _stopped = true; co_return false; }
+            co_return true;
         }
 
         [[nodiscard]] static clock_node* subscribe(async<>&& ctx, const duration_t dur) {

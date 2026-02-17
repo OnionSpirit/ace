@@ -137,14 +137,9 @@ TEST(futures, cutex_race) {
     for (volatile std::size_t i = 0; i < ace::core::s_balancer_config._runners_amount; i = i + 1)
         ace::schedule(racer(max_, shared_cnt_, cutx_));
 
-    while (true) {
+    while (not ace::empty()) {
         ace::run();
-        EXPECT_EQ(shared_cnt_, max_ * ace::core::s_balancer_config._runners_amount);
-        if (shared_cnt_ == max_ * ace::core::s_balancer_config._runners_amount) {
-            std::cout << "All tasks complete...\n";
-            break;
-        }
-        std::cout << "Mutex jam at counter: " << shared_cnt_ << std::endl;
+        ASSERT_EQ(shared_cnt_, max_ * ace::core::s_balancer_config._runners_amount);
     }
     ASSERT_TRUE(ace::empty());
     ASSERT_EQ(shared_cnt_, max_ * ace::core::s_balancer_config._runners_amount);

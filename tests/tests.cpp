@@ -132,7 +132,7 @@ TEST(futures, cutex_race) {
 
     ace::cutex cutx_;
     int shared_cnt_ {0};
-    constexpr int max_ = 10000;
+    constexpr int max_ = 100000;
 
     for (volatile std::size_t i = 0; i < ace::core::s_balancer_config._runners_amount; i = i + 1)
         ace::schedule(racer(max_, shared_cnt_, cutx_));

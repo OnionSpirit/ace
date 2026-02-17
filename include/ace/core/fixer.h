@@ -9,13 +9,14 @@
 
 #include "vortex.h"
 #include "ace/coroutines/context.h"
+#include "ace/futures/cutex.h"
 #include "ace/futures/timeout.h"
 
 namespace ace::futures { class cutex; }
 namespace ace::core {
 
     // TODO: FIX THIS SHIT
-    class fixer : public vortex_traits<fixer> {
+    class fixer : public vortex_traits<fixer, shared_spawn_mode> {
 
         fixer() = default;
 
@@ -25,17 +26,22 @@ namespace ace::core {
 
         promise<bool> yank() {
             futures::cutex* cutex_;
-            while (_detache.pop(cutex_)) _pool.erase(cutex_);
-            while (_attache.pop(cutex_)) _pool.insert(cutex_);
-            for (auto* cutex__ : _pool) {
-                co_await futures::timeout(1ms);
-                resolve(cutex__);
+            while (_detache.pop(cutex_) and _pool.contains(cutex_)) {
+                // std::cout << "Cutex " << cutex_ << " detached\n";
+                _pool.erase(cutex_);
             }
-            co_return true; // not _pool.empty();
+            while (_attache.pop(cutex_) and not _pool.contains(cutex_)) {
+                // std::cout << "Cutex " << cutex_ << " attached\n";
+                _pool.insert(cutex_);
+            }
+            for (auto* ctx : _pool) {
+                if (not resolve(ctx)) detach(ctx);
+            }
+            co_return not _pool.empty();
         }
 
         static void attach_cutex(futures::cutex* cutx) {
-            if (not get_instance()._pool.contains(cutx))
+            // if (not get_instance()._pool.contains(cutx))
                 get_instance()._attache.push(std::forward<futures::cutex*>(cutx));
         }
 
@@ -49,6 +55,8 @@ namespace ace::core {
         nukes::dynamic::mpsc_queue<futures::cutex*> _detache;
 
         static inline bool resolve(futures::cutex* cutex_) noexcept;
+
+        static inline void detach(futures::cutex* cutex_) noexcept;
 
         static inline bool is_empty_cutex(const futures::cutex* cutex_) noexcept;
     };

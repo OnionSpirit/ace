@@ -104,7 +104,7 @@ namespace ace {
 
     inline void reset_signal() {
         std::unique_ptr<core::signal_handler> _sigh;
-        while (not core::dispatcher::get_sig_pipe().pop(_sigh)) _sigh.reset();
+        while (not core::dispatcher::get_sig_pipe().pop(_sigh) and not core::dispatcher::get_sig_pipe().empty()) _sigh.reset();
     }
 
     inline void interrupt() {

@@ -28,7 +28,14 @@ namespace ace::core {
     template <typename vortex_t>
     concept is_vortex_compatible = is_vortex_promise<vortex_t> or is_vortex_routine<vortex_t>;
 
-    template <typename derived_t>
+    struct shared_spawn_mode { typedef struct{} spawn_mode_t; };
+
+    struct unique_spawn_mode { typedef struct{} spawn_mode_t; };
+
+    template <typename mark_t>
+    concept is_spawn_mode = requires { typename mark_t::spawn_mode_t; };
+
+    template <typename derived_t, is_spawn_mode spawn_mode_t = unique_spawn_mode>
     class vortex_traits {
 
         static void crtp_asserter() {
@@ -39,23 +46,52 @@ namespace ace::core {
                 "Derived type is not actually derived from 'vortex_traits<DerivedT>'");
         };
 
-        static thread_local bool _detached;
+        static thread_local bool                _unique_detached;
+        alignas(ACE_BUS_SIZE) std::atomic_bool  _shared_detached { true };
+
+        void(*detach_set)(bool) = nullptr;
+        bool(*detach_get)()     = nullptr;
+
         friend derived_t;
 
-        vortex_traits() { crtp_asserter(); respawn(); };
+        static void detach_set_shared(bool b) {
+            get_instance()._shared_detached.store(b, std::memory_order_relaxed);
+        }
+
+        static bool detach_get_shared() {
+            return get_instance()._shared_detached.load(std::memory_order_relaxed);
+        }
+
+        static void detach_set_unique(bool b) { _unique_detached = b; }
+
+        static bool detach_get_unique() { return _unique_detached; }
+
+        vortex_traits() {
+            crtp_asserter();
+            if constexpr (std::same_as<spawn_mode_t, unique_spawn_mode>) {
+                detach_set = detach_set_unique;
+                detach_get = detach_get_unique;
+            } else if constexpr (std::same_as<spawn_mode_t, shared_spawn_mode>) {
+                detach_set = detach_set_shared;
+                detach_get = detach_get_shared;
+            } else {
+                static_assert(false, "Unknown spawn mode for vortex");
+            }
+            // respawn();
+        };
 
         void respawn(runner* rnr = nullptr) {
             dispatcher::get_instance().schedule(vortex(dispatcher::get_sig_pipe()), rnr);
-            _detached = false;
+            detach_set(false);
         }
 
         async<> vortex(sig_pipe_t& sig_pipe) {
             std::unique_ptr<signal_handler> sig { nullptr };
-            while (not _detached) {
+            while (not detach_get()) {
                 if constexpr (is_vortex_promise<derived_t>)
-                    _detached = not co_await static_cast<derived_t*>(this)->yank();
+                    detach_set(not co_await static_cast<derived_t*>(this)->yank());
                 else if constexpr (is_vortex_routine<derived_t>)
-                    _detached = not static_cast<derived_t*>(this)->yank();
+                    detach_set(not static_cast<derived_t*>(this)->yank());
                 if (sig_pipe.pop(sig)) [[unlikely]] {
                     const auto action_result = co_await sig->action();
                     sig_pipe.push(std::move(sig));
@@ -75,7 +111,7 @@ namespace ace::core {
 
         static derived_t& attach(runner_pool_t* rnr = nullptr) {
             static derived_t instance;
-            if (instance._detached) instance.respawn(reinterpret_cast<runner*>(rnr));
+            if (instance.detach_get()) instance.respawn(reinterpret_cast<runner*>(rnr));
             return instance;
         }
 
@@ -86,8 +122,8 @@ namespace ace::core {
 
     };
 
-    template <typename derived_t>
-    thread_local bool vortex_traits<derived_t>::_detached {true};
+    template <typename derived_t, is_spawn_mode spawn_mode_t>
+    thread_local bool vortex_traits<derived_t, spawn_mode_t>::_unique_detached {true};
 
     template <typename vortex_t>
     concept is_vortex = is_vortex_compatible<vortex_t>

@@ -51,17 +51,33 @@ namespace ace::futures {
 
         bool resolve() noexcept;
 
+        std::atomic<bool> _attached { false };
+
+        void attach_basic() noexcept {
+                core::fixer::attach_cutex(this);
+                _attached.store(true);
+        };
+
     public:
 
-        cutex() = default;
+        void attach() noexcept { if (not _attached.load()) attach_basic(); };
 
-        ~cutex() override = default;
+        void detach() noexcept {
+            if (_attached.load()) {
+                core::fixer::detach_cutex(this);
+                _attached.store(false);
+            }
+        };
+
+        cutex() { attach_basic(); };
 
         [[nodiscard]] auto capture() noexcept -> cutex_future&;
 
         [[nodiscard]] bool try_capture() noexcept;
 
         void sync() noexcept;
+
+        ~cutex() override { detach(); };
     };
 
     class secure_capture {
@@ -192,16 +208,18 @@ sync() noexcept {
         core::runner::reattach(std::move(_waiter));
     } else {
         _core->_state.store(cutex_state::e_vacant, std::memory_order_release);
-        core::fixer::attach_cutex(this);
+        attach();
     }
 }
 
 #undef ACE_FUTURE_CUTEX_MEMBER
 #undef ACE_FUTURE_CUTEX_SPACE
 
-inline bool ace::core::fixer::resolve(futures::cutex* cutex_) noexcept { return cutex_->resolve(); }
+inline bool ace::core::fixer::resolve(cutex* cutex_) noexcept { return cutex_->resolve(); }
 
-inline bool ace::core::fixer::is_empty_cutex(const futures::cutex* cutex_) noexcept {
+inline void ace::core::fixer::detach(cutex* cutex_) noexcept { cutex_->detach(); }
+
+inline bool ace::core::fixer::is_empty_cutex(const cutex* cutex_) noexcept {
     return cutex_->_core->_waiters.empty()
         and cutex_->_core->_state.load(std::memory_order_acquire) == futures::cutex_state::e_vacant;
 }

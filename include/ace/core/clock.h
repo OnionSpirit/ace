@@ -397,18 +397,18 @@ namespace ace::core {
 
     };
 
-    struct clock : vortex_traits<clock> {
+    struct clock : vortex_traits<clock, vortex_spawn_mode::e_unique> {
 
         clock() = default;
 
         static thread_local multi_dial _multi_dial;
 
-        static auto current_time() { return get_instance()._multi_dial.current_time(); }
+        static auto current_time() { return inspect()._multi_dial.current_time(); }
 
-        static auto detach(clock_node* node) { get_instance()._multi_dial.detach_record(node); }
+        static auto detach(clock_node* node) { inspect()._multi_dial.detach_record(node); }
 
         [[nodiscard]] static clock_node* subscribe(async<>&& ctx, const duration_t dur) {
-            return attach(ctx._coroutine.promise()._runner_pool)._multi_dial.subscribe(std::forward<async<>>(ctx), dur);
+            return touch(ctx._coroutine.promise()._runner_pool)._multi_dial.subscribe(std::forward<async<>>(ctx), dur);
         };
 
         static bool yank() {

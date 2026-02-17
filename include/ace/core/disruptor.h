@@ -22,7 +22,7 @@
 namespace ace::futures { class cutex; }
 namespace ace::core {
 
-    class disruptor : public vortex_traits<disruptor, shared_spawn_mode> {
+    class disruptor : public vortex_traits<disruptor, vortex_spawn_mode::e_shared> {
 
         disruptor() = default;
 
@@ -50,7 +50,7 @@ namespace ace::core {
 
         static void attach_cutex(futures::cutex* cute) {
             _attache.push(std::forward<futures::cutex*>(cute));
-            attach();
+            touch();
         }
 
         std::set<futures::cutex*> _pool;

@@ -10,6 +10,7 @@
 #define ACE_CORE_VORTEX_H
 
 #include "dispatcher.h"
+#include "ace/common/selection.h"
 #include "ace/core/signal.h"
 #include "ace/coroutines/context.h"
 
@@ -28,14 +29,7 @@ namespace ace::core {
     template <typename vortex_t>
     concept is_vortex_compatible = is_vortex_promise<vortex_t> or is_vortex_routine<vortex_t>;
 
-    struct shared_spawn_mode { typedef struct{} spawn_mode_t; };
-
-    struct unique_spawn_mode { typedef struct{} spawn_mode_t; };
-
-    template <typename mark_t>
-    concept is_spawn_mode = requires { typename mark_t::spawn_mode_t; };
-
-    template <typename derived_t, is_spawn_mode spawn_mode_t = unique_spawn_mode>
+    template <typename derived_t, vortex_spawn_mode spawn_mode_v>
     class vortex_traits {
 
         static void crtp_asserter() {
@@ -55,11 +49,11 @@ namespace ace::core {
         friend derived_t;
 
         static void detach_set_shared(bool b) {
-            get_instance()._shared_detached.store(b, std::memory_order_relaxed);
+            inspect()._shared_detached.store(b, std::memory_order_relaxed);
         }
 
         static bool detach_get_shared() {
-            return get_instance()._shared_detached.load(std::memory_order_relaxed);
+            return inspect()._shared_detached.load(std::memory_order_relaxed);
         }
 
         static void detach_set_unique(const bool b) { _unique_detached = b; }
@@ -68,10 +62,10 @@ namespace ace::core {
 
         vortex_traits() {
             crtp_asserter();
-            if constexpr (std::same_as<spawn_mode_t, unique_spawn_mode>) {
+            if constexpr (spawn_mode_v == vortex_spawn_mode::e_unique) {
                 detach_set = detach_set_unique;
                 detach_get = detach_get_unique;
-            } else if constexpr (std::same_as<spawn_mode_t, shared_spawn_mode>) {
+            } else if constexpr (spawn_mode_v == vortex_spawn_mode::e_shared) {
                 detach_set = detach_set_shared;
                 detach_get = detach_get_shared;
             } else {
@@ -109,25 +103,28 @@ namespace ace::core {
 
     public:
 
-        static derived_t& attach(runner_pool_t* rnr = nullptr) {
+        // NOTE: Gets vortex instance and respawns service if needed
+        static derived_t& touch(runner_pool_t* rnr = nullptr) {
             static derived_t instance;
             if (instance.detach_get()) instance.respawn(reinterpret_cast<runner*>(rnr));
             return instance;
         }
 
-        static derived_t& get_instance() {
+        // NOTE: Gets vortex instance to inspect
+        static derived_t& inspect() {
             static derived_t instance;
             return instance;
         }
 
     };
 
-    template <typename derived_t, is_spawn_mode spawn_mode_t>
-    thread_local bool vortex_traits<derived_t, spawn_mode_t>::_unique_detached {true};
+    template <typename derived_t, vortex_spawn_mode spawn_mode_v>
+    thread_local bool vortex_traits<derived_t, spawn_mode_v>::_unique_detached {true};
 
     template <typename vortex_t>
     concept is_vortex = is_vortex_compatible<vortex_t>
-        and std::derived_from<vortex_t, vortex_traits<vortex_t>>;
+        and (std::derived_from<vortex_t, vortex_traits<vortex_t, vortex_spawn_mode::e_unique>>
+            or std::derived_from<vortex_t, vortex_traits<vortex_t, vortex_spawn_mode::e_shared>>);
 }
 
 #endif // ACE_CORE_VORTEX_H

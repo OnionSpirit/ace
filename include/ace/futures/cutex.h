@@ -94,9 +94,7 @@ namespace ace::futures {
 
         explicit proxy(cutex& cx) : _cutex(cx) { _cutex.add_user(); }
 
-        [[nodiscard]] auto capture() -> cutex_future& {
-            if (not _is_synced) [[unlikely]]
-                throw std::logic_error("Didn't 'sync()' cutex before the next 'capture()'");
+        [[nodiscard]] auto capture() noexcept -> cutex_future& {
             _is_synced = false;
             return _cutex.capture();
         };

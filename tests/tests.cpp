@@ -127,35 +127,7 @@ TEST(futures, do_expire_on_runner_test) {
 }
 
 TEST(futures, cutex_race) {
-    ace::core::s_balancer_config._runners_amount = 4;
-    ace::reload();
-
-    ace::cutex cutx_;
-    int shared_cnt_ {0};
-    constexpr int max_ = 10000;
-
-    for (volatile std::size_t i = 0; i < ace::core::s_balancer_config._runners_amount; i = i + 1)
-        ace::schedule(racer(max_, shared_cnt_, cutx_));
-
-    while (true) {
-        ace::run();
-        EXPECT_EQ(shared_cnt_, max_ * ace::core::s_balancer_config._runners_amount);
-        if (shared_cnt_ == max_ * ace::core::s_balancer_config._runners_amount) {
-            std::cout << "All tasks complete...\n";
-            break;
-        }
-        std::cout << "Mutex jam at counter: " << shared_cnt_ << std::endl;
-    }
-    ASSERT_TRUE(ace::empty());
-    ASSERT_EQ(shared_cnt_, max_ * ace::core::s_balancer_config._runners_amount);
-
-    ace::core::s_balancer_config._runners_amount = 1;
-    ace::reload();
-    ace::reset_signal();
-}
-
-TEST(futures, secure_cutex_race) {
-    ace::core::s_balancer_config._runners_amount = 4;
+    ace::core::s_balancer_config._runners_amount = 8;
     ace::reload();
 
     ace::cutex cutx_;

@@ -131,13 +131,11 @@ TEST(futures, cutex_race) {
     ace::reload();
 
     ace::cutex cutx_;
-    ace::futures::channel_dyn<char> race_res {};
     int shared_cnt_ {0};
     constexpr int max_ = 10000;
 
-    ace::schedule(cutex_detacher(cutx_, ace::core::s_balancer_config._runners_amount, race_res));
     for (volatile std::size_t i = 0; i < ace::core::s_balancer_config._runners_amount; i = i + 1)
-        ace::schedule(racer(max_, shared_cnt_, cutx_, race_res));
+        ace::schedule(racer(max_, shared_cnt_, cutx_));
 
     while (true) {
         ace::run();
@@ -161,13 +159,11 @@ TEST(futures, secure_cutex_race) {
     ace::reload();
 
     ace::cutex cutx_;
-    ace::futures::channel_dyn<char> race_res {};
     int shared_cnt_ {0};
     constexpr int max_ = 10000;
 
-    ace::schedule(cutex_detacher(cutx_, ace::core::s_balancer_config._runners_amount, race_res));
     for (volatile std::size_t i = 0; i < ace::core::s_balancer_config._runners_amount; i = i + 1)
-        ace::schedule(racer(max_, shared_cnt_, cutx_, race_res));
+        ace::schedule(racer(max_, shared_cnt_, cutx_));
 
     while (true) {
         ace::run();

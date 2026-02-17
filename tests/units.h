@@ -184,25 +184,22 @@ inline ace::async<> spawner_cancel(ace::futures::channel_dyn<ace::core::runner*>
     std::cout << "'spawner' finished\n";
 }
 
-inline ace::async<> racer(const int& max, int& shared_counter, ace::cutex& cutx,
-        ace::futures::channel_dyn<char>& racer_output) {
+inline ace::async<> racer(const int& max, int& shared_counter, ace::cutex& cut) {
+    ace::croxy crx(cut);
     for (volatile int i = 0; i < max; i = i + 1) {
-        co_await cutx.capture();
+        co_await crx.capture();
         shared_counter = shared_counter + 1;
-        cutx.sync();
+        crx.sync();
     }
-    racer_output << 1;
     std::cout << "'racer' finished\n";
 }
 
-inline ace::async<> secure_racer(const int& max, int& shared_counter, ace::cutex& cutx,
-        ace::futures::channel_dyn<char>& racer_output) {
+inline ace::async<> auto_racer(const int& max, int& shared_counter, ace::cutex& cut) {
     for (volatile int i = 0; i < max; i = i + 1) {
-        auto sec = ace::secure_capture(cutx);
-        co_await sec.capture();
+        ace::croxy crx(cut);
+        co_await crx.capture();
         shared_counter = shared_counter + 1;
     }
-    racer_output << 1;
     std::cout << "'racer' finished\n";
 }
 
@@ -212,6 +209,6 @@ inline ace::async<> cutex_detacher(ace::cutex& cutx, const int racers_count,
         ace::futures::channel_dyn<char>& racer_output) {
     for (int i = 0; i < racers_count; ++i)
         co_await racer_output.pull();
-    cutx.detach();
+    // cutx.detach();
 }
 #endif // UNITS_H

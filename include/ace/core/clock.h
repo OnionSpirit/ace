@@ -401,20 +401,20 @@ namespace ace::core {
 
         clock() = default;
 
-        static bool yank() {
-            _multi_dial.release();
-            return not _multi_dial.empty();
-        }
-
-        [[nodiscard]] static clock_node* subscribe(async<>&& ctx, const duration_t dur) {
-            return attach(ctx._coroutine.promise()._runner_pool)._multi_dial.subscribe(std::forward<async<>>(ctx), dur);
-        };
+        static thread_local multi_dial _multi_dial;
 
         static auto current_time() { return get_instance()._multi_dial.current_time(); }
 
         static auto detach(clock_node* node) { get_instance()._multi_dial.detach_record(node); }
 
-        static thread_local multi_dial _multi_dial;
+        [[nodiscard]] static clock_node* subscribe(async<>&& ctx, const duration_t dur) {
+            return attach(ctx._coroutine.promise()._runner_pool)._multi_dial.subscribe(std::forward<async<>>(ctx), dur);
+        };
+
+        static bool yank() {
+            _multi_dial.release();
+            return not _multi_dial.empty();
+        }
     };
 
     thread_local common::slab_mempool<clock_record> clock_record::_clock_record_mempool =

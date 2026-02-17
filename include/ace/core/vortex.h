@@ -62,7 +62,7 @@ namespace ace::core {
             return get_instance()._shared_detached.load(std::memory_order_relaxed);
         }
 
-        static void detach_set_unique(bool b) { _unique_detached = b; }
+        static void detach_set_unique(const bool b) { _unique_detached = b; }
 
         static bool detach_get_unique() { return _unique_detached; }
 

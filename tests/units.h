@@ -212,7 +212,6 @@ inline ace::async<> cutex_detacher(ace::cutex& cutx, const int racers_count,
         ace::futures::channel_dyn<char>& racer_output) {
     for (int i = 0; i < racers_count; ++i)
         co_await racer_output.pull();
-    // ace::terminate();
-    // cutx.detach();
+    cutx.detach();
 }
 #endif // UNITS_H

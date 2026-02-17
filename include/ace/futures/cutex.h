@@ -49,27 +49,24 @@ namespace ace::futures {
         friend class cutex_future;
         friend core::fixer;
 
-        bool resolve() noexcept;
+        void resolve() noexcept;
 
         std::atomic<bool> _attached { false };
 
-        void attach_basic() noexcept {
-                core::fixer::attach_cutex(this);
-                _attached.store(true);
+        void attach_trivial() noexcept {
+            core::fixer::attach_cutex(this);
+            _attached.store(true);
         };
 
     public:
 
-        void attach() noexcept { if (not _attached.load()) attach_basic(); };
+        void attach() noexcept { if (not _attached.load()) attach_trivial(); };
 
-        void detach() noexcept {
-            if (_attached.load()) {
-                core::fixer::detach_cutex(this);
-                _attached.store(false);
-            }
-        };
+        void detach() noexcept { _attached.store(false); };
 
-        cutex() { attach_basic(); };
+        [[nodiscard]] bool status() const noexcept { return _attached.load(); };
+
+        cutex() { attach_trivial(); };
 
         [[nodiscard]] auto capture() noexcept -> cutex_future&;
 
@@ -144,7 +141,7 @@ ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 await_suspend(auto coroutine) {
     if (try_lock()) return false;
     // // TODO: Remove timeout line after mtx_resolve_service will be tested
-    // std::this_thread::sleep_for(1ms);
+    std::this_thread::sleep_for(1ms);
     coroutine.promise()._future_conductor = cutex_conductor{this};
     return true;
 }
@@ -159,7 +156,7 @@ ace::futures::cutex::
 returnT ACE_FUTURE_CUTEX_SPACE
 
 
-ACE_FUTURE_CUTEX_MEMBER(bool)
+ACE_FUTURE_CUTEX_MEMBER(void)
 resolve() noexcept {
     bool state_changed { false };
     auto state = _core->_state.load(std::memory_order_acquire);
@@ -171,12 +168,12 @@ resolve() noexcept {
         state_changed = _core->_state.compare_exchange_weak(state, cutex_state::e_pending,
             std::memory_order_release, std::memory_order_relaxed);
         state = cutex_state::e_pending;
-    } else return false;
+    } else return;
 
     // NOTE: If we have changed the state then trying to pull and reattach next waiter
     if (async<> _waiter; state_changed and _core->_waiters.pop(_waiter)) [[unlikely]] {
         core::runner::reattach(std::move(_waiter));
-        return true;
+        return;
     }
 
     // NOTE: If we didn't pull waiter successfully but state changed,
@@ -186,11 +183,11 @@ resolve() noexcept {
         _core->_state.compare_exchange_strong(state, cutex_state::e_vacant,
             std::memory_order_release, std::memory_order_relaxed);
     }
-    return false;
 }
 
 ACE_FUTURE_CUTEX_MEMBER(ace::futures::cutex_future&)
 capture() noexcept {
+    attach();
     return *static_cast<cutex_future*>(this);
 }
 
@@ -206,18 +203,18 @@ sync() noexcept {
     if (async<> _waiter; _core->_waiters.pop(_waiter)) [[likely]] {
         _core->_state.store(cutex_state::e_pending, std::memory_order_release);
         core::runner::reattach(std::move(_waiter));
+        detach();
     } else {
         _core->_state.store(cutex_state::e_vacant, std::memory_order_release);
-        attach();
     }
 }
 
 #undef ACE_FUTURE_CUTEX_MEMBER
 #undef ACE_FUTURE_CUTEX_SPACE
 
-inline bool ace::core::fixer::resolve(cutex* cutex_) noexcept { return cutex_->resolve(); }
+inline void ace::core::fixer::resolve(cutex* cutex_) noexcept { cutex_->resolve(); }
 
-inline void ace::core::fixer::detach(cutex* cutex_) noexcept { cutex_->detach(); }
+inline bool ace::core::fixer::is_detached(cutex* cutex_) noexcept { return not cutex_->status(); };
 
 inline bool ace::core::fixer::is_empty_cutex(const cutex* cutex_) noexcept {
     return cutex_->_core->_waiters.empty()

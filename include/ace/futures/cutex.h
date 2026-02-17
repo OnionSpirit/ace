@@ -82,7 +82,7 @@ namespace ace::futures {
     class cutex::proxy {
 
         cutex& _cutex;
-        bool _is_synced { false };
+        bool _is_synced { true };
 
     public:
 
@@ -94,9 +94,14 @@ namespace ace::futures {
 
         explicit proxy(cutex& cx) : _cutex(cx) { _cutex.add_user(); }
 
-        [[nodiscard]] auto capture() noexcept -> cutex_future& { _is_synced = false; return _cutex.capture(); };
+        [[nodiscard]] auto capture() -> cutex_future& {
+            if (not _is_synced) [[unlikely]]
+                throw std::logic_error("Didn't 'sync()' cutex before the next 'capture()'");
+            _is_synced = false;
+            return _cutex.capture();
+        };
 
-        void sync() noexcept { _cutex.sync(); _is_synced = true; };
+        void sync() noexcept { if (not _is_synced) { _cutex.sync(); _is_synced = true; } };
 
         ~proxy() { if (not _is_synced) sync(); _cutex.del_user(); }
     };

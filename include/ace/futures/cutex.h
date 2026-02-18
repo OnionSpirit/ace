@@ -54,7 +54,7 @@ namespace ace::futures {
 
         std::atomic<int>  _users     { 0 };
 
-        void add_user() { if (_users.fetch_add(1, std::memory_order_release) == 0) core::disruptor::attach_cutex(this); }
+        void add_user() { if (_users.fetch_add(1, std::memory_order_release) == 2) core::disruptor::attach_cutex(this); }
 
         void del_user() { _users.fetch_sub(1, std::memory_order_release); }
 

@@ -131,18 +131,17 @@ TEST(futures, cutex_race) {
     ace::reload();
 
     ace::cutex cutx_;
-    int shared_cnt_ {0};
+    // while (true) {
+    std::string shared_cnt_ {"0"};
     constexpr int max_ = 100000;
 
     for (volatile std::size_t i = 0; i < ace::core::s_balancer_config._runners_amount; i = i + 1)
         ace::schedule(racer(max_, shared_cnt_, cutx_));
 
-    while (not ace::empty()) {
-        ace::run();
-        ASSERT_EQ(shared_cnt_, max_ * ace::core::s_balancer_config._runners_amount);
-    }
+    ace::run();
     ASSERT_TRUE(ace::empty());
-    ASSERT_EQ(shared_cnt_, max_ * ace::core::s_balancer_config._runners_amount);
+    ASSERT_EQ(std::stoi(shared_cnt_), max_ * ace::core::s_balancer_config._runners_amount);
+    // }
 
     ace::core::s_balancer_config._runners_amount = 1;
     ace::reload();

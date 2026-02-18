@@ -184,11 +184,11 @@ inline ace::async<> spawner_cancel(ace::futures::channel_dyn<ace::core::runner*>
     std::cout << "'spawner' finished\n";
 }
 
-inline ace::async<> racer(const int& max, int& shared_counter, ace::cutex& cut) {
+inline ace::async<> racer(const int& max, std::string& shared_counter, ace::cutex& cut) {
     for (volatile int i = 0; i < max; i = i + 1) {
         ace::croxy crx(cut);
         co_await crx.capture();
-        shared_counter = shared_counter + 1;
+        shared_counter = std::to_string(std::stoi(shared_counter) + 1);
     }
     std::cout << "'racer' finished\n";
 }

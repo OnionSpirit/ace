@@ -54,7 +54,7 @@ namespace ace::futures {
 
         std::atomic<int>  _users     { 0 };
 
-        void add_user() { if (_users.fetch_add(1, std::memory_order_release) == 2) core::disruptor::attach_cutex(this); }
+        void add_user() { if (_users.fetch_add(1, std::memory_order_release) == 0) core::disruptor::attach_cutex(this); }
 
         void del_user() { _users.fetch_sub(1, std::memory_order_release); }
 
@@ -152,8 +152,6 @@ try_lock() noexcept {
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 await_suspend(auto coroutine) {
     if (try_lock()) return false;
-    // // TODO: Remove timeout line after mtx_resolve_service will be tested
-    // std::this_thread::sleep_for(1ms);
     coroutine.promise()._future_conductor = cutex_conductor{this};
     return true;
 }

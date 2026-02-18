@@ -33,9 +33,6 @@ namespace ace::core {
         promise<bool> yank() {
             futures::cutex* cutex_ {};
             std::queue<futures::cutex*> _detache {};
-            while (_attache.pop(cutex_) and not _pool.contains(cutex_))
-                _pool.insert(cutex_);
-
             for (auto* ctx : _pool) {
                 resolve(ctx);
                 if (is_detached(ctx)) _detache.push(ctx);
@@ -44,7 +41,9 @@ namespace ace::core {
                 _pool.erase(_detache.front());
                 _detache.pop();
             }
-            co_return not _pool.empty();
+            while (_attache.pop(cutex_) and not _pool.contains(cutex_))
+                _pool.insert(cutex_);
+            co_return not (_pool.empty() and _attache.empty());
         }
 
         static void attach_cutex(futures::cutex* cute) {

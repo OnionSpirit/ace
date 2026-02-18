@@ -41,7 +41,7 @@ namespace ace::core {
                 _pool.erase(_detache.front());
                 _detache.pop();
             }
-            while (_attache.pop(cutex_) and not _pool.contains(cutex_))
+            while (_attache.pop(cutex_))
                 _pool.insert(cutex_);
             co_return not (_pool.empty() and _attache.empty());
         }

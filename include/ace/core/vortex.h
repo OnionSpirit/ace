@@ -97,7 +97,7 @@ namespace ace::core {
                     }
                     sig.reset();
                 }
-                co_await std::suspend_always{};
+                co_await suspend();
             }
         }
 

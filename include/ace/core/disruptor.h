@@ -37,8 +37,10 @@ namespace ace::core {
                 resolve(ctx);
                 if (is_detached(ctx)) _detache.push(ctx);
             }
+            co_await futures::timeout(1ms);
             while (not _detache.empty()) {
-                _pool.erase(_detache.front());
+                if (is_empty_cutex(_detache.front()))
+                    _pool.erase(_detache.front());
                 _detache.pop();
             }
             while (_attache.pop(cutex_))
@@ -59,7 +61,7 @@ namespace ace::core {
 
         static inline bool is_detached(const futures::cutex* cutex_) noexcept;
 
-        static inline bool is_empty_cutex(const futures::cutex* cutex_) noexcept;
+        static inline bool is_empty_cutex(futures::cutex* cutex_) noexcept;
     };
 
     nukes::dynamic::mpsc_queue<futures::cutex*> disruptor::_attache {};

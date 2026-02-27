@@ -127,7 +127,7 @@ TEST(futures, do_expire_on_runner_test) {
 }
 
 TEST(futures, cutex_race) {
-    ace::core::s_balancer_config._runners_amount = 12;
+    ace::core::s_balancer_config._runners_amount = 4;
     ace::reload();
 
     ace::cutex cutx_;

@@ -146,6 +146,7 @@ returnT ACE_FUTURE_CUTEX_SPACE
 
 ACE_FUTURE_CUTEX_MEMBER(bool)
 resolve() noexcept {
+    // NOTE: Trying to fetch and release from cutex waiters queue
     if (async<> _waiter; _waiters.pop(_waiter)) {
         _waiter.release_future();
         core::runner::reattach(std::move(_waiter));
@@ -160,11 +161,16 @@ capture() noexcept { return *static_cast<cutex_future*>(this); }
 ACE_FUTURE_CUTEX_MEMBER(void)
 sync() noexcept {
     async<> _waiter;
+    // NOTE: Substract users because leaving cutex
     const bool has_waiters = _users.fetch_sub(1, std::memory_order_acq_rel) > 1;
+    // NOTE: Trying to fetch next waiter and release it on the runner
     if (has_waiters and _waiters.pop(_waiter)) {
         _waiter.release_future();
         core::runner::reattach(std::move(_waiter));
-    } else if (has_waiters)
+    }
+    // NOTE: If there are some waiters but fetching is failed
+    // NOTE: than requesting resolve from disruptor
+    else if (has_waiters)
         core::disruptor::request_resolve(this);
 }
 

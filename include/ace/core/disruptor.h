@@ -28,34 +28,32 @@ namespace ace::core {
 
         friend vortex_traits;
 
+        typedef std::pair<futures::cutex*, int> cutex_record_t;
+
+        static constexpr  uint16_t max_detaches = UINT16_MAX;
+
     public:
 
         promise<bool> yank() {
-            futures::cutex* cutex_ {};
-            std::queue<futures::cutex*> _detache {};
-            for (auto* ctx : _pool) {
-                resolve(ctx);
-                if (is_detached(ctx)) _detache.push(ctx);
+            if (cutex_record_t cutex_ {}; _attache.pop(cutex_)) {
+                resolve(cutex_.first);
+                // co_await suspend();
+                if (is_detached(cutex_.first)) ++cutex_.second;
+                else --cutex_.second;
+                if (cutex_.second < -UINT32_MAX / 2)
+                    cutex_.second = -UINT16_MAX;
+                if (cutex_.second < max_detaches)
+                    _attache.push(std::forward<cutex_record_t>(cutex_));
             }
-            co_await futures::timeout(1ms);
-            while (not _detache.empty()) {
-                if (is_empty_cutex(_detache.front()))
-                    _pool.erase(_detache.front());
-                _detache.pop();
-            }
-            while (_attache.pop(cutex_))
-                _pool.insert(cutex_);
-            co_return not (_pool.empty() and _attache.empty());
+            co_return not _attache.empty();
         }
 
         static void attach_cutex(futures::cutex* cute) {
-            _attache.push(std::forward<futures::cutex*>(cute));
+            _attache.push(std::forward<cutex_record_t>({cute, 0}));
             touch();
         }
 
-        std::set<futures::cutex*> _pool;
-
-        static nukes::dynamic::mpsc_queue<futures::cutex*> _attache;
+        static nukes::dynamic::mpsc_queue<cutex_record_t> _attache;
 
         static inline void resolve(futures::cutex* cutex_) noexcept;
 
@@ -64,7 +62,7 @@ namespace ace::core {
         static inline bool is_empty_cutex(futures::cutex* cutex_) noexcept;
     };
 
-    nukes::dynamic::mpsc_queue<futures::cutex*> disruptor::_attache {};
+    nukes::dynamic::mpsc_queue<disruptor::cutex_record_t> disruptor::_attache {};
 
 }
 

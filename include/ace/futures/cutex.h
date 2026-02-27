@@ -50,7 +50,7 @@ namespace ace::futures {
 
         void resolve() noexcept;
 
-        void add_user() { if (_users.fetch_add(1, std::memory_order_release) == 0) core::disruptor::attach_cutex(this); }
+        void add_user() { if (_users.fetch_add(1, std::memory_order_release) == 1) core::disruptor::attach_cutex(this); }
 
         void del_user() { _users.fetch_sub(1, std::memory_order_release); }
 
@@ -164,30 +164,12 @@ returnT ACE_FUTURE_CUTEX_SPACE
 
 ACE_FUTURE_CUTEX_MEMBER(void)
 resolve() noexcept {
-    bool state_changed { false };
     auto state = _state.load(std::memory_order_acquire);
-
-    // NOTE: Checking if state is 'free'
-    if (state == cutex_state::e_vacant) [[unlikely]] {
-        // NOTE: Using 'weak' version because 'strong' option consumes more time
-        // NOTE: and logic wont break if haven't captured 'free' state
-        state_changed = _state.compare_exchange_weak(state, cutex_state::e_pending,
-            std::memory_order_release, std::memory_order_relaxed);
-        state = cutex_state::e_pending;
-    } else return;
-
-    // NOTE: If we have changed the state then trying to pull and reattach next waiter
-    if (async<> _waiter; state_changed and _waiters.pop(_waiter)) [[unlikely]] {
+    // NOTE: Checking if state is vacant and trying to pull waiter
+    if (async<> _waiter; state == cutex_state::e_vacant and _waiters.pop(_waiter)) {
         core::runner::reattach(std::move(_waiter));
-        return;
-    }
-
-    // NOTE: If we didn't pull waiter successfully but state changed,
-    // NOTE: then restoring state to 'free' if it wasn't changed
-    if (state_changed) [[unlikely]] {
-        // NOTE: Using 'strong' version because 'weak' one may skip equality (state == e_free)
-        _state.compare_exchange_strong(state, cutex_state::e_vacant,
-            std::memory_order_release, std::memory_order_relaxed);
+        _state.compare_exchange_weak(state, cutex_state::e_pending,
+            std::memory_order_release, std::memory_order_acquire);
     }
 }
 

@@ -161,9 +161,7 @@ sync() noexcept {
     if (async<> _waiter; _waiters.pop(_waiter)) {
         _waiter.release_future();
         core::runner::reattach(std::move(_waiter));
-        return;
-    }
-    if (_users.fetch_sub(1, std::memory_order_acq_rel) > 0) {
+    } else if (_users.fetch_sub(1, std::memory_order_acq_rel) > 1) {
         core::disruptor::request_resolve(this);
     }
 }

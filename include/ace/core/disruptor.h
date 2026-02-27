@@ -34,12 +34,13 @@ namespace ace::core {
 
     public:
 
-        promise<bool> yank() {
+        bool yank() {
             if (futures::cutex* cutex_ {}; _resolve_requests.pop(cutex_)) {
                 if (not resolve(cutex_))
                     _resolve_requests.push(std::forward<futures::cutex*>(cutex_));
             }
-            co_return not _resolve_requests.empty();
+            const bool is_running = not _resolve_requests.empty();
+            return is_running;
         }
 
         static void request_resolve(futures::cutex* cute) {

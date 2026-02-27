@@ -65,6 +65,11 @@ namespace ace::coroutines {
 
         ~context() override { if (_coroutine) _coroutine.destroy(); };
 
+        void release_future() {
+            _coroutine.promise()._future_conductor.release();
+            _coroutine.promise()._future = nullptr;
+        }
+
         // NOTE: Type to store conductor and pass it to outer promise
         struct conductor_carry {
             template <typename conductor_t>
@@ -212,8 +217,7 @@ namespace ace::coroutines {
             if (_coroutine.done()) return true;
             if (_coroutine.promise()._future and not _coroutine.promise()._future->await_ready())
                 return false;
-            _coroutine.promise()._future_conductor.release();
-            _coroutine.promise()._future = nullptr;
+            release_future();
             _coroutine.resume();
             return _coroutine.done();
         }
@@ -243,8 +247,7 @@ namespace ace::coroutines {
             };
             // NOTE: Clear future and resume context
             if (is_ready) {
-                _coroutine.promise()._future_conductor.release();
-                _coroutine.promise()._future = nullptr;
+                release_future();
                 _coroutine.resume();
             }
             // NOTE: For user provided touch result ptr

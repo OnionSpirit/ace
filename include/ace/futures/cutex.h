@@ -9,13 +9,6 @@
 
 namespace ace::futures {
 
-    enum class cutex_state : uint8_t {
-        e_vacant,
-        e_captured,
-        e_pending,
-    };
-
-
     class cutex_future : public future_traits<cutex_future> {
 
         struct cutex_conductor;
@@ -26,9 +19,8 @@ namespace ace::futures {
         DECLARE_FUTURE(cutex_future)
         IMPORT_FUTURE_ENV
 
-        std::atomic<cutex_state> _state {cutex_state::e_vacant };
-        nukes::dynamic::mpmc_queue<async<>> _waiters {};
         std::atomic<int> _users { 0 };
+        nukes::dynamic::mpmc_queue<async<>> _waiters {};
 
         bool try_lock() noexcept;
 
@@ -48,19 +40,13 @@ namespace ace::futures {
         friend class core::disruptor;
         friend class cutex_wrap;
 
-        void resolve() noexcept;
-
-        void add_user() { if (_users.fetch_add(1, std::memory_order_release) == 1) core::disruptor::attach_cutex(this); }
-
-        void del_user() { _users.fetch_sub(1, std::memory_order_release); }
+        bool resolve() noexcept;
 
         [[nodiscard]] auto capture() noexcept -> cutex_future&;
 
-        [[nodiscard]] bool try_capture() noexcept;
-
         void sync() noexcept;
 
-        [[nodiscard]] bool is_attached() const noexcept { return _users.load(std::memory_order_acquire) > 0; };
+        [[nodiscard]] bool is_attached() const noexcept { return _users.load(std::memory_order_acquire) > 1; };
 
     public:
 
@@ -88,7 +74,7 @@ namespace ace::futures {
 
         proxy(proxy&&) = delete;
 
-        explicit proxy(cutex& cx) : _cutex(cx) { _cutex.add_user(); }
+        explicit proxy(cutex& cx) : _cutex(cx) { }
 
         [[nodiscard]] auto capture() -> cutex_future& {
             if (not _is_synced)
@@ -99,7 +85,7 @@ namespace ace::futures {
 
         void sync() noexcept { if (not _is_synced) { _cutex.sync(); _is_synced = true; } };
 
-        ~proxy() { sync(); _cutex.del_user(); }
+        ~proxy() { sync(); }
     };
 
 } // end namespace ace::futures
@@ -139,15 +125,11 @@ struct ACE_FUTURE_CUTEX_FUTURE_SPACE cutex_conductor : conductor_handler_t {
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 try_lock() noexcept {
-    auto state = _state.load(std::memory_order_acquire);
-    return (state == cutex_state::e_vacant or state == cutex_state::e_pending)
-        and _state.compare_exchange_weak(state, cutex_state::e_captured,
-            std::memory_order_release, std::memory_order_relaxed);
+    return _users.fetch_add(1, std::memory_order_acq_rel) == 0;
 }
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 await_suspend(auto coroutine) {
-    if (try_lock()) return false;
     coroutine.promise()._future_conductor = cutex_conductor{this};
     return true;
 }
@@ -162,47 +144,33 @@ ace::futures::cutex::
 returnT ACE_FUTURE_CUTEX_SPACE
 
 
-ACE_FUTURE_CUTEX_MEMBER(void)
+ACE_FUTURE_CUTEX_MEMBER(bool)
 resolve() noexcept {
-    auto state = _state.load(std::memory_order_acquire);
-    // NOTE: Checking if state is vacant and trying to pull waiter
-    if (async<> _waiter; state == cutex_state::e_vacant and _waiters.pop(_waiter)) {
+    if (async<> _waiter; _waiters.pop(_waiter)) {
         core::runner::reattach(std::move(_waiter));
-        _state.compare_exchange_weak(state, cutex_state::e_pending,
-            std::memory_order_release, std::memory_order_acquire);
+        return true;
     }
+    return false;
 }
 
 ACE_FUTURE_CUTEX_MEMBER(ace::futures::cutex_future&)
 capture() noexcept { return *static_cast<cutex_future*>(this); }
 
-ACE_FUTURE_CUTEX_MEMBER(bool)
-try_capture() noexcept {
-    return try_lock();
-}
-
 ACE_FUTURE_CUTEX_MEMBER(void)
 sync() noexcept {
-    if (_state.load(std::memory_order_acquire) not_eq cutex_state::e_captured)
-        return;
-    if (async<> _waiter; _waiters.pop(_waiter)) [[likely]] {
-        _state.store(cutex_state::e_pending, std::memory_order_release);
+    if (async<> _waiter; _waiters.pop(_waiter)) {
+        _waiter.release_future();
         core::runner::reattach(std::move(_waiter));
-    } else
-        _state.store(cutex_state::e_vacant, std::memory_order_release);
+        return;
+    }
+    if (_users.fetch_sub(1, std::memory_order_acq_rel) > 0) {
+        core::disruptor::request_resolve(this);
+    }
 }
 
 #undef ACE_FUTURE_CUTEX_MEMBER
 #undef ACE_FUTURE_CUTEX_SPACE
 
-inline void ace::core::disruptor::resolve(cutex* cutex_) noexcept { cutex_->resolve(); }
-
-inline bool ace::core::disruptor::is_detached(const cutex* cutex_) noexcept { return not cutex_->is_attached(); };
-
-inline bool ace::core::disruptor::is_empty_cutex(cutex* cutex_) noexcept {
-    return  cutex_->_users.load(std::memory_order_acquire) == 0
-        and cutex_->_state.load(std::memory_order_acquire) == futures::cutex_state::e_vacant
-        and cutex_->_waiters.empty();
-}
+inline bool ace::core::disruptor::resolve(cutex* cutex_) noexcept { return cutex_->resolve(); }
 
 #endif //ACE_FUTURE_CUTEX_H

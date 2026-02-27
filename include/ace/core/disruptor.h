@@ -35,34 +35,24 @@ namespace ace::core {
     public:
 
         promise<bool> yank() {
-            if (cutex_record_t cutex_ {}; _attache.pop(cutex_)) {
-                resolve(cutex_.first);
-                // co_await suspend();
-                if (is_detached(cutex_.first)) ++cutex_.second;
-                else --cutex_.second;
-                if (cutex_.second < -UINT32_MAX / 2)
-                    cutex_.second = -UINT16_MAX;
-                if (cutex_.second < max_detaches)
-                    _attache.push(std::forward<cutex_record_t>(cutex_));
+            if (futures::cutex* cutex_ {}; _resolve_requests.pop(cutex_)) {
+                if (not resolve(cutex_))
+                    _resolve_requests.push(std::forward<futures::cutex*>(cutex_));
             }
-            co_return not _attache.empty();
+            co_return not _resolve_requests.empty();
         }
 
-        static void attach_cutex(futures::cutex* cute) {
-            _attache.push(std::forward<cutex_record_t>({cute, 0}));
+        static void request_resolve(futures::cutex* cute) {
+            _resolve_requests.push(std::forward<futures::cutex*>(cute));
             touch();
         }
 
-        static nukes::dynamic::mpsc_queue<cutex_record_t> _attache;
+        static nukes::dynamic::mpsc_queue<futures::cutex*> _resolve_requests;
 
-        static inline void resolve(futures::cutex* cutex_) noexcept;
-
-        static inline bool is_detached(const futures::cutex* cutex_) noexcept;
-
-        static inline bool is_empty_cutex(futures::cutex* cutex_) noexcept;
+        static inline bool resolve(futures::cutex* cutex_) noexcept;
     };
 
-    nukes::dynamic::mpsc_queue<disruptor::cutex_record_t> disruptor::_attache {};
+    nukes::dynamic::mpsc_queue<futures::cutex*> disruptor::_resolve_requests {};
 
 }
 

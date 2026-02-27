@@ -28,10 +28,6 @@ namespace ace::core {
 
         friend vortex_traits;
 
-        typedef std::pair<futures::cutex*, int> cutex_record_t;
-
-        static constexpr  uint16_t max_detaches = UINT16_MAX;
-
     public:
 
         bool yank() {

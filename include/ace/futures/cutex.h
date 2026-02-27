@@ -19,7 +19,7 @@ namespace ace::futures {
         DECLARE_FUTURE(cutex_future)
         IMPORT_FUTURE_ENV
 
-        std::atomic<int> _users { 0 };
+        std::atomic<uint64_t> _users { 0 };
         nukes::dynamic::mpmc_queue<async<>> _waiters {};
 
         bool try_lock() noexcept;
@@ -147,6 +147,7 @@ returnT ACE_FUTURE_CUTEX_SPACE
 ACE_FUTURE_CUTEX_MEMBER(bool)
 resolve() noexcept {
     if (async<> _waiter; _waiters.pop(_waiter)) {
+        _waiter.release_future();
         core::runner::reattach(std::move(_waiter));
         return true;
     }
@@ -158,12 +159,13 @@ capture() noexcept { return *static_cast<cutex_future*>(this); }
 
 ACE_FUTURE_CUTEX_MEMBER(void)
 sync() noexcept {
-    if (async<> _waiter; _waiters.pop(_waiter)) {
+    async<> _waiter;
+    const bool has_waiters = _users.fetch_sub(1, std::memory_order_acq_rel) > 1;
+    if (has_waiters and _waiters.pop(_waiter)) {
         _waiter.release_future();
         core::runner::reattach(std::move(_waiter));
-    } else if (_users.fetch_sub(1, std::memory_order_acq_rel) > 1) {
+    } else if (has_waiters)
         core::disruptor::request_resolve(this);
-    }
 }
 
 #undef ACE_FUTURE_CUTEX_MEMBER

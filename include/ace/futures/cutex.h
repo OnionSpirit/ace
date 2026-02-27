@@ -20,7 +20,7 @@ namespace ace::futures {
         IMPORT_FUTURE_ENV
 
         std::atomic<uint64_t> _users { 0 };
-        nukes::dynamic::mpmc_queue<async<>> _waiters {};
+        nukes::dynamic::mpsc_queue<async<>> _waiters {};
 
         bool try_lock() noexcept;
 

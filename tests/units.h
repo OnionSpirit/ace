@@ -135,6 +135,15 @@ inline ace::async<> spawner(ace::futures::channel_dyn<ace::core::runner*>& outpu
     std::cout << "'spawned' done!!!\n";
 }
 
+inline ace::async<> join_spawner(ace::futures::channel_dyn<ace::core::runner*>& output) {
+    auto curr_runner = co_await ace::commands::get_runner();
+    output << curr_runner;
+    auto handle = co_await ace::spawn(to_spawn(output));
+    std::cout << "'spawned' is spawned\n";
+    if (co_await handle.join()) std::cout << "'spawned' done!!!\n";
+    else std::cout << "'spawned' broken!!!\n";
+}
+
 struct destruct_on_cancel_checker {
 
     std::string _name;

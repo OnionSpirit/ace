@@ -243,6 +243,22 @@ TEST(commands, check_spawn_command) {
     ASSERT_EQ(res[0], res[1]);
 }
 
+TEST(commands, check_spawn_and_join) {
+    ace::futures::channel_dyn<ace::core::runner*> channel_ {};
+    ace::schedule(join_spawner(channel_));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    // NOTE: Collecting waited time sequence
+    std::vector<ace::core::runner*> res{};
+    ace::schedule(channel_fetcher(channel_, res));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    ASSERT_EQ(res.size(), 2);
+    ASSERT_NE(res[0], nullptr);
+    ASSERT_NE(res[1], nullptr);
+    ASSERT_EQ(res[0], res[1]);
+}
+
 TEST(commands, check_cancel) {
     const auto start_time = std::chrono::_V2::steady_clock::now();
     ace::futures::channel_dyn<ace::core::runner*> channel_ {};
@@ -259,4 +275,3 @@ TEST(commands, check_cancel) {
     EXPECT_NE(res[0], nullptr);
     EXPECT_LT(ms_time, 900);
 }
-

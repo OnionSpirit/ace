@@ -7,7 +7,7 @@
 
 namespace ace::commands {
 
-    class spawn : public command_traits<spawn> {
+    class spawn final : public command_traits<spawn> {
 
         async<> _task {};
         coroutines::control_block_handle _handle;

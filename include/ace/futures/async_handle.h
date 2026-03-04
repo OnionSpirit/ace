@@ -2,36 +2,13 @@
 #define ACE_FUTURE_ASYNC_HANDLE_H
 
 #include "future.h"
-#include "ace/core/runner.h"
 #include "ace/coroutines/context.h"
 
 namespace ace::futures {
 
-    class async_handle {
+    class join_handler : public future_traits<join_handler> {
 
-        class join_handler;
-
-        coroutines::control_block_handle _handle;
-
-    public:
-
-        async_handle() = delete;
-
-        explicit async_handle(const coroutines::control_block_handle& handle)
-            : _handle{handle} {}
-
-        [[nodiscard]] auto join() const;
-
-        [[nodiscard]] bool done() const { return _handle.done(); }
-
-        void cancel() { _handle.cancel(); }
-
-    };
-
-    class async_handle::join_handler final : future_traits<join_handler> {
-
-        DECLARE_FUTURE(join_handler)
-        IMPORT_FUTURE_ENV
+    protected:
 
         coroutines::control_block_handle _handle;
 
@@ -39,19 +16,40 @@ namespace ace::futures {
 
     public:
 
-        join_handler() = delete;
+        DECLARE_FUTURE(join_handler)
+        IMPORT_FUTURE_ENV
 
-        explicit join_handler(const coroutines::control_block_handle& handle) : _handle{handle} {}
+        join_handler() = default;
+
+        explicit join_handler(const coroutines::control_block_handle& handle)
+            : _handle{handle} {}
 
         bool await_ready() override { return false; }
 
         template<typename promise_u>
         bool await_suspend(std::coroutine_handle<promise_u> outer);
 
-        bool await_resume() const { return _handle.done(); }
+        [[nodiscard]] bool await_resume() const { return _handle.done(); }
     };
 
-    struct async_handle::join_handler::join_handler_conductor final : conductor_handler_t {
+    class async_handle final : protected join_handler {
+
+    public:
+
+        async_handle() = delete;
+
+        explicit async_handle(const coroutines::control_block_handle& handle)
+            : join_handler(handle) {}
+
+        [[nodiscard]] auto join() noexcept -> join_handler&;
+
+        [[nodiscard]] bool done() const { return _handle.done(); }
+
+        void cancel() { _handle.cancel(); }
+
+    };
+
+    struct join_handler::join_handler_conductor final : conductor_handler_t {
 
         coroutines::control_block_handle _handle;
 
@@ -81,19 +79,21 @@ ace::futures::async_handle::
 returnT ACE_FUTURE_ASYNC_HANDLE_SPACE
 
 #define ACE_FUTURE_JOIN_HANDLER_FUTURE_SPACE \
-ace::futures::async_handle::join_handler::
+ace::futures::join_handler::
 
 #define ACE_FUTURE_JOIN_HANDLER_FUTURE_MEMBER(returnT) \
 returnT ACE_FUTURE_JOIN_HANDLER_FUTURE_SPACE
 
 
-ACE_FUTURE_ASYNC_HANDLE_MEMBER(auto) join() const { return join_handler{_handle}; }
+ACE_FUTURE_ASYNC_HANDLE_MEMBER(auto)
+join() noexcept -> join_handler& { return *static_cast<join_handler*>(this); }
 
 ACE_FUTURE_JOIN_HANDLER_FUTURE_MEMBER(template<typename promise_u> bool)
 await_suspend(std::coroutine_handle<promise_u> outer) {
     outer.promise()._future_conductor = join_handler_conductor{_handle};
-    return false;
+    return true;
 }
+
 
 #undef ACE_FUTURE_ASYNC_HANDLE_SPACE
 #undef ACE_FUTURE_ASYNC_HANDLE_MEMBER

@@ -39,6 +39,7 @@ public:
      * @return void
      */
     void schedule(async<>&& new_task, const runner* rnr = nullptr) noexcept {
+        new_task._coroutine.promise()._roaming = true;
         _balancer.schedule(std::forward<async<>>(new_task), rnr);
     }
 

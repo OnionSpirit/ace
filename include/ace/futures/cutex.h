@@ -21,16 +21,22 @@ namespace ace::futures {
 
         std::atomic<uint64_t> _users { 0 };
         nukes::dynamic::mpsc_queue<async<>> _waiters {};
+        runner_pool_t* _runner_pool { nullptr };
+        bool _rescheduling { false };
 
         bool try_lock() noexcept;
 
-        bool await_ready() override { return try_lock(); }
+        bool await_ready() override { return false; }
 
         bool await_suspend(auto coroutine);
 
         void await_resume() {}
 
         ~cutex_future() override = default;
+
+        void set_rescheduling(const bool rs) noexcept { _rescheduling = rs; }
+
+        [[nodiscard]] bool get_rescheduling() const noexcept { return _rescheduling; }
     };
 
     // NOTE: Cooperative Userspace muTEX
@@ -57,6 +63,10 @@ namespace ace::futures {
         ~cutex() override = default;
 
         class proxy;
+
+        using cutex_future::set_rescheduling;
+
+        using cutex_future::get_rescheduling;
     };
 
     class cutex::proxy {
@@ -128,8 +138,14 @@ try_lock() noexcept {
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 await_suspend(auto coroutine) {
-    coroutine.promise()._future_conductor = cutex_conductor{this};
-    return true;
+    if (not try_lock()) {
+        if (_runner_pool and _rescheduling and coroutine.promise()._roaming)
+            coroutine.promise()._runner_pool = _runner_pool;
+        else if (_rescheduling) _runner_pool = coroutine.promise()._runner_pool;
+        coroutine.promise()._future_conductor = cutex_conductor{this};
+        return true;
+    }
+    return false;
 }
 
 #undef ACE_FUTURE_CUTEX_FUTURE_MEMBER

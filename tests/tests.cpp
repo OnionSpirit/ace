@@ -152,6 +152,29 @@ TEST(futures, cutex_race) {
     ace::reset_signal();
 }
 
+TEST(futures, cutex_race_resheduling) {
+    ace::core::s_balancer_config._runners_amount = 8;
+    ace::reload();
+
+    ace::cutex cutx_;
+    cutx_.set_rescheduling(true);
+    // while (true) {
+    std::string shared_cnt_ {"0"};
+    constexpr int max_ = 1000000;
+
+    for (volatile std::size_t i = 0; i < ace::core::s_balancer_config._runners_amount; i = i + 1)
+        ace::schedule(racer(max_, shared_cnt_, cutx_));
+
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    ASSERT_EQ(std::stoi(shared_cnt_), max_ * ace::core::s_balancer_config._runners_amount);
+    // }
+
+    ace::core::s_balancer_config._runners_amount = 1;
+    ace::reload();
+    ace::reset_signal();
+}
+
 TEST(futures, do_timer_on_runner_parallel_test) {
     ace::core::s_balancer_config._runners_amount = 4;
     ace::reload();

@@ -4,7 +4,7 @@
 #include "ace/core/runner.h"
 #include "ace/core/disruptor.h"
 #include "ace/coroutines/context.h"
-#include "nukes/dynamic/mpmc_queue.h"
+#include "nukes/dynamic/mpsc_queue.h"
 
 
 namespace ace::futures {
@@ -45,8 +45,6 @@ namespace ace::futures {
         [[nodiscard]] auto capture() noexcept -> cutex_future&;
 
         void sync() noexcept;
-
-        [[nodiscard]] bool is_attached() const noexcept { return _users.load(std::memory_order_acquire) > 1; };
 
     public:
 
@@ -160,18 +158,16 @@ capture() noexcept { return *static_cast<cutex_future*>(this); }
 
 ACE_FUTURE_CUTEX_MEMBER(void)
 sync() noexcept {
-    async<> _waiter;
-    // NOTE: Substract users because leaving cutex
+    // NOTE: Subtract users because leaving cutex
     const bool has_waiters = _users.fetch_sub(1, std::memory_order_acq_rel) > 1;
     // NOTE: Trying to fetch next waiter and release it on the runner
-    if (has_waiters and _waiters.pop(_waiter)) {
-        _waiter.release_future();
-        core::runner::reattach(std::move(_waiter));
+    if (async<> waiter; has_waiters and _waiters.pop(waiter)) {
+        waiter.release_future();
+        core::runner::reattach(std::move(waiter));
     }
     // NOTE: If there are some waiters but fetching is failed
     // NOTE: than requesting resolve from disruptor
-    else if (has_waiters)
-        core::disruptor::request_resolve(this);
+    else if (has_waiters) core::disruptor::request_resolve(this);
 }
 
 #undef ACE_FUTURE_CUTEX_MEMBER

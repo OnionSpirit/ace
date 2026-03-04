@@ -193,4 +193,10 @@ inline ace::async<> racer(const int& max, std::string& shared_counter, ace::cute
     std::cout << "'racer' finished\n";
 }
 
+template<typename Rep, typename Period>
+ace::async<> sleeper(std::chrono::duration<Rep, Period> wait_time) {
+    co_await ace::futures::timeout(wait_time);
+    co_return;
+}
+
 #endif // UNITS_H

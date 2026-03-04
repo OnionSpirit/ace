@@ -127,16 +127,20 @@ TEST(futures, do_expire_on_runner_test) {
 }
 
 TEST(futures, cutex_race) {
-    ace::core::s_balancer_config._runners_amount = 4;
+    ace::core::s_balancer_config._runners_amount = 8;
     ace::reload();
 
     ace::cutex cutx_;
     // while (true) {
     std::string shared_cnt_ {"0"};
-    constexpr int max_ = 1000;
+    constexpr int max_ = 100000;
 
-    for (volatile std::size_t i = 0; i < ace::core::s_balancer_config._runners_amount; i = i + 1)
+    for (volatile std::size_t i = 0; i < ace::core::s_balancer_config._runners_amount; i = i + 1) {
         ace::schedule(racer(max_, shared_cnt_, cutx_));
+        // NOTE: Sleeper needed to not to make workers idle while waiting for cutex.
+        // NOTE: Idle worker state causes thread recreation that is heavy op
+        ace::schedule(sleeper(75ms * ace::core::s_balancer_config._runners_amount));
+    }
 
     ace::run();
     ASSERT_TRUE(ace::empty());

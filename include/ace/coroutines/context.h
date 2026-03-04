@@ -75,6 +75,27 @@ namespace ace::coroutines {
             _coroutine.promise()._future = nullptr;
         }
 
+        control_block_handle observe() {
+            // NOTE: Setting up promise block by coroutine
+            _coroutine.promise().setup_control_block(_coroutine);
+            return control_block_handle{ _coroutine };
+        }
+
+        void release_waiters() {
+            if (context<> waiter; _coroutine.promise()._waiters.load()) {
+                while (_coroutine.promise()._waiters.load()->pop(waiter)) {
+                    waiter.release_future();
+                    waiter._coroutine.promise()._runner_pool->push(std::move(waiter));
+                }
+            }
+        }
+
+        std::expected<std::size_t, std::string_view> track() {
+            if (_coroutine)
+                return _coroutine.promise().setup_trace();
+            return std::unexpected("context is already dead.");
+        }
+
         // NOTE: Type to store conductor and pass it to outer promise
         struct conductor_carry {
             template <typename conductor_t>
@@ -272,26 +293,6 @@ namespace ace::coroutines {
             else return;
         }
 
-        control_block_handle observe() {
-            // NOTE: Setting up promise block by coroutine
-            _coroutine.promise().setup_control_block(_coroutine);
-            return control_block_handle{ _coroutine };
-        }
-
-        void release_waiters() {
-            if (context<> waiter; _coroutine.promise()._waiters.load()) {
-                while (_coroutine.promise()._waiters.load()->pop(waiter)) {
-                    waiter.release_future();
-                    waiter._coroutine.promise()._runner_pool->push(std::move(waiter));
-                }
-            }
-        }
-
-        std::expected<std::size_t, std::string_view> track() {
-            if (_coroutine)
-                return _coroutine.promise().setup_trace();
-            return std::unexpected("context is already dead.");
-        }
     };
 
 }

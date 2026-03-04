@@ -73,7 +73,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
             and touch_result not_eq coroutines::promise_touch_result::e_detached
         };
 
-        // TODO: Add reattach for task waiters if there are some
+        // TODO: Separate pool onto incoming pool (for task rescheduling) and processing pool (for task processing)
 
         // NOTE: Checking if the context shall be forwarded via passed conductor
         const bool is_conducted {
@@ -88,7 +88,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
         if (is_conducted) [[likely]]
             async_n->_data._coroutine.promise()._future_conductor->forward(std::forward<async<>>(async_n->_data));
 
-        // NOTE: Managing nodes depending on checks
+        // NOTE: If async is idle, releasing it's node. Else returning it back to the local pool
         if (is_idle) _pool.release_node(async_n);
         else _pool.push_node(async_n);
 

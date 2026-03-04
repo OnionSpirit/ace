@@ -138,14 +138,23 @@ try_lock() noexcept {
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 await_suspend(auto coroutine) {
-    if (not try_lock()) {
-        if (_runner_pool and _rescheduling and coroutine.promise()._roaming)
-            coroutine.promise()._runner_pool = _runner_pool;
-        else if (_rescheduling) _runner_pool = coroutine.promise()._runner_pool;
-        coroutine.promise()._future_conductor = cutex_conductor{this};
-        return true;
-    }
-    return false;
+    const bool captured = try_lock();
+    const bool on_reschedule = not captured and _rescheduling and coroutine.promise()._roaming;
+
+    // NOTE: Selecting rescheduling pool if it doesn't set
+    if (_rescheduling and not _runner_pool)
+        _runner_pool = coroutine.promise()._runner_pool;
+
+    // NOTE: Leaving because cutex captured
+    if (captured) return false;
+
+    // NOTE: Setting a new pool for the task if it is allowed
+    if (on_reschedule)
+        coroutine.promise()._runner_pool = _runner_pool;
+
+    // NOTE: Setting conductor for dispatch to the cutex waiters queue
+    coroutine.promise()._future_conductor = cutex_conductor{this};
+    return true;
 }
 
 #undef ACE_FUTURE_CUTEX_FUTURE_MEMBER

@@ -3,6 +3,7 @@
 
 #include "command.h"
 #include "ace/core/runner.h"
+#include "ace/futures/async_handle.h"
 
 namespace ace::commands {
 
@@ -31,8 +32,7 @@ namespace ace::commands {
             return false;
         }
 
-        // TODO: Make return type as 'join_handler' future type, when I will write it
-        coroutines::control_block_handle await_resume() { return _handle; }
+        [[nodiscard]] futures::async_handle await_resume() const { return futures::async_handle{_handle}; }
 
     };
 

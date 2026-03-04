@@ -63,7 +63,12 @@ namespace ace::coroutines {
 
         explicit operator bool() const { return is_resumable(); }
 
-        ~context() override { if (_coroutine) _coroutine.destroy(); };
+        ~context() override {
+            if (_coroutine) {
+                release_waiters();
+                _coroutine.destroy();
+            }
+        };
 
         void release_future() {
             _coroutine.promise()._future_conductor.release();
@@ -147,6 +152,15 @@ namespace ace::coroutines {
                 handle.promise()._status = e_detached;
             }
 
+            bool subscribe(void* undefined_waiter) noexcept override {
+                if (not _address or not undefined_waiter) [[unlikely]] return false;
+                auto handle = coroutine_t::from_address(_address);
+                auto* waiter = static_cast<context<>*>(undefined_waiter);
+                handle.promise()._waiters.store(std::make_shared<runner_pool_t>());
+                handle.promise()._waiters.load()->push(std::forward<context<>>(*waiter));
+                return true;
+            }
+
             ~promise_conductor() override = default;
         };
 
@@ -206,7 +220,7 @@ namespace ace::coroutines {
             conductor_carry _future_conductor {};
             // TODO: Wrap into weak hazard ptr, when I will write it
             runner_pool_t* _runner_pool {nullptr};
-            // std::atomic<std::shared_ptr<runner_pool_t>> _waiters;
+            std::atomic<std::shared_ptr<runner_pool_t>> _waiters;
             // NOTE: Conductor to manage promise on suspended state.
             // NOTE: Context owns only one promise. Extra carry object is unnecessary
             std::optional<promise_conductor> _promise_conductor;
@@ -264,52 +278,20 @@ namespace ace::coroutines {
             return control_block_handle{ _coroutine };
         }
 
+        void release_waiters() {
+            if (context<> waiter; _coroutine.promise()._waiters.load()) {
+                while (_coroutine.promise()._waiters.load()->pop(waiter)) {
+                    waiter.release_future();
+                    waiter._coroutine.promise()._runner_pool->push(std::move(waiter));
+                }
+            }
+        }
+
         std::expected<std::size_t, std::string_view> track() {
             if (_coroutine)
                 return _coroutine.promise().setup_trace();
             return std::unexpected("context is already dead.");
         }
-    };
-
-
-    // TODO: Need to replace it into unique file and finish its conductor
-    template <typename promise_t>
-    class join_handler : futures::future_traits<join_handler<promise_t>> {
-
-        DECLARE_FUTURE(join_handler)
-        IMPORT_FUTURE_ENV
-
-        std::weak_ptr<std::coroutine_handle<promise_t>> _coroutine;
-
-        class join_handler_conductor;
-        friend class join_handler_conductor;
-
-        class join_handler_conductor : conductor_traits<join_handler_conductor> {
-        public:
-
-            join_handler_conductor() = delete;
-
-        };
-
-    public:
-
-        join_handler() = delete;
-
-        explicit join_handler(const std::coroutine_handle<promise_t> coroutine)
-            : _coroutine{coroutine} {
-            if (not _coroutine.promise()._waiter.load(std::memory_order_acquire))
-                _coroutine.promise()._waiter.store(std::make_shared<context<>::runner_pool_t>(), std::memory_order_release);
-        }
-
-        bool await_ready() override { return _coroutine.done(); }
-
-        template<typename promise_u>
-        bool await_suspend(std::coroutine_handle<promise_u> outer) {
-            outer.promise()._future_conductor = join_handler_conductor{_coroutine};
-            return false;
-        }
-
-        bool await_resume() { return _coroutine.done(); }
     };
 
 }

@@ -13,6 +13,8 @@ namespace ace::coroutines {
 
         virtual void cancel() noexcept = 0;
 
+        virtual bool subscribe(void*) noexcept = 0;
+
         virtual ~promise_conductor_handle() = default;
     };
 
@@ -85,6 +87,12 @@ namespace ace::coroutines {
         [[nodiscard]] bool done() const {
             if (not _block) [[unlikely]] return false;
             return not _block->_exists;
+        }
+
+        bool subscribe(void* waiter) const {
+            if (done() or not _block->_promise_conductor or waiter == nullptr) [[unlikely]]
+                return false;
+            return _block->_promise_conductor->subscribe(waiter);
         }
     };
 

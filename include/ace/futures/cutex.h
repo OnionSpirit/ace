@@ -30,6 +30,7 @@ namespace ace::futures {
 
         bool await_suspend(auto coroutine);
 
+        // ReSharper disable once CppMemberFunctionMayBeStatic
         void await_resume() {}
 
         ~cutex_future() override = default;
@@ -39,12 +40,10 @@ namespace ace::futures {
         [[nodiscard]] bool get_rescheduling() const noexcept { return _rescheduling; }
     };
 
-    // NOTE: Cooperative Userspace muTEX
+    // NOTE: <C>ooperative <U>serspace mu<TEX>
     class cutex final : protected cutex_future {
 
-        friend class cutex_future;
         friend class core::disruptor;
-        friend class cutex_wrap;
 
         bool resolve() noexcept;
 

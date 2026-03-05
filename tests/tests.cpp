@@ -131,7 +131,7 @@ TEST(futures, cutex_race) {
     ace::reload();
 
     ace::cutex cutx_;
-    // while (true) {
+    while (true) {
     std::string shared_cnt_ {"0"};
     constexpr int max_ = 100000;
 
@@ -145,7 +145,7 @@ TEST(futures, cutex_race) {
     ace::run();
     ASSERT_TRUE(ace::empty());
     ASSERT_EQ(std::stoi(shared_cnt_), max_ * ace::core::s_balancer_config._runners_amount);
-    // }
+    }
 
     ace::core::s_balancer_config._runners_amount = 1;
     ace::reload();
@@ -266,7 +266,6 @@ TEST(commands, check_cancel) {
     ace::run();
     ASSERT_TRUE(ace::empty());
     const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::_V2::steady_clock::now() - start_time).count();
-    // // NOTE: Collecting waited time sequence
     std::vector<ace::core::runner*> res{};
     ace::schedule(channel_fetcher(channel_, res));
     ace::run();
@@ -283,7 +282,6 @@ TEST(commands, check_join_after_cancel) {
     ace::run();
     ASSERT_TRUE(ace::empty());
     const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::_V2::steady_clock::now() - start_time).count();
-    // // NOTE: Collecting waited time sequence
     std::vector<ace::core::runner*> res{};
     ace::schedule(channel_fetcher(channel_, res));
     ace::run();

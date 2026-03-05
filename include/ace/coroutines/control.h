@@ -13,7 +13,7 @@ namespace ace::coroutines {
 
         virtual void cancel() noexcept = 0;
 
-        virtual bool subscribe(void*) noexcept = 0;
+        virtual bool forward(void*) noexcept = 0;
 
         virtual ~promise_conductor_handle() = default;
     };
@@ -50,6 +50,12 @@ namespace ace::coroutines {
         { std::remove_reference_t<decltype(p._block)>{} } -> std::same_as<control_block*>;
     };
 
+    /**
+     * @brief Handle of the coroutine control-block.
+     * Can be copied freely.
+     * Provides external dispatch operations (aka @b 'cancel()', @b 'done()' and @b 'forward(...)')
+     * @warning Not thread safe entity
+     */
     class control_block_handle {
 
         control_block* _block { nullptr };
@@ -91,11 +97,11 @@ namespace ace::coroutines {
             return not _block->_exists;
         }
 
-        bool subscribe(void* waiter) const {
+        bool forward(void* waiter) const {
             if (not _block) [[unlikely]] return false;
             if (done() or not _block->_promise_conductor or waiter == nullptr) [[unlikely]]
                 return false;
-            return _block->_promise_conductor->subscribe(waiter);
+            return _block->_promise_conductor->forward(waiter);
         }
     };
 

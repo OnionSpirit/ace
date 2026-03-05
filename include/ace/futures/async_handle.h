@@ -60,7 +60,7 @@ namespace ace::futures {
 
         explicit join_handler_conductor(const coroutines::control_block_handle& handle) : _handle{handle} {}
 
-        void forward(async<>&& ctx) override { _handle.subscribe(&ctx); }
+        void forward(async<>&& ctx) override { _handle.forward(&ctx); }
 
         // TODO: Finish later
         void cancel() override {  }

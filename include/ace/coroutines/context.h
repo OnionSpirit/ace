@@ -173,7 +173,7 @@ namespace ace::coroutines {
                 handle.promise()._status = e_detached;
             }
 
-            bool subscribe(void* undefined_waiter) noexcept override {
+            bool forward(void* undefined_waiter) noexcept override {
                 if (not _address or not undefined_waiter) [[unlikely]] return false;
                 auto handle = coroutine_t::from_address(_address);
                 auto* waiter = static_cast<context<>*>(undefined_waiter);

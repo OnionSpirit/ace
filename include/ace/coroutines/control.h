@@ -84,12 +84,15 @@ namespace ace::coroutines {
             release();
         }
 
+        [[nodiscard]] bool is_idle() const { return not _block; }
+
         [[nodiscard]] bool done() const {
-            if (not _block) [[unlikely]] return false;
+            if (is_idle()) [[unlikely]] return false;
             return not _block->_exists;
         }
 
         bool subscribe(void* waiter) const {
+            if (not _block) [[unlikely]] return false;
             if (done() or not _block->_promise_conductor or waiter == nullptr) [[unlikely]]
                 return false;
             return _block->_promise_conductor->subscribe(waiter);

@@ -24,7 +24,10 @@ namespace ace::futures {
         explicit join_handler(const coroutines::control_block_handle& handle)
             : _handle{handle} {}
 
-        bool await_ready() override { return false; }
+        bool await_ready() override {
+            if (_handle.is_idle()) return true;
+            return _handle.done();
+        }
 
         template<typename promise_u>
         bool await_suspend(std::coroutine_handle<promise_u> outer);

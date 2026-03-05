@@ -182,13 +182,28 @@ inline ace::async<> to_spawn_cancel(ace::futures::channel_dyn<ace::core::runner*
 inline ace::async<> spawner_cancel(ace::futures::channel_dyn<ace::core::runner*>& output) {
     std::cout << "'spawner' started\n";
     auto curr_runner = co_await ace::commands::get_runner();
-    // TODO: Temp
     auto handle = co_await ace::spawn(to_spawn_cancel(output));
     co_await ace::futures::timeout(100ms);
     std::cout << "'spawner' awake, canceling...\n";
     handle.cancel();
     output << curr_runner;
     co_await ace::futures::timeout(10ms);
+    std::cout << "'spawner' finished\n";
+}
+
+inline ace::async<> spawner_join_canceled(ace::futures::channel_dyn<ace::core::runner*>& output) {
+    std::cout << "'spawner' started\n";
+    auto curr_runner = co_await ace::commands::get_runner();
+    auto handle = co_await ace::spawn(to_spawn_cancel(output));
+    co_await ace::futures::timeout(100ms);
+    std::cout << "'spawner' awake, canceling...\n";
+    handle.cancel();
+    co_await ace::futures::timeout(10ms);
+    if (not co_await handle.join()) {
+        std::cout << "'spawned' canceled!\n";
+        output << curr_runner;
+    }
+    else std::cout << "'spawned' still alive!!!\n";
     std::cout << "'spawner' finished\n";
 }
 

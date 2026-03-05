@@ -275,3 +275,20 @@ TEST(commands, check_cancel) {
     EXPECT_NE(res[0], nullptr);
     EXPECT_LT(ms_time, 900);
 }
+
+TEST(commands, check_join_after_cancel) {
+    const auto start_time = std::chrono::_V2::steady_clock::now();
+    ace::futures::channel_dyn<ace::core::runner*> channel_ {};
+    ace::schedule(spawner_join_canceled(channel_));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::_V2::steady_clock::now() - start_time).count();
+    // // NOTE: Collecting waited time sequence
+    std::vector<ace::core::runner*> res{};
+    ace::schedule(channel_fetcher(channel_, res));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    EXPECT_EQ(res.size(), 1);
+    EXPECT_NE(res[0], nullptr);
+    EXPECT_LT(ms_time, 900);
+}

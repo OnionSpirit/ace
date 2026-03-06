@@ -19,6 +19,7 @@ namespace ace::futures {
         DECLARE_FUTURE(cutex_future)
         IMPORT_FUTURE_ENV
 
+        // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
         std::atomic<int> _users { 0 };
         nukes::dynamic::mpsc_queue<async<>> _waiters {};
         std::atomic<runner_pool_t*> _runner_pool { nullptr };

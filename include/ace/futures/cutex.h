@@ -19,7 +19,7 @@ namespace ace::futures {
         DECLARE_FUTURE(cutex_future)
         IMPORT_FUTURE_ENV
 
-        std::atomic<uint64_t> _users { 0 };
+        std::atomic<int> _users { 0 };
         nukes::dynamic::mpsc_queue<async<>> _waiters {};
         std::atomic<runner_pool_t*> _runner_pool { nullptr };
         bool _rescheduling { false };

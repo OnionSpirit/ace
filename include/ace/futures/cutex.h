@@ -21,12 +21,14 @@ namespace ace::futures {
 
         std::atomic<uint64_t> _users { 0 };
         nukes::dynamic::mpsc_queue<async<>> _waiters {};
-        runner_pool_t* _runner_pool { nullptr };
+        std::atomic<runner_pool_t*> _runner_pool { nullptr };
         bool _rescheduling { false };
 
         bool try_lock() noexcept;
 
         bool await_ready() override { return false; }
+
+        // bool await_ready() override { return try_lock(); }
 
         bool await_suspend(auto coroutine);
 
@@ -141,15 +143,15 @@ await_suspend(auto coroutine) {
     const bool on_reschedule = not captured and _rescheduling and coroutine.promise()._roaming;
 
     // NOTE: Selecting rescheduling pool if it doesn't set
-    if (_rescheduling and not _runner_pool)
-        _runner_pool = coroutine.promise()._runner_pool;
+    if (_rescheduling and not _runner_pool.load(std::memory_order_acquire))
+        _runner_pool.store(coroutine.promise()._runner_pool, std::memory_order_release);
 
     // NOTE: Leaving because cutex captured
     if (captured) return false;
 
     // NOTE: Setting a new pool for the task if it is allowed
     if (on_reschedule)
-        coroutine.promise()._runner_pool = _runner_pool;
+        coroutine.promise()._runner_pool = _runner_pool.load(std::memory_order_acquire);
 
     // NOTE: Setting conductor for dispatch to the cutex waiters queue
     coroutine.promise()._future_conductor = cutex_conductor{this};

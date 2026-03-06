@@ -29,8 +29,6 @@ namespace ace::futures {
 
         bool await_ready() override { return false; }
 
-        // bool await_ready() override { return try_lock(); }
-
         bool await_suspend(auto coroutine);
 
         // ReSharper disable once CppMemberFunctionMayBeStatic
@@ -143,7 +141,7 @@ await_suspend(auto coroutine) {
     const bool captured = try_lock();
     const bool on_reschedule = not captured and _rescheduling and coroutine.promise()._roaming;
 
-    // NOTE: Selecting rescheduling pool if it doesn't set
+    // NOTE: Selecting rescheduling pool if it doesn't set and rescheduling mode on
     if (_rescheduling and not _runner_pool.load(std::memory_order_acquire))
         _runner_pool.store(coroutine.promise()._runner_pool, std::memory_order_release);
 

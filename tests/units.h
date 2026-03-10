@@ -213,6 +213,7 @@ inline ace::async<> racer(const int& max, std::string& shared_counter, ace::cute
         co_await crx.capture();
         shared_counter = std::to_string(std::stoi(shared_counter) + 1);
     }
+    // co_await crx.capture();
     std::cout << "'racer' finished\n";
 }
 

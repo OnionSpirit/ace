@@ -107,13 +107,15 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
 
     /**
      * @details Resumes tasks from the ready task pool until it is empty, or limit (1024) reached.
-     * @return @b true if runner still has tasks after run, @b false otherwise
+     * @return @b true if runner made some tasks, @b false otherwise
      */
     bool run() const noexcept {
         int i = 0;
         constexpr int yank_limit = 1024;
         while (i < yank_limit and yank()) ++i;
-        return i == yank_limit;
+        return i not_eq 0;
+        // NOTE: Old return
+        // return i == yank_limit;
     }
 
     // TODO: Make return type as 'join_handler' future type, when I will write it

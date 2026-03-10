@@ -25,9 +25,11 @@ namespace ace::futures {
         std::atomic<runner_pool_t*> _runner_pool { nullptr };
         bool _rescheduling { false };
 
+        bool notify() noexcept;
+
         bool try_lock() noexcept;
 
-        bool await_ready() override { return false; }
+        bool await_ready() override { return try_lock(); }
 
         bool await_suspend(auto coroutine);
 
@@ -46,11 +48,11 @@ namespace ace::futures {
 
         friend class core::disruptor;
 
-        bool resolve() noexcept;
-
         [[nodiscard]] auto capture() noexcept -> cutex_future&;
 
         void sync() noexcept;
+
+        class proxy;
 
     public:
 
@@ -60,9 +62,9 @@ namespace ace::futures {
 
         cutex(cutex&&) = delete;
 
-        ~cutex() override = default;
+        typedef volatile proxy vol_proxy;
 
-        class proxy;
+        ~cutex() override = default;
 
         using cutex_future::set_rescheduling;
 
@@ -84,14 +86,14 @@ namespace ace::futures {
 
         explicit proxy(cutex& cx) : _cutex(cx) { }
 
-        [[nodiscard]] auto capture() -> cutex_future& {
+        [[nodiscard]] auto capture() volatile -> cutex_future& {
             if (not _is_synced)
                 throw std::logic_error {"cutex 'capture()' before 'sync()'"};
             _is_synced = false;
             return _cutex.capture();
         };
 
-        void sync() noexcept { if (not _is_synced) { _cutex.sync(); _is_synced = true; } };
+        void sync() volatile noexcept { if (not _is_synced) { _cutex.sync(); _is_synced = true; } };
 
         ~proxy() { sync(); }
     };
@@ -100,7 +102,7 @@ namespace ace::futures {
 
 namespace ace {
     using futures::cutex;
-    using croxy = cutex::proxy;
+    using croxy = cutex::vol_proxy;
 }
 
 //==============================- DEFINITIONS -==================================
@@ -137,20 +139,27 @@ try_lock() noexcept {
 }
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
+notify() noexcept {
+    // NOTE: Trying to fetch next waiter and release it on the runner
+    if (async<> waiter; _waiters.pop(waiter)) {
+        // NOTE: Updating rescheduling pool if rescheduling mode is on and waiter forbids roaming
+        if (const bool roaming = waiter._coroutine.promise()._roaming; _rescheduling and not roaming)
+            _runner_pool.store(waiter._coroutine.promise()._runner_pool, std::memory_order_release);
+        // NOTE: Rescheduling waiter if rescheduling mode is on and waiter supports roaming
+        else if (_rescheduling)
+            waiter._coroutine.promise()._runner_pool = _runner_pool.load(std::memory_order_acquire);
+        waiter.release_future();
+        core::runner::reattach(std::move(waiter));
+        return true;
+    }
+    return false;
+}
+
+ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 await_suspend(auto coroutine) {
-    const bool captured = try_lock();
-    const bool on_reschedule = not captured and _rescheduling and coroutine.promise()._roaming;
-
     // NOTE: Selecting rescheduling pool if it doesn't set and rescheduling mode on
-    if (_rescheduling and not _runner_pool.load(std::memory_order_acquire))
+    if (not _runner_pool.load(std::memory_order_acquire))
         _runner_pool.store(coroutine.promise()._runner_pool, std::memory_order_release);
-
-    // NOTE: Leaving because cutex captured
-    if (captured) return false;
-
-    // NOTE: Setting a new pool for the task if it is allowed
-    if (on_reschedule)
-        coroutine.promise()._runner_pool = _runner_pool.load(std::memory_order_acquire);
 
     // NOTE: Setting conductor for dispatch to the cutex waiters queue
     coroutine.promise()._future_conductor = cutex_conductor{this};
@@ -167,37 +176,21 @@ ace::futures::cutex::
 returnT ACE_FUTURE_CUTEX_SPACE
 
 
-ACE_FUTURE_CUTEX_MEMBER(bool)
-resolve() noexcept {
-    // NOTE: Trying to fetch and release from cutex waiters queue
-    if (async<> _waiter; _waiters.pop(_waiter)) {
-        _waiter.release_future();
-        core::runner::reattach(std::move(_waiter));
-        return true;
-    }
-    return false;
-}
-
 ACE_FUTURE_CUTEX_MEMBER(ace::futures::cutex_future&)
 capture() noexcept { return *static_cast<cutex_future*>(this); }
 
 ACE_FUTURE_CUTEX_MEMBER(void)
 sync() noexcept {
     // NOTE: Subtract users because leaving cutex
-    const bool has_waiters = _users.fetch_sub(1, std::memory_order_acq_rel) > 1;
-    // NOTE: Trying to fetch next waiter and release it on the runner
-    if (async<> waiter; has_waiters and _waiters.pop(waiter)) {
-        waiter.release_future();
-        core::runner::reattach(std::move(waiter));
-    }
     // NOTE: If there are some waiters but fetching is failed
     // NOTE: than requesting resolve from disruptor
-    else if (has_waiters) core::disruptor::request_resolve(this);
+    if (_users.fetch_sub(1, std::memory_order_acq_rel) > 1 and not notify())
+        core::disruptor::request_resolve(this);
 }
 
 #undef ACE_FUTURE_CUTEX_MEMBER
 #undef ACE_FUTURE_CUTEX_SPACE
 
-inline bool ace::core::disruptor::resolve(cutex* cutex_) noexcept { return cutex_->resolve(); }
+inline bool ace::core::disruptor::resolve(cutex* cutex_) noexcept { return cutex_->notify(); }
 
 #endif //ACE_FUTURE_CUTEX_H

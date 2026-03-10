@@ -37,7 +37,7 @@ TEST(core, do_runner_test) {
 
     ace::core::runner runner;
     runner.attach(nested_context_suspender());
-    ASSERT_FALSE(runner.run());
+    ASSERT_TRUE(runner.run());
     ASSERT_TRUE(runner.empty());
 }
 
@@ -47,7 +47,7 @@ TEST(futures, do_dynamic_channel_on_runner_test) {
     channel_abuser abuser;
     runner.attach(abuser.channel_receiver());
     runner.attach(abuser.channel_sender());
-    ASSERT_FALSE(runner.run());
+    ASSERT_TRUE(runner.run());
     ASSERT_TRUE(runner.empty());
     ASSERT_TRUE(abuser._channel.empty());
 }
@@ -131,6 +131,7 @@ TEST(futures, cutex_race) {
     ace::reload();
 
     ace::cutex cutx_;
+    // int attempt = 0;
     // while (true) {
     std::string shared_cnt_ {"0"};
     constexpr int max_ = 100000;
@@ -145,7 +146,7 @@ TEST(futures, cutex_race) {
     ace::run();
     ASSERT_TRUE(ace::empty());
     ASSERT_EQ(std::stoi(shared_cnt_), max_ * ace::core::s_balancer_config._runners_amount);
-    // }
+    // std::cout << "Attempt: " << attempt++ << '\n'; }
 
     ace::core::s_balancer_config._runners_amount = 1;
     ace::reload();

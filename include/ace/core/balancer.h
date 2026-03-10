@@ -27,8 +27,16 @@ namespace ace::core {
         std::atomic<std::size_t> _runner_selector {};
 
         void worker_round(const int worker_id) {
-            _workers_states[worker_id]._pending = not _runners[worker_id].run();
-            std::this_thread::sleep_for(std::chrono::milliseconds(0));
+            // NOTE: Old mode
+            // _workers_states[worker_id]._pending = not _runners[worker_id].run();
+            // std::this_thread::sleep_for(std::chrono::milliseconds(0));
+
+            bool active = false;
+            for (int i =0; i < 1048576; ++i)
+                active = _runners[worker_id].run() or active;
+            _workers_states[worker_id]._pending = not active;
+            if (not active)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
 
         void worker_tf(const std::stop_token& stoken, const int worker_id) {

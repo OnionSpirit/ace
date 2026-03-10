@@ -200,10 +200,10 @@ inline ace::async<> spawner_join_canceled(ace::futures::channel_dyn<ace::core::r
     handle.cancel();
     co_await ace::futures::timeout(10ms);
     if (not co_await handle.join()) {
-        std::cout << "'spawned' canceled. Joining is 'false'\n";
+        std::cout << "'parallel' canceled. Joining is 'false'\n";
         output << curr_runner;
     }
-    else std::cout << "'spawned' joined as alive. Failure\n";
+    else std::cout << "'parallel' joined as alive. Failure\n";
     std::cout << "'spawner' finished\n";
 }
 

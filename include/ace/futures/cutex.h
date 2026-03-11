@@ -4,7 +4,7 @@
 #include "ace/core/runner.h"
 #include "ace/core/disruptor.h"
 #include "ace/coroutines/context.h"
-#include "nukes/dynamic/mpsc_queue.h"
+#include "nukes/dynamic/mpmc_queue.h"
 
 
 namespace ace::futures {
@@ -21,7 +21,7 @@ namespace ace::futures {
 
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
         std::atomic<int> _users { 0 };
-        nukes::dynamic::mpsc_queue<async<>> _waiters {};
+        nukes::dynamic::mpmc_queue<async<>> _waiters {};
         std::atomic<runner_pool_t*> _runner_pool { nullptr };
         bool _rescheduling { false };
 
@@ -152,7 +152,7 @@ notify() noexcept {
         core::runner::reattach(std::move(waiter));
         return true;
     }
-    return false;
+    return _users.load(std::memory_order_acquire) == 0;
 }
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
@@ -184,7 +184,7 @@ sync() noexcept {
     // NOTE: Subtract users because leaving cutex
     // NOTE: If there are some waiters but fetching is failed
     // NOTE: than requesting resolve from disruptor
-    if (_users.fetch_sub(1, std::memory_order_acq_rel) > 1 and not notify())
+    if (_users.fetch_sub(1, std::memory_order_release) > 1 and not notify())
         core::disruptor::request_resolve(this);
 }
 

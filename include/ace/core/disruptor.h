@@ -14,7 +14,6 @@
  */
 #ifndef ACE_CORE_DISRUPTOR_H
 #define ACE_CORE_DISRUPTOR_H
-#include <set>
 
 #include "vortex.h"
 #include "ace/coroutines/context.h"
@@ -36,8 +35,9 @@ namespace ace::core {
                 // NOTE: If it doesn't resolved to make another attempt next time
                 if (not resolve(cutex_))
                     _resolve_requests.push(std::forward<futures::cutex*>(cutex_));
+                return true;
             }
-            return not _resolve_requests.empty();
+            return false;
         }
 
         static void request_resolve(futures::cutex* cute) {
@@ -45,12 +45,12 @@ namespace ace::core {
             touch();
         }
 
-        static nukes::dynamic::mpsc_queue<futures::cutex*> _resolve_requests;
+        static nukes::dynamic::mpmc_queue<futures::cutex*> _resolve_requests;
 
         static inline bool resolve(futures::cutex* cutex_) noexcept;
     };
 
-    nukes::dynamic::mpsc_queue<futures::cutex*> disruptor::_resolve_requests {};
+    nukes::dynamic::mpmc_queue<futures::cutex*> disruptor::_resolve_requests {};
 
 }
 

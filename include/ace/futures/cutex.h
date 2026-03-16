@@ -9,7 +9,7 @@
 namespace ace::futures {
 
     // TODO: This is a temp solution. Need to fix nukes::dynamic::mpsc_queue to prevent data loss. Cutex is stable
-    struct spinlock_waiters_std_queue {
+    struct [[deprecated]] spinlock_waiters_std_queue {
         std::queue<async<>> _queue {};
         std::atomic_flag _lock = ATOMIC_FLAG_INIT;
 

@@ -2,12 +2,36 @@
 #define ACE_FUTURE_CUTEX_H
 #include "future.h"
 #include "ace/core/runner.h"
-#include "ace/core/disruptor.h"
 #include "ace/coroutines/context.h"
 #include "nukes/dynamic/mpmc_queue.h"
 
 
 namespace ace::futures {
+
+    // TODO: This is a temp solution. Need to fix nukes::dynamic::mpsc_queue to prevent data loss. Cutex is stable
+    struct spinlock_waiters_std_queue {
+        std::queue<async<>> _queue {};
+        std::atomic_flag _lock = ATOMIC_FLAG_INIT;
+
+        bool push(async<>&& waiter) {
+            while (_lock.test_and_set(std::memory_order_acq_rel)) {};
+            _queue.push(std::move(waiter));
+            _lock.clear();
+            return true;
+        }
+
+        bool pop(async<>& waiter) {
+            while (_lock.test_and_set(std::memory_order_acq_rel)) {};
+            if (_queue.empty()) {
+                _lock.clear();
+                return false;
+            }
+            waiter = std::forward<async<>>(_queue.front());
+            _queue.pop();
+            _lock.clear();
+            return true;
+        }
+    };
 
     class cutex_future : public future_traits<cutex_future> {
 
@@ -21,7 +45,9 @@ namespace ace::futures {
 
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
         std::atomic<int> _users { 0 };
-        nukes::dynamic::mpmc_queue<async<>> _waiters {};
+        // TODO: This is a temp solution. Need to fix nukes::dynamic::mpsc_queue to prevent data loss.
+        // nukes::dynamic::mpsc_queue<async<>> _waiters {};
+        spinlock_waiters_std_queue _waiters {};
         std::atomic<runner_pool_t*> _runner_pool { nullptr };
         bool _rescheduling { false };
 
@@ -61,8 +87,6 @@ namespace ace::futures {
 
     // NOTE: <C>ooperative <U>serspace mu<TEX>
     class cutex final : protected cutex_future {
-
-        friend class core::disruptor;
 
         [[nodiscard]] auto capture() noexcept -> cutex_future&;
 
@@ -168,14 +192,14 @@ notify() noexcept {
         core::runner::reattach(std::move(waiter));
         return true;
     }
-    return _users.load(std::memory_order_acquire) == 0;
+    return false;
 }
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(ace::async<>)
 pending_notify() noexcept {
     while (true) {
-        // NOTE: If it doesn't resolved to make another attempt next time
         if (notify()) co_return;
+        // NOTE: If notify still has no success, suspend and retry
         co_await suspend();
     }
 }
@@ -209,13 +233,10 @@ sync() noexcept {
     // NOTE: Subtract users because leaving cutex
     // NOTE: If there are some waiters but fetching is failed
     // NOTE: then scheduling delayed notification
-    if (_users.fetch_sub(1, std::memory_order_release) > 1 and not notify())
+    if (_users.fetch_sub(1, std::memory_order_acq_rel) > 1 and not notify())
         schedule(pending_notify());
 }
 
 #undef ACE_FUTURE_CUTEX_MEMBER
 #undef ACE_FUTURE_CUTEX_SPACE
-
-inline bool ace::core::disruptor::resolve(cutex* cutex_) noexcept { return cutex_->notify(); }
-
 #endif //ACE_FUTURE_CUTEX_H

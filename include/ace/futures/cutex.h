@@ -27,6 +27,22 @@ namespace ace::futures {
 
         bool notify() noexcept;
 
+        /**
+         * @brief Deadlock resolution helper
+         * @details Cutex can be deadlocked after an unexpected syscall of the process timeout.
+         * The halper figures this out <br><br>
+         * @b Cutex deadlock case:
+         * - thread @b A owns @b cutex
+         * - thread @b B tries to capture @b cutex but didn't receive success.
+         * - thread @b B going to sign up into @b cutex @b waiters queue
+         * - OS interrupts thread @b B, before it signed up.
+         * - thread @b A making @b cutex sync operation
+         * - @b cutex @b waiters queue is empty (thread @b B didn't finish signing up before interruption) notify noone
+         * - @b cutex is vacant but @b B thread isn't notified and waits inside @b cutex @b waiters queue
+         * - Got deadlock (notify sequence broken) @b B thread is forever blocked
+         */
+        async<> pending_notify() noexcept;
+
         bool try_lock() noexcept;
 
         bool await_ready() override { return try_lock(); }
@@ -155,6 +171,15 @@ notify() noexcept {
     return _users.load(std::memory_order_acquire) == 0;
 }
 
+ACE_FUTURE_CUTEX_FUTURE_MEMBER(ace::async<>)
+pending_notify() noexcept {
+    while (true) {
+        // NOTE: If it doesn't resolved to make another attempt next time
+        if (notify()) co_return;
+        co_await suspend();
+    }
+}
+
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 await_suspend(auto coroutine) {
     // NOTE: Selecting rescheduling pool if it doesn't set and rescheduling mode on
@@ -183,9 +208,9 @@ ACE_FUTURE_CUTEX_MEMBER(void)
 sync() noexcept {
     // NOTE: Subtract users because leaving cutex
     // NOTE: If there are some waiters but fetching is failed
-    // NOTE: than requesting resolve from disruptor
+    // NOTE: then scheduling delayed notification
     if (_users.fetch_sub(1, std::memory_order_release) > 1 and not notify())
-        core::disruptor::request_resolve(this);
+        schedule(pending_notify());
 }
 
 #undef ACE_FUTURE_CUTEX_MEMBER

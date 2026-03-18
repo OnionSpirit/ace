@@ -155,19 +155,19 @@ try_lock() noexcept {
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 notify() noexcept {
+    async<> waiter;
     // NOTE: Trying to fetch next waiter and release it on the runner
-    if (async<> waiter; _waiters.pop(waiter)) {
-        // NOTE: Updating rescheduling pool if rescheduling mode is on and waiter forbids roaming
-        if (const bool roaming = waiter._coroutine.promise()._roaming; _rescheduling and not roaming)
-            _runner_pool.store(waiter._coroutine.promise()._runner_pool, std::memory_order_release);
-        // NOTE: Rescheduling waiter if rescheduling mode is on and waiter supports roaming
-        else if (_rescheduling)
-            waiter._coroutine.promise()._runner_pool = _runner_pool.load(std::memory_order_acquire);
-        waiter.release_future();
-        core::runner::reattach(std::move(waiter));
-        return true;
-    }
-    return false;
+    if (not _waiters.pop(waiter))
+        return false;
+    // NOTE: Updating rescheduling pool if rescheduling mode is on and waiter forbids roaming
+    if (const bool roaming = waiter._coroutine.promise()._roaming; _rescheduling and not roaming)
+        _runner_pool.store(waiter._coroutine.promise()._runner_pool, std::memory_order_release);
+    // NOTE: Rescheduling waiter if rescheduling mode is on and waiter supports roaming
+    else if (_rescheduling)
+        waiter._coroutine.promise()._runner_pool = _runner_pool.load(std::memory_order_acquire);
+    waiter.release_future();
+    core::runner::reattach(std::move(waiter));
+    return true;
 }
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(ace::async<>)

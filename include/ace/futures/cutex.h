@@ -3,7 +3,7 @@
 #include "future.h"
 #include "ace/core/runner.h"
 #include "ace/coroutines/context.h"
-#include "nukes/dynamic/mpsc_queue.h"
+#include "nukes/dynamic/mpmc_queue.h"
 
 
 namespace ace::futures {
@@ -20,7 +20,7 @@ namespace ace::futures {
 
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
         std::atomic<int> _users { 0 };
-        nukes::dynamic::mpsc_queue<async<>> _waiters {};
+        nukes::dynamic::mpmc_queue<async<>> _waiters {};
         std::atomic<runner_pool_t*> _runner_pool { nullptr };
         bool _rescheduling { false };
 
@@ -172,6 +172,8 @@ ACE_FUTURE_CUTEX_FUTURE_MEMBER(ace::async<>)
 pending_notify() noexcept {
     while (true) {
         if (notify()) co_return;
+        // NOTE: No more waiters — all have been served by concurrent notifiers
+        if (_users.load(std::memory_order_acquire) == 0) co_return;
         // NOTE: If notify still has no success, suspend and retry
         co_await suspend();
     }

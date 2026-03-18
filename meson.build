@@ -41,9 +41,10 @@ if tests_enabled
       sources: test_sources,
       cpp_args: [
         '-std=c++23',
+        '-fexperimental-library',
         '-Wno-invalid-offsetof',
 #        '-Mmodules',
-        #        '-fconcepts-diagnostics-depth=2'
+#        '-fconcepts-diagnostics-depth=2'
       ],
       dependencies: [
           gtest_dep,

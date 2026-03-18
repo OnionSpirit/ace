@@ -188,10 +188,10 @@ TEST(futures, do_timer_on_runner_parallel_test) {
             ace::schedule(timer_waiter(std::chrono::milliseconds(q), channel_));
 
     std::cout << "Tasks spawned" << std::endl;
-    const auto start_time = std::chrono::_V2::steady_clock::now();
+    const auto start_time = std::chrono::steady_clock::now();
     while (not ace::core::dispatcher::get_instance().empty())
         ace::run();
-    const auto end_time = std::chrono::_V2::steady_clock::now();
+    const auto end_time = std::chrono::steady_clock::now();
     const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
     std::cout << "Timers released after: " << ms_time << "ms.\n\t"
                  "Timers amount: " << sets_count * set_size << ".\n\t"
@@ -257,12 +257,12 @@ TEST(commands, check_spawn_and_join) {
 }
 
 TEST(commands, check_cancel) {
-    const auto start_time = std::chrono::_V2::steady_clock::now();
+    const auto start_time = std::chrono::steady_clock::now();
     ace::futures::channel_dyn<ace::core::runner*> channel_ {};
     ace::schedule(spawner_cancel(channel_));
     ace::run();
     ASSERT_TRUE(ace::empty());
-    const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::_V2::steady_clock::now() - start_time).count();
+    const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
     std::vector<ace::core::runner*> res{};
     ace::schedule(channel_fetcher(channel_, res));
     ace::run();
@@ -273,12 +273,12 @@ TEST(commands, check_cancel) {
 }
 
 TEST(commands, check_join_after_cancel) {
-    const auto start_time = std::chrono::_V2::steady_clock::now();
+    const auto start_time = std::chrono::steady_clock::now();
     ace::futures::channel_dyn<ace::core::runner*> channel_ {};
     ace::schedule(spawner_join_canceled(channel_));
     ace::run();
     ASSERT_TRUE(ace::empty());
-    const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::_V2::steady_clock::now() - start_time).count();
+    const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
     std::vector<ace::core::runner*> res{};
     ace::schedule(channel_fetcher(channel_, res));
     ace::run();

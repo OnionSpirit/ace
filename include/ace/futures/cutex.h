@@ -3,35 +3,10 @@
 #include "future.h"
 #include "ace/core/runner.h"
 #include "ace/coroutines/context.h"
-#include "nukes/dynamic/mpmc_queue.h"
+#include "nukes/dynamic/mpsc_queue.h"
 
 
 namespace ace::futures {
-
-    // TODO: This is a temp solution. Need to fix nukes::dynamic::mpsc_queue to prevent data loss. Cutex is stable
-    struct [[deprecated]] spinlock_waiters_std_queue {
-        std::queue<async<>> _queue {};
-        std::atomic_flag _lock = ATOMIC_FLAG_INIT;
-
-        bool push(async<>&& waiter) {
-            while (_lock.test_and_set(std::memory_order_acq_rel)) {};
-            _queue.push(std::move(waiter));
-            _lock.clear();
-            return true;
-        }
-
-        bool pop(async<>& waiter) {
-            while (_lock.test_and_set(std::memory_order_acq_rel)) {};
-            if (_queue.empty()) {
-                _lock.clear();
-                return false;
-            }
-            waiter = std::forward<async<>>(_queue.front());
-            _queue.pop();
-            _lock.clear();
-            return true;
-        }
-    };
 
     class cutex_future : public future_traits<cutex_future> {
 
@@ -45,9 +20,7 @@ namespace ace::futures {
 
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
         std::atomic<int> _users { 0 };
-        // TODO: This is a temp solution. Need to fix nukes::dynamic::mpsc_queue to prevent data loss.
-        // nukes::dynamic::mpsc_queue<async<>> _waiters {};
-        spinlock_waiters_std_queue _waiters {};
+        nukes::dynamic::mpsc_queue<async<>> _waiters {};
         std::atomic<runner_pool_t*> _runner_pool { nullptr };
         bool _rescheduling { false };
 

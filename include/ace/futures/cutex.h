@@ -3,7 +3,7 @@
 #include "future.h"
 #include "ace/core/runner.h"
 #include "ace/coroutines/context.h"
-#include "nukes/dynamic/mpsc_queue.h"
+#include "nukes/dynamic/roaming_mpsc_queue.h"
 
 
 namespace ace::futures {
@@ -21,7 +21,7 @@ namespace ace::futures {
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
         std::atomic<int> _users { 0 };
         // std::atomic_flag _lock { false }; // TODO: Busy polling option, wo conductor
-        nukes::dynamic::mpsc_queue<async<>> _waiters {};
+        nukes::dynamic::roaming_mpsc_queue<async<>> _waiters {};
         std::atomic<runner_pool_t*> _runner_pool { nullptr };
         bool _rescheduling { false };
 

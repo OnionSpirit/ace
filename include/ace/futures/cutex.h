@@ -3,7 +3,7 @@
 #include "future.h"
 #include "ace/core/runner.h"
 #include "ace/coroutines/context.h"
-#include "nukes/dynamic/mpmc_queue.h"
+#include "nukes/dynamic/mpsc_queue.h"
 
 
 namespace ace::futures {
@@ -20,7 +20,8 @@ namespace ace::futures {
 
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
         std::atomic<int> _users { 0 };
-        nukes::dynamic::mpmc_queue<async<>> _waiters {};
+        // std::atomic_flag _lock { false }; // TODO: Busy polling option, wo conductor
+        nukes::dynamic::mpsc_queue<async<>> _waiters {};
         std::atomic<runner_pool_t*> _runner_pool { nullptr };
         bool _rescheduling { false };
 
@@ -149,6 +150,7 @@ struct ACE_FUTURE_CUTEX_FUTURE_SPACE cutex_conductor : conductor_handler_t {
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 try_lock() noexcept {
     return _users.fetch_add(1, std::memory_order_acq_rel) == 0;
+    // return not _lock.test_and_set();
 }
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
@@ -170,13 +172,11 @@ notify() noexcept {
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(ace::async<>)
 pending_notify() noexcept {
-    while (true) {
+    do {
         if (notify()) co_return;
-        // NOTE: No more waiters — all have been served by concurrent notifiers
-        if (_users.load(std::memory_order_acquire) == 0) co_return;
         // NOTE: If notify still has no success, suspend and retry
         co_await suspend();
-    }
+    } while (_users.load(std::memory_order_acquire) > 0);
 }
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
@@ -210,6 +210,7 @@ sync() noexcept {
     // NOTE: then scheduling delayed notification
     if (_users.fetch_sub(1, std::memory_order_acq_rel) > 1 and not notify())
         schedule(pending_notify());
+    // _lock.clear();
 }
 
 #undef ACE_FUTURE_CUTEX_MEMBER

@@ -131,8 +131,8 @@ TEST(futures, cutex_race) {
     ace::reload();
 
     ace::cutex cutx_;
-    // int attempt = 0;
-    // while (true) { std::cout << "Attempt: " << attempt++ << '\n';
+    int attempt = 0;
+    while (true) { std::cout << "Attempt: " << attempt++ << '\n';
     std::string shared_cnt_ {"0"};
     constexpr int max_ = 100000;
 
@@ -142,7 +142,7 @@ TEST(futures, cutex_race) {
     ace::run();
     ASSERT_TRUE(ace::empty());
     ASSERT_EQ(std::stoi(shared_cnt_), max_ * ace::core::s_balancer_config._runners_amount);
-    // std::cout << "===========\n"; }
+    std::cout << "===========\n"; }
 
     ace::core::s_balancer_config._runners_amount = 1;
     ace::reload();

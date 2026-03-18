@@ -82,8 +82,16 @@ namespace ace::coroutines {
         }
 
         void release_waiters() {
+#if defined(_MSC_VER)
+            if (context<> waiter; _coroutine.promise()._waiters.load()) {
+                while (_coroutine.promise()._waiters.load()->pop(waiter)) {
+#elif defined(__GNUC__)
+            if (context<> waiter; _coroutine.promise()._waiters.load()) {
+                while (_coroutine.promise()._waiters.load()->pop(waiter)) {
+#elif defined(__clang__)
             if (context<> waiter; std::atomic_load(&_coroutine.promise()._waiters)) {
                 while (std::atomic_load(&_coroutine.promise()._waiters)->pop(waiter)) {
+#endif
                     waiter.release_future();
                     waiter._coroutine.promise()._runner_pool->push(std::move(waiter));
                 }
@@ -177,8 +185,16 @@ namespace ace::coroutines {
                 if (not _address or not undefined_waiter) [[unlikely]] return false;
                 auto handle = coroutine_t::from_address(_address);
                 auto* waiter = static_cast<context<>*>(undefined_waiter);
+#if defined(_MSC_VER)
+                handle.promise()._waiters.store(std::make_shared<runner_pool_t>(), std::memory_order_release);
+                handle.promise()._waiters.load(std::memory_order_acquire)->push(std::forward<context<>>(*waiter));
+#elif defined(__GNUC__)
+                handle.promise()._waiters.store(std::make_shared<runner_pool_t>(), std::memory_order_release);
+                handle.promise()._waiters.load(std::memory_order_acquire)->push(std::forward<context<>>(*waiter));
+#elif defined(__clang__)
                 std::atomic_store(&handle.promise()._waiters, std::make_shared<runner_pool_t>());
                 std::atomic_load(&handle.promise()._waiters)->push(std::forward<context<>>(*waiter));
+#endif
                 return true;
             }
 
@@ -241,8 +257,14 @@ namespace ace::coroutines {
             conductor_carry _future_conductor {};
             // TODO: Wrap into weak hazard ptr, when I will write it
             runner_pool_t* _runner_pool {nullptr};
+#if defined(_MSC_VER)
+            std::atomic<std::shared_ptr<runner_pool_t>> _waiters;
+#elif defined(__GNUC__)
+            std::atomic<std::shared_ptr<runner_pool_t>> _waiters;
+#elif defined(__clang__)
             // NOTE: std::atomic<std::shared_ptr<T>> not available on Apple libc++, using free functions
             std::shared_ptr<runner_pool_t> _waiters;
+#endif
             // NOTE: Conductor to manage promise on suspended state.
             // NOTE: Context owns only one promise. Extra carry object is unnecessary
             std::optional<promise_conductor> _promise_conductor;

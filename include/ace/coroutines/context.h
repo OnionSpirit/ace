@@ -85,7 +85,7 @@ namespace ace::coroutines {
 #if defined(_MSC_VER)
             if (context<> waiter; _coroutine.promise()._waiters.load()) {
                 while (_coroutine.promise()._waiters.load()->pop(waiter)) {
-#elif defined(__GNUC__)
+#elif defined(__GNUC__) && !defined(__clang__)
             if (context<> waiter; _coroutine.promise()._waiters.load()) {
                 while (_coroutine.promise()._waiters.load()->pop(waiter)) {
 #elif defined(__clang__)
@@ -175,8 +175,17 @@ namespace ace::coroutines {
                 if (not _address) [[unlikely]] return;
                 auto handle = coroutine_t::from_address(_address);
                 if (handle and handle.promise()._future_conductor) [[likely]] {
-                    handle.promise()._future_conductor->cancel();
-                    handle.promise()._future_conductor.release();
+                    // Save the conductor pointer, then clear it and set status
+                    // BEFORE calling cancel(). cancel() may trigger a cascade
+                    // that destroys the coroutine frame (e.g. via clock_record
+                    // destruction), which would make any post-cancel access to
+                    // handle.promise() a use-after-free.  Clearing first ensures
+                    // conductor_carry::~conductor_carry() sees nullptr and is a no-op.
+                    auto* conductor = handle.promise()._future_conductor.get();
+                    handle.promise()._future_conductor.reset();
+                    handle.promise()._status = e_detached;
+                    conductor->cancel();
+                    return;
                 }
                 handle.promise()._status = e_detached;
             }
@@ -188,7 +197,7 @@ namespace ace::coroutines {
 #if defined(_MSC_VER)
                 handle.promise()._waiters.store(std::make_shared<runner_pool_t>(), std::memory_order_release);
                 handle.promise()._waiters.load(std::memory_order_acquire)->push(std::forward<context<>>(*waiter));
-#elif defined(__GNUC__)
+#elif defined(__GNUC__) && !defined(__clang__)
                 handle.promise()._waiters.store(std::make_shared<runner_pool_t>(), std::memory_order_release);
                 handle.promise()._waiters.load(std::memory_order_acquire)->push(std::forward<context<>>(*waiter));
 #elif defined(__clang__)
@@ -259,7 +268,7 @@ namespace ace::coroutines {
             runner_pool_t* _runner_pool {nullptr};
 #if defined(_MSC_VER)
             std::atomic<std::shared_ptr<runner_pool_t>> _waiters;
-#elif defined(__GNUC__)
+#elif defined(__GNUC__) && !defined(__clang__)
             std::atomic<std::shared_ptr<runner_pool_t>> _waiters;
 #elif defined(__clang__)
             // NOTE: std::atomic<std::shared_ptr<T>> not available on Apple libc++, using free functions

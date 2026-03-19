@@ -120,6 +120,7 @@ namespace ace::coroutines {
             conductor_carry& operator =(conductor_t&& conductor) {
                 static_assert(sizeof(conductor_t) <= ACE_CONDUCTOR_MEM_SIZE,
                 "[conductor_carry]: conductor size can't be larger than ACE_CONDUCTOR_MEM_SIZE");
+                release();
                 _conductor = new (_conductor_area) conductor_t(std::forward<conductor_t>(conductor));
                 return *this;
             }

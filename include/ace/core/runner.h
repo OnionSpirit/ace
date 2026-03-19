@@ -111,7 +111,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
      */
     bool run() const noexcept {
         int i = 0;
-        constexpr int yank_limit = 1024;
+        constexpr int yank_limit = 128;
         while (i < yank_limit and yank()) ++i;
         return i not_eq 0;
         // NOTE: Old return

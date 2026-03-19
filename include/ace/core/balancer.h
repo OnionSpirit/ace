@@ -42,7 +42,7 @@ namespace ace::core {
             auto now = start;
 
             // NOTE: Working with runner until interval ends (also updating last ts)
-            while (now - start < 5ms) {
+            while (now - start < 1ms) {
                 active = _runners[worker_id].run() or active;
                 fetch_time();
                 now = get_time();

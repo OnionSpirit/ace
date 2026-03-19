@@ -20,7 +20,6 @@ namespace ace::futures {
 
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
         std::atomic<int> _users { 0 };
-        // std::atomic_flag _lock { false }; // TODO: Busy polling option, wo conductor
         nukes::dynamic::roaming_mpsc_queue<async<>> _waiters {};
         std::atomic<runner_pool_t*> _runner_pool { nullptr };
         bool _rescheduling { false };
@@ -150,7 +149,6 @@ struct ACE_FUTURE_CUTEX_FUTURE_SPACE cutex_conductor : conductor_handler_t {
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 try_lock() noexcept {
     return _users.fetch_add(1, std::memory_order_acq_rel) == 0;
-    // return not _lock.test_and_set();
 }
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
@@ -210,7 +208,6 @@ sync() noexcept {
     // NOTE: then scheduling delayed notification
     if (_users.fetch_sub(1, std::memory_order_acq_rel) > 1 and not notify())
         schedule(pending_notify());
-    // _lock.clear();
 }
 
 #undef ACE_FUTURE_CUTEX_MEMBER

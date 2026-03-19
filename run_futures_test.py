@@ -4,11 +4,11 @@ import sys
 
 TEST_NAME = "futures.cutex_race"
 BINARY = "./build/ace_tests"
-TIMEOUT = 1.5
+TIMEOUT = 10
 
 def main():
-    for iteration in range(100):
-        iteration += 1
+    fails = 0
+    for iteration in range(1, 1000):
         print(f"[{iteration}] Running {TEST_NAME}...", end=" ", flush=True)
         try:
             result = subprocess.run(
@@ -19,6 +19,7 @@ def main():
             )
         except subprocess.TimeoutExpired:
             print(f"Timeout : [ RunTime > {TIMEOUT} sec]")
+            fails += 1
             continue
         if result.returncode == 0:
             print("Ok")
@@ -27,6 +28,7 @@ def main():
             print(result.stdout)
             print(result.stderr)
             sys.exit(1)
+    print(f"Fails amount : {fails}...")
 
 if __name__ == "__main__":
     main()

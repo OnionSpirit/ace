@@ -33,7 +33,7 @@ public:
     }
 
     /**
-     * @details Function to schedule task at the dispatcher
+     * @brief Function to schedule task at the dispatcher
      * @param new_task Task to be pushed into the dispatcher
      * @param rnr Specific runner to schedule on
      * @return void
@@ -44,13 +44,13 @@ public:
     }
 
     /**
-     * @details Checks if any Tasks stored in the dispatcher
+     * @brief Checks if any Tasks stored in the dispatcher
      * @return @b true if empty, @b false otherwise
      */
     [[nodiscard]] bool empty() const noexcept { return _balancer.empty(); };
 
     /**
-     * @details Resumes all tasks from the runners.
+     * @brief Resumes all tasks from the runners.
      */
     void run() noexcept { while ( not empty() ) _balancer.run(); }
 

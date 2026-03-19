@@ -16,9 +16,14 @@ namespace ace::core {
 
     class balancer {
 
+        static thread_local std::chrono::time_point<std::chrono::steady_clock> local_ts;
+
+        static void fetch_time() { local_ts = std::chrono::steady_clock::now(); }
+
         struct alignas(ACE_CACHE_LINE_SIZE) worker_state {
             int _worker_id { 0 };
             bool _pending { false };
+            int _rounds {0};
         };
 
         std::vector<runner> _runners {};
@@ -27,16 +32,31 @@ namespace ace::core {
         std::atomic<std::size_t> _runner_selector {};
 
         void worker_round(const int worker_id) {
-            // NOTE: Old mode
-            // _workers_states[worker_id]._pending = not _runners[worker_id].run();
-            // std::this_thread::sleep_for(std::chrono::milliseconds(0));
+            using namespace std::chrono_literals;
 
+            // NOTE: Flag that indicates that runner processed some tasks in the interval
             bool active = false;
-            for (int i =0; i < 1048576; ++i)
+
+            // NOTE: Timepoint to track interval
+            const auto round_start = get_time();
+            auto now = round_start;
+
+            // NOTE: Working with runner until interval ends (also updating last ts)
+            while ((now - round_start) < 5ms) {
                 active = _runners[worker_id].run() or active;
+                fetch_time();
+                now = get_time();
+            }
+
+            // NOTE: Updating runner status
             _workers_states[worker_id]._pending = not active;
-            if (not active)
+            ++_workers_states[worker_id]._rounds;
+
+            // NOTE: Making decision about sleeping
+            if (not active or _workers_states[worker_id]._rounds > 999) {
+                _workers_states[worker_id]._rounds = 0;
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
         }
 
         void worker_tf(const std::stop_token& stoken, const int worker_id) {
@@ -123,6 +143,9 @@ namespace ace::core {
             return res;
         };
 
+        static auto get_time()
+            -> std::chrono::time_point<std::chrono::steady_clock> { return local_ts; }
+
         // balancer(const balancer&) = delete;
         // balancer(balancer&&) = delete;
         // balancer& operator=(const balancer&) = delete;
@@ -131,5 +154,8 @@ namespace ace::core {
     };
 
 } // end namespace ace::core
+
+thread_local std::chrono::time_point<std::chrono::steady_clock> ace::core::balancer::local_ts
+    = std::chrono::steady_clock::now();
 
 #endif // ACE_CORE_BALANCER_H

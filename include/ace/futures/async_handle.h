@@ -93,7 +93,7 @@ join() noexcept -> join_handler& { return *static_cast<join_handler*>(this); }
 
 ACE_FUTURE_JOIN_HANDLER_FUTURE_MEMBER(template<typename promise_u> bool)
 await_suspend(std::coroutine_handle<promise_u> outer) {
-    outer.promise()._future_conductor = join_handler_conductor{_handle};
+    outer.promise()._runner_conductor = join_handler_conductor{_handle};
     return true;
 }
 

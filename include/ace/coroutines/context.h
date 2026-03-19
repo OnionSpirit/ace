@@ -14,7 +14,7 @@
 #include <coroutine>
 #include <expected>
 
-#include "conductor.h"
+#include "conduction.h"
 #include "control.h"
 #include "ace/common/terms.h"
 
@@ -33,7 +33,10 @@ namespace ace::coroutines {
 
         typedef nukes::dynamic::mpsc_queue<context<>> runner_pool_t;
 
-        typedef future_conductor_handle<context<>> future_conductor;
+        typedef runner_conductor_handle<context<>> runner_conductor;
+
+        // NOTE: Type to store conductor and pass it to outer promise
+        typedef conductor_slot<runner_conductor> runner_conductor_slot_t;
 
         coroutine_t _coroutine;
 
@@ -71,7 +74,7 @@ namespace ace::coroutines {
         };
 
         void release_future() {
-            _coroutine.promise()._future_conductor.release();
+            _coroutine.promise()._runner_conductor.release();
             _coroutine.promise()._future = nullptr;
         }
 
@@ -104,80 +107,23 @@ namespace ace::coroutines {
             return std::unexpected("context is already dead.");
         }
 
-        // NOTE: Type to store conductor and pass it to outer promise
-        struct conductor_slot {
-            template <typename conductor_t>
-            requires std::derived_from<conductor_t, future_conductor>
-            conductor_slot& operator =(const conductor_t& conductor) {
-                static_assert(sizeof(conductor_t) <= ACE_CONDUCTOR_MEM_SIZE,
-                "[conductor_carry]: conductor size can't be larger than ACE_CONDUCTOR_MEM_SIZE");
-                _conductor = new (_conductor_area) conductor_t(std::forward<conductor_t>(conductor));
-                return *this;
-            }
-
-            template <typename conductor_t>
-            requires std::derived_from<conductor_t, future_conductor>
-            conductor_slot& operator =(conductor_t&& conductor) {
-                static_assert(sizeof(conductor_t) <= ACE_CONDUCTOR_MEM_SIZE,
-                "[conductor_carry]: conductor size can't be larger than ACE_CONDUCTOR_MEM_SIZE");
-                release();
-                _conductor = new (_conductor_area) conductor_t(std::forward<conductor_t>(conductor));
-                return *this;
-            }
-
-            template<typename carry_t>
-            requires requires { carry_t::_conductor; carry_t::_conductor_area; }
-            conductor_slot& operator <<(carry_t& carry) noexcept {
-                if (carry._conductor) {
-                    _conductor = carry._conductor;
-                    carry._conductor = nullptr;
-                }
-                return *this;
-            }
-
-            // NOTE: Releases conductor from carry with distracting
-            void release() {
-                if (_conductor) {
-                    _conductor->~future_conductor();
-                    _conductor = nullptr;
-                }
-            }
-
-            // NOTE: Wipes conductor data from carry without distracting
-            void reset() {
-                if (_conductor)
-                    _conductor = nullptr;
-            }
-
-            [[nodiscard]] future_conductor* get() const { return _conductor; }
-
-            future_conductor* operator->() const { return get(); }
-
-            explicit operator bool() const { return _conductor != nullptr; };
-
-            ~conductor_slot() { release(); };
-
-            future_conductor* _conductor {nullptr};
-            alignas(ACE_BUS_SIZE) uint8_t _conductor_area [ACE_CONDUCTOR_MEM_SIZE] {};
-        };
-
-        class promise_conductor : public promise_conductor_handle {
+        class context_conductor : public control_conductor_handle {
 
             void* _address { nullptr };
 
         public:
 
-            promise_conductor() = default;
+            context_conductor() = default;
 
-            explicit promise_conductor(const coroutine_t& coroutine)
+            explicit context_conductor(const coroutine_t& coroutine)
                 : _address(coroutine.address()) {}
 
             void cancel() noexcept override {
                 if (not _address) [[unlikely]] return;
                 auto handle = coroutine_t::from_address(_address);
-                if (handle and handle.promise()._future_conductor) [[likely]] {
-                    handle.promise()._future_conductor->cancel();
-                    handle.promise()._future_conductor.release();
+                if (handle and handle.promise()._runner_conductor) [[likely]] {
+                    handle.promise()._runner_conductor->cancel();
+                    handle.promise()._runner_conductor.release();
                 }
                 handle.promise()._status = e_detached;
             }
@@ -199,7 +145,7 @@ namespace ace::coroutines {
                 return true;
             }
 
-            ~promise_conductor() override = default;
+            ~context_conductor() override = default;
         };
 
         struct promise_type : promise_traits<returnT> {
@@ -237,27 +183,27 @@ namespace ace::coroutines {
             // NOTE: Set ups control block settings from extern coroutine_handle object
             template <typename promise_t>
             requires std::same_as<differed, promise_rule_t>
-            void setup_control_block(const std::coroutine_handle<promise_t>& c) {
+            void setup_control_block(const std::coroutine_handle<promise_t>& self) {
                 // NOTE: Getting control block address
-                _block = control_block::get_block_from_address(c.address());
+                _block = control_block::get_block_from_address(self.address());
                 // NOTE: Initiating promise conductor
-                _promise_conductor = promise_conductor(c);
-                // NOTE: Setting promise conductor
-                _block->_promise_conductor = &c.promise()._promise_conductor.value();
+                _self_conductor = context_conductor(self);
+                // NOTE: Passing reference of the inited conductor to the control block
+                _block->_control_conductor = &_self_conductor.value();
             }
 
             template <typename promise_t>
-            promise_conductor_handle* get_promise_conductor(const std::coroutine_handle<promise_t>& c) {
+            control_conductor_handle* get_promise_conductor(const std::coroutine_handle<promise_t>& self) {
                 // NOTE: Initiating promise conductor
-                _promise_conductor = promise_conductor(c);
-                return &_promise_conductor.value();
+                _self_conductor = context_conductor(self);
+                return &_self_conductor.value();
             }
 
             // NOTE: Order of the following variables is optimized. DO NOT SWAP THEM!!!
 
             // NOTE: Conductor to manage futures on suspended state.
             // NOTE: Slot object needed because few futures can be awaited during context run
-            conductor_slot _future_conductor {};
+            runner_conductor_slot_t _runner_conductor {};
             runner_pool_t* _runner_pool {nullptr};
 #if defined(_MSC_VER)
             std::atomic<std::shared_ptr<runner_pool_t>> _waiters;
@@ -268,8 +214,8 @@ namespace ace::coroutines {
             std::shared_ptr<runner_pool_t> _waiters;
 #endif
             // NOTE: Conductor to manage promise on suspended state.
-            // NOTE: Context owns only one promise. Extra carry object is unnecessary
-            std::optional<promise_conductor> _promise_conductor;
+            // NOTE: Context owns only one promise. Extra slot object is unnecessary
+            std::optional<context_conductor> _self_conductor;
             alignas(ACE_BUS_SIZE) bool _roaming { false };
         };
 
@@ -286,7 +232,7 @@ namespace ace::coroutines {
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
             // NOTE: No extra checks needed, because function would be called once before suspending.
             // NOTE: Just coping conductor ptr. Outer task will destroy conductor before current promise stack
-            outer.promise()._future_conductor << _coroutine.promise()._future_conductor;
+            outer.promise()._runner_conductor << _coroutine.promise()._runner_conductor;
             return true;
         }
 
@@ -343,7 +289,7 @@ namespace ace {
     typedef async<>::runner_pool_t runner_pool_t;
 
     // NOTE: Type of a conductor handler for runner and future objects [Relates 'future' and 'runner']
-    typedef async<>::future_conductor conductor_handler_t;
+    typedef async<>::runner_conductor conductor_handler_t;
 
     // NOTE: Type alias for std standard type
     typedef std::suspend_always suspend;

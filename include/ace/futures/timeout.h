@@ -92,7 +92,7 @@ struct ACE_FUTURE_TIMEOUT_SPACE timeout_conductor : conductor_handler_t {
 
 ACE_FUTURE_TIMEOUT_MEMBER(bool)
 await_suspend(auto coroutine) {
-    coroutine.promise()._future_conductor = timeout_conductor{this};
+    coroutine.promise()._runner_conductor = timeout_conductor{this};
     return true;
 }
 

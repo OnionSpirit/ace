@@ -253,7 +253,7 @@ ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::await_ready() {
 
 ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::await_suspend(auto ctx) {
     if (not _container->pop(_output_data)) {
-        ctx.promise()._future_conductor = channel_conductor{_waiters};
+        ctx.promise()._runner_conductor = channel_conductor{_waiters};
         return true;
     }
     return false;

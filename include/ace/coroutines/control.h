@@ -4,7 +4,7 @@
 #include <atomic>
 #include <cstddef>
 
-#include "conductor.h"
+#include "conduction.h"
 #include "ace/common/terms.h"
 
 namespace ace::coroutines {
@@ -13,7 +13,7 @@ namespace ace::coroutines {
 
         uint64_t _weak_refcount {1};
         uint64_t _strong_refcount {1};
-        promise_conductor_handle* _promise_conductor { nullptr };
+        control_conductor_handle* _control_conductor { nullptr };
         alignas(ACE_BUS_SIZE) bool _exists {true};
 
         control_block() = default;
@@ -75,9 +75,9 @@ namespace ace::coroutines {
         ~control_block_handle() { release(); }
 
         void cancel() {
-            if (done() or not _block->_promise_conductor) [[unlikely]]
+            if (done() or not _block->_control_conductor) [[unlikely]]
                 return;
-            _block->_promise_conductor->cancel();
+            _block->_control_conductor->cancel();
             release();
         }
 
@@ -90,9 +90,9 @@ namespace ace::coroutines {
 
         bool forward(void* waiter) const {
             if (not _block) [[unlikely]] return false;
-            if (done() or not _block->_promise_conductor or waiter == nullptr) [[unlikely]]
+            if (done() or not _block->_control_conductor or waiter == nullptr) [[unlikely]]
                 return false;
-            return _block->_promise_conductor->forward(waiter);
+            return _block->_control_conductor->forward(waiter);
         }
     };
 

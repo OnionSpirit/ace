@@ -184,7 +184,7 @@ await_suspend(auto coroutine) {
         _runner_pool.store(coroutine.promise()._runner_pool, std::memory_order_release);
 
     // NOTE: Setting conductor for dispatch to the cutex waiters queue
-    coroutine.promise()._future_conductor = cutex_conductor{this};
+    coroutine.promise()._runner_conductor = cutex_conductor{this};
     return true;
 }
 

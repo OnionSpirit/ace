@@ -38,11 +38,11 @@ namespace ace::core {
             bool active = false;
 
             // NOTE: Timepoint to track interval
-            const auto round_start = get_time();
-            auto now = round_start;
+            const auto start = get_time();
+            auto now = start;
 
             // NOTE: Working with runner until interval ends (also updating last ts)
-            while ((now - round_start) < 5ms) {
+            while (now - start < 5ms) {
                 active = _runners[worker_id].run() or active;
                 fetch_time();
                 now = get_time();

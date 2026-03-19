@@ -9,15 +9,6 @@
 
 namespace ace::coroutines {
 
-    struct promise_conductor_handle {
-
-        virtual void cancel() noexcept = 0;
-
-        virtual bool forward(void*) noexcept = 0;
-
-        virtual ~promise_conductor_handle() = default;
-    };
-
     struct control_block {
 
         uint64_t _weak_refcount {1};

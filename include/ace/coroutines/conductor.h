@@ -15,19 +15,30 @@
 namespace ace::coroutines {
 
     template <typename runner_context_t>
-    struct conductor_traits {
+    struct future_conductor_handle {
 
-        conductor_traits() noexcept = default;
+        future_conductor_handle() noexcept = default;
 
-        conductor_traits(const conductor_traits&) noexcept = default;
+        future_conductor_handle(const future_conductor_handle&) noexcept = default;
 
-        conductor_traits(conductor_traits&&) noexcept = default;
+        future_conductor_handle(future_conductor_handle&&) noexcept = default;
 
         virtual void forward(runner_context_t&& context) = 0;
 
         virtual void cancel() = 0;
 
-        virtual ~conductor_traits() = default;
+        virtual ~future_conductor_handle() = default;
+    };
+
+    struct promise_conductor_handle {
+
+        promise_conductor_handle() noexcept = default;
+
+        virtual bool forward(void*) noexcept = 0;
+
+        virtual void cancel() noexcept = 0;
+
+        virtual ~promise_conductor_handle() = default;
     };
 
 }

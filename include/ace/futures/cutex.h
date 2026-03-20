@@ -75,7 +75,7 @@ namespace ace::futures {
 
         cutex(cutex&&) = delete;
 
-        typedef volatile proxy vol_proxy;
+        typedef volatile proxy volatile_proxy;
 
         ~cutex() override = default;
 
@@ -115,7 +115,7 @@ namespace ace::futures {
 
 namespace ace {
     using futures::cutex;
-    using croxy = cutex::vol_proxy;
+    using guard = cutex::volatile_proxy;
 }
 
 //==============================- DEFINITIONS -==================================
@@ -138,7 +138,14 @@ struct ACE_FUTURE_CUTEX_FUTURE_SPACE cutex_conductor : conductor_handler_t {
         while (not _cutex->_waiters.push(std::move(ctx)));
     }
 
-    // TODO: Finish later
+    // NOTE: Tasks is resuming with wiped conductor.
+    // NOTE: Placing into waiters queue is moving operation and also wont affect context handler inner state.
+    // NOTE: So we can cancel it by task handler
+    // NOTE: If task has handlers it means that task is thread local with canceling task.
+    // NOTE: No extra sync needed.
+    // NOTE: Cutex can be interacted only via it's RAII proxy, so extra manual 'sync()' not needed.
+    // NOTE: Maybe... Sometimes... I will add ejecting from mpsc queue by node handle.
+    // NOTE: But Im not sure that mpsc or mpmc would stay consistent
     void cancel() override {  }
 
     ~cutex_conductor() override = default;

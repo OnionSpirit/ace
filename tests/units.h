@@ -273,4 +273,21 @@ inline ace::async<> cutex_spawner(ace::futures::channel_dyn<ace::core::runner*>&
     std::cout << "'cutex_spawner' finished\n";
 }
 
+inline ace::async<> cutex_spawner_permanent(ace::futures::channel_dyn<ace::core::runner*>& output, ace::cutex& cut) {
+    std::cout << "'cutex_spawner_permanent' started\n";
+    auto curr_runner = co_await ace::commands::get_runner();
+    co_await ace::futures::timeout(10ms);
+    auto handle = co_await ace::spawn(cutex_carry(output, cut));
+    co_await ace::futures::timeout(25ms);
+    std::cout << "'cutex_spawner_permanent' awake, canceling...\n";
+    handle.cancel();
+    co_await ace::futures::timeout(10ms);
+    if (not co_await handle.join())
+        std::cout << "'cutex_carry' canceled. Joining is 'false'\n";
+    else
+        std::cout << "'cutex_carry' joined as alive. Failure\n";
+    output << curr_runner;
+    std::cout << "'cutex_spawner_permanent' finished\n";
+}
+
 #endif // UNITS_H

@@ -291,7 +291,8 @@ TEST(commands, check_join_after_cancel) {
     EXPECT_LT(ms_time, 900);
 }
 
-TEST(commands, check_cutex_cancel) {
+
+TEST(commands, check_cutex_cancel_after_capture) {
     ace::core::s_balancer_config._runners_amount = 2;
     ace::reload();
 
@@ -302,6 +303,50 @@ TEST(commands, check_cutex_cancel) {
     ace::cutex cutx_;
     ace::schedule(cutex_parallel(channel_, cutx_));
     ace::schedule(cutex_spawner(channel_, cutx_));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+
+    const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
+
+    // NOTE: Fetching data from channel. Each task produces 1 record in channel. The 'cutex_spawner' spawns extra task.
+    // NOTE: If all tasks finished channel will handle 3 records but if we successfully canceled task then 2 records remain
+    std::vector<ace::core::runner*> res{};
+    ace::schedule(channel_fetcher(channel_, res));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    EXPECT_EQ(res.size(), 2);
+    EXPECT_NE(res[0], nullptr);
+    EXPECT_NE(res[1], nullptr);
+
+    // NOTE: Trying to capture cutex to check if it is free after canceling owner task
+    res.clear();
+    ace::schedule(cutex_checker(channel_, cutx_));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    ace::schedule(channel_fetcher(channel_, res));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    EXPECT_EQ(res.size(), 1);
+    EXPECT_NE(res[0], nullptr);
+
+    EXPECT_LT(ms_time, 900);
+
+    ace::core::s_balancer_config._runners_amount = 1;
+    ace::reload();
+}
+
+
+TEST(commands, check_cutex_cancel_before_capture) {
+    ace::core::s_balancer_config._runners_amount = 2;
+    ace::reload();
+
+    const auto start_time = std::chrono::steady_clock::now();
+
+    // NOTE: Scheduling spawner-canceler and parallel cutex user
+    ace::futures::channel_dyn<ace::core::runner*> channel_ {};
+    ace::cutex cutx_;
+    ace::schedule(cutex_parallel(channel_, cutx_));
+    ace::schedule(cutex_spawner_permanent(channel_, cutx_));
     ace::run();
     ASSERT_TRUE(ace::empty());
 

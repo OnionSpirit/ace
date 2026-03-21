@@ -2,8 +2,10 @@
 #define ACE_CORE_KERNELIC_H
 
 #include <cstring>
+#include <functional>
 #include <liburing.h>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "vortex.h"
 #include "ace/common/queue.h"
@@ -22,41 +24,58 @@ namespace ace::core {
 
             return false;
         }
+
+        // static nukes::dynamic::mpsc_queue<>
     };
 
     /**
-     * @brief Supported operation types via kernelic controller
+     * @brief Uring user_data entity
      */
-    enum class operation_type {
-        e_nop,
-        e_open,
-        e_close,
-        e_read,
-        e_write,
-        e_accept,
-        e_connect,
-        e_send,
-        e_recv,
-    };
+    struct kernel_waiter {
 
-    struct operation_mapping {
-        operation_type type;
-        void (*submission_function)();
-        void (*completion_function)();
-    };
+        kernel_waiter() = default;
 
-    // static auto operation_mappings[][4] = {
-    //     {}
-    // };
+        /**
+         * @brief Activates waiter with CQE result
+         * @param res CQE result value
+         */
+        virtual void activate(int32_t res) = 0;
+
+        virtual ~kernel_waiter() = default;
+    };
 
     /**
      * @brief Abstract object to interact with kernel controller
      */
     struct kernel_entity {
 
-        operation_type _op_code;  ///< Operation type to do
-        int32_t _res;             ///< Operation completion result
-        async<> _user;            ///< User of request. Actually [s|c]qe user_data
+        template <typename io_uring_foo_t, typename ... Args>
+        kernel_entity(io_uring_foo_t, io_uring_sqe *sqe, Args... args) {
+            _action = action_templ<io_uring_foo_t, Args...>;
+            _sqe = sqe;
+            // NOTE: Placement new to copy params to the local storage
+            new (_params) std::tuple<Args...>(args...);
+        }
+
+        template <typename foo_t, typename ... Args>
+        static void action_templ(io_uring_sqe* sqe, uintptr_t* params) {
+            std::tuple<Args...> tuple { *reinterpret_cast<std::tuple<Args...>*>(params) };
+            foo_t(sqe, std::get<Args>(tuple)...);
+        }
+
+        void apply() {
+            if (_sqe not_eq nullptr)
+                _action(_sqe, _params);
+        }
+
+        ACE_CACHE_LINE(0)
+
+        uintptr_t _params[8] = {};
+
+        ACE_CACHE_LINE(1)
+
+        void (*_action)(io_uring_sqe*, uintptr_t*) = nullptr;
+        io_uring_sqe* _sqe = nullptr;
 
         static thread_local common::slab_mempool<kernel_entity> _kernelic_entity_mempool;
     };
@@ -66,7 +85,7 @@ namespace ace::core {
      */
     struct kernel_controller : vortex_traits<kernel_controller, vortex_spawn_mode::e_thread_local> {
 
-        static constexpr unsigned max_entries = 128;
+        static constexpr unsigned max_entries = 1024;
 
         kernel_controller() {
             memset(&_ring_params, 0, sizeof(_ring_params));
@@ -74,46 +93,84 @@ namespace ace::core {
         }
 
         bool ping() {
+
+            // NOTE: Setting request to the io_uring
+            for (int i = 0; i < max_entries and not _submission_buffer.empty(); ++i) {
+                auto entity = _submission_buffer.dequeue();
+                entity.apply();
+            }
+
+            // NOTE: Receiving responses from the io_uring
             io_uring_cqe *cqe_s[max_entries];
             const int cqe_count = io_uring_peek_batch_cqe(&_ring, cqe_s, max_entries);
             for (int i = 0; i < cqe_count; ++i) {
                 const auto identity = io_uring_cqe_get_data64(cqe_s[i]);
-                runner::reattach(std::move(_waiters[identity]));
-                _waiters.erase(cqe_s[i]->user_data);
-                _waiter_results.insert({identity, cqe_s[i]->res});
+                const auto waiter = reinterpret_cast<kernel_waiter*>(identity);
+                waiter->activate(cqe_s[i]->res);
+                io_uring_cqe_seen(&_ring, cqe_s[i]);
+                --_waiters;
             }
-            return not _waiters.empty();
+            // io_uring_submit(&_ring);
+            return _waiters not_eq 0;
         }
 
-        common::queue<kernel_entity> _submission_queue {kernel_entity::_kernelic_entity_mempool};
+        common::queue<kernel_entity> _submission_buffer {kernel_entity::_kernelic_entity_mempool};
 
-        ~kernel_controller() {
-            io_uring_queue_exit(&_ring);
-        }
+        ~kernel_controller() { io_uring_queue_exit(&_ring); }
 
         /**
-         * @brief Gets submission entity of the io_uring with installed user_data for a waiting task
-         * @return A pair of the waiter identity and pointer to submission queue entity
+         * @brief Submits IO request to controller
+         * @warning IO function params shall be passed without SQE ptr
          */
-        auto get_sqe_for(async<>&& waiter) -> std::tuple<uintptr_t, io_uring_sqe*> {
+        template <typename foo_t, typename ... Args>
+        void submit(kernel_waiter* waiter, foo_t io_uring_foo, Args... args) {
             io_uring_sqe *sqe = io_uring_get_sqe(&_ring);
-            io_uring_sqe_set_data(sqe, waiter._coroutine.address());
-            _waiters.insert({sqe->user_data, std::move(waiter)});
-            return std::tie(sqe->user_data, sqe);
+            io_uring_sqe_set_data(sqe, waiter);
+            ++_waiters;
+            const auto entity = kernel_entity(io_uring_foo, sqe, args...);
+            _submission_buffer.enqueue(entity);
         }
 
-        /**
-         * @brief Erases waiter's identity from the controller
-         * @warning May be used only if SQE wasn't passed to the ring
-         */
-        void detach_sqe_for(uintptr_t waiter_identity) {
-            _waiters.erase(waiter_identity);
+        void nop(kernel_waiter* waiter) {
+            submit(waiter, io_uring_prep_nop);
         }
 
-        int32_t consume_result(uintptr_t waiter_identity) {
-            const auto result = _waiter_results[waiter_identity];
-            _waiter_results.erase(waiter_identity);
-            return result;
+        // TODO: Figure out how to control waiters count
+        // void cancel(kernel_waiter* waiter, const int flags) {
+        //     submit(waiter, io_uring_prep_cancel, waiter, flags);
+        // }
+
+        void open(kernel_waiter* waiter, const char* path, const int flags, const mode_t mode) {
+            submit(waiter, io_uring_prep_open, path, flags, mode);
+        }
+
+        void close(kernel_waiter* waiter, const int fd) {
+            submit(waiter, io_uring_prep_close, fd);
+        }
+
+        void bind(kernel_waiter* waiter, const int fd, const sockaddr *addr, const socklen_t addrlen) {
+            submit(waiter, io_uring_prep_bind, fd, addr, addrlen);
+        }
+
+        void connect(kernel_waiter* waiter, const int fd, const sockaddr *addr, const socklen_t addrlen) {
+            submit(waiter, io_uring_prep_connect, fd, addr, addrlen);
+        }
+
+        void listen(kernel_waiter* waiter, const int fd, const int backlog) {
+            submit(waiter, io_uring_prep_listen, fd, backlog);
+        }
+
+        void accept(kernel_waiter* waiter, const int fd, sockaddr *addr, socklen_t *addrlen, const int flags) {
+            submit(waiter, io_uring_prep_accept, fd, addr, addrlen, flags);
+        }
+
+        void send(kernel_waiter* waiter, const int fd, const void *buf, const size_t len, const int flags,
+                  const sockaddr *addr, const socklen_t addrlen) {
+            submit(waiter, io_uring_prep_sendto, fd, buf, len, flags, addr, addrlen);
+        }
+
+        void recv(kernel_waiter* waiter, const int fd, void *buf, const size_t len, const int flags) {
+            submit(waiter, io_uring_prep_recv, fd, buf, len, flags);
         }
 
     private:
@@ -121,8 +178,7 @@ namespace ace::core {
         io_uring_params _ring_params;
         io_uring _ring;
 
-        std::unordered_map<uintptr_t, async<>> _waiters {};
-        std::unordered_map<uintptr_t, int32_t> _waiter_results {};
+        int _waiters = 0;
     };
 
     thread_local common::slab_mempool<kernel_entity> kernel_entity::_kernelic_entity_mempool =

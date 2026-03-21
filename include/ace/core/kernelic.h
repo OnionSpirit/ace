@@ -4,8 +4,6 @@
 #include <cstring>
 #include <functional>
 #include <liburing.h>
-#include <unordered_map>
-#include <unordered_set>
 
 #include "vortex.h"
 #include "ace/common/queue.h"
@@ -29,7 +27,7 @@ namespace ace::core {
     };
 
     /**
-     * @brief Uring user_data entity
+     * @brief Uring user_data entity with activation method
      */
     struct kernel_waiter {
 
@@ -57,10 +55,11 @@ namespace ace::core {
             new (_params) std::tuple<Args...>(args...);
         }
 
-        template <typename foo_t, typename ... Args>
+        template <typename io_uring_foo_t, typename ... Args>
         static void action_templ(io_uring_sqe* sqe, uintptr_t* params) {
             std::tuple<Args...> tuple { *reinterpret_cast<std::tuple<Args...>*>(params) };
-            foo_t(sqe, std::get<Args>(tuple)...);
+            io_uring_foo_t f {};
+            f(sqe, std::get<Args>(tuple)...);
         }
 
         void apply() {
@@ -123,7 +122,7 @@ namespace ace::core {
          * @warning IO function params shall be passed without SQE ptr
          */
         template <typename foo_t, typename ... Args>
-        void submit(kernel_waiter* waiter, foo_t io_uring_foo, Args... args) {
+        void submit(foo_t io_uring_foo, kernel_waiter* waiter, Args... args) {
             io_uring_sqe *sqe = io_uring_get_sqe(&_ring);
             io_uring_sqe_set_data(sqe, waiter);
             ++_waiters;
@@ -132,7 +131,7 @@ namespace ace::core {
         }
 
         void nop(kernel_waiter* waiter) {
-            submit(waiter, io_uring_prep_nop);
+            submit(io_uring_prep_nop, waiter);
         }
 
         // TODO: Figure out how to control waiters count
@@ -141,36 +140,36 @@ namespace ace::core {
         // }
 
         void open(kernel_waiter* waiter, const char* path, const int flags, const mode_t mode) {
-            submit(waiter, io_uring_prep_open, path, flags, mode);
+            submit(io_uring_prep_open, waiter, path, flags, mode);
         }
 
         void close(kernel_waiter* waiter, const int fd) {
-            submit(waiter, io_uring_prep_close, fd);
+            submit(io_uring_prep_close, waiter, fd);
         }
 
         void bind(kernel_waiter* waiter, const int fd, const sockaddr *addr, const socklen_t addrlen) {
-            submit(waiter, io_uring_prep_bind, fd, addr, addrlen);
+            submit(io_uring_prep_bind, waiter, fd, addr, addrlen);
         }
 
         void connect(kernel_waiter* waiter, const int fd, const sockaddr *addr, const socklen_t addrlen) {
-            submit(waiter, io_uring_prep_connect, fd, addr, addrlen);
+            submit(io_uring_prep_connect, waiter, fd, addr, addrlen);
         }
 
         void listen(kernel_waiter* waiter, const int fd, const int backlog) {
-            submit(waiter, io_uring_prep_listen, fd, backlog);
+            submit(io_uring_prep_listen, waiter, fd, backlog);
         }
 
         void accept(kernel_waiter* waiter, const int fd, sockaddr *addr, socklen_t *addrlen, const int flags) {
-            submit(waiter, io_uring_prep_accept, fd, addr, addrlen, flags);
+            submit(io_uring_prep_accept, waiter, fd, addr, addrlen, flags);
         }
 
         void send(kernel_waiter* waiter, const int fd, const void *buf, const size_t len, const int flags,
                   const sockaddr *addr, const socklen_t addrlen) {
-            submit(waiter, io_uring_prep_sendto, fd, buf, len, flags, addr, addrlen);
+            submit(io_uring_prep_sendto, waiter, fd, buf, len, flags, addr, addrlen);
         }
 
         void recv(kernel_waiter* waiter, const int fd, void *buf, const size_t len, const int flags) {
-            submit(waiter, io_uring_prep_recv, fd, buf, len, flags);
+            submit(io_uring_prep_recv, waiter, fd, buf, len, flags);
         }
 
     private:

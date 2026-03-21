@@ -397,7 +397,7 @@ namespace ace::core {
 
     };
 
-    struct clock : vortex_traits<clock, vortex_spawn_mode::e_unique> {
+    struct clock : vortex_traits<clock, vortex_spawn_mode::e_thread_local> {
 
         clock() = default;
 
@@ -411,7 +411,7 @@ namespace ace::core {
             return touch(ctx._coroutine.promise()._runner_pool)._multi_dial.subscribe(std::forward<async<>>(ctx), dur);
         };
 
-        static bool yank() {
+        static bool ping() {
             _multi_dial.release();
             return not _multi_dial.empty();
         }

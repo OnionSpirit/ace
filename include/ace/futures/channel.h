@@ -7,9 +7,7 @@
 
 #include "future.h"
 #include "ace/common/selection.h"
-#include <nukes/dynamic/mpsc_queue.h>
 #include <nukes/dynamic/mpmc_queue.h>
-#include <nukes/bounded/mpsc_queue.h>
 #include <nukes/bounded/mpmc_queue.h>
 
 #include "ace/core/runner.h"
@@ -30,34 +28,32 @@ template
 <
     typename data_t,
 
-    size_t data_buffer_size_v = 16ul,
+    size_t data_buffer_size_v = 1ul,
 
     allocation_type data_allocation_v = allocation_type::e_dynamic,
 
-    size_t waiters_buffer_size_v = 16ul,
+    size_t waiters_buffer_size_v = 1ul,
 
     allocation_type waiters_allocation_v = allocation_type::e_dynamic
 >
 class channel {
 
-    void reset();
+    template <typename storage_entity_t, allocation_type allocation_v, size_t buff_len_v>
+    static auto consteval define_storage() {
+        if constexpr (allocation_v == allocation_type::e_dynamic)
+            return nukes::dynamic::mpmc_queue<storage_entity_t>{};
+        if constexpr (allocation_v == allocation_type::e_static)
+            return nukes::bounded::mpmc_queue<storage_entity_t, buff_len_v>{};
+        if constexpr (allocation_v == allocation_type::e_on_init)
+            return nukes::bounded::mpmc_queue<storage_entity_t>{};
+    }
 
     static auto consteval define_data_storage() {
-        if constexpr (waiters_allocation_v == allocation_type::e_dynamic)
-            return nukes::dynamic::mpmc_queue<data_t>{};
-        if constexpr (waiters_allocation_v == allocation_type::e_static)
-            return nukes::bounded::mpmc_queue<data_t, data_buffer_size_v>{};
-        if constexpr (waiters_allocation_v == allocation_type::e_on_init)
-            return nukes::bounded::mpmc_queue<data_t>{};
+        return define_storage<data_t, data_allocation_v, data_buffer_size_v>();
     }
 
     static auto consteval define_waiters_storage() {
-        if constexpr (waiters_allocation_v == allocation_type::e_dynamic)
-            return nukes::dynamic::mpsc_queue<async<>>{};
-        if constexpr (waiters_allocation_v == allocation_type::e_static)
-            return nukes::bounded::mpsc_queue<async<>, waiters_buffer_size_v>{};
-        if constexpr (waiters_allocation_v == allocation_type::e_on_init)
-            return nukes::bounded::mpsc_queue<async<>>{};
+        return define_storage<async<>, waiters_allocation_v, waiters_buffer_size_v>();
     }
 
     typedef std::decay_t<decltype(define_data_storage())> data_storage_t;
@@ -69,6 +65,8 @@ class channel {
     struct channel_conductor;
     friend channel_conductor;
 
+    void notify();
+
 public:
 
     data_storage_t _container; ///< Storage of transmitting data
@@ -79,18 +77,30 @@ public:
     explicit operator bool() const { return empty(); };
 
     /**
-     * @details pushes data to tha channel
+     * @brief The function pushes data to the channel
      * @param data data to push
      * @return False if inner buffer overflowed
      */
     bool push(data_t& data);
 
     /**
-     * @details pushes data to tha channel
+     * @brief The function pushes data to the channel
      * @param data data to push
      * @return False if inner buffer overflowed
      */
     bool push(data_t&& data);
+
+    /**
+     * @brief The function pushes data to the channel with waiting for a vacant spot in the data queue
+     * @param data data to push
+     */
+    promise<> pending_push(data_t& data);
+
+    /**
+     * @brief The function pushes data to the channel with waiting for a vacant spot in the data queue
+     * @param data data to push
+     */
+    promise<> pending_push(data_t&& data);
 
     /**
      * @details Checks if channel is empty
@@ -131,23 +141,30 @@ public:
 };
 
 
-template <typename Type, size_t DataBufferSize = 16ul, size_t WaitersBufferSize = 4ul>
-using channel_bounded = channel
+/**
+ * @brief Static Channel with bounded amount of waiters
+ */
+template <typename Type, size_t DataBufferSize = 1ul, size_t WaitersBufferSize = 1ul>
+using channel_static = channel
 <
     Type,
     DataBufferSize,
     allocation_type::e_static,
-    WaitersBufferSize
+    WaitersBufferSize,
+    allocation_type::e_static
 >;
 
-
-template <typename Type, size_t DataBufferSize = 16ul, size_t WaitersBufferSize = 4ul>
+/**
+ * @brief Dynamic Channel with bounded amount of waiters
+ */
+template <typename Type, size_t WaitersBufferSize = 1ul>
 using channel_dyn = channel
 <
     Type,
-    DataBufferSize,
+    1ul,
     allocation_type::e_dynamic,
-    WaitersBufferSize
+    WaitersBufferSize,
+    allocation_type::e_static
 >;
 
 
@@ -205,7 +222,7 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_conductor : conductor_handler_t {
 
     explicit channel_conductor(waiters_storage_t* waiters) : _waiters(waiters) {};
 
-    void forward(async<>&& ctx) override { _waiters->push(std::move(ctx)); }
+    void forward(async<>&& ctx) override { while (not _waiters->push(std::move(ctx))) {}; }
 
     // TODO: Finish later
     void cancel() override {  }
@@ -216,15 +233,15 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_conductor : conductor_handler_t {
 };
 
 
-ACE_FUTURE_CHANNEL_MEMBER(void) reset() {
+ACE_FUTURE_CHANNEL_MEMBER(void) notify() {
     if (async<> ctx; _waiters.pop(ctx)) [[likely]]
         core::runner::reattach(std::move(ctx));
 }
 
 
 ACE_FUTURE_CHANNEL_MEMBER(bool) push(data_t& data) {
-    if (_container.push(std::forward<data_t&>(data))) [[likely]] {
-        reset();
+    if (_container.push(std::forward<data_t>(data))) [[likely]] {
+        notify();
         return true;
     }
     return false;
@@ -233,10 +250,25 @@ ACE_FUTURE_CHANNEL_MEMBER(bool) push(data_t& data) {
 
 ACE_FUTURE_CHANNEL_MEMBER(bool) push(data_t&& data) {
     if (_container.push(std::forward<data_t>(data))) [[likely]] {
-        reset();
+        notify();
         return true;
     }
     return false;
+}
+
+ACE_FUTURE_CHANNEL_MEMBER(ace::promise<>) pending_push(data_t& data) {
+    while (not _container.push(std::forward<data_t>(data))) [[unlikely]]
+        co_await suspend();
+    notify();
+    co_return;
+}
+
+
+ACE_FUTURE_CHANNEL_MEMBER(ace::promise<>) pending_push(data_t&& data) {
+    while (not _container.push(std::forward<data_t>(data))) [[unlikely]]
+        co_await suspend();
+    notify();
+    co_return;
 }
 
 

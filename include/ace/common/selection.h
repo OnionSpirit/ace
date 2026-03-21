@@ -8,8 +8,8 @@ enum class allocation_type {
 };
 
 enum class vortex_spawn_mode {
-    e_shared, ///< Same service task for all threads
-    e_unique, ///< Unique service task for each thread
+    e_thread_shared, ///< Single vortex for all threads
+    e_thread_local,  ///< Local vortex instance for each thread
 };
 
 #endif // ACE_COMMON_SELECTION_H

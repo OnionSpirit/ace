@@ -32,7 +32,7 @@ namespace ace::core {
     };
 
     /**
-     * @brief Uring user_data proxy entity with activation method
+     * @brief Proxy entity with activation method to use it as Uring user_data
      */
     struct kernel_waiter {
 
@@ -55,48 +55,6 @@ namespace ace::core {
         virtual ~kernel_waiter() = default;
     };
 
-    /**
-     * @brief Abstract object to interact with kernel controller
-     */
-    struct kernel_entity {
-
-        template <typename io_uring_foo_t, typename ... Args>
-        kernel_entity(io_uring_foo_t foo, io_uring_sqe *sqe, Args... args) {
-            _action = action_templ<io_uring_foo_t, Args...>;
-            _sqe = sqe;
-            _io_uring_foo = reinterpret_cast<void*>(foo);
-            // NOTE: Placement new to copy params to the local storage
-            new (_params) std::tuple<Args...>(args...);
-        }
-
-        // NOTE: Polymorphic action handler
-        template <typename io_uring_foo_t, typename ... Args>
-        static void action_templ(void* io_uring_foo, io_uring_sqe* sqe, uintptr_t* params) {
-            std::tuple<Args...> tuple { *reinterpret_cast<std::tuple<Args...>*>(params) };
-            io_uring_foo_t foo { reinterpret_cast<io_uring_foo_t>(io_uring_foo) };
-            [&]<std::size_t ... index_v>(std::index_sequence<index_v...>) {
-                foo(sqe, std::get<index_v>(tuple)...);
-            }(std::make_index_sequence<sizeof...(Args)>{});
-        }
-
-        void apply() {
-            if (_sqe not_eq nullptr)
-                _action(_io_uring_foo, _sqe, _params);
-        }
-
-        ACE_CACHE_LINE(0)
-
-        uintptr_t _params[8] = {};
-
-        ACE_CACHE_LINE(1)
-
-        void (*_action)(void*, io_uring_sqe*, uintptr_t*) = nullptr;
-        io_uring_sqe* _sqe = nullptr;
-        void* _io_uring_foo = nullptr;
-
-        static thread_local common::slab_mempool<kernel_entity> _kernelic_entity_mempool;
-    };
-
 
     /**
      * @brief Thread local vortex to work with uring queues without kernel notification
@@ -105,66 +63,30 @@ namespace ace::core {
 
     private:
 
+        struct kernel_entity;
+
         static thread_local io_uring_params _ring_params;
         static thread_local io_uring _ring;
         static thread_local int _requests;
 
     public:
 
+        kernel_controller();
+
+        ~kernel_controller();
+
         static constexpr unsigned max_entries = 1024;
-
-        kernel_controller() {
-            memset(&_ring_params, 0, sizeof(_ring_params));
-            io_uring_queue_init_params(max_entries, &_ring, &_ring_params);
-        }
-
-        static bool ping() {
-            // NOTE: Setting requests to the io_uring
-            const bool need_submission = not _submission_buffer.empty();
-            for (int i = 0; i < max_entries and not _submission_buffer.empty(); ++i) {
-                auto entity = _submission_buffer.dequeue();
-                entity.apply();
-            }
-
-            // NOTE: Requesting submission if it's needed
-            if (need_submission)
-                kernel_notifier::request_submission(&_ring);
-
-            // NOTE: Receiving responses from the io_uring
-            io_uring_cqe* cqe_s[max_entries] {};
-            const unsigned int cqe_count = io_uring_peek_batch_cqe(&_ring, cqe_s, max_entries);
-            for (int i = 0; i < cqe_count; ++i) {
-
-                const auto cqe = cqe_s[i];
-                const auto identity = io_uring_cqe_get_data64(cqe);
-                const auto waiter = reinterpret_cast<kernel_waiter*>(identity);
-
-                if (waiter->_on_cancel) [[unlikely]] _requests -= cqe->res;
-                else [[likely]] waiter->activate(cqe->res);
-
-                io_uring_cqe_seen(&_ring, cqe);
-                if (not waiter->_multishot) --_requests;
-            }
-            return _requests not_eq 0;
-        }
 
         static thread_local common::queue<kernel_entity> _submission_buffer;
 
-        ~kernel_controller() { io_uring_queue_exit(&_ring); }
+        static bool ping();
 
         /**
          * @brief Submits IO request to controller
          * @warning IO function params shall be passed without SQE ptr
          */
         template <typename foo_t, typename ... Args>
-        static void submit(foo_t io_uring_foo, kernel_waiter* waiter, Args... args) {
-            io_uring_sqe *sqe = io_uring_get_sqe(&_ring);
-            io_uring_sqe_set_data(sqe, waiter);
-            ++_requests;
-            const auto entity = kernel_entity(io_uring_foo, sqe, args...);
-            _submission_buffer.enqueue(entity);
-            touch(waiter->_runner_identity);
-        }
+        static void submit(foo_t io_uring_foo, kernel_waiter* waiter, Args... args);
 
         static void nop(kernel_waiter* waiter) {
             submit(io_uring_prep_nop, waiter);
@@ -215,13 +137,40 @@ namespace ace::core {
 
     };
 
+    /**
+     * @brief Abstract object to interact with kernel controller
+     */
+    struct kernel_controller::kernel_entity {
+
+        template <typename io_uring_foo_t, typename ... Args>
+        kernel_entity(io_uring_foo_t foo, io_uring_sqe *sqe, Args... args);
+
+        // NOTE: Polymorphic action handler
+        template <typename io_uring_foo_t, typename ... Args>
+        static void action_templ(void* io_uring_foo, io_uring_sqe* sqe, uintptr_t* params);
+
+        void apply();
+
+        ACE_CACHE_LINE(0)
+
+        uintptr_t _params[8] = {};
+
+        ACE_CACHE_LINE(1)
+
+        void (*_action)(void*, io_uring_sqe*, uintptr_t*) = nullptr;
+        io_uring_sqe* _sqe = nullptr;
+        void* _io_uring_foo = nullptr;
+
+        static thread_local common::slab_mempool<kernel_entity> _kernelic_entity_mempool;
+    };
+
     nukes::dynamic::mpsc_queue<io_uring*> kernel_notifier::_controllers {};
 
-    thread_local common::slab_mempool<kernel_entity> kernel_entity::_kernelic_entity_mempool {
+    thread_local common::slab_mempool<kernel_controller::kernel_entity> kernel_controller::kernel_entity::_kernelic_entity_mempool {
         common::slab_mempool<kernel_entity>()
     };
 
-    thread_local common::queue<kernel_entity> kernel_controller::_submission_buffer {
+    thread_local common::queue<kernel_controller::kernel_entity> kernel_controller::_submission_buffer {
         kernel_entity::_kernelic_entity_mempool
     };
 
@@ -231,4 +180,104 @@ namespace ace::core {
 
 }
 
+#define ACE_CORE_KERNEL_CONTROLLER_SPACE \
+ace::core::kernel_controller::
+
+#define ACE_CORE_KERNEL_CONTROLLER_MEMBER(returnT) \
+inline returnT ACE_CORE_KERNEL_CONTROLLER_SPACE
+
+#define ACE_CORE_KERNEL_ENTITY_SPACE \
+ace::core::kernel_controller::kernel_entity::
+
+#define ACE_CORE_KERNEL_ENTITY_MEMBER(returnT) \
+inline returnT ACE_CORE_KERNEL_ENTITY_SPACE
+
+
+ACE_CORE_KERNEL_CONTROLLER_MEMBER()
+kernel_controller() {
+    memset(&_ring_params, 0, sizeof(_ring_params));
+    io_uring_queue_init_params(max_entries, &_ring, &_ring_params);
+}
+
+
+ACE_CORE_KERNEL_CONTROLLER_MEMBER()
+~kernel_controller() { io_uring_queue_exit(&_ring); }
+
+
+ACE_CORE_KERNEL_CONTROLLER_MEMBER(bool)
+ping() {
+    // NOTE: Setting requests to the io_uring
+    const bool need_submission = not _submission_buffer.empty();
+    for (int i = 0; i < max_entries and not _submission_buffer.empty(); ++i) {
+        auto entity = _submission_buffer.dequeue();
+        entity.apply();
+    }
+
+    // NOTE: Requesting submission if it's needed
+    if (need_submission)
+        kernel_notifier::request_submission(&_ring);
+
+    // NOTE: Receiving responses from the io_uring
+    io_uring_cqe* cqe_s[max_entries] {};
+    const unsigned int cqe_count = io_uring_peek_batch_cqe(&_ring, cqe_s, max_entries);
+    for (int i = 0; i < cqe_count; ++i) {
+
+        const auto cqe = cqe_s[i];
+        const auto identity = io_uring_cqe_get_data64(cqe);
+        const auto waiter = reinterpret_cast<kernel_waiter*>(identity);
+
+        if (waiter->_on_cancel) [[unlikely]] _requests -= cqe->res;
+        else [[likely]] waiter->activate(cqe->res);
+
+        io_uring_cqe_seen(&_ring, cqe);
+        if (not waiter->_multishot) --_requests;
+    }
+    return _requests not_eq 0;
+}
+
+
+template <typename foo_t, typename ... Args> void
+ACE_CORE_KERNEL_CONTROLLER_SPACE
+submit(foo_t io_uring_foo, kernel_waiter* waiter, Args... args) {
+    io_uring_sqe *sqe = io_uring_get_sqe(&_ring);
+    io_uring_sqe_set_data(sqe, waiter);
+    ++_requests;
+    const auto entity = kernel_entity(io_uring_foo, sqe, args...);
+    _submission_buffer.enqueue(entity);
+    touch(waiter->_runner_identity);
+}
+
+
+template <typename io_uring_foo_t, typename ... Args>
+ACE_CORE_KERNEL_ENTITY_SPACE
+kernel_entity(io_uring_foo_t foo, io_uring_sqe *sqe, Args... args) {
+    _action = action_templ<io_uring_foo_t, Args...>;
+    _sqe = sqe;
+    _io_uring_foo = reinterpret_cast<void*>(foo);
+    // NOTE: Placement new to copy params to the local storage
+    new (_params) std::tuple<Args...>(args...);
+}
+
+
+template <typename io_uring_foo_t, typename ... Args> void
+ACE_CORE_KERNEL_ENTITY_SPACE
+action_templ(void* io_uring_foo, io_uring_sqe* sqe, uintptr_t* params) {
+    std::tuple<Args...> tuple { *reinterpret_cast<std::tuple<Args...>*>(params) };
+    io_uring_foo_t foo { reinterpret_cast<io_uring_foo_t>(io_uring_foo) };
+    [&]<std::size_t ... index_v>(std::index_sequence<index_v...>) {
+        foo(sqe, std::get<index_v>(tuple)...);
+    }(std::make_index_sequence<sizeof...(Args)>{});
+}
+
+
+ACE_CORE_KERNEL_ENTITY_MEMBER(void)
+apply() {
+    if (_sqe not_eq nullptr)
+        _action(_io_uring_foo, _sqe, _params);
+}
+
+#undef ACE_CORE_KERNEL_CONTROLLER_SPACE
+#undef ACE_CORE_KERNEL_CONTROLLER_MEMBER
+#undef ACE_CORE_KERNEL_ENTITY_SPACE
+#undef ACE_CORE_KERNEL_ENTITY_MEMBER
 #endif //ACE_CORE_KERNELIC_H

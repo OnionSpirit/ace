@@ -102,14 +102,21 @@ namespace ace::core {
             }
         }
 
-    public:
-
-        // NOTE: Gets vortex instance and respawns service if needed
-        static derived_t& touch(runner_pool_t* rnr = nullptr) {
+        static derived_t& touch_impl(runner_pool_t* rnr = nullptr) {
             static derived_t instance;
             if (instance.detach_get()) instance.respawn(reinterpret_cast<runner*>(rnr));
             return instance;
         }
+
+    public:
+
+        // NOTE: Gets vortex instance and respawns service if needed
+        static derived_t& touch(runner_pool_t* rnr = nullptr)
+        requires (spawn_mode_v == vortex_spawn_mode::e_thread_shared) { return touch_impl(rnr); }
+
+        // NOTE: Gets vortex instance and respawns service if needed
+        static derived_t& touch(runner_pool_t* rnr)
+        requires (spawn_mode_v == vortex_spawn_mode::e_thread_local) { return touch_impl(rnr); }
 
         // NOTE: Gets vortex instance to inspect
         static derived_t& inspect() {

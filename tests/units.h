@@ -11,6 +11,7 @@
 #include "ace/futures/channel.h"
 #include "ace/futures/timeout.h"
 #include "ace/futures/cutex.h"
+#include "ace/core/kernelic.h"
 
 struct once_suspend : ace::futures::future_traits<once_suspend> {
 

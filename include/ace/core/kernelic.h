@@ -26,13 +26,13 @@ namespace ace::core {
         static nukes::dynamic::mpsc_queue<io_uring*> _controllers;
 
         static void request_submission(io_uring* ring) {
-            while (not _controllers.push(std::move(ring))) {};
+            while (not _controllers.push(std::forward<io_uring*>(ring))) {};
             touch();
         }
     };
 
     /**
-     * @brief Proxy entity with activation method to use it as Uring user_data
+     * @brief Proxy entity with activation method to use it as uring user_data
      */
     struct kernel_waiter {
 
@@ -147,7 +147,7 @@ namespace ace::core {
 
         // NOTE: Polymorphic action handler
         template <typename io_uring_foo_t, typename ... Args>
-        static void action_templ(void* io_uring_foo, io_uring_sqe* sqe, uintptr_t* params);
+        static void action_templ(void* io_uring_foo, io_uring_sqe* sqe, const uintptr_t* params);
 
         void apply();
 
@@ -157,7 +157,7 @@ namespace ace::core {
 
         ACE_CACHE_LINE(1)
 
-        void (*_action)(void*, io_uring_sqe*, uintptr_t*) = nullptr;
+        void (*_action)(void*, io_uring_sqe*, const uintptr_t*) = nullptr;
         io_uring_sqe* _sqe = nullptr;
         void* _io_uring_foo = nullptr;
 
@@ -261,8 +261,8 @@ kernel_entity(io_uring_foo_t foo, io_uring_sqe *sqe, Args... args) {
 
 template <typename io_uring_foo_t, typename ... Args> void
 ACE_CORE_KERNEL_ENTITY_SPACE
-action_templ(void* io_uring_foo, io_uring_sqe* sqe, uintptr_t* params) {
-    std::tuple<Args...> tuple { *reinterpret_cast<std::tuple<Args...>*>(params) };
+action_templ(void* io_uring_foo, io_uring_sqe* sqe, const uintptr_t* params) {
+    std::tuple<Args...> tuple { *reinterpret_cast<const std::tuple<Args...>*>(params) };
     io_uring_foo_t foo { reinterpret_cast<io_uring_foo_t>(io_uring_foo) };
     [&]<std::size_t ... index_v>(std::index_sequence<index_v...>) {
         foo(sqe, std::get<index_v>(tuple)...);

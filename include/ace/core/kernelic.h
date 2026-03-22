@@ -82,14 +82,26 @@ namespace ace::core {
         static bool ping();
 
         /**
-         * @brief Submits IO request to controller
-         * @warning IO function params shall be passed without SQE ptr
+         * @brief Submits IO request to controller.
+         * @param [in] io_uring_foo IO function ptr.
+         * @param [in] waiter pointer to an external object that waits
+         * for the operation result of the requested operation.
+         * @param [in, out] params... IO function params (without sqe).
+         * @warning IO function params shall be passed without SQE ptr.
+         * <br>Same order but waiter ptr required instead of the SQE ptr.
+         * <br>@code io_uring_prep_open(sqe, path, flags, mode) @endcode - @b liburing @b interface.
+         * <br>@code submit(io_uring_prep_open, waiter, path, flags, mode) @endcode - @b submit @b interface.
          */
-        template <typename foo_t, typename ... Args>
-        static void submit(foo_t io_uring_foo, kernel_waiter* waiter, Args... args);
+        template <typename foo_t, typename ... Params>
+        static void submit(foo_t io_uring_foo, kernel_waiter* waiter, Params... params);
 
         static void nop(kernel_waiter* waiter) {
             submit(io_uring_prep_nop, waiter);
+        }
+
+        static void socket(kernel_waiter* waiter, const int domain, const int type,
+        const int protocol, const unsigned int flags) {
+            submit(io_uring_prep_socket, waiter, domain, type, protocol, flags);
         }
 
         static void cancel(kernel_waiter* waiter, const int flags) {
@@ -126,8 +138,8 @@ namespace ace::core {
             submit(io_uring_prep_accept, waiter, fd, addr, addrlen, flags);
         }
 
-        static void send(kernel_waiter* waiter, const int fd, const void *buf, const size_t len, const int flags,
-                  const sockaddr *addr, const socklen_t addrlen) {
+        static void sendto(kernel_waiter* waiter, const int fd, const void *buf, const size_t len, const int flags,
+        const sockaddr *addr, const socklen_t addrlen) {
             submit(io_uring_prep_sendto, waiter, fd, buf, len, flags, addr, addrlen);
         }
 
@@ -236,13 +248,13 @@ ping() {
 }
 
 
-template <typename foo_t, typename ... Args> void
+template <typename foo_t, typename ... Params> void
 ACE_CORE_KERNEL_CONTROLLER_SPACE
-submit(foo_t io_uring_foo, kernel_waiter* waiter, Args... args) {
+submit(foo_t io_uring_foo, kernel_waiter* waiter, Params... params) {
     io_uring_sqe *sqe = io_uring_get_sqe(&_ring);
     io_uring_sqe_set_data(sqe, waiter);
     ++_requests;
-    const auto entity = kernel_entity(io_uring_foo, sqe, args...);
+    const auto entity = kernel_entity(io_uring_foo, sqe, params...);
     _submission_buffer.enqueue(entity);
     touch(waiter->_runner_identity);
 }

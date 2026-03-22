@@ -49,17 +49,17 @@ namespace ace::core {
 
         friend derived_t;
 
-        static void detach_set_shared(bool b) {
+        static void detach_set_shared(bool b) noexcept {
             inspect()._shared_detached.store(b, std::memory_order_relaxed);
         }
 
-        static bool detach_get_shared() {
+        static bool detach_get_shared() noexcept {
             return inspect()._shared_detached.load(std::memory_order_relaxed);
         }
 
-        static void detach_set_unique(const bool b) { _unique_detached = b; }
+        static void detach_set_unique(const bool b) noexcept { _unique_detached = b; }
 
-        static bool detach_get_unique() { return _unique_detached; }
+        static bool detach_get_unique() noexcept { return _unique_detached; }
 
         vortex_traits() {
             crtp_asserter();
@@ -75,7 +75,7 @@ namespace ace::core {
             // respawn();
         };
 
-        void respawn(runner* rnr = nullptr) {
+        void respawn(runner* rnr = nullptr) noexcept {
             dispatcher::get_instance().schedule(vortex(dispatcher::get_sig_pipe()), rnr);
             detach_set(false);
         }
@@ -102,7 +102,7 @@ namespace ace::core {
             }
         }
 
-        static derived_t& touch_impl(runner_pool_t* rnr = nullptr) {
+        static derived_t& touch_impl(runner_pool_t* rnr = nullptr) noexcept {
             static derived_t instance;
             if (instance.detach_get()) instance.respawn(reinterpret_cast<runner*>(rnr));
             return instance;
@@ -111,15 +111,15 @@ namespace ace::core {
     public:
 
         // NOTE: Gets vortex instance and respawns service if needed
-        static derived_t& touch(runner_pool_t* rnr = nullptr)
+        static derived_t& touch(runner_pool_t* rnr = nullptr) noexcept
         requires (spawn_mode_v == vortex_spawn_mode::e_thread_shared) { return touch_impl(rnr); }
 
         // NOTE: Gets vortex instance and respawns service if needed
-        static derived_t& touch(runner_pool_t* rnr)
+        static derived_t& touch(runner_pool_t* rnr) noexcept
         requires (spawn_mode_v == vortex_spawn_mode::e_thread_local) { return touch_impl(rnr); }
 
         // NOTE: Gets vortex instance to inspect
-        static derived_t& inspect() {
+        static derived_t& inspect() noexcept {
             static derived_t instance;
             return instance;
         }

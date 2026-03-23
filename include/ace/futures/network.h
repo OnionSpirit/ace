@@ -8,6 +8,13 @@
 
 namespace ace::futures {
 
+
+    template <typename query_t>
+    concept is_query = requires(query_t q, core::kernel_waiter* kwp) {
+        { q.query(kwp) } -> std::same_as<bool>;
+    };
+
+
     /**
      * @brief An interface template to interact with the
      * @b ace::core::kernel_controller through @b co_await operator.
@@ -20,8 +27,10 @@ namespace ace::futures {
         DECLARE_FUTURE(query_t);
         IMPORT_FUTURE_ENV;
 
-        // static_assert(requires(query_t q, kernel_waiter* kwp) { { q.query(kwp) } -> std::same_as<bool>; },
-        //     "Query object shall implement 'void query(ace::core::kernel_waiter*)' method");
+        base_query_traits() {
+            static_assert(is_query<query_t>,
+                "Query object shall implement 'bool query(ace::core::kernel_waiter*)' method");
+        }
 
         struct io_socket_query_conductor : conductor_handler_t {
 
@@ -59,6 +68,7 @@ namespace ace::futures {
         ~base_query_traits() override = default;
     };
 
+
     /**
      * @brief An interface template with standard activation to interact with the
      * @b ace::core::kernel_controller through @b co_await operator.
@@ -80,6 +90,61 @@ namespace ace::futures {
 
         int32_t await_resume() const { return _res; }
     };
+
+
+    struct close_query : complete_query_traits<close_query> {
+
+        close_query() = delete;
+
+        explicit close_query(const int fd)
+            : _fd(fd) {}
+
+        bool query(kernel_waiter* kwp) const noexcept {
+            if (_fd == -1) return false;
+            return core::kernel_controller::close(kwp, _fd);
+        }
+
+        int _fd;
+    };
+
+    /**
+     * @brief RAII socket closer
+     */
+    struct io_socket_closer final {
+        io_socket_closer() = delete;
+        explicit io_socket_closer(const int& fd, const bool& closed)
+            : _fd(fd)
+            , _closed(closed) {}
+
+        const int& _fd;
+        const bool& _closed;
+
+        static async<> check_and_close(const bool closed, const int fd) noexcept {
+            if (not closed) co_await close_query{fd};
+        }
+
+        static void pending_close(const bool closed, const int fd) noexcept {
+            schedule(check_and_close(closed, fd));
+        }
+
+        ~io_socket_closer() noexcept { pending_close(_closed, _fd); }
+    };
+
+    // struct io_socket_connection {
+    //
+    //     io_socket_connection() = default;
+    //
+    //     int _fd = -1;              ///< Socket file descriptor
+    //     bool _is_closed   = true;  ///< Socket closed flag
+    // }
+
+    // struct io_socket_listener {
+    //
+    //     io_socket_listener() = default;
+    //
+    //     int _fd = -1;              ///< Socket file descriptor
+    //     bool _is_closed   = true;  ///< Socket closed flag
+    // }
 
     struct io_socket_base {
 
@@ -272,21 +337,6 @@ namespace ace::futures {
             const int _flags;
         };
 
-        struct close_query : complete_query_traits<close_query> {
-
-            close_query() = delete;
-
-            explicit close_query(const int fd)
-                : _fd(fd) {}
-
-            bool query(kernel_waiter* kwp) const noexcept {
-                if (_fd == -1) return false;
-                return core::kernel_controller::close(kwp, _fd);
-            }
-
-            int _fd;
-        };
-
         [[nodiscard]] auto bind(const sockaddr* addr, const socklen_t addrlen) const
         -> bind_query {
             return bind_query {_fd, addr, addrlen};
@@ -336,30 +386,7 @@ namespace ace::futures {
 
         private:
 
-        /**
-         * @brief RAII socket closer
-         */
-        struct closer final {
-            closer() = delete;
-            explicit closer(const int& fd, const bool& closed)
-                : _fd(fd)
-                , _closed(closed) {}
-
-            const int& _fd;
-            const bool& _closed;
-
-            static async<> check_and_close(const bool closed, const int fd) noexcept {
-                if (not closed) co_await close_query{fd};
-            }
-
-            static void pending_close(const bool closed, const int fd) noexcept {
-                schedule(check_and_close(closed, fd));
-            }
-
-            ~closer() noexcept { pending_close(_closed, _fd); }
-
-        } _closer{_fd, _is_closed};
-
+        io_socket_closer _closer{_fd, _is_closed};
     };
 
     template <int domain_v, int type_v, int protocol_v>

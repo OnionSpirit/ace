@@ -10,10 +10,42 @@ namespace ace::futures {
 
     struct io_socket_base {
 
-        int _fd = -1;         ///< Socket file descriptor
-        bool _closed = false; ///< Socket closed flag
+        int _fd = -1;              ///< Socket file descriptor
+        bool _is_bind     = false; ///< Socket bind flag
+        bool _is_listener = false; ///< Listen socket flag
+        bool _is_closed   = true;  ///< Socket closed flag
 
-        // static_assert(sizeof(io_socket_traits) == 1, "Class must have only methods not fields");
+        io_socket_base() = default;
+
+        explicit io_socket_base(const int fd)
+            : _fd(fd) {
+            // NOTE: Special constructor on accept
+            _is_bind = true;
+            _is_closed = false;
+        }
+
+        io_socket_base(io_socket_base&& io) noexcept {
+            _fd = io._fd;
+            _is_bind = io._is_bind;
+            _is_listener = io._is_listener;
+            _is_closed = io._is_closed;
+            io._fd = -1;
+            io._is_bind = false;
+            io._is_listener = false;
+            io._is_closed = true;
+        }
+
+        io_socket_base& operator=(io_socket_base&& io)  noexcept {
+            _fd = io._fd;
+            _is_bind = io._is_bind;
+            _is_listener = io._is_listener;
+            _is_closed = io._is_closed;
+            io._fd = -1;
+            io._is_bind = false;
+            io._is_listener = false;
+            io._is_closed = true;
+            return *this;
+        }
 
         /**
          * @brief An interface to interact with the
@@ -246,29 +278,48 @@ namespace ace::futures {
         };
 
         [[nodiscard]] auto bind(const sockaddr* addr, const socklen_t addrlen) const
-        -> bind_query { return bind_query {_fd, addr, addrlen}; }
+        -> bind_query {
+            return bind_query {_fd, addr, addrlen};
+        }
+
+        [[nodiscard]] auto listen(const int backlog)
+        -> listen_query {
+            _is_listener = true;
+            return listen_query{_fd, backlog};
+        }
 
         [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen) const
-        -> connect_query { return connect_query{_fd, addr, addrlen}; }
+        -> connect_query {
+            if (_is_listener) throw std::logic_error{"can not 'connect(...)' at listen socket"};
+            return connect_query{_fd, addr, addrlen};
+        }
 
-        [[nodiscard]] auto listen(const int backlog) const
-        -> listen_query { return listen_query{_fd, backlog}; }
-
-        [[nodiscard]] auto accept(sockaddr* addr, socklen_t* addrlen, const int flags = 0) const
-        -> accept_query { return accept_query{_fd, addr, addrlen, flags}; }
+        [[nodiscard]] promise<io_socket_base&&> accept(sockaddr* addr, socklen_t* addrlen, const int flags = 0) const {
+            if (not _is_listener) throw std::logic_error{"can 'accept(...)' only at listen socket"};
+            co_return io_socket_base {co_await accept_query{_fd, addr, addrlen, flags}};
+        }
 
         [[nodiscard]] auto send(const void *buf, const size_t len, const int flags = 0) const
-        -> send_query { return send_query{_fd, buf, len, flags}; }
+        -> send_query {
+            if (_is_listener) throw std::logic_error{"can not 'send(...)' at listen socket"};
+            return send_query{_fd, buf, len, flags};
+        }
 
         [[nodiscard]] auto sendto(const void *buf, const size_t len, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
-        -> sendto_query { return sendto_query{_fd, buf, len, flags, addr, addrlen}; }
+        -> sendto_query {
+            if (_is_listener) throw std::logic_error{"can not 'sento(...)' at listen socket"};
+            return sendto_query{_fd, buf, len, flags, addr, addrlen};
+        }
 
         [[nodiscard]] auto recv(void *buf, const size_t len, const int flags = 0) const
-        -> recv_query { return recv_query{_fd, buf, len, flags}; }
+        -> recv_query {
+            if (_is_listener) throw std::logic_error{"can not 'recv(...)' at listen socket"};
+            return recv_query{_fd, buf, len, flags};
+        }
 
         [[nodiscard]] auto close()
-        -> close_query { _closed = true; return close_query{_fd}; }
+        -> close_query { _is_closed = true; return close_query{_fd}; }
 
         virtual ~io_socket_base() = default;
 
@@ -296,7 +347,7 @@ namespace ace::futures {
 
             ~closer() noexcept { pending_close(_closed, _fd); }
 
-        } _closer{_fd, _closed};
+        } _closer{_fd, _is_closed};
 
     };
 

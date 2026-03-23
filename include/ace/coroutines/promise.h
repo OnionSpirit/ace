@@ -54,7 +54,7 @@ namespace ace::coroutines {
         alignas(ACE_BUS_SIZE) promise_touch_result _status { e_executed };
 
         auto return_value(returnT return_value) {
-            _return_value =return_value;
+            _return_value = std::forward<std::remove_reference_t<returnT>>(return_value);
             _derived->_status = promise_touch_result::e_finished;
             return std::suspend_never{};
         }

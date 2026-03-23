@@ -157,7 +157,7 @@ namespace ace::futures {
             static async<> check_and_close(const bool closed, const int fd) noexcept {
                 if (not closed) {
                     const int res = co_await close_query{fd};
-                    if (res < 0) std::cerr << res << std::endl;
+                    if (res < 0) std::cerr << strerror(res) << std::endl;
                 }
             }
 

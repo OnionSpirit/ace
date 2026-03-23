@@ -291,10 +291,10 @@ inline ace::async<> cutex_spawner_permanent(ace::futures::channel_dyn<ace::core:
     std::cout << "'cutex_spawner_permanent' finished\n";
 }
 
-// inline ace::async<> socket_listener() {
-//     ace::futures::io_socket_tcp sock;
-//     sock.
-//     co_return;
-// }
+inline ace::async<> socket_listener() {
+    ace::futures::io_socket_tcp sock;
+    const bool opened = co_await sock.open();
+    co_return;
+}
 
 #endif // UNITS_H

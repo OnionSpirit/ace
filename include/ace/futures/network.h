@@ -83,20 +83,20 @@ namespace ace::futures {
             };
 
             async<> _waiter;
-            int32_t _res = -1;
+            int _res = -1;
             const int _fd;
 
             bool await_ready() override { return false; };
 
             bool await_suspend(auto coroutine) {
-                if (_fd not_eq -1 and static_cast<query_t*>(this)->query(this)) {
+                if (_fd > -1 and static_cast<query_t*>(this)->query(this)) {
                     coroutine.promise()._runner_conductor = io_socket_query_conductor{this};
                     return true;
                 }
                 return false;
             }
 
-            void activate(const int32_t res) override {
+            void activate(const int res) override {
                 _res = res;
                 _waiter.release_future();
                 core::runner::reattach(std::move(_waiter));
@@ -121,7 +121,7 @@ namespace ace::futures {
             explicit complete_query_traits(const int fd)
                 : basic_query_traits<query_t>(fd) {}
 
-            int32_t await_resume() const { return _res; }
+            int await_resume() const { return _res; }
         };
 
         struct close_query : complete_query_traits<close_query> {
@@ -178,8 +178,7 @@ namespace ace::futures {
 
         explicit io_socket_connection(const int fd) {
             _fd = fd;
-            if (_fd not_eq -1)
-                _is_closed = false;
+            if (_fd > -1) _is_closed = false;
         }
 
         struct send_query : complete_query_traits<send_query> {
@@ -266,8 +265,7 @@ namespace ace::futures {
 
         explicit io_socket_listener(const int fd) {
             _fd = fd;
-            if (_fd not_eq -1)
-                _is_closed = false;
+            if (_fd > -1) _is_closed = false;
         }
 
         struct accept_query : basic_query_traits<accept_query> {
@@ -302,12 +300,11 @@ namespace ace::futures {
      */
     struct io_socket_idle : io_socket_base {
 
-        io_socket_idle() = delete;
+        io_socket_idle() : io_socket_base() {};
 
         explicit io_socket_idle(const int fd) {
             _fd = fd;
-            if (_fd not_eq -1)
-                _is_closed = false;
+            if (_fd > -1) _is_closed = false;
         }
 
         struct bind_query : complete_query_traits<bind_query> {
@@ -382,9 +379,9 @@ namespace ace::futures {
      * @tparam protocol_v Particular socket protol
      */
     template <int domain_v, int type_v, int protocol_v>
-    struct io_socket_roasted : io_socket_base {
+    struct io_socket_roasted : io_socket_idle {
 
-        io_socket_roasted() = delete;
+        io_socket_roasted() = default;
 
         struct open_query : basic_query_traits<open_query> {
 
@@ -406,10 +403,7 @@ namespace ace::futures {
                 return true;
             }
 
-            [[nodiscard]] io_socket_idle await_resume() const {
-                _fd_ref = _res;
-                return io_socket_idle{_res};
-            }
+            [[nodiscard]] int await_resume() const { _fd_ref = _res; return _res; }
 
             int& _fd_ref;
             const int _flags;
@@ -428,7 +422,7 @@ namespace ace::futures {
     /**
      * @brief io_socket class with standard 'socket(...)' constructor
      */
-    struct io_socket : io_socket_base {
+    struct io_socket : io_socket_idle {
 
         io_socket() = delete;
 
@@ -460,10 +454,7 @@ namespace ace::futures {
                 return true;
             }
 
-            [[nodiscard]] io_socket_idle await_resume() const {
-                _fd_ref = _res;
-                return io_socket_idle{_res};
-            }
+            [[nodiscard]] int await_resume() const { _fd_ref = _res; return _res; }
 
             int& _fd_ref;
             const int _domain;

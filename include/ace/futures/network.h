@@ -1,6 +1,7 @@
 #ifndef ACE_NET_H
 #define ACE_NET_H
 
+#include <arpa/inet.h>
 #include <netinet/in.h>
 
 #include "future.h"
@@ -20,6 +21,8 @@ namespace ace::futures {
     struct io_socket_base {
         mutable int  _fd;         ///< Socket file descriptor
         mutable bool _is_closed;  ///< Socket closed flag
+        sockaddr_in _self_sin{};  ///< Socket self sockaddr
+        sockaddr_in _peer_sin{};  ///< Socket peer sockaddr
 
         io_socket_base()
             : _fd(-1)
@@ -301,6 +304,7 @@ namespace ace::futures {
     /**
      * @brief io_socket class that represents bint socket on initial state
      */
+    template<int domain_v = -1>
     struct io_socket_bint : io_socket_base {
 
         io_socket_bint() : io_socket_base() {};
@@ -312,15 +316,17 @@ namespace ace::futures {
 
         struct connect_query : basic_query_traits<connect_query> {
 
+            using basic_query_traits<connect_query>::_fd;
+
             connect_query() = delete;
 
             explicit connect_query(const io_socket_bint* sock, const sockaddr* addr, const socklen_t addrlen)
-                : basic_query_traits(sock->_fd)
+                : basic_query_traits<connect_query>(sock->_fd)
                 , _sock(sock)
                 , _addr(addr)
                 , _addrlen(addrlen) {}
 
-            bool query(kernel_waiter* kwp) const {
+            bool query(core::kernel_waiter* kwp) const {
                 return core::kernel_controller::connect(kwp, _fd, _addr, _addrlen);
             }
 
@@ -338,14 +344,16 @@ namespace ace::futures {
 
         struct listen_query : basic_query_traits<listen_query> {
 
+            using basic_query_traits<listen_query>::_fd;
+
             listen_query() = delete;
 
             explicit listen_query(const io_socket_bint* sock, const int backlog)
-                : basic_query_traits(sock->_fd)
+                : basic_query_traits<listen_query>(sock->_fd)
                 , _sock(sock)
                 , _backlog(backlog) {}
 
-            bool query(kernel_waiter* kwp) const {
+            bool query(core::kernel_waiter* kwp) const {
                 return core::kernel_controller::listen(kwp, _fd, _backlog);
             }
 
@@ -366,13 +374,30 @@ namespace ace::futures {
         [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen) const
         -> connect_query { return connect_query{this, addr, addrlen}; }
 
+        [[nodiscard]] auto connect(const in_addr_t addr, const int port)
+        -> connect_query requires (domain_v == AF_INET) {
+            _peer_sin.sin_family = domain_v;
+            _peer_sin.sin_port = htons(port);
+            _peer_sin.sin_addr.s_addr = htonl(addr);
+            return connect_query {this, reinterpret_cast<sockaddr*>(&_self_sin), sizeof(_self_sin)};
+        }
+
+        [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
+        -> connect_query requires (domain_v == AF_INET) {
+            _peer_sin.sin_family = domain_v;
+            _peer_sin.sin_port = htons(port);
+            inet_pton(domain_v, addr.data(), &(_self_sin.sin_addr));
+            return connect_query {this, reinterpret_cast<sockaddr*>(&_self_sin), sizeof(_self_sin)};
+        }
+
         ~io_socket_bint() override = default;
     };
 
 
     /**
-     * @brief io_socket class that represents idle socket on initial state
+     * @brief io_socket class that represents idle socket that waiting for binding
      */
+    template<int domain_v = -1>
     struct io_socket_idle : io_socket_base {
 
         io_socket_idle() : io_socket_base() {};
@@ -384,23 +409,25 @@ namespace ace::futures {
 
         struct bind_query : basic_query_traits<bind_query> {
 
+            using basic_query_traits<bind_query>::_fd;
+
             bind_query() = delete;
 
             explicit bind_query(const io_socket_idle* sock, const sockaddr* addr, const socklen_t addrlen)
-                : basic_query_traits(sock->_fd)
+                : basic_query_traits<bind_query>(sock->_fd)
                 , _sock(sock)
                 , _addr(addr)
                 , _addrlen(addrlen) {}
 
-            bool query(kernel_waiter* kwp) const {
+            bool query(core::kernel_waiter* kwp) const {
                 return core::kernel_controller::bind(kwp, _fd, _addr, _addrlen);
             }
 
-            [[nodiscard]] io_socket_bint await_resume() {
+            [[nodiscard]] io_socket_bint<domain_v> await_resume() {
                 // NOTE: Removing ownership
                 _sock->_fd = -1;
                 _sock->_is_closed = true;
-                return io_socket_bint{_fd};
+                return io_socket_bint<domain_v>{_fd};
             }
 
             const io_socket_idle* _sock;
@@ -411,20 +438,36 @@ namespace ace::futures {
         [[nodiscard]] auto bind(const sockaddr* addr, const socklen_t addrlen) const
         -> bind_query { return bind_query {this, addr, addrlen}; }
 
+        [[nodiscard]] auto bind(const in_addr_t addr, const int port)
+        -> bind_query requires (domain_v == AF_INET) {
+            _self_sin.sin_family = domain_v;
+            _self_sin.sin_port = htons(port);
+            _self_sin.sin_addr.s_addr = htonl(addr);
+            return bind_query {this, reinterpret_cast<sockaddr*>(&_self_sin), sizeof(_self_sin)};
+        }
+
+        [[nodiscard]] auto bind(const std::string_view addr, const uint16_t port)
+        -> bind_query requires (domain_v == AF_INET) {
+            _self_sin.sin_family = domain_v;
+            _self_sin.sin_port = htons(port);
+            inet_pton(domain_v, addr.data(), &(_self_sin.sin_addr));
+            return bind_query {this, reinterpret_cast<sockaddr*>(&_self_sin), sizeof(_self_sin)};
+        }
+
         ~io_socket_idle() override = default;
     };
 
 
     /**
-     * @brief io_socket future for socket creation
+     * @brief io_socket future for socket creation. Also, supports aliasing
      * @tparam domain_v Communication domain
      * @tparam type_v Communication semantics
      * @tparam protocol_v Particular socket protol
      */
     template <int domain_v = -1, int type_v = -1, int protocol_v = -1>
-    struct io_socket : io_socket_idle::basic_query_traits<io_socket<domain_v, type_v, protocol_v>> {
+    struct io_socket : io_socket_base::basic_query_traits<io_socket<domain_v, type_v, protocol_v>> {
 
-        typedef io_socket_idle::basic_query_traits<io_socket> future_query_traits_t;
+        typedef io_socket_base::basic_query_traits<io_socket> future_query_traits_t;
         using future_query_traits_t::_res;
         using future_query_traits_t::_waiter;
 
@@ -433,7 +476,7 @@ namespace ace::futures {
          */
         explicit io_socket(const int flags = 0)
             // NOTE: There is no socket but need supress defaulted '-1' errcode
-            : io_socket_idle::basic_query_traits<io_socket>(0)
+            : io_socket_base::basic_query_traits<io_socket>(0)
             , _flags(flags) {}
 
         bool query(core::kernel_waiter* kwp) const {
@@ -441,14 +484,14 @@ namespace ace::futures {
             return true;
         }
 
-        [[nodiscard]] io_socket_idle await_resume() const { return io_socket_idle{_res}; }
+        [[nodiscard]] io_socket_idle<domain_v> await_resume() const { return io_socket_idle<domain_v>{_res}; }
 
         const int _flags;
     };
 
 
     template <>
-    struct io_socket<-1, -1, -1> : io_socket_idle::basic_query_traits<io_socket<-1, -1, -1>> {
+    struct io_socket<-1, -1, -1> : io_socket_base::basic_query_traits<io_socket<>> {
 
         typedef basic_query_traits future_query_traits_t;
         using future_query_traits_t::_res;
@@ -462,7 +505,7 @@ namespace ace::futures {
          */
         explicit io_socket(const int domain, const int type, const int protocol, const int flags = 0)
             // NOTE: There is no socket but need supress defaulted '-1' errcode
-            : io_socket_idle::basic_query_traits<io_socket>(0)
+            : io_socket_base::basic_query_traits<io_socket>(0)
             , _domain(domain)
             , _type(type)
             , _protocol(protocol)
@@ -473,7 +516,7 @@ namespace ace::futures {
             return true;
         }
 
-        [[nodiscard]] io_socket_idle await_resume() const { return io_socket_idle{_res}; }
+        [[nodiscard]] io_socket_idle<> await_resume() const { return io_socket_idle{_res}; }
 
         const int _domain;
         const int _type;

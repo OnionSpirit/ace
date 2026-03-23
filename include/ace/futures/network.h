@@ -427,7 +427,7 @@ namespace ace::futures {
             const socklen_t _addrlen;
         };
 
-        [[nodiscard]] auto listen(const int backlog) const
+        [[nodiscard]] auto listen(const int backlog = 0) const
         -> listen_query requires (type_v == SOCK_SEQPACKET or type_v == SOCK_STREAM) {
             return listen_query{this, backlog};
         }
@@ -484,8 +484,8 @@ namespace ace::futures {
                 return core::kernel_controller::bind(kwp, _fd, _addr, _addrlen);
             }
 
-            [[nodiscard]] io_socket_bint<domain_v> await_resume() {
-                return io_socket_bint<domain_v>{_sock};
+            [[nodiscard]] io_socket_bint<domain_v, type_v> await_resume() {
+                return io_socket_bint<domain_v, type_v>{_sock};
             }
 
             const io_socket_idle* _sock;
@@ -542,7 +542,9 @@ namespace ace::futures {
             return true;
         }
 
-        [[nodiscard]] io_socket_idle<domain_v> await_resume() const { return io_socket_idle<domain_v>{_res}; }
+        [[nodiscard]] io_socket_idle<domain_v, type_v> await_resume() const {
+            return io_socket_idle<domain_v, type_v>{_res};
+        }
 
         const int _flags;
     };
@@ -582,11 +584,12 @@ namespace ace::futures {
         const int _flags;
     };
 
-    using io_socket_raw    = io_socket<AF_INET, SOCK_RAW, IPPROTO_RAW>;
-    using io_socket_tcp    = io_socket<AF_INET, SOCK_STREAM, IPPROTO_TCP>;
-    using io_socket_tcp_v6 = io_socket<AF_INET6, SOCK_STREAM, IPPROTO_TCP>;
-    using io_socket_udp    = io_socket<AF_INET, SOCK_DGRAM, IPPROTO_UDP>;
-    using io_socket_udp_v6 = io_socket<AF_INET6, SOCK_DGRAM, IPPROTO_UDP>;
+    using io_socket_raw      = io_socket<AF_INET , SOCK_RAW   , IPPROTO_RAW>;
+    using io_socket_raw_dual = io_socket<AF_INET6, SOCK_RAW   , IPPROTO_RAW>;
+    using io_socket_tcp      = io_socket<AF_INET , SOCK_STREAM, IPPROTO_TCP>;
+    using io_socket_tcp_dual = io_socket<AF_INET6, SOCK_STREAM, IPPROTO_TCP>;
+    using io_socket_udp      = io_socket<AF_INET , SOCK_DGRAM , IPPROTO_UDP>;
+    using io_socket_udp_dual = io_socket<AF_INET6, SOCK_DGRAM , IPPROTO_UDP>;
 
 } // end namespace ace::futures
 

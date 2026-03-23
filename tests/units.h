@@ -291,32 +291,33 @@ inline ace::async<> cutex_spawner_permanent(ace::futures::channel_dyn<ace::core:
     std::cout << "'cutex_spawner_permanent' finished\n";
 }
 
-inline ace::async<> socket_listener() {
-    auto dummy_sock = co_await ace::futures::io_socket_tcp();
-    const auto sock = co_await dummy_sock.bind("127.0.0.1", 8000);
-    auto listener = co_await sock.listen();
-
-    const auto connection = co_await listener.accept("127.0.0.1", 8001);
-
-    char buff[128];
-    for (int i =0; i < 5; ++i) {
-        if (co_await connection.recv(buff, 128) > 0)
-            std::cout << "Server received: '" << buff << "'\n";
-        memset(buff, 0, 128);
-    }
-
-    co_return;
-}
-
 inline ace::async<> socket_abuser() {
     auto dummy_sock = co_await ace::futures::io_socket_tcp();
     const auto sock = co_await dummy_sock.bind("127.0.0.1", 8001);
 
     const auto connection = co_await sock.connect("127.0.0.1", 8000);
 
-    for (int i =0; i < 5; ++i) {
-        if (const auto msg = "Echo test"; co_await connection.send(msg, strlen(msg)) == strlen(msg))
+    for (int i =1; i < 6; ++i) {
+        std::string msg = "Echo message " + std::to_string(i);
+        if (co_await connection.send(msg.c_str(), msg.size()) == msg.size())
             std::cout << "Client sent: '" << msg << "'\n";
+    }
+
+    co_return;
+}
+
+inline ace::async<> socket_listener() {
+    auto dummy_sock = co_await ace::futures::io_socket_tcp();
+    const auto sock = co_await dummy_sock.bind("127.0.0.1", 8000);
+
+    auto listener = co_await sock.listen();
+    const auto connection = co_await listener.accept("127.0.0.1", 8001);
+
+    char buff[128];
+    for (int i =0; i < 5; ++i) {
+        memset(buff, 0, 128);
+        if (co_await connection.recv(buff, 128) > 0)
+            std::cout << "Server received: '" << buff << "'\n";
     }
 
     co_return;

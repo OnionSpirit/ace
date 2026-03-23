@@ -67,7 +67,7 @@ namespace ace::core {
 
         static thread_local io_uring_params _ring_params;
         static thread_local io_uring _ring;
-        static thread_local int _requests;
+        static thread_local int _queries;
 
     public:
 
@@ -75,7 +75,7 @@ namespace ace::core {
 
         ~kernel_controller();
 
-        static constexpr unsigned max_entries = 1024;
+        static constexpr unsigned max_entries = 4096;
 
         static thread_local common::queue<kernel_entity> _submission_buffer;
 
@@ -190,7 +190,7 @@ namespace ace::core {
 
     thread_local io_uring_params kernel_controller::_ring_params {};
     thread_local io_uring kernel_controller::_ring {};
-    thread_local int kernel_controller::_requests {};
+    thread_local int kernel_controller::_queries {};
 
 }
 
@@ -240,25 +240,25 @@ ping() {
         const auto identity = io_uring_cqe_get_data64(cqe);
         const auto waiter = reinterpret_cast<kernel_waiter*>(identity);
 
-        if (waiter->_on_cancel) [[unlikely]] _requests -= cqe->res;
+        if (waiter->_on_cancel) [[unlikely]] _queries -= cqe->res;
         else [[likely]] waiter->activate(cqe->res);
 
         io_uring_cqe_seen(&_ring, cqe);
-        if (not waiter->_multishot) --_requests;
+        if (not waiter->_multishot) --_queries;
     }
-    return _requests not_eq 0;
+
+    return _queries not_eq 0;
 }
 
 
 template <typename foo_t, typename ... Params> bool
 ACE_CORE_KERNEL_CONTROLLER_SPACE
 submit(foo_t io_uring_foo, kernel_waiter* waiter, Params... params) noexcept {
+    touch(waiter->_runner_identity);
     io_uring_sqe *sqe = io_uring_get_sqe(&_ring);
     io_uring_sqe_set_data(sqe, waiter);
-    ++_requests;
-    const auto entity = kernel_entity(io_uring_foo, sqe, params...);
-    if (not _submission_buffer.enqueue(entity)) [[unlikely]] return false;
-    touch(waiter->_runner_identity);
+    ++_queries;
+    if (not _submission_buffer.enqueue( kernel_entity{io_uring_foo, sqe, params...} )) [[unlikely]] return false;
     return true;
 }
 

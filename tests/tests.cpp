@@ -41,13 +41,6 @@ TEST(core, do_runner_test) {
     ASSERT_TRUE(runner.empty());
 }
 
-// TEST(futures, io_socket) {
-//     ace::schedule(socket_listener());
-//     ace::schedule(socket_abuser());
-//     ace::run();
-//     ASSERT_TRUE(ace::empty());
-// }
-
 TEST(futures, do_dynamic_channel_on_runner_test) {
 
     ace::core::runner runner;
@@ -384,4 +377,11 @@ TEST(commands, check_cutex_cancel_before_capture) {
 
     ace::core::s_balancer_config._runners_amount = 1;
     ace::reload();
+}
+
+TEST(futures, do_io_socket_echo) {
+    ace::schedule(socket_listener());
+    ace::schedule(socket_abuser());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
 }

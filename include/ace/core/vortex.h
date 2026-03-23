@@ -1,9 +1,9 @@
 /**
  * @file
  * @details The file contains a @b vortex class definition.
- * @b vortex aggregates requests and helps to avoid busy-polling.
+ * @b vortex aggregates queries and helps to avoid busy-polling.
  * Structurally, @b vortex is a special object with a promise for polling in the dispatcher.
- * The @b vortex polling promise maintains a detach state to stop polling when @b vortex runs out of active requests.
+ * The @b vortex polling promise maintains a detach state to stop polling when @b vortex runs out of active queries.
  * The return value of the @b ping() promise of the @b vortex derived type defines the detach state behavior.
  * @b false forces to suspend service, @b true means service must stay alive.
  */

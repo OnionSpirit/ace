@@ -19,10 +19,10 @@ namespace ace::futures {
      * @brief Base io_socket class with defined ownership and guard behavior
      */
     struct io_socket_base {
-        mutable int  _fd;         ///< Socket file descriptor
-        mutable bool _is_closed;  ///< Socket closed flag
-        sockaddr_in _self_sin{};  ///< Socket self sockaddr
-        sockaddr_in _peer_sin{};  ///< Socket peer sockaddr
+        mutable int  _fd;                 ///< Socket file descriptor
+        mutable bool _is_closed;          ///< Socket closed flag
+        mutable sockaddr_in _self_sin{};  ///< Socket self sockaddr
+        mutable sockaddr_in _peer_sin{};  ///< Socket peer sockaddr
 
         io_socket_base()
             : _fd(-1)
@@ -35,6 +35,8 @@ namespace ace::futures {
         io_socket_base(io_socket_base&& io) noexcept {
             _fd = io._fd;
             _is_closed = io._is_closed;
+            _self_sin = io._self_sin;
+            _peer_sin = io._peer_sin;
             io._fd = -1;
             io._is_closed = true;
         }
@@ -45,6 +47,11 @@ namespace ace::futures {
             io._fd = -1;
             io._is_closed = true;
             return *this;
+        }
+
+        void remove_ownership() const noexcept {
+            _is_closed = true;
+            _fd = -1;
         }
 
         /**
@@ -186,6 +193,15 @@ namespace ace::futures {
             if (_fd > -1) _is_closed = false;
         }
 
+        explicit io_socket_connection(const io_socket_base* io) noexcept {
+            _fd = io->_fd;
+            if (_fd > -1) _is_closed = io->_is_closed;
+            else _is_closed = true;
+            _self_sin = io->_self_sin;
+            _peer_sin = io->_peer_sin;
+            io->remove_ownership();
+        }
+
         struct send_query : complete_query_traits<send_query> {
 
             send_query() = delete;
@@ -264,6 +280,7 @@ namespace ace::futures {
     /**
      * @brief io_socket class that represents listen socket
      */
+    template <int domain_v = -1>
     struct io_socket_listener : io_socket_base  {
 
         io_socket_listener() = delete;
@@ -273,29 +290,69 @@ namespace ace::futures {
             if (_fd > -1) _is_closed = false;
         }
 
+        explicit io_socket_listener(const io_socket_base* io) noexcept {
+            _fd = io->_fd;
+            if (_fd > -1) _is_closed = io->_is_closed;
+            else _is_closed = true;
+            _self_sin = io->_self_sin;
+            io->remove_ownership();
+        }
+
         struct accept_query : basic_query_traits<accept_query> {
+
+            using basic_query_traits<accept_query>::_fd;
+            using basic_query_traits<accept_query>::_res;
 
             accept_query() = delete;
 
-            explicit accept_query(const int fd, sockaddr* addr, socklen_t* addrlen, const int flags = 0)
-                : basic_query_traits(fd)
+            explicit accept_query(const io_socket_listener* sock, sockaddr* addr, socklen_t* addrlen, const int flags = 0)
+                : basic_query_traits<accept_query>(sock->_fd)
+                , _sock(sock)
                 , _addr(addr)
                 , _addrlen(addrlen)
                 , _flags(flags) {}
 
-            bool query(kernel_waiter* kwp) const {
+            bool query(core::kernel_waiter* kwp) const {
                 return core::kernel_controller::accept(kwp, _fd, _addr, _addrlen, _flags);
             }
 
-            [[nodiscard]] io_socket_connection await_resume() const { return io_socket_connection{_res}; }
+            [[nodiscard]] io_socket_connection await_resume() const {
+                const io_socket_base io_sock {};
+                if (_res > -1) {
+                    io_sock._fd = _res;
+                    io_sock._is_closed = false;
+                    io_sock._self_sin = _sock->_self_sin;
+                    io_sock._peer_sin = *reinterpret_cast<sockaddr_in*>(_addr);
+                }
+                return io_socket_connection{&io_sock};
+            }
 
+            const io_socket_listener* _sock;
             sockaddr* _addr;
             socklen_t* _addrlen;
             const int _flags;
         };
 
-        [[nodiscard]] auto accept(sockaddr* addr, socklen_t* addrlen, const int flags = 0) const
-        -> accept_query { return accept_query{_fd, addr, addrlen, flags}; }
+        [[nodiscard]] auto accept(sockaddr* addr, const socklen_t* addrlen, const int flags = 0) const
+        -> accept_query { return accept_query{this, addr, addrlen, flags}; }
+
+        [[nodiscard]] auto accept(const in_addr_t addr, const int port)
+        -> accept_query requires (domain_v == AF_INET) {
+            _peer_sin.sin_family = domain_v;
+            _peer_sin.sin_port = htons(port);
+            _peer_sin.sin_addr.s_addr = htonl(addr);
+            return accept_query {this, reinterpret_cast<sockaddr*>(&_peer_sin), &peer_sin_size};
+        }
+
+        [[nodiscard]] auto accept(const std::string_view addr, const uint16_t port)
+        -> accept_query requires (domain_v == AF_INET) {
+            _peer_sin.sin_family = domain_v;
+            _peer_sin.sin_port = htons(port);
+            inet_pton(domain_v, addr.data(), &(_peer_sin.sin_addr));
+            return accept_query {this, reinterpret_cast<sockaddr*>(&_peer_sin), &peer_sin_size};
+        }
+
+        socklen_t peer_sin_size = sizeof(_peer_sin);
 
         ~io_socket_listener() override = default;
     };
@@ -304,7 +361,7 @@ namespace ace::futures {
     /**
      * @brief io_socket class that represents bint socket on initial state
      */
-    template<int domain_v = -1>
+    template <int domain_v = -1, int type_v = -1>
     struct io_socket_bint : io_socket_base {
 
         io_socket_bint() : io_socket_base() {};
@@ -313,6 +370,37 @@ namespace ace::futures {
             _fd = fd;
             if (_fd > -1) _is_closed = false;
         }
+
+        explicit io_socket_bint(const io_socket_base* io) noexcept {
+            _fd = io->_fd;
+            if (_fd > -1) _is_closed = io->_is_closed;
+            else _is_closed = true;
+            _self_sin = io->_self_sin;
+            io->remove_ownership();
+        }
+
+        struct listen_query : basic_query_traits<listen_query> {
+
+            using basic_query_traits<listen_query>::_fd;
+
+            listen_query() = delete;
+
+            explicit listen_query(const io_socket_bint* sock, const int backlog)
+                : basic_query_traits<listen_query>(sock->_fd)
+                , _sock(sock)
+                , _backlog(backlog) {}
+
+            bool query(core::kernel_waiter* kwp) const {
+                return core::kernel_controller::listen(kwp, _fd, _backlog);
+            }
+
+            [[nodiscard]] io_socket_listener<domain_v> await_resume() const {
+                return io_socket_listener<domain_v>{_sock};
+            }
+
+            const io_socket_bint* _sock;
+            const int _backlog;
+        };
 
         struct connect_query : basic_query_traits<connect_query> {
 
@@ -331,10 +419,7 @@ namespace ace::futures {
             }
 
             [[nodiscard]] io_socket_connection await_resume() const {
-                // NOTE: Removing ownership
-                _sock->_fd = -1;
-                _sock->_is_closed = true;
-                return io_socket_connection{_fd};
+                return io_socket_connection{_sock};
             }
 
             const io_socket_bint* _sock;
@@ -342,34 +427,10 @@ namespace ace::futures {
             const socklen_t _addrlen;
         };
 
-        struct listen_query : basic_query_traits<listen_query> {
-
-            using basic_query_traits<listen_query>::_fd;
-
-            listen_query() = delete;
-
-            explicit listen_query(const io_socket_bint* sock, const int backlog)
-                : basic_query_traits<listen_query>(sock->_fd)
-                , _sock(sock)
-                , _backlog(backlog) {}
-
-            bool query(core::kernel_waiter* kwp) const {
-                return core::kernel_controller::listen(kwp, _fd, _backlog);
-            }
-
-            [[nodiscard]] io_socket_listener await_resume() const {
-                // NOTE: Removing ownership
-                _sock->_fd = -1;
-                _sock->_is_closed = true;
-                return io_socket_listener{_fd};
-            }
-
-            const io_socket_bint* _sock;
-            const int _backlog;
-        };
-
         [[nodiscard]] auto listen(const int backlog) const
-        -> listen_query { return listen_query{this, backlog}; }
+        -> listen_query requires (type_v == SOCK_SEQPACKET or type_v == SOCK_STREAM) {
+            return listen_query{this, backlog};
+        }
 
         [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen) const
         -> connect_query { return connect_query{this, addr, addrlen}; }
@@ -379,15 +440,15 @@ namespace ace::futures {
             _peer_sin.sin_family = domain_v;
             _peer_sin.sin_port = htons(port);
             _peer_sin.sin_addr.s_addr = htonl(addr);
-            return connect_query {this, reinterpret_cast<sockaddr*>(&_self_sin), sizeof(_self_sin)};
+            return connect_query {this, reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(_peer_sin)};
         }
 
         [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
         -> connect_query requires (domain_v == AF_INET) {
             _peer_sin.sin_family = domain_v;
             _peer_sin.sin_port = htons(port);
-            inet_pton(domain_v, addr.data(), &(_self_sin.sin_addr));
-            return connect_query {this, reinterpret_cast<sockaddr*>(&_self_sin), sizeof(_self_sin)};
+            inet_pton(domain_v, addr.data(), &(_peer_sin.sin_addr));
+            return connect_query {this, reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(_peer_sin)};
         }
 
         ~io_socket_bint() override = default;
@@ -397,7 +458,7 @@ namespace ace::futures {
     /**
      * @brief io_socket class that represents idle socket that waiting for binding
      */
-    template<int domain_v = -1>
+    template <int domain_v = -1, int type_v = -1>
     struct io_socket_idle : io_socket_base {
 
         io_socket_idle() : io_socket_base() {};
@@ -424,10 +485,7 @@ namespace ace::futures {
             }
 
             [[nodiscard]] io_socket_bint<domain_v> await_resume() {
-                // NOTE: Removing ownership
-                _sock->_fd = -1;
-                _sock->_is_closed = true;
-                return io_socket_bint<domain_v>{_fd};
+                return io_socket_bint<domain_v>{_sock};
             }
 
             const io_socket_idle* _sock;
@@ -505,7 +563,7 @@ namespace ace::futures {
          */
         explicit io_socket(const int domain, const int type, const int protocol, const int flags = 0)
             // NOTE: There is no socket but need supress defaulted '-1' errcode
-            : io_socket_base::basic_query_traits<io_socket>(0)
+            : basic_query_traits<io_socket>(0)
             , _domain(domain)
             , _type(type)
             , _protocol(protocol)

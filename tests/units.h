@@ -292,10 +292,8 @@ inline ace::async<> cutex_spawner_permanent(ace::futures::channel_dyn<ace::core:
 }
 
 inline ace::async<> socket_listener() {
-    auto sock {
-        co_await (co_await ace::futures::io_socket_tcp())
-            .bind("127.0.0.1", 8000)
-    };
+    auto sock = co_await ace::futures::io_socket_tcp();
+    auto sock_bint = co_await sock.bind("127.0.0.1", 8000);
     co_return;
 }
 

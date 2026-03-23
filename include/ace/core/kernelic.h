@@ -228,8 +228,10 @@ ping() {
     }
 
     // NOTE: Requesting submission if it's needed
-    if (need_submission)
+    if (need_submission and s_balancer_config._runners_amount > 1)
         kernel_notifier::request_submission(&_ring);
+    else if (need_submission)
+        io_uring_submit(&_ring);
 
     // NOTE: Receiving responses from the io_uring
     io_uring_cqe* cqe_s[max_entries] {};
@@ -240,11 +242,18 @@ ping() {
         const auto identity = io_uring_cqe_get_data64(cqe);
         const auto waiter = reinterpret_cast<kernel_waiter*>(identity);
 
-        if (waiter->_on_cancel) [[unlikely]] _queries -= cqe->res;
-        else [[likely]] waiter->activate(cqe->res);
+        if (waiter == nullptr)
+            continue;
+
+        if (waiter->_on_cancel) [[unlikely]]
+            _queries -= cqe->res;
+        else [[likely]]
+            waiter->activate(cqe->res);
+
+        if (not waiter->_multishot)
+            --_queries;
 
         io_uring_cqe_seen(&_ring, cqe);
-        if (not waiter->_multishot) --_queries;
     }
 
     return _queries not_eq 0;
@@ -258,7 +267,13 @@ submit(foo_t io_uring_foo, kernel_waiter* waiter, Params... params) noexcept {
     io_uring_sqe *sqe = io_uring_get_sqe(&_ring);
     io_uring_sqe_set_data(sqe, waiter);
     ++_queries;
-    if (not _submission_buffer.enqueue( kernel_entity{io_uring_foo, sqe, params...} )) [[unlikely]] return false;
+    if (not _submission_buffer.enqueue( kernel_entity{io_uring_foo, sqe, params...} )) [[unlikely]] {
+        sqe = io_uring_get_sqe(&_ring);
+        io_uring_sqe_set_data(sqe, nullptr);
+        io_uring_prep_cancel(sqe, waiter, 0);
+        --_queries;
+        return false;
+    }
     return true;
 }
 

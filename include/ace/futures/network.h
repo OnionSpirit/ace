@@ -144,8 +144,8 @@ namespace ace::futures {
             }
         };
 
-        [[nodiscard]] auto close()
-        -> close_query { _is_closed = true; return close_query{_fd}; }
+        [[nodiscard]] auto close() const
+            -> close_query { _is_closed = true; return close_query{_fd}; }
 
         virtual ~io_socket_base() = default;
 
@@ -336,7 +336,7 @@ namespace ace::futures {
         [[nodiscard]] auto accept(sockaddr* addr, const socklen_t* addrlen, const int flags = 0) const
         -> accept_query { return accept_query{this, addr, addrlen, flags}; }
 
-        [[nodiscard]] auto accept(const in_addr_t addr, const int port)
+        [[nodiscard]] auto accept(const in_addr_t addr, const uint16_t port)
         -> accept_query requires (domain_v == AF_INET) {
             _peer_sin.sin_family = domain_v;
             _peer_sin.sin_port = htons(port);
@@ -435,7 +435,7 @@ namespace ace::futures {
         [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen) const
         -> connect_query { return connect_query{this, addr, addrlen}; }
 
-        [[nodiscard]] auto connect(const in_addr_t addr, const int port)
+        [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port) const
         -> connect_query requires (domain_v == AF_INET) {
             _peer_sin.sin_family = domain_v;
             _peer_sin.sin_port = htons(port);
@@ -443,7 +443,7 @@ namespace ace::futures {
             return connect_query {this, reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(_peer_sin)};
         }
 
-        [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
+        [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port) const
         -> connect_query requires (domain_v == AF_INET) {
             _peer_sin.sin_family = domain_v;
             _peer_sin.sin_port = htons(port);
@@ -496,7 +496,7 @@ namespace ace::futures {
         [[nodiscard]] auto bind(const sockaddr* addr, const socklen_t addrlen) const
         -> bind_query { return bind_query {this, addr, addrlen}; }
 
-        [[nodiscard]] auto bind(const in_addr_t addr, const int port)
+        [[nodiscard]] auto bind(const in_addr_t addr, const uint16_t port)
         -> bind_query requires (domain_v == AF_INET) {
             _self_sin.sin_family = domain_v;
             _self_sin.sin_port = htons(port);

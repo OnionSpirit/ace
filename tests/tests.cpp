@@ -41,6 +41,13 @@ TEST(core, do_runner_test) {
     ASSERT_TRUE(runner.empty());
 }
 
+// TEST(futures, io_socket) {
+//     ace::schedule(socket_listener());
+//     ace::schedule(socket_abuser());
+//     ace::run();
+//     ASSERT_TRUE(ace::empty());
+// }
+
 TEST(futures, do_dynamic_channel_on_runner_test) {
 
     ace::core::runner runner;

@@ -11,8 +11,11 @@ nukes = nukes.dependency('nukes')
 # Объявляем mimalloc
 mimalloc_dep = dependency('mimalloc', fallback : ['mimalloc', 'mimalloc_dep'], required : true)
 
+# Подключаем liburing
+liburing_dep = dependency('liburing')
+
 # Декларируем интерфейсную библеотеку
-ace = declare_dependency(include_directories: include_dir, dependencies: [ nukes, mimalloc_dep ])
+ace = declare_dependency(include_directories: include_dir, dependencies: [ nukes, mimalloc_dep, liburing_dep ])
 
 
 # # Создаем артифактную библиотеку

@@ -48,7 +48,7 @@ namespace ace::futures {
         /**
          * @brief An interface template to interact with the
          * @b ace::core::kernel_controller through @b co_await operator.
-         * <br>Does not define 'activate(...)' and 'resume(...)' logic.
+         * <br>Does not define 'resume(...)' logic.
          * @tparam query_t Specific query type.
          */
         template <typename query_t>
@@ -57,7 +57,7 @@ namespace ace::futures {
             DECLARE_FUTURE(query_t);
             IMPORT_FUTURE_ENV;
 
-            basic_query_traits() {
+            explicit basic_query_traits(const int fd) : _fd(fd) {
                 static_assert(is_query<query_t>,
                     "Query object shall implement 'bool query(ace::core::kernel_waiter*)' method");
             }
@@ -84,15 +84,22 @@ namespace ace::futures {
 
             async<> _waiter;
             int32_t _res = -1;
+            const int _fd;
 
             bool await_ready() override { return false; };
 
             bool await_suspend(auto coroutine) {
-                if (static_cast<query_t*>(this)->query(this)) {
+                if (_fd not_eq -1 and static_cast<query_t*>(this)->query(this)) {
                     coroutine.promise()._runner_conductor = io_socket_query_conductor{this};
                     return true;
                 }
                 return false;
+            }
+
+            void activate(const int32_t res) override {
+                _res = res;
+                _waiter.release_future();
+                core::runner::reattach(std::move(_waiter));
             }
 
             ~basic_query_traits() override = default;
@@ -100,9 +107,8 @@ namespace ace::futures {
 
 
         /**
-         * @brief An interface template with standard activation to interact with the
+         * @brief An interface template with 'resume(...)' logic to interact with the
          * @b ace::core::kernel_controller through @b co_await operator.
-         * <br>Defines common 'activate(...)' and 'resume(...)' logic.
          * @tparam query_t Specific query type.
          */
         template <typename query_t>
@@ -112,11 +118,8 @@ namespace ace::futures {
             using future_query_traits_t::_res;
             using future_query_traits_t::_waiter;
 
-            void activate(const int32_t res) override {
-                _res = res;
-                _waiter.release_future();
-                core::runner::reattach(std::move(_waiter));
-            }
+            explicit complete_query_traits(const int fd)
+                : basic_query_traits<query_t>(fd) {}
 
             int32_t await_resume() const { return _res; }
         };
@@ -125,15 +128,11 @@ namespace ace::futures {
 
             close_query() = delete;
 
-            explicit close_query(const int fd)
-                : _fd(fd) {}
+            explicit close_query(const int fd) : complete_query_traits(fd) {}
 
             bool query(kernel_waiter* kwp) const noexcept {
-                if (_fd == -1) return false;
                 return core::kernel_controller::close(kwp, _fd);
             }
-
-            int _fd;
         };
 
         [[nodiscard]] auto close()
@@ -179,7 +178,8 @@ namespace ace::futures {
 
         explicit io_socket_connection(const int fd) {
             _fd = fd;
-            _is_closed = false;
+            if (_fd not_eq -1)
+                _is_closed = false;
         }
 
         struct send_query : complete_query_traits<send_query> {
@@ -187,17 +187,15 @@ namespace ace::futures {
             send_query() = delete;
 
             explicit send_query(const int fd, const void *buf, const size_t len, const int flags = 0)
-                : _fd(fd)
+                : complete_query_traits(fd)
                 , _buf(buf)
                 , _len(len)
                 , _flags(flags) {}
 
             bool query(kernel_waiter* kwp) const {
-                if (_fd == -1) return false;
                 return core::kernel_controller::send(kwp, _fd, _buf, _len, _flags);
             }
 
-            int _fd;
             const void *_buf;
             const size_t _len;
             const int _flags;
@@ -209,7 +207,7 @@ namespace ace::futures {
 
             explicit sendto_query(const int fd, const void *buf, const size_t len, const int flags,
                 const sockaddr *addr, const socklen_t addrlen)
-                : _fd(fd)
+                : complete_query_traits(fd)
                 , _buf(buf)
                 , _len(len)
                 , _flags(flags)
@@ -217,11 +215,9 @@ namespace ace::futures {
                 , _addrlen(addrlen) {}
 
             bool query(kernel_waiter* kwp) const {
-                if (_fd == -1) return false;
                 return core::kernel_controller::sendto(kwp, _fd, _buf, _len, _flags, _addr, _addrlen);
             }
 
-            int _fd;
             const void *_buf;
             const size_t _len;
             const int _flags;
@@ -234,17 +230,15 @@ namespace ace::futures {
             recv_query() = delete;
 
             explicit recv_query(const int fd, void *buf, const size_t len, const int flags = 0)
-                : _fd(fd)
+                : complete_query_traits(fd)
                 , _buf(buf)
                 , _len(len)
                 , _flags(flags) {}
 
             bool query(kernel_waiter* kwp) const {
-                if (_fd == -1) return false;
                 return core::kernel_controller::recv(kwp, _fd, _buf, _len, _flags);
             }
 
-            int _fd;
             void *_buf;
             const size_t _len;
             const int _flags;
@@ -272,7 +266,8 @@ namespace ace::futures {
 
         explicit io_socket_listener(const int fd) {
             _fd = fd;
-            _is_closed = false;
+            if (_fd not_eq -1)
+                _is_closed = false;
         }
 
         struct accept_query : basic_query_traits<accept_query> {
@@ -280,25 +275,17 @@ namespace ace::futures {
             accept_query() = delete;
 
             explicit accept_query(const int fd, sockaddr* addr, socklen_t* addrlen, const int flags = 0)
-                : _fd(fd)
+                : basic_query_traits(fd)
                 , _addr(addr)
                 , _addrlen(addrlen)
                 , _flags(flags) {}
 
             bool query(kernel_waiter* kwp) const {
-                if (_fd == -1) return false;
                 return core::kernel_controller::accept(kwp, _fd, _addr, _addrlen, _flags);
-            }
-
-            void activate(const int32_t res) override {
-                _res = res;
-                _waiter.release_future();
-                core::runner::reattach(std::move(_waiter));
             }
 
             [[nodiscard]] io_socket_connection await_resume() const { return io_socket_connection{_res}; }
 
-            int _fd;
             sockaddr* _addr;
             socklen_t* _addrlen;
             const int _flags;
@@ -315,23 +302,27 @@ namespace ace::futures {
      */
     struct io_socket_idle : io_socket_base {
 
-        io_socket_idle() = default;
+        io_socket_idle() = delete;
+
+        explicit io_socket_idle(const int fd) {
+            _fd = fd;
+            if (_fd not_eq -1)
+                _is_closed = false;
+        }
 
         struct bind_query : complete_query_traits<bind_query> {
 
             bind_query() = delete;
 
             explicit bind_query(const int fd, const sockaddr* addr, const socklen_t addrlen)
-                : _fd(fd)
+                : complete_query_traits(fd)
                 , _addr(addr)
                 , _addrlen(addrlen) {}
 
             bool query(kernel_waiter* kwp) const {
-                if (_fd == -1) return false;
                 return core::kernel_controller::bind(kwp, _fd, _addr, _addrlen);
             }
 
-            int _fd;
             const sockaddr* _addr;
             const socklen_t _addrlen;
         };
@@ -341,24 +332,16 @@ namespace ace::futures {
             connect_query() = delete;
 
             explicit connect_query(const int fd, const sockaddr* addr, const socklen_t addrlen)
-                : _fd(fd)
+                : basic_query_traits(fd)
                 , _addr(addr)
                 , _addrlen(addrlen) {}
 
             bool query(kernel_waiter* kwp) const {
-                if (_fd == -1) return false;
                 return core::kernel_controller::connect(kwp, _fd, _addr, _addrlen);
-            }
-
-            void activate(const int32_t res) override {
-                _res = res;
-                _waiter.release_future();
-                core::runner::reattach(std::move(_waiter));
             }
 
             [[nodiscard]] io_socket_connection await_resume() const { return io_socket_connection{_res}; }
 
-            int _fd;
             const sockaddr* _addr;
             const socklen_t _addrlen;
         };
@@ -368,23 +351,15 @@ namespace ace::futures {
             listen_query() = delete;
 
             explicit listen_query(const int fd, const int backlog)
-                : _fd(fd)
+                : basic_query_traits(fd)
                 , _backlog(backlog) {}
 
             bool query(kernel_waiter* kwp) const {
-                if (_fd == -1) return false;
                 return core::kernel_controller::listen(kwp, _fd, _backlog);
-            }
-
-            void activate(const int32_t res) override {
-                _res = res;
-                _waiter.release_future();
-                core::runner::reattach(std::move(_waiter));
             }
 
             [[nodiscard]] io_socket_listener await_resume() const { return io_socket_listener{_res}; }
 
-            int _fd;
             const int _backlog;
         };
 
@@ -400,8 +375,16 @@ namespace ace::futures {
         ~io_socket_idle() override = default;
     };
 
+    /**
+     * @brief io_socket template for io_socket alias producing
+     * @tparam domain_v Communication domain
+     * @tparam type_v Communication semantics
+     * @tparam protocol_v Particular socket protol
+     */
     template <int domain_v, int type_v, int protocol_v>
-    struct io_socket_template : io_socket_idle {
+    struct io_socket_roasted : io_socket_base {
+
+        io_socket_roasted() = delete;
 
         struct open_query : basic_query_traits<open_query> {
 
@@ -414,7 +397,8 @@ namespace ace::futures {
              * @param [in] flags currently unused
              */
             explicit open_query(int& fd, const int flags = 0)
-                : _fd(fd)
+                : basic_query_traits<open_query>(0) // NOTE: There is no socket but need supress on '-1' fail
+                , _fd_ref(fd)
                 , _flags(flags) {}
 
             bool query(core::kernel_waiter* kwp) const {
@@ -422,15 +406,12 @@ namespace ace::futures {
                 return true;
             }
 
-            void activate(const int32_t res) override {
-                _fd = res;
-                _waiter.release_future();
-                core::runner::reattach(std::move(_waiter));
+            [[nodiscard]] io_socket_idle await_resume() const {
+                _fd_ref = _res;
+                return io_socket_idle{_res};
             }
 
-            [[nodiscard]] bool await_resume() const { return _res == 0; }
-
-            int& _fd;
+            int& _fd_ref;
             const int _flags;
         };
 
@@ -441,10 +422,13 @@ namespace ace::futures {
         auto open(const int flags = 0)
         -> open_query { return open_query {_fd, flags}; }
 
-        ~io_socket_template() override = default;
+        ~io_socket_roasted() override = default;
     };
 
-    struct io_socket : io_socket_idle {
+    /**
+     * @brief io_socket class with standard 'socket(...)' constructor
+     */
+    struct io_socket : io_socket_base {
 
         io_socket() = delete;
 
@@ -464,7 +448,8 @@ namespace ace::futures {
             using future_query_traits_t::_waiter;
 
             explicit open_query(int& fd, const int domain, const int type, const int protocol, const int flags = 0)
-                : _fd(fd)
+                : basic_query_traits(0) // NOTE: There is no socket but need supress on '-1' fail
+                , _fd_ref(fd)
                 , _domain(domain)
                 , _type(type)
                 , _protocol(protocol)
@@ -475,15 +460,12 @@ namespace ace::futures {
                 return true;
             }
 
-            void activate(const int32_t res) override {
-                _fd = res;
-                _waiter.release_future();
-                core::runner::reattach(std::move(_waiter));
+            [[nodiscard]] io_socket_idle await_resume() const {
+                _fd_ref = _res;
+                return io_socket_idle{_res};
             }
 
-            [[nodiscard]] bool await_resume() const { return _res == 0; }
-
-            int& _fd;
+            int& _fd_ref;
             const int _domain;
             const int _type;
             const int _protocol;
@@ -500,11 +482,11 @@ namespace ace::futures {
         ~io_socket() override = default;
     };
 
-    using io_socket_raw    = io_socket_template<AF_INET, SOCK_RAW, IPPROTO_RAW>;
-    using io_socket_tcp    = io_socket_template<AF_INET, SOCK_STREAM, IPPROTO_TCP>;
-    using io_socket_tcp_v6 = io_socket_template<AF_INET6, SOCK_STREAM, IPPROTO_TCP>;
-    using io_socket_udp    = io_socket_template<AF_INET, SOCK_DGRAM, IPPROTO_UDP>;
-    using io_socket_udp_v6 = io_socket_template<AF_INET6, SOCK_DGRAM, IPPROTO_UDP>;
+    using io_socket_raw    = io_socket_roasted<AF_INET, SOCK_RAW, IPPROTO_RAW>;
+    using io_socket_tcp    = io_socket_roasted<AF_INET, SOCK_STREAM, IPPROTO_TCP>;
+    using io_socket_tcp_v6 = io_socket_roasted<AF_INET6, SOCK_STREAM, IPPROTO_TCP>;
+    using io_socket_udp    = io_socket_roasted<AF_INET, SOCK_DGRAM, IPPROTO_UDP>;
+    using io_socket_udp_v6 = io_socket_roasted<AF_INET6, SOCK_DGRAM, IPPROTO_UDP>;
 
 } // end namespace ace::futures
 

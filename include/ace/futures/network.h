@@ -333,10 +333,10 @@ namespace ace::futures {
             const int _flags;
         };
 
-        [[nodiscard]] auto accept(sockaddr* addr, const socklen_t* addrlen, const int flags = 0) const
+        [[nodiscard]] auto accept(sockaddr* addr, socklen_t* addrlen, const int flags = 0) const
         -> accept_query { return accept_query{this, addr, addrlen, flags}; }
 
-        [[nodiscard]] auto accept(const in_addr_t addr, const uint16_t port)
+        [[nodiscard]] auto accept(const in_addr_t addr, const uint16_t port) const
         -> accept_query requires (domain_v == AF_INET) {
             _peer_sin.sin_family = domain_v;
             _peer_sin.sin_port = htons(port);
@@ -344,15 +344,16 @@ namespace ace::futures {
             return accept_query {this, reinterpret_cast<sockaddr*>(&_peer_sin), &peer_sin_size};
         }
 
-        [[nodiscard]] auto accept(const std::string_view addr, const uint16_t port)
+        [[nodiscard]] auto accept(const std::string_view addr, const uint16_t port) const
         -> accept_query requires (domain_v == AF_INET) {
             _peer_sin.sin_family = domain_v;
             _peer_sin.sin_port = htons(port);
             inet_pton(domain_v, addr.data(), &(_peer_sin.sin_addr));
-            return accept_query {this, reinterpret_cast<sockaddr*>(&_peer_sin), &peer_sin_size};
+            return accept_query {this, reinterpret_cast<sockaddr*>(&_peer_sin), peer_sin_len_ptr};
         }
 
         socklen_t peer_sin_size = sizeof(_peer_sin);
+        socklen_t* peer_sin_len_ptr = &peer_sin_size;
 
         ~io_socket_listener() override = default;
     };

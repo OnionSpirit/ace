@@ -121,7 +121,7 @@ namespace ace::futures {
             explicit complete_query_traits(const int fd)
                 : basic_query_traits<query_t>(fd) {}
 
-            int await_resume() const { return _res; }
+            [[nodiscard]] int await_resume() const { return _res; }
         };
 
         struct close_query : complete_query_traits<close_query> {
@@ -155,7 +155,10 @@ namespace ace::futures {
             const bool& _closed;
 
             static async<> check_and_close(const bool closed, const int fd) noexcept {
-                if (not closed) co_await close_query{fd};
+                if (not closed) {
+                    const int res = co_await close_query{fd};
+                    if (res < 0) std::cerr << res << std::endl;
+                }
             }
 
             static void pending_close(const bool closed, const int fd) noexcept {

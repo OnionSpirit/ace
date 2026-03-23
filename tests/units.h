@@ -292,8 +292,7 @@ inline ace::async<> cutex_spawner_permanent(ace::futures::channel_dyn<ace::core:
 }
 
 inline ace::async<> socket_listener() {
-    ace::futures::io_socket_tcp sock;
-    const bool opened = co_await sock.open();
+    auto sock = co_await ace::futures::io_socket<>(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     co_return;
 }
 

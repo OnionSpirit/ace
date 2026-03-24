@@ -71,7 +71,10 @@ namespace ace::futures {
 
         bool await_suspend(auto coroutine) {
             if (_fd < 0)
-                throw std::logic_error("Trying to make query on invalid file descriptor [Query object type: "
+                throw std::logic_error("Trying to make query on failed 'io_entity' [Query object type: "
+                    + std::string{typeid(query_core_t).name()} + "]");
+            if (INT_MIN == _fd)
+                throw std::logic_error("Trying to make query on idle 'io_entry' [Query object type: "
                     + std::string{typeid(query_core_t).name()} + "]");
             if (static_cast<query_core_t*>(this)->query(this)) {
                 coroutine.promise()._runner_conductor = io_socket_query_conductor{this};
@@ -202,10 +205,12 @@ namespace ace::futures {
 
 
 #define IMPORT_ERROR_HANDLING                                                                 \
-    operator bool() const { return _fd > -1; }                                                \
+    operator bool() const { return _fd > -1 or INT_MIN == _fd; }                              \
     std::string_view error() const {                                                          \
         if (_fd > -1)                                                                         \
-            throw std::logic_error("can not receive 'error()' on successed file descriptor"); \
+            throw std::logic_error("can not receive 'error()' on successed 'io_entity'");     \
+        if (INT_MIN == _fd)                                                                   \
+            throw std::logic_error("can not receive 'error()' on idle 'io_entry'");           \
         return strerror(_fd);                                                                 \
     }
 

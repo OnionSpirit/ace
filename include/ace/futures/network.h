@@ -619,12 +619,12 @@ namespace ace::futures {
         const int _flags;
     };
 
-    using io_socket_raw= io_socket<AF_INET , SOCK_RAW   , IPPROTO_RAW>;
-    using io_socket_raw_dual= io_socket<AF_INET6, SOCK_RAW   , IPPROTO_RAW>;
-    using io_socket_tcp= io_socket<AF_INET , SOCK_STREAM, IPPROTO_TCP>;
-    using io_socket_tcp_dual= io_socket<AF_INET6, SOCK_STREAM, IPPROTO_TCP>;
-    using io_socket_udp= io_socket<AF_INET , SOCK_DGRAM , IPPROTO_UDP>;
-    using io_socket_udp_dual= io_socket<AF_INET6, SOCK_DGRAM , IPPROTO_UDP>;
+    using io_socket_raw      = io_socket<AF_INET , SOCK_RAW   , IPPROTO_RAW>;
+    using io_socket_raw_dual = io_socket<AF_INET6, SOCK_RAW   , IPPROTO_RAW>;
+    using io_socket_tcp      = io_socket<AF_INET , SOCK_STREAM, IPPROTO_TCP>;
+    using io_socket_tcp_dual = io_socket<AF_INET6, SOCK_STREAM, IPPROTO_TCP>;
+    using io_socket_udp      = io_socket<AF_INET , SOCK_DGRAM , IPPROTO_UDP>;
+    using io_socket_udp_dual = io_socket<AF_INET6, SOCK_DGRAM , IPPROTO_UDP>;
 
 } // end namespace ace::futures
 

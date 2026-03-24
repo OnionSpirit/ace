@@ -93,25 +93,43 @@ namespace ace::futures {
     struct io_entity {
 
         // NOTE: Don't want to use move semantics in interfaces
-        mutable int  _fd;                 ///< Socket file descriptor
-        mutable bool _is_closed;          ///< Socket closed flag
-        mutable sockaddr_in _self_sin{};  ///< Socket self sockaddr
-        mutable sockaddr_in _peer_sin{};  ///< Socket peer sockaddr
+        int  _fd;                 ///< Socket file descriptor
+        bool _is_closed;          ///< Socket closed flag
+        sockaddr_in _self_sin{};  ///< Socket self sockaddr
+        sockaddr_in _peer_sin{};  ///< Socket peer sockaddr
 
         io_entity()
             : _fd(-1)
             , _is_closed(true) {}
 
-        io_entity(const io_entity& io) {
+        io_entity(const int fd, const bool is_closed, const sockaddr_in self, const sockaddr_in peer)
+            : _fd(fd)
+            , _is_closed(is_closed)
+            , _self_sin(self)
+            , _peer_sin(peer) { };
+
+        template<typename entry_t>
+        static entity_t make_from_entry(entry_t* io) noexcept {
+            int fd = io->_fd;
+            bool is_closed;
+            if (fd > -1) is_closed = io->_is_closed;
+            else is_closed = true;
+            sockaddr_in self = io->_self_sin;
+            sockaddr_in peer = io->_peer_sin;
+            io->devastate();
+            return entity_t {fd, is_closed, self, peer};
+        }
+
+        io_entity(io_entity&& io) noexcept {
             _fd = io._fd;
             _is_closed = io._is_closed;
             _self_sin = io._self_sin;
             _peer_sin = io._peer_sin;
             io._fd = -1;
             io._is_closed = true;
-        };
+        }
 
-        io_entity& operator=(const io_entity& io) {
+        io_entity& operator=(io_entity&& io)  noexcept {
             _fd = io._fd;
             _is_closed = io._is_closed;
             _self_sin = io._self_sin;
@@ -119,38 +137,7 @@ namespace ace::futures {
             io._fd = -1;
             io._is_closed = true;
             return *this;
-        };
-
-        template<typename entry_t>
-        static entity_t make_from_entry(const entry_t* io) noexcept {
-            entity_t entity;
-            entity._fd = io->_fd;
-            if (entity._fd > -1) entity._is_closed = io->_is_closed;
-            else entity._is_closed = true;
-            entity._self_sin = io->_self_sin;
-            entity._peer_sin = io->_peer_sin;
-            io->devastate();
-            return entity;
         }
-
-        // io_entity(io_entity&& io) noexcept {
-        //     _fd = io._fd;
-        //     _is_closed = io._is_closed;
-        //     _self_sin = io._self_sin;
-        //     _peer_sin = io._peer_sin;
-        //     io._fd = -1;
-        //     io._is_closed = true;
-        // }
-        //
-        // io_entity& operator=(io_entity&& io)  noexcept {
-        //     _fd = io._fd;
-        //     _is_closed = io._is_closed;
-        //     _self_sin = io._self_sin;
-        //     _peer_sin = io._peer_sin;
-        //     io._fd = -1;
-        //     io._is_closed = true;
-        //     return *this;
-        // }
 
         struct close_query : io_query_traits<close_query> {
 
@@ -168,7 +155,7 @@ namespace ace::futures {
             [[nodiscard]] int await_resume() const { return _res; }
         };
 
-        [[nodiscard]] auto close() const
+        [[nodiscard]] auto close()
             -> close_query { _is_closed = true; return close_query{_fd}; }
 
         virtual ~io_entity() = default;
@@ -211,7 +198,13 @@ namespace ace::futures {
      */
     template <typename entry_t>
     struct io_entry : io_entity<entry_t> {
-        void devastate() const noexcept {
+
+        io_entry() = default;
+
+        io_entry(const int fd, const bool is_closed, const sockaddr_in self, const sockaddr_in peer)
+            : io_entity<entry_t>(fd, is_closed, self, peer) { };
+
+        void devastate() noexcept {
             io_entity<entry_t>::_is_closed = true;
             io_entity<entry_t>::_fd = -1;
         }
@@ -225,6 +218,9 @@ namespace ace::futures {
     struct io_connection : io_entity<io_connection> {
 
         io_connection() = default;
+
+        io_connection(const int fd, const bool is_closed, const sockaddr_in self, const sockaddr_in peer)
+            : io_entity(fd, is_closed, self, peer) { };
 
         struct send_query : io_query_traits<send_query> {
 
@@ -321,6 +317,9 @@ namespace ace::futures {
 
         io_listener() = default;
 
+        io_listener(const int fd, const bool is_closed, const sockaddr_in self, const sockaddr_in peer)
+            : io_entity_t(fd, is_closed, self, peer) { };
+
         struct accept_query : io_query_traits<accept_query> {
 
             using io_query_traits<accept_query>::_fd;
@@ -340,14 +339,10 @@ namespace ace::futures {
             }
 
             [[nodiscard]] io_connection await_resume() const {
-                io_connection connection {};
-                if (_res > -1) {
-                    connection._fd = _res;
-                    connection._is_closed = false;
-                    connection._self_sin = _entry->_self_sin;
-                    connection._peer_sin = *reinterpret_cast<sockaddr_in*>(_addr);
-                }
-                return connection;
+                if (_res > -1)
+                    return io_connection { _res, false,
+                        _entry->_self_sin, *reinterpret_cast<sockaddr_in*>(_addr) };
+                return io_connection {};
             }
 
             const io_listener* _entry;
@@ -393,6 +388,9 @@ namespace ace::futures {
         using io_entry_t::_peer_sin;
 
         io_type_entry() : io_entry_t() {};
+
+        io_type_entry(const int fd, const bool is_closed, const sockaddr_in self, sockaddr_in peer)
+            : io_entry_t(fd, is_closed, self, peer) { };
 
         struct listen_query : io_query_traits<listen_query> {
 

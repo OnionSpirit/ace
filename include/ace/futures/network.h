@@ -89,7 +89,7 @@ namespace ace::futures {
         ~io_query() override = default;
     };
 
-#define IMPORT_IO_QUERY(class)         \
+#define IMPORT_IO_QUERY_ENV(class)      \
     typedef io_query<class> io_query_t; \
     using io_query_t::_fd;              \
     using io_query_t::_res;
@@ -151,7 +151,7 @@ namespace ace::futures {
 
         struct close_query : io_query<close_query> {
 
-            IMPORT_IO_QUERY(close_query)
+            IMPORT_IO_QUERY_ENV(close_query)
 
             close_query() = delete;
 
@@ -201,8 +201,7 @@ namespace ace::futures {
     };
 
 
-#define DECLARE_IO_ENTITY(class) typedef io_entity<class> io_entity_t;
-#define IMPORT_IO_ENTITY_ENV(class)                                                           \
+#define IMPORT_IO_ENTITY_ENV(class) typedef io_entity<class> io_entity_t;                     \
     class(const int fd, const bool is_closed, const sockaddr_in self, const sockaddr_in peer) \
         : io_entity_t(fd, is_closed, self, peer) { };                                         \
     using io_entity_t::_fd;                                                                   \
@@ -220,13 +219,13 @@ namespace ace::futures {
     template <typename entry_t>
     struct io_entry : io_entity<entry_t> {
 
-        DECLARE_IO_ENTITY(entry_t);
-        IMPORT_IO_ENTITY_ENV(io_entry);
-
         io_entry() = default;
 
-        // io_entry(const int fd, const bool is_closed, const sockaddr_in self, const sockaddr_in peer)
-        //     : io_entity<entry_t>(fd, is_closed, self, peer) { };
+        io_entry(const int fd, const bool is_closed, const sockaddr_in self, const sockaddr_in peer)
+            : io_entity<entry_t>(fd, is_closed, self, peer) { };
+
+        using io_entity<entry_t>::_fd;
+        using io_entity<entry_t>::_is_closed;
 
         void clear() noexcept {
             _is_closed = true;
@@ -236,8 +235,7 @@ namespace ace::futures {
 
     // TODO: Use memmove instead of params on commonized io_entry
     // TODO: Try to make it mixin
-    #define DECLARE_IO_ENTRY(class) typedef io_entry<class> io_entry_t;
-    #define IMPORT_IO_ENTRY_ENV(class)                                                           \
+    #define IMPORT_IO_ENTRY_ENV(class) typedef io_entry<class> io_entry_t;                       \
     class(const int fd, const bool is_closed, const sockaddr_in self, const sockaddr_in peer)    \
         : io_entry_t(fd, is_closed, self, peer) { };                                             \
     using io_entry_t::_fd;                                                                       \
@@ -346,14 +344,13 @@ namespace ace::futures {
     template <int domain_v = -1>
     struct io_listener : io_entity<io_listener<domain_v>> {
 
-        DECLARE_IO_ENTITY(io_listener);
         IMPORT_IO_ENTITY_ENV(io_listener);
 
         io_listener() = default;
 
         struct accept_query : io_query<accept_query> {
 
-            IMPORT_IO_QUERY(accept_query)
+            IMPORT_IO_QUERY_ENV(accept_query)
 
             accept_query() = delete;
 
@@ -414,14 +411,13 @@ namespace ace::futures {
     template <int domain_v = -1, int type_v = -1>
     struct io_type_entry : io_entry<io_type_entry<domain_v, type_v>> {
 
-        DECLARE_IO_ENTRY(io_type_entry);
-        IMPORT_IO_ENTRY_ENV(io_type_entry);
+        IMPORT_IO_ENTRY_ENV(io_type_entry)
 
         io_type_entry() : io_entry_t() {};
 
         struct listen_query : io_query<listen_query> {
 
-            IMPORT_IO_QUERY(listen_query)
+            IMPORT_IO_QUERY_ENV(listen_query)
 
             listen_query() = delete;
 
@@ -444,7 +440,7 @@ namespace ace::futures {
 
         struct connect_query : io_query<connect_query> {
 
-            IMPORT_IO_QUERY(connect_query)
+            IMPORT_IO_QUERY_ENV(connect_query)
 
             connect_query() = delete;
 
@@ -502,8 +498,7 @@ namespace ace::futures {
     template <int domain_v = -1, int type_v = -1>
     struct io_bind_entry : io_entry<io_bind_entry<domain_v, type_v>> {
 
-        DECLARE_IO_ENTRY(io_bind_entry);
-        IMPORT_IO_ENTRY_ENV(io_bind_entry);
+        IMPORT_IO_ENTRY_ENV(io_bind_entry)
 
         io_bind_entry() : io_entry_t() {};
 
@@ -569,7 +564,7 @@ namespace ace::futures {
     template <int domain_v = -1, int type_v = -1, int protocol_v = -1>
     struct io_socket : io_query<io_socket<domain_v, type_v, protocol_v>> {
 
-        IMPORT_IO_QUERY(io_socket)
+        IMPORT_IO_QUERY_ENV(io_socket)
 
         /**
          * @param [in] flags currently unused
@@ -595,7 +590,7 @@ namespace ace::futures {
     template <>
     struct io_socket<-1, -1, -1> : io_query<io_socket<>> {
 
-        IMPORT_IO_QUERY(io_socket)
+        IMPORT_IO_QUERY_ENV(io_socket)
 
         /**
          * @param [in] domain communication domain

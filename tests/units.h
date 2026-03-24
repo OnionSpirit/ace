@@ -412,7 +412,7 @@ inline ace::async<> tcp_echo_client() {
             and co_await connection.send(buff, READ_BUFF_LEN);
 
         if (is_sent) {
-            std::string msg = "[ CLIENT SENT ] : " + std::string(buff) + "\n";
+            std::string msg = "[ CLIENT SENT ] : " + std::string(buff);
             if (co_await ace::core::write_query(STDIN_FILENO, msg.c_str(), msg.size()) < 1)
                 co_return;
         }
@@ -461,7 +461,7 @@ inline ace::async<> tcp_echo_server() {
     for (int i =0; i < 5; ++i) {
         memset(buff, 0, READ_BUFF_LEN);
         if (co_await connection.recv(buff, READ_BUFF_LEN) > 0)
-            std::cout << "[ SERVER RECEIVED ] : '" << std::string(buff) << "'\n";
+            std::cout << "[ SERVER RECEIVED ] : " << std::string(buff);
     }
 
     co_return;

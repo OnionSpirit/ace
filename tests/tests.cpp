@@ -393,8 +393,8 @@ TEST(futures, do_io_socket_echo) {
 // }
 
 // TEST(futures, do_tcp_echo) {
-//     ace::schedule(tcp_echo_client());
 //     ace::schedule(tcp_echo_server());
+//     ace::schedule(tcp_echo_client());
 //     ace::run();
 //     ASSERT_TRUE(ace::empty());
 // }

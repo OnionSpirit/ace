@@ -15,9 +15,19 @@ namespace ace::futures {
         { q.query(kwp) } -> std::same_as<bool>;
     };
 
+    template <typename entry_t>
+    concept is_entry = requires(entry_t q) {
+        { q._fd } -> std::same_as<int>;
+        { q._is_closed } -> std::same_as<bool>;
+        { q._self_sin } -> std::same_as<sockaddr_in>;
+        { q._peer_sin } -> std::same_as<sockaddr_in>;
+        { q.devastate() } -> std::same_as<void>;
+    };
+
     /**
-     * @brief Base io class with socket descriptor data and guard behavior
+     * @brief Base io class with socket data and guard behavior
      */
+    template <typename entity_t>
     struct io_entity {
 
         mutable int  _fd;                 ///< Socket file descriptor
@@ -29,9 +39,36 @@ namespace ace::futures {
             : _fd(-1)
             , _is_closed(true) {}
 
-        io_entity(const io_entity&) = delete;
+        io_entity(const io_entity& io) {
+            _fd = io._fd;
+            _is_closed = io._is_closed;
+            _self_sin = io._self_sin;
+            _peer_sin = io._peer_sin;
+            io._fd = -1;
+            io._is_closed = true;
+        };
 
-        io_entity& operator=(const io_entity&) = delete;
+        io_entity& operator=(const io_entity& io) {
+            _fd = io._fd;
+            _is_closed = io._is_closed;
+            _self_sin = io._self_sin;
+            _peer_sin = io._peer_sin;
+            io._fd = -1;
+            io._is_closed = true;
+            return *this;
+        };
+
+        template<typename entry_t>
+        static entity_t make_from_entry(const entry_t* io) noexcept {
+            entity_t entity;
+            entity._fd = io->_fd;
+            if (entity._fd > -1) entity._is_closed = io->_is_closed;
+            else entity._is_closed = true;
+            entity._self_sin = io->_self_sin;
+            entity._peer_sin = io->_peer_sin;
+            io->devastate();
+            return entity;
+        }
 
         io_entity(io_entity&& io) noexcept {
             _fd = io._fd;
@@ -45,6 +82,8 @@ namespace ace::futures {
         io_entity& operator=(io_entity&& io)  noexcept {
             _fd = io._fd;
             _is_closed = io._is_closed;
+            _self_sin = io._self_sin;
+            _peer_sin = io._peer_sin;
             io._fd = -1;
             io._is_closed = true;
             return *this;
@@ -112,7 +151,7 @@ namespace ace::futures {
 
 
         /**
-         * @brief An interface template with 'resume(...)' logic to interact with the
+         * @brief An interface template with @b 'resume(...)' logic to interact with the
          * @b ace::core::kernel_controller through @b co_await operator.
          * @tparam query_t Specific query type.
          */
@@ -131,11 +170,13 @@ namespace ace::futures {
 
         struct close_query : complete_query_traits<close_query> {
 
+            using complete_query_traits<close_query>::_fd;
+
             close_query() = delete;
 
-            explicit close_query(const int fd) : complete_query_traits(fd) {}
+            explicit close_query(const int fd) : complete_query_traits<close_query>(fd) {}
 
-            bool query(kernel_waiter* kwp) const noexcept {
+            bool query(core::kernel_waiter* kwp) const noexcept {
                 return core::kernel_controller::close(kwp, _fd);
             }
         };
@@ -177,32 +218,26 @@ namespace ace::futures {
     };
 
     /**
-     * @brief Consumable modification of an @b io_entity for the one-shot objects
+     * @brief Consumable modification of the @b io_entity for the one-shot objects.
+     * The @b io_entry derived types are supposed to be invalid after calling any operation of them.
+     * The @b io_entity::make_from_entry(...) operation turns @b io_entry into the invalid state
      */
-    struct io_entry : io_entity {
-        void consume() const noexcept {
-            _is_closed = true;
-            _fd = -1;
+    template <typename entry_t>
+    struct io_entry : io_entity<entry_t> {
+        void devastate() const noexcept {
+            io_entity<entry_t>::_is_closed = true;
+            io_entity<entry_t>::_fd = -1;
         }
     };
 
     /**
-     * @brief An io-socket class to represent connection socket
+     * @brief An @b io_entity class to represent connection socket
      * <br>Turns out from the @b io_type_entry as a result of processing its member @b connect(...)
      * or the result of @b io_listener.accept(...) via @b co_await
      */
-    struct io_connection : io_entity {
+    struct io_connection : io_entity<io_connection> {
 
-        io_connection() = delete;
-
-        explicit io_connection(const io_entry* io) noexcept {
-            _fd = io->_fd;
-            if (_fd > -1) _is_closed = io->_is_closed;
-            else _is_closed = true;
-            _self_sin = io->_self_sin;
-            _peer_sin = io->_peer_sin;
-            io->consume();
-        }
+        io_connection() = default;
 
         struct send_query : complete_query_traits<send_query> {
 
@@ -280,31 +315,26 @@ namespace ace::futures {
     };
 
     /**
-     * @brief An io-socket class to represent listen socket
+     * @brief An @b io_entity class to represent listen socket
      * <br>Turns out from the @b io_type_entry as a result of processing its member @b listen() via @b co_await
      */
     template <int domain_v = -1>
-    struct io_listener : io_entity {
+    struct io_listener : io_entity<io_listener<domain_v>> {
 
-        io_listener() = delete;
+        typedef io_entity<io_listener> io_entity_t;
+        using io_entity_t::_peer_sin;
 
-        explicit io_listener(const io_entry* io) noexcept {
-            _fd = io->_fd;
-            if (_fd > -1) _is_closed = io->_is_closed;
-            else _is_closed = true;
-            _self_sin = io->_self_sin;
-            io->consume();
-        }
+        io_listener() = default;
 
-        struct accept_query : basic_query_traits<accept_query> {
+        struct accept_query : io_entity_t:: template basic_query_traits<accept_query> {
 
-            using basic_query_traits<accept_query>::_fd;
-            using basic_query_traits<accept_query>::_res;
+            using io_entity_t:: template basic_query_traits<accept_query>::_fd;
+            using io_entity_t:: template basic_query_traits<accept_query>::_res;
 
             accept_query() = delete;
 
             explicit accept_query(const io_listener* entry, sockaddr* addr, socklen_t* addrlen, const int flags = 0)
-                : basic_query_traits<accept_query>(entry->_fd)
+                : io_entity_t:: template basic_query_traits<accept_query>(entry->_fd)
                 , _entry(entry)
                 , _addr(addr)
                 , _addrlen(addrlen)
@@ -315,14 +345,14 @@ namespace ace::futures {
             }
 
             [[nodiscard]] io_connection await_resume() const {
-                const io_entry io_sock {};
+                io_connection connection {};
                 if (_res > -1) {
-                    io_sock._fd = _res;
-                    io_sock._is_closed = false;
-                    io_sock._self_sin = _entry->_self_sin;
-                    io_sock._peer_sin = *reinterpret_cast<sockaddr_in*>(_addr);
+                    connection._fd = _res;
+                    connection._is_closed = false;
+                    connection._self_sin = _entry->_self_sin;
+                    connection._peer_sin = *reinterpret_cast<sockaddr_in*>(_addr);
                 }
-                return io_connection{&io_sock};
+                return connection;
             }
 
             const io_listener* _entry;
@@ -358,30 +388,25 @@ namespace ace::futures {
 
 
     /**
-     * @brief An io-entry class to represent socket type selection [ Listener | Connection ]
+     * @brief An @b io_entry class to represent socket type selection [ Listener | Connection ]
      * <br>Turns out from the @b io_bind_entry as a result of processing its member @b bind(...) via @b co_await
      */
     template <int domain_v = -1, int type_v = -1>
-    struct io_type_entry : io_entry {
+    struct io_type_entry : io_entry<io_type_entry<domain_v, type_v>> {
 
-        io_type_entry() : io_entry() {};
+        typedef io_entry<io_type_entry> io_entry_t;
+        using io_entry_t::_peer_sin;
 
-        explicit io_type_entry(const io_entry* io) noexcept {
-            _fd = io->_fd;
-            if (_fd > -1) _is_closed = io->_is_closed;
-            else _is_closed = true;
-            _self_sin = io->_self_sin;
-            io->consume();
-        }
+        io_type_entry() : io_entry_t() {};
 
-        struct listen_query : basic_query_traits<listen_query> {
+        struct listen_query : io_entry_t::template basic_query_traits<listen_query> {
 
-            using basic_query_traits<listen_query>::_fd;
+            using io_entry_t::template basic_query_traits<listen_query>::_fd;
 
             listen_query() = delete;
 
             explicit listen_query(const io_type_entry* entry, const int backlog)
-                : basic_query_traits<listen_query>(entry->_fd)
+                : io_entry_t::template basic_query_traits<listen_query>(entry->_fd)
                 , _entry(entry)
                 , _backlog(backlog) {}
 
@@ -390,21 +415,21 @@ namespace ace::futures {
             }
 
             [[nodiscard]] io_listener<domain_v> await_resume() const {
-                return io_listener<domain_v>{_entry};
+                return io_listener<domain_v>::make_from_entry(_entry);
             }
 
             const io_type_entry* _entry;
             const int _backlog;
         };
 
-        struct connect_query : basic_query_traits<connect_query> {
+        struct connect_query : io_entry_t::template basic_query_traits<connect_query> {
 
-            using basic_query_traits<connect_query>::_fd;
+            using io_entry_t::template basic_query_traits<connect_query>::_fd;
 
             connect_query() = delete;
 
             explicit connect_query(const io_type_entry* entry, const sockaddr* addr, const socklen_t addrlen)
-                : basic_query_traits<connect_query>(entry->_fd)
+                : io_entry_t::template basic_query_traits<connect_query>(entry->_fd)
                 , _entry(entry)
                 , _addr(addr)
                 , _addrlen(addrlen) {}
@@ -414,7 +439,7 @@ namespace ace::futures {
             }
 
             [[nodiscard]] io_connection await_resume() const {
-                return io_connection{_entry};
+                return io_connection::make_from_entry(_entry);
             }
 
             const io_type_entry* _entry;
@@ -451,27 +476,30 @@ namespace ace::futures {
 
 
     /**
-     * @brief An io-entry class to represent waiting for binding
+     * @brief An @b io_entry class to represent waiting for binding
      * <br>Turns out from @b io_socket_entry as a result of processing it via @b co_await
      */
     template <int domain_v = -1, int type_v = -1>
-    struct io_bind_entry : io_entry {
+    struct io_bind_entry : io_entry<io_bind_entry<domain_v, type_v>> {
 
-        io_bind_entry() : io_entry() {};
+        typedef io_entry<io_bind_entry> io_entry_t;
+        using io_entry_t::_self_sin;
+
+        io_bind_entry() : io_entry_t() {};
 
         explicit io_bind_entry(const int fd) {
-            _fd = fd;
-            if (_fd > -1) _is_closed = false;
+            io_entry_t::_fd = fd;
+            if (io_entry_t::_fd > -1) io_entry_t::_is_closed = false;
         }
 
-        struct bind_query : basic_query_traits<bind_query> {
+        struct bind_query : io_entry_t::template basic_query_traits<bind_query> {
 
-            using basic_query_traits<bind_query>::_fd;
+            using io_entry_t::template basic_query_traits<bind_query>::_fd;
 
             bind_query() = delete;
 
             explicit bind_query(const io_bind_entry* entry, const sockaddr* addr, const socklen_t addrlen)
-                : basic_query_traits<bind_query>(entry->_fd)
+                : io_entry_t::template basic_query_traits<bind_query>(entry->_fd)
                 , _entry(entry)
                 , _addr(addr)
                 , _addrlen(addrlen) {}
@@ -481,7 +509,7 @@ namespace ace::futures {
             }
 
             [[nodiscard]] io_type_entry<domain_v, type_v> await_resume() {
-                return io_type_entry<domain_v, type_v>{_entry};
+                return io_type_entry<domain_v, type_v>::make_from_entry(_entry);
             }
 
             const io_bind_entry* _entry;
@@ -513,15 +541,16 @@ namespace ace::futures {
 
 
     /**
-     * @brief io_socket future for socket creation. Also, supports aliasing
+     * @brief An @b io_entry for socket creation. Also, supports aliasing
      * @tparam domain_v Communication domain
      * @tparam type_v Communication semantics
      * @tparam protocol_v Particular socket protol
      */
     template <int domain_v = -1, int type_v = -1, int protocol_v = -1>
-    struct io_socket_entry : io_entry::basic_query_traits<io_socket_entry<domain_v, type_v, protocol_v>> {
+    struct io_socket_entry : io_entry<int>::basic_query_traits<io_socket_entry<domain_v, type_v, protocol_v>> {
 
-        typedef io_entry::basic_query_traits<io_socket_entry> future_query_traits_t;
+        typedef io_entry<int> io_entry_t;
+        typedef io_entry_t::basic_query_traits<io_socket_entry> future_query_traits_t;
         using future_query_traits_t::_res;
         using future_query_traits_t::_waiter;
 
@@ -530,7 +559,7 @@ namespace ace::futures {
          */
         explicit io_socket_entry(const int flags = 0)
             // NOTE: There is no socket but need supress defaulted '-1' errcode
-            : io_entry::basic_query_traits<io_socket_entry>(0)
+            : io_entry_t::basic_query_traits<io_socket_entry>(0)
             , _flags(flags) {}
 
         bool query(core::kernel_waiter* kwp) const {
@@ -547,8 +576,9 @@ namespace ace::futures {
 
 
     template <>
-    struct io_socket_entry<-1, -1, -1> : io_entry::basic_query_traits<io_socket_entry<>> {
+    struct io_socket_entry<-1, -1, -1> : io_entry<int>::basic_query_traits<io_socket_entry<>> {
 
+        typedef io_entry<int> io_entry_t;
         typedef basic_query_traits future_query_traits_t;
         using future_query_traits_t::_res;
         using future_query_traits_t::_waiter;

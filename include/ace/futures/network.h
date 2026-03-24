@@ -315,7 +315,9 @@ namespace ace::futures {
     struct io_listener : io_entity<io_listener<domain_v>> {
 
         typedef io_entity<io_listener> io_entity_t;
-        using io_entity_t::_peer_sin;
+        using io_entity_t::_fd;
+        using io_entity_t::_self_sin;
+        using io_entity_t::_peer_sin; // NOTE: Not actual peer but stores work variable for accept query
 
         io_listener() = default;
 
@@ -354,23 +356,23 @@ namespace ace::futures {
             const int _flags;
         };
 
-        [[nodiscard]] auto accept(sockaddr* addr, const socklen_t* addrlen, const int flags = 0) const
+        [[nodiscard]] auto accept(sockaddr* addr, const socklen_t* addrlen, const int flags = 0)
         -> accept_query { return accept_query{this, addr, addrlen, flags}; }
 
-        [[nodiscard]] auto accept(const in_addr_t addr, const uint16_t port) const
+        [[nodiscard]] auto accept(const in_addr_t addr, const uint16_t port)
         -> accept_query requires (domain_v == AF_INET) {
             _peer_sin.sin_family = domain_v;
             _peer_sin.sin_port = htons(port);
             _peer_sin.sin_addr.s_addr = htonl(addr);
-            return accept_query {this, reinterpret_cast<sockaddr*>(&_peer_sin), &peer_sin_size};
+            return accept_query { this, reinterpret_cast<sockaddr*>(&_peer_sin), &peer_sin_size};
         }
 
-        [[nodiscard]] auto accept(const std::string_view addr, const uint16_t port) const
+        [[nodiscard]] auto accept(const std::string_view addr, const uint16_t port)
         -> accept_query requires (domain_v == AF_INET) {
             _peer_sin.sin_family = domain_v;
             _peer_sin.sin_port = htons(port);
             inet_pton(domain_v, addr.data(), &(_peer_sin.sin_addr));
-            return accept_query {this, reinterpret_cast<sockaddr*>(&_peer_sin), peer_sin_len_ptr};
+            return accept_query { this, reinterpret_cast<sockaddr*>(&_peer_sin), peer_sin_len_ptr};
         }
 
         socklen_t peer_sin_size = sizeof(_peer_sin);
@@ -398,8 +400,8 @@ namespace ace::futures {
 
             listen_query() = delete;
 
-            explicit listen_query(const io_type_entry* entry, const int backlog)
-                : io_query_traits<listen_query>(entry->_fd)
+            explicit listen_query(io_type_entry&& entry, const int backlog)
+                : io_query_traits<listen_query>(entry._fd)
                 , _entry(entry)
                 , _backlog(backlog) {}
 
@@ -408,10 +410,10 @@ namespace ace::futures {
             }
 
             [[nodiscard]] io_listener<domain_v> await_resume() const {
-                return io_listener<domain_v>::make_from_entry(_entry);
+                return io_listener<domain_v>::make_from_entry(&_entry);
             }
 
-            const io_type_entry* _entry;
+            io_type_entry& _entry;
             const int _backlog;
         };
 
@@ -421,8 +423,8 @@ namespace ace::futures {
 
             connect_query() = delete;
 
-            explicit connect_query(const io_type_entry* entry, const sockaddr* addr, const socklen_t addrlen)
-                : io_query_traits<connect_query>(entry->_fd)
+            explicit connect_query(io_type_entry&& entry, const sockaddr* addr, const socklen_t addrlen)
+                : io_query_traits<connect_query>(entry._fd)
                 , _entry(entry)
                 , _addr(addr)
                 , _addrlen(addrlen) {}
@@ -432,36 +434,36 @@ namespace ace::futures {
             }
 
             [[nodiscard]] io_connection await_resume() const {
-                return io_connection::make_from_entry(_entry);
+                return io_connection::make_from_entry(&_entry);
             }
 
-            const io_type_entry* _entry;
+            io_type_entry& _entry;
             const sockaddr* _addr;
             const socklen_t _addrlen;
         };
 
-        [[nodiscard]] auto listen(const int backlog = 0) const
+        [[nodiscard]] auto listen(const int backlog = 0)
         -> listen_query requires (type_v == SOCK_SEQPACKET or type_v == SOCK_STREAM) {
-            return listen_query{this, backlog};
+            return listen_query{ std::move(*this), backlog};
         }
 
-        [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen) const
-        -> connect_query { return connect_query{this, addr, addrlen}; }
+        [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen)
+        -> connect_query { return connect_query{ std::move(*this), addr, addrlen}; }
 
-        [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port) const
+        [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
         -> connect_query requires (domain_v == AF_INET) {
             _peer_sin.sin_family = domain_v;
             _peer_sin.sin_port = htons(port);
             _peer_sin.sin_addr.s_addr = htonl(addr);
-            return connect_query {this, reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(_peer_sin)};
+            return connect_query { std::move(*this), reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(_peer_sin)};
         }
 
-        [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port) const
+        [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
         -> connect_query requires (domain_v == AF_INET) {
             _peer_sin.sin_family = domain_v;
             _peer_sin.sin_port = htons(port);
             inet_pton(domain_v, addr.data(), &(_peer_sin.sin_addr));
-            return connect_query {this, reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(_peer_sin)};
+            return connect_query { std::move(*this), reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(_peer_sin)};
         }
 
         ~io_type_entry() override = default;
@@ -491,8 +493,8 @@ namespace ace::futures {
 
             bind_query() = delete;
 
-            explicit bind_query(const io_bind_entry* entry, const sockaddr* addr, const socklen_t addrlen)
-                : io_query_traits<bind_query>(entry->_fd)
+            explicit bind_query(io_bind_entry&& entry, const sockaddr* addr, const socklen_t addrlen)
+                : io_query_traits<bind_query>(entry._fd)
                 , _entry(entry)
                 , _addr(addr)
                 , _addrlen(addrlen) {}
@@ -502,23 +504,23 @@ namespace ace::futures {
             }
 
             [[nodiscard]] io_type_entry<domain_v, type_v> await_resume() {
-                return io_type_entry<domain_v, type_v>::make_from_entry(_entry);
+                return io_type_entry<domain_v, type_v>::make_from_entry(&_entry);
             }
 
-            const io_bind_entry* _entry;
+            io_bind_entry& _entry;
             const sockaddr* _addr;
             const socklen_t _addrlen;
         };
 
-        [[nodiscard]] auto bind(const sockaddr* addr, const socklen_t addrlen) const
-        -> bind_query { return bind_query {this, addr, addrlen}; }
+        [[nodiscard]] auto bind(const sockaddr* addr, const socklen_t addrlen)
+        -> bind_query { return bind_query { std::move(*this), addr, addrlen}; }
 
         [[nodiscard]] auto bind(const in_addr_t addr, const uint16_t port)
         -> bind_query requires (domain_v == AF_INET) {
             _self_sin.sin_family = domain_v;
             _self_sin.sin_port = htons(port);
             _self_sin.sin_addr.s_addr = htonl(addr);
-            return bind_query {this, reinterpret_cast<sockaddr*>(&_self_sin), sizeof(_self_sin)};
+            return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&_self_sin), sizeof(_self_sin)};
         }
 
         [[nodiscard]] auto bind(const std::string_view addr, const uint16_t port)
@@ -526,7 +528,7 @@ namespace ace::futures {
             _self_sin.sin_family = domain_v;
             _self_sin.sin_port = htons(port);
             inet_pton(domain_v, addr.data(), &(_self_sin.sin_addr));
-            return bind_query {this, reinterpret_cast<sockaddr*>(&_self_sin), sizeof(_self_sin)};
+            return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&_self_sin), sizeof(_self_sin)};
         }
 
         ~io_bind_entry() override = default;

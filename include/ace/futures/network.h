@@ -201,13 +201,24 @@ namespace ace::futures {
     };
 
 
+#define IMPORT_ERROR_HANDLING                                                                 \
+    operator bool() const { return _fd > -1; }                                                \
+    std::string_view error() const {                                                          \
+        if (_fd > -1)                                                                         \
+            throw std::logic_error("can not receive 'error()' on successed file descriptor"); \
+        return strerror(_fd);                                                                 \
+    }
+
+
 #define IMPORT_IO_ENTITY_ENV(class) typedef io_entity<class> io_entity_t;                     \
     class(const int fd, const bool is_closed, const sockaddr_in self, const sockaddr_in peer) \
         : io_entity_t(fd, is_closed, self, peer) { };                                         \
     using io_entity_t::_fd;                                                                   \
     using io_entity_t::_self_sin;                                                             \
     using io_entity_t::_peer_sin;                                                             \
-    using io_entity_t::_is_closed;
+    using io_entity_t::_is_closed;                                                            \
+    IMPORT_ERROR_HANDLING
+
 
 
     // TODO: Use memmove instead of params on commonized io_entry
@@ -241,20 +252,20 @@ namespace ace::futures {
     using io_entry_t::_fd;                                                                       \
     using io_entry_t::_self_sin;                                                                 \
     using io_entry_t::_peer_sin;                                                                 \
-    using io_entry_t::_is_closed;
+    using io_entry_t::_is_closed;                                                                \
+    IMPORT_ERROR_HANDLING
 
 
     /**
      * @brief An @b io_entity class to represent connection socket
-     * <br>Turns out from the @b io_type_entry as a result of processing its member @b connect(...)
+     * <br>Turns out from the @b io_selection_entry as a result of processing its member @b connect(...)
      * or the result of @b io_listener.accept(...) via @b co_await
      */
     struct io_connection : io_entity<io_connection> {
 
-        io_connection() = default;
+        IMPORT_IO_ENTITY_ENV(io_connection)
 
-        io_connection(const int fd, const bool is_closed, const sockaddr_in self, const sockaddr_in peer)
-            : io_entity(fd, is_closed, self, peer) { };
+        io_connection() = default;
 
         struct send_query : io_query<send_query> {
 
@@ -339,7 +350,8 @@ namespace ace::futures {
 
     /**
      * @brief An @b io_entity class to represent listen socket
-     * <br>Turns out from the @b io_type_entry as a result of processing its member @b listen() via @b co_await
+     * <br>Turns out from the @b io_selection_entry as a result of processing its member @b listen()
+     * via @b co_await
      */
     template <int domain_v = -1>
     struct io_listener : io_entity<io_listener<domain_v>> {
@@ -409,11 +421,11 @@ namespace ace::futures {
      * <br>Turns out from the @b io_bind_entry as a result of processing its member @b bind(...) via @b co_await
      */
     template <int domain_v = -1, int type_v = -1>
-    struct io_type_entry : io_entry<io_type_entry<domain_v, type_v>> {
+    struct io_selection_entry : io_entry<io_selection_entry<domain_v, type_v>> {
 
-        IMPORT_IO_ENTRY_ENV(io_type_entry)
+        IMPORT_IO_ENTRY_ENV(io_selection_entry)
 
-        io_type_entry() : io_entry_t() {};
+        io_selection_entry() : io_entry_t() {};
 
         struct listen_query : io_query<listen_query> {
 
@@ -421,7 +433,7 @@ namespace ace::futures {
 
             listen_query() = delete;
 
-            explicit listen_query(io_type_entry&& entry, const int backlog)
+            explicit listen_query(io_selection_entry&& entry, const int backlog)
                 : io_query<listen_query>(entry._fd)
                 , _entry(entry)
                 , _backlog(backlog) {}
@@ -434,7 +446,7 @@ namespace ace::futures {
                 return io_listener<domain_v>::make_from_entry(&_entry);
             }
 
-            io_type_entry& _entry;
+            io_selection_entry& _entry;
             const int _backlog;
         };
 
@@ -444,7 +456,7 @@ namespace ace::futures {
 
             connect_query() = delete;
 
-            explicit connect_query(io_type_entry&& entry, const sockaddr* addr, const socklen_t addrlen)
+            explicit connect_query(io_selection_entry&& entry, const sockaddr* addr, const socklen_t addrlen)
                 : io_query<connect_query>(entry._fd)
                 , _entry(entry)
                 , _addr(addr)
@@ -458,7 +470,7 @@ namespace ace::futures {
                 return io_connection::make_from_entry(&_entry);
             }
 
-            io_type_entry& _entry;
+            io_selection_entry& _entry;
             const sockaddr* _addr;
             const socklen_t _addrlen;
         };
@@ -487,7 +499,7 @@ namespace ace::futures {
             return connect_query { std::move(*this), reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(_peer_sin)};
         }
 
-        ~io_type_entry() override = default;
+        ~io_selection_entry() override = default;
     };
 
 
@@ -509,7 +521,7 @@ namespace ace::futures {
 
         struct bind_query : io_query<bind_query> {
 
-            using io_query<bind_query>::_fd;
+            IMPORT_IO_QUERY_ENV(bind_query)
 
             bind_query() = delete;
 
@@ -523,8 +535,8 @@ namespace ace::futures {
                 return core::kernel_controller::bind(kwp, _fd, _addr, _addrlen);
             }
 
-            [[nodiscard]] io_type_entry<domain_v, type_v> await_resume() {
-                return io_type_entry<domain_v, type_v>::make_from_entry(&_entry);
+            [[nodiscard]] io_selection_entry<domain_v, type_v> await_resume() {
+                return io_selection_entry<domain_v, type_v>::make_from_entry(&_entry);
             }
 
             io_bind_entry& _entry;

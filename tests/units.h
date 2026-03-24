@@ -292,7 +292,7 @@ inline ace::async<> cutex_spawner_permanent(ace::futures::channel_dyn<ace::core:
 }
 
 inline ace::async<> socket_abuser() {
-    auto bind_entry = co_await ace::futures::io_socket_tcp_entry();
+    auto bind_entry = co_await ace::futures::io_socket_tcp();
     auto type_entry = co_await bind_entry.bind("127.0.0.1", 8001);
     const auto connection = co_await type_entry.connect("127.0.0.1", 8000);
 
@@ -306,7 +306,7 @@ inline ace::async<> socket_abuser() {
 }
 
 inline ace::async<> socket_listener() {
-    auto bind_entry = co_await ace::futures::io_socket_tcp_entry();
+    auto bind_entry = co_await ace::futures::io_socket_tcp();
     auto type_entry = co_await bind_entry.bind("127.0.0.1", 8000);
     auto listener   = co_await type_entry.listen();
     const auto connection = co_await listener.accept("127.0.0.1", 8001);

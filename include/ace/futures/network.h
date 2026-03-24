@@ -25,8 +25,8 @@ namespace ace::futures {
     };
 
     /**
-     * @brief An interface template to interact with the
-     * @b ace::core::kernel_controller through @b co_await operator.
+     * @brief An interface to interact with the
+     * @b ace::core::kernel_controller via @b co_await operator.
      * <br>Does not define 'resume(...)' logic.
      * @tparam query_t Specific query type.
      */
@@ -86,7 +86,8 @@ namespace ace::futures {
 
 
     /**
-     * @brief Base io class with socket data and guard behavior
+     * @brief Base io class with socket data and guard behavior.
+     * The io_entity derived types represents socket state and provides allowed async operations
      */
     template <typename entity_t>
     struct io_entity {

@@ -2,6 +2,7 @@
 #define ACE_CORE_BALANCER_H
 
 #include <cstddef>
+#include <functional>
 #include <thread>
 
 #include "runner.h"

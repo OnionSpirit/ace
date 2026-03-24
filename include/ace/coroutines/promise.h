@@ -15,6 +15,7 @@
 #include <concepts>
 #include <coroutine>
 #include <type_traits>
+#include <optional>
 
 #include "control.h"
 #include "ace/common/terms.h"

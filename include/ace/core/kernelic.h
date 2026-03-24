@@ -230,7 +230,7 @@ ACE_CORE_KERNEL_CONTROLLER_MEMBER(bool)
 ping() {
     // NOTE: Setting requests to the io_uring
     const bool need_submission = not _submission_buffer.empty();
-    for (int i = 0; i < max_entries and not _submission_buffer.empty(); ++i) {
+    for (unsigned int i = 0; i < max_entries and not _submission_buffer.empty(); ++i) {
         auto entity = _submission_buffer.dequeue();
         entity.apply();
     }
@@ -244,7 +244,7 @@ ping() {
     // NOTE: Receiving responses from the io_uring
     io_uring_cqe* cqe_s[max_entries] {};
     const unsigned int cqe_count = io_uring_peek_batch_cqe(&_ring, cqe_s, max_entries);
-    for (int i = 0; i < cqe_count; ++i) {
+    for (unsigned int i = 0; i < cqe_count; ++i) {
 
         const auto cqe = cqe_s[i];
         const auto identity = io_uring_cqe_get_data64(cqe);

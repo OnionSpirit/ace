@@ -98,7 +98,11 @@ namespace ace::core {
             return kernel_controller::read(kwp, _fd, _buf, _nbytes, _offset);
         }
 
-        [[nodiscard]] int await_resume() const { return _res; }
+        [[nodiscard]] int await_resume() const {
+            // NOTE: Nul-termination for input
+            if (_res > 0) static_cast<char*>(_buf)[_res] = '\0';
+            return _res;
+        }
 
         const int _fd;
         void *_buf;

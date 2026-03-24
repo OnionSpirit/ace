@@ -128,6 +128,17 @@ namespace ace::futures {
     using io_entity_t::_self_sin;                                                             \
     using io_entity_t::_peer_sin;                                                             \
     using io_entity_t::_is_closed;                                                            \
+    class(class&& io) noexcept                                                                \
+        : io_entity_t(static_cast<io_entity_t>(std::move(io))) { }                            \
+    class& operator = (class&& io) noexcept {                                                 \
+        _fd = io._fd;                                                                         \
+        _is_closed = io._is_closed;                                                           \
+        _self_sin = io._self_sin;                                                             \
+        _peer_sin = io._peer_sin;                                                             \
+        io._fd = -1;                                                                          \
+        io._is_closed = true;                                                                 \
+        return *this;                                                                         \
+    }                                                                                         \
     IMPORT_ERROR_HANDLING
 
 
@@ -378,7 +389,10 @@ namespace ace::futures {
             }
 
             [[nodiscard]] io_connection await_resume() const {
-                return io_connection::make_from_entry(&_entry);
+                if (_res > -1) {
+                    return io_connection::make_from_entry(&_entry);
+                }
+                return io_connection {};
             }
 
             io_selection_entry& _entry;

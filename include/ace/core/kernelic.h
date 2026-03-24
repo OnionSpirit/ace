@@ -149,6 +149,14 @@ namespace ace::core {
             return submit(io_uring_prep_recv, waiter, fd, buf, len, flags);
         }
 
+        static bool read(kernel_waiter* waiter, const int fd, void *buf, const unsigned nbytes, const uint64_t offset) {
+            return submit(io_uring_prep_read, waiter, fd, buf, nbytes, offset);
+        }
+
+        static bool write(kernel_waiter* waiter, const int fd, const void *buf, const unsigned nbytes, const uint64_t offset) {
+            return submit(io_uring_prep_write, waiter, fd, buf, nbytes, offset);
+        }
+
     };
 
     /**

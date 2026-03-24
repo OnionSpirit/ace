@@ -385,3 +385,16 @@ TEST(futures, do_io_socket_echo) {
     ace::run();
     ASSERT_TRUE(ace::empty());
 }
+
+// TEST(futures, do_input_echo) {
+//     ace::schedule(input_echo());
+//     ace::run();
+//     ASSERT_TRUE(ace::empty());
+// }
+
+// TEST(futures, do_tcp_echo) {
+//     ace::schedule(tcp_echo_client());
+//     ace::schedule(tcp_echo_server());
+//     ace::run();
+//     ASSERT_TRUE(ace::empty());
+// }

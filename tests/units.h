@@ -294,16 +294,22 @@ inline ace::async<> cutex_spawner_permanent(ace::futures::channel_dyn<ace::core:
 inline ace::async<> socket_abuser() {
 
     auto bind_entry = co_await ace::futures::io_socket_tcp();
-    if (not bind_entry)
+    if (not bind_entry) {
         std::cerr << bind_entry.error() << std::endl;
+        co_return;
+    }
 
     auto selection_entry = co_await bind_entry.bind("127.0.0.1", 8001);
-    if (not selection_entry)
+    if (not selection_entry) {
         std::cerr << selection_entry.error() << std::endl;
+        co_return;
+    }
 
     const auto connection = co_await selection_entry.connect("127.0.0.1", 8000);
-    if (not connection)
+    if (not connection) {
         std::cerr << connection.error() << std::endl;
+        co_return;
+    }
 
     for (int i =1; i < 6; ++i) {
         std::string msg = "Echo message " + std::to_string(i);
@@ -317,26 +323,145 @@ inline ace::async<> socket_abuser() {
 inline ace::async<> socket_listener() {
 
     auto bind_entry = co_await ace::futures::io_socket_tcp();
-    if (not bind_entry)
+    if (not bind_entry) {
         std::cerr << bind_entry.error() << std::endl;
+        co_return;
+    }
 
     auto selection_entry = co_await bind_entry.bind("127.0.0.1", 8000);
-    if (not selection_entry)
+    if (not selection_entry) {
         std::cerr << selection_entry.error() << std::endl;
+        co_return;
+    }
 
     auto listener = co_await selection_entry.listen();
-    if (not listener)
+    if (not listener) {
         std::cerr << listener.error() << std::endl;
+        co_return;
+    }
 
     const auto connection = co_await listener.accept("127.0.0.1", 8001);
-    if (not connection)
+    if (not connection) {
         std::cerr << connection.error() << std::endl;
+        co_return;
+    }
 
     char buff[128];
     for (int i =0; i < 5; ++i) {
         memset(buff, 0, 128);
         if (co_await connection.recv(buff, 128) > 0)
             std::cout << "Server received: '" << buff << "'\n";
+    }
+
+    co_return;
+}
+
+
+inline ace::async<> input_echo() {
+
+    static constexpr int READ_BUFF_LEN = 128;
+    char buff[READ_BUFF_LEN];
+    auto msg = "[ TEST MESSAGE ]";
+
+    for (int i =0; i < 5; ++i) {
+        memset(buff, 0, 128);
+        if (co_await ace::core::read_query(STDIN_FILENO, buff, READ_BUFF_LEN) > 0) {
+            std::string send_buff = "[ ECHO ] : " + std::string(buff) + "\n";
+            if (co_await ace::core::write_query(STDIN_FILENO, send_buff.c_str(), send_buff.size()) < 1)
+                co_return;
+        }
+    }
+
+    co_return;
+}
+
+
+inline ace::async<> tcp_echo_client() {
+
+    auto bind_entry = co_await ace::futures::io_socket_tcp();
+    if (not bind_entry) {
+        std::cout << "[ CLIENT ERROR ] - " << bind_entry.error() << std::endl;
+        co_return;
+    }
+
+    std::cout << "[ CLIENT ] - Socket created...\n";
+
+    auto selection_entry = co_await bind_entry.bind("127.0.0.1", 8001);
+    if (not selection_entry) {
+        std::cout << "[ CLIENT ERROR ] - " << selection_entry.error() << std::endl;
+        co_return;
+    }
+
+    std::cout << "[ CLIENT ] - Socket bint...\n";
+
+    const auto connection = co_await selection_entry.connect("127.0.0.1", 8000);
+    if (not connection) {
+        std::cout << "[ CLIENT ERROR ] - " << connection.error() << std::endl;
+        co_return;
+    }
+
+    std::cout << "[ CLIENT ] - Connected to server...\n";
+
+    static constexpr int READ_BUFF_LEN = 128;
+
+    char buff[READ_BUFF_LEN];
+
+    for (int i =1; i < 6; ++i) {
+        memset(buff, 0, READ_BUFF_LEN);
+        const bool is_sent = co_await ace::core::read_query(STDIN_FILENO, buff, READ_BUFF_LEN)
+            and co_await connection.send(buff, READ_BUFF_LEN);
+
+        if (is_sent) {
+            std::string msg = "[ CLIENT SENT ] : " + std::string(buff) + "\n";
+            if (co_await ace::core::write_query(STDIN_FILENO, msg.c_str(), msg.size()) < 1)
+                co_return;
+        }
+    }
+
+    co_return;
+}
+
+inline ace::async<> tcp_echo_server() {
+
+    auto bind_entry = co_await ace::futures::io_socket_tcp();
+    if (not bind_entry) {
+        std::cout << "[ SERVER ERROR ] - " << bind_entry.error() << std::endl;
+        co_return;
+    }
+
+    std::cout << "[ SERVER ] - Socket created...\n";
+
+    auto selection_entry = co_await bind_entry.bind("127.0.0.1", 8000);
+    if (not selection_entry) {
+        std::cout << "[ SERVER ERROR ] - " << selection_entry.error() << std::endl;
+        co_return;
+    }
+
+    std::cout << "[ SERVER ] - Socket bint...\n";
+
+    auto listener = co_await selection_entry.listen();
+    if (not listener) {
+        std::cout << "[ SERVER ERROR ] - " << listener.error() << std::endl;
+        co_return;
+    }
+
+    std::cout << "[ SERVER ] - Pending connections...\n";
+
+    const auto connection = co_await listener.accept("127.0.0.1", 8001);
+    if (not connection) {
+        std::cout << "[ SERVER ERROR ] - " << connection.error() << std::endl;
+        co_return;
+    }
+
+    std::cout << "[ SERVER ] - Client [ id: " << connection._fd << " ] connected...\n";
+
+    static constexpr int READ_BUFF_LEN = 128;
+
+    char buff[READ_BUFF_LEN];
+    for (int i =0; i < 5; ++i) {
+        memset(buff, 0, READ_BUFF_LEN);
+        if (co_await connection.recv(buff, READ_BUFF_LEN) > 0)
+            std::cout << "[ SERVER RECEIVED ] : '" << std::string(buff) << "'\n";
     }
 
     co_return;

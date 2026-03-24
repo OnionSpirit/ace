@@ -292,10 +292,9 @@ inline ace::async<> cutex_spawner_permanent(ace::futures::channel_dyn<ace::core:
 }
 
 inline ace::async<> socket_abuser() {
-    auto dummy_sock = co_await ace::futures::io_socket_tcp();
-    const auto sock = co_await dummy_sock.bind("127.0.0.1", 8001);
-
-    const auto connection = co_await sock.connect("127.0.0.1", 8000);
+    auto bind_entry = co_await ace::futures::io_socket_tcp_entry();
+    const auto type_entry = co_await bind_entry.bind("127.0.0.1", 8001);
+    const auto connection = co_await type_entry.connect("127.0.0.1", 8000);
 
     for (int i =1; i < 6; ++i) {
         std::string msg = "Echo message " + std::to_string(i);
@@ -307,10 +306,9 @@ inline ace::async<> socket_abuser() {
 }
 
 inline ace::async<> socket_listener() {
-    auto dummy_sock = co_await ace::futures::io_socket_tcp();
-    const auto sock = co_await dummy_sock.bind("127.0.0.1", 8000);
-
-    auto listener = co_await sock.listen();
+    auto bind_entry = co_await ace::futures::io_socket_tcp_entry();
+    const auto type_entry = co_await bind_entry.bind("127.0.0.1", 8000);
+    const auto listener   = co_await type_entry.listen();
     const auto connection = co_await listener.accept("127.0.0.1", 8001);
 
     char buff[128];

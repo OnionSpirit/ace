@@ -16,8 +16,7 @@ namespace ace::futures {
 
     public:
 
-        DECLARE_FUTURE(join_handler)
-        IMPORT_FUTURE_ENV
+        IMPORT_FUTURE_ENV(join_handler)
 
         join_handler() = default;
 

@@ -18,7 +18,7 @@ namespace ace::futures {
     /**
      * @details Handler for future objects
      */
-    struct future_handler {
+    struct future_handle {
 
         /**
          * @details Future value check function,
@@ -31,15 +31,15 @@ namespace ace::futures {
         /**
          * @details Default destructor
          */
-        virtual ~future_handler() = default;
+        virtual ~future_handle() = default;
     };
 
     /**
-     * @details Traits class future objects
+     * @details Trait class for future objects
      * @tparam derivedT Derived type
      */
     template <typename derivedT>
-    struct future_traits : future_handler {
+    struct future_traits : future_handle {
 
         using derived_future_t = derivedT;
 
@@ -49,8 +49,40 @@ namespace ace::futures {
          * @b operator inside context code,
          * and makes derived class @b awaitable
          */
-        derived_future_t& operator co_await() requires (std::copy_constructible<derived_future_t>) {
-            return *static_cast<derived_future_t*>(this);
+        auto&& operator co_await() {
+            return std::move(*static_cast<derived_future_t*>(this));
+        }
+
+        bool await_ready() override { return false; };
+
+        /**
+         * @details Default destructor
+         */
+        ~future_traits() override = default;
+    };
+
+    #define IMPORT_FUTURE_ENV(future_t)                                \
+        typedef ace::futures::future_traits<future_t> future_traits_t; \
+        using typename future_traits_t::derived_future_t;
+
+
+    /**
+     * @details Traits class busy future objects. (Active polling of awaited tasks)
+     * @tparam derivedT Derived type
+     */
+    template <typename derivedT>
+    struct busy_future_traits : future_handle {
+
+        using derived_busy_future_t = derivedT;
+
+        /**
+         * @details Allows
+         * use created object with @b co_await
+         * @b operator inside context code,
+         * and makes derived class @b awaitable
+         */
+        derived_busy_future_t& operator co_await() requires (std::copy_constructible<derived_busy_future_t>) {
+            return *static_cast<derived_busy_future_t*>(this);
         }
 
         /**
@@ -59,21 +91,20 @@ namespace ace::futures {
          * @b operator inside context code,
          * and makes derived class @b awaitable
          */
-        derived_future_t&& operator co_await() requires (not std::copy_constructible<derived_future_t>) {
+        derived_busy_future_t&& operator co_await() requires (not std::copy_constructible<derived_busy_future_t>) {
             // static_assert(std::move_constructible<derived_future_t>, "At least move constructability required");
-            return std::forward<derived_future_t>(*static_cast<derived_future_t*>(this));
+            return std::forward<derived_busy_future_t>(*static_cast<derived_busy_future_t*>(this));
         }
 
         /**
          * @details Default destructor
          */
-        ~future_traits() override = default;
+        ~busy_future_traits() override = default;
     };
 
-    #define DECLARE_FUTURE(future_t) typedef ace::futures::future_traits<future_t> future_traits_t;
-
-    #define IMPORT_FUTURE_ENV using typename future_traits_t::derived_future_t;
-
+    #define IMPORT_BUSY_FUTURE_ENV(future_t)                                     \
+        typedef ace::futures::busy_future_traits<future_t> busy_future_traits_t; \
+        using typename busy_future_traits_t::derived_busy_future_t;
 
 }
 

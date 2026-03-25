@@ -17,37 +17,6 @@
 
 namespace ace::commands {
 
-    /**
-     * @details Trait class for command objects
-     * @tparam derivedT Derived type
-     */
-    template <typename derivedT>
-    struct command_traits : futures::future_handler {
-
-        using derived_command_t = derivedT;
-
-        /**
-         * @details Allows
-         * use created object with @b co_await
-         * @b operator inside context code,
-         * and makes derived class @b awaitable
-         */
-        auto&& operator co_await() {
-            return std::move(*static_cast<derived_command_t*>(this));
-        }
-
-        bool await_ready() override { return false; };
-
-        /**
-         * @details Default destructor
-         */
-        ~command_traits() override = default;
-    };
-
-    #define DECLARE_COMMAND(command_t) typedef ace::commands::command_traits<command_t> command_traits_t;
-
-    #define IMPORT_COMMAND_ENV using typename command_traits_t::derived_command_t;
-
 }
 
 #endif // ACE_COMMAND_H

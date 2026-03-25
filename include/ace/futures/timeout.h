@@ -4,7 +4,6 @@
 #include <future>
 
 #include "future.h"
-#include "ace/common/selection.h"
 #include "ace/coroutines/context.h"
 #include "ace/core/clock.h"
 
@@ -13,7 +12,7 @@ using namespace std::chrono_literals;
 namespace ace::futures {
 
 
-class timeout : public future_traits<timeout> {
+class timeout : public busy_future_traits<timeout> {
 
     core::duration_t _duration;
     bool _released {false};
@@ -23,8 +22,7 @@ class timeout : public future_traits<timeout> {
 
     public:
 
-        DECLARE_FUTURE(timeout)
-        IMPORT_FUTURE_ENV
+        IMPORT_BUSY_FUTURE_ENV(timeout)
 
         template <typename I, typename T>
         requires std::is_integral_v<I>

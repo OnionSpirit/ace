@@ -15,8 +15,7 @@ namespace ace::futures {
 
     public:
 
-        DECLARE_FUTURE(cutex_future)
-        IMPORT_FUTURE_ENV
+        IMPORT_FUTURE_ENV(cutex_future)
 
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
         std::atomic<int> _users { 0 };
@@ -170,7 +169,6 @@ notify() noexcept {
     // NOTE: Rescheduling waiter if rescheduling mode is on and waiter supports roaming
     else if (_rescheduling)
         waiter._coroutine.promise()._runner_pool = _runner_pool.load(std::memory_order_acquire);
-    waiter.release_future();
     core::runner::reattach(std::move(waiter));
     return true;
 }

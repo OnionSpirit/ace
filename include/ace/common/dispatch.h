@@ -31,11 +31,12 @@ namespace ace::common::dispatch {
     and std::derived_from<futureT, typename futureT::future_traits_t>
     and is_awaitable<futureT, promiseT>;
 
-    template <typename commandT, typename promiseT>
-    concept is_command =
-        requires { typename commandT::command_traits_t; }
-    and std::derived_from<commandT, typename commandT::command_traits_t>
-    and is_awaitable<commandT, promiseT>;
+    template <typename futureT, typename promiseT>
+    concept is_busy_future =
+        requires { typename futureT::busy_future_traits_t; }
+    and std::derived_from<futureT, typename futureT::busy_future_traits_t>
+    and is_awaitable<futureT, promiseT>;
+
 
 }
 #endif //DISPATCH_H

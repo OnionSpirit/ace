@@ -13,10 +13,9 @@
 #include "ace/futures/cutex.h"
 #include "ace/futures/network.h"
 
-struct once_suspend : ace::futures::future_traits<once_suspend> {
+struct once_suspend : ace::futures::busy_future_traits<once_suspend> {
 
-    DECLARE_FUTURE(once_suspend)
-    IMPORT_FUTURE_ENV
+    IMPORT_BUSY_FUTURE_ENV(once_suspend)
 
     // once_suspend() { std::cout << "Future constructed" << '\n'; }
     // once_suspend(const once_suspend& t) { std::cout << "once_suspend copy const" << std::endl; }

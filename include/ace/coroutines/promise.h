@@ -81,7 +81,7 @@ namespace ace::coroutines {
     template <typename return_t>
     struct promise_traits : promise_return_traits<promise_traits<return_t>, return_t> {
 
-        typedef futures::future_handler* future_handler_ptr_t;
+        typedef futures::future_handle* future_handler_ptr_t;
         typedef promise_return_traits<promise_traits, return_t> promise_return_traits_t;
         using promise_return_traits_t::_status;
 
@@ -106,6 +106,22 @@ namespace ace::coroutines {
 
         template <typename futureT>
         requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, return_t>
+        futureT& await_transform(futureT& command) {
+            _status = e_executed;
+            _future = nullptr;
+            return command;
+        }
+
+        template <typename futureT>
+        requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, return_t>
+        futureT&& await_transform(futureT&& command) {
+            _status = e_executed;
+            _future = nullptr;
+            return command;
+        }
+
+        template <typename futureT>
+        requires ace::common::dispatch::is_busy_future<std::remove_reference_t<futureT>, return_t>
         futureT& await_transform(futureT& future) {
             _status = e_executed;
             _future = &future;
@@ -113,27 +129,11 @@ namespace ace::coroutines {
         }
 
         template <typename futureT>
-        requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, return_t>
+        requires ace::common::dispatch::is_busy_future<std::remove_reference_t<futureT>, return_t>
         futureT&& await_transform(futureT&& future) {
             _status = e_executed;
             _future = &future;
             return std::forward<futureT>(future);
-        }
-
-        template <typename commandT>
-        requires ace::common::dispatch::is_command<std::remove_reference_t<commandT>, return_t>
-        commandT& await_transform(commandT& command) {
-            _status = e_executed;
-            _future = nullptr;
-            return command;
-        }
-
-        template <typename commandT>
-        requires ace::common::dispatch::is_command<std::remove_reference_t<commandT>, return_t>
-        commandT&& await_transform(commandT&& command) {
-            _status = e_executed;
-            _future = nullptr;
-            return command;
         }
 
         void* operator new(size_t mem_size) noexcept {

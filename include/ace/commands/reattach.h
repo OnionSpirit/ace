@@ -1,12 +1,12 @@
 #ifndef ACE_COMMANDS_REATTACH_H
 #define ACE_COMMANDS_REATTACH_H
 
-#include "command.h"
+#include "ace/futures/future.h"
 #include "ace/core/runner.h"
 
 namespace ace::commands {
 
-    class reattach : public command_traits<reattach> {
+    class reattach : public futures::future_traits<reattach> {
 
         core::runner* _new_runner {};
 
@@ -15,8 +15,7 @@ namespace ace::commands {
 
     public:
 
-        DECLARE_COMMAND(reattach)
-        IMPORT_COMMAND_ENV
+        IMPORT_FUTURE_ENV(reattach)
 
         reattach() = delete;
         reattach(const reattach&) = delete;

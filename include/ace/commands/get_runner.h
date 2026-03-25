@@ -1,16 +1,15 @@
 #ifndef ACE_COMMANDS_GET_RUNNER_H
 #define ACE_COMMANDS_GET_RUNNER_H
 
-#include "command.h"
+#include "ace/futures/future.h"
 
 namespace ace::commands {
 
-    struct get_runner : command_traits<get_runner> {
+    struct get_runner : futures::future_traits<get_runner> {
 
         core::runner* _ptr {};
 
-        DECLARE_COMMAND(get_runner)
-        IMPORT_COMMAND_ENV
+        IMPORT_FUTURE_ENV(get_runner)
 
         bool await_suspend(auto coroutine) {
             _ptr = core::pool_to_runner(coroutine.promise()._runner_pool);

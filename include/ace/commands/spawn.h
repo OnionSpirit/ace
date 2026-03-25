@@ -1,21 +1,20 @@
 #ifndef ACE_COMMANDS_SPAWN_H
 #define ACE_COMMANDS_SPAWN_H
 
-#include "command.h"
+#include "ace/futures/future.h"
 #include "ace/core/runner.h"
 #include "ace/futures/async_handle.h"
 
 namespace ace::commands {
 
-    class spawn final : public command_traits<spawn> {
+    class spawn final : public futures::future_traits<spawn> {
 
         async<> _task {};
         coroutines::control_block_handle _handle;
 
     public:
 
-        DECLARE_COMMAND(spawn)
-        IMPORT_COMMAND_ENV
+        IMPORT_FUTURE_ENV(spawn)
 
         spawn() = delete;
         spawn(const spawn&) = delete;

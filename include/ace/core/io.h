@@ -19,8 +19,7 @@ namespace ace::core {
     template <typename query_core_t>
     struct io_query : futures::future_traits<query_core_t>, kernel_waiter {
 
-        DECLARE_FUTURE(query_core_t);
-        IMPORT_FUTURE_ENV;
+        IMPORT_FUTURE_ENV(query_core_t);
 
         explicit io_query(const int fd) : _fd(fd) {
             static_assert(is_query<query_core_t>,
@@ -70,8 +69,7 @@ namespace ace::core {
 
         void activate(const int res) override {
             _res = res;
-            _waiter.release_future();
-            core::runner::reattach(std::move(_waiter));
+            runner::reattach(std::move(_waiter));
         }
 
         ~io_query() override = default;

@@ -1,18 +1,17 @@
 #ifndef ACE_COMMANDS_ROAMING_ROAMING_H
 #define ACE_COMMANDS_ROAMING_ROAMING_H
 
-#include "command.h"
+#include "ace/futures/future.h"
 
 namespace ace::commands {
 
-    class roaming : public command_traits<roaming> {
+    class roaming : public futures::future_traits<roaming> {
 
         bool _is_roaming { true };
 
     public:
 
-        DECLARE_COMMAND(roaming)
-        IMPORT_COMMAND_ENV
+        IMPORT_FUTURE_ENV(roaming)
 
         roaming() = default;
         explicit roaming(const bool is_roaming) : _is_roaming{is_roaming} {};

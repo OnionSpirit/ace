@@ -189,14 +189,13 @@ ACE_FUTURE_CHANNEL_META returnT ACE_FUTURE_CHANNEL_SPACE
 
 
 ACE_FUTURE_CHANNEL_META
-class ACE_FUTURE_CHANNEL_SPACE pull_impl : public future_traits<pull_impl> {
+class ACE_FUTURE_CHANNEL_SPACE pull_impl : public busy_future_traits<pull_impl> {
 
     data_t _output_data{};
 
 public:
 
-    DECLARE_FUTURE(pull_impl)
-    IMPORT_FUTURE_ENV
+    IMPORT_BUSY_FUTURE_ENV(pull_impl)
 
     pull_impl() =delete;
 

@@ -24,9 +24,9 @@
 namespace ace::coroutines {
 
     template<typename returnT =void, is_promise_rule promise_rule_t =differed>
-    struct context : futures::future_traits<context<returnT, promise_rule_t>> {
-        DECLARE_FUTURE(context)
-        IMPORT_FUTURE_ENV
+    struct context : futures::busy_future_traits<context<returnT, promise_rule_t>> {
+
+        IMPORT_BUSY_FUTURE_ENV(context)
 
         struct promise_type;
 

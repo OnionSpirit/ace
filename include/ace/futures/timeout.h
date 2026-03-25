@@ -20,28 +20,21 @@ class timeout : public busy_future_traits<timeout> {
     struct timeout_conductor;
     friend timeout_conductor;
 
-    public:
+public:
 
-        IMPORT_BUSY_FUTURE_ENV(timeout)
+    IMPORT_BUSY_FUTURE_ENV(timeout)
 
-        template <typename I, typename T>
-        requires std::is_integral_v<I>
-        explicit timeout(std::chrono::duration<I, T> t) {
-            _duration = std::chrono::duration_cast<std::chrono::milliseconds, uint64_t, std::milli>(t);
-        };
+    template <typename I, typename T>
+    requires std::is_integral_v<I>
+    explicit timeout(std::chrono::duration<I, T> t) {
+        _duration = std::chrono::duration_cast<std::chrono::milliseconds, uint64_t, std::milli>(t);
+    };
 
-        bool await_ready() override { return _released; }
+    bool await_ready() override { return _released; }
 
-        bool await_suspend(auto coroutine);
+    bool await_suspend(auto coroutine);
 
-        void await_resume() {}
-
-        void reset() { _released = false; }
-
-        // TODO: Support detatch later
-        // void detach() { _detached = true; }
-        //
-        // bool is_detached() { return _detached;}
+    void await_resume() {}
 };
 
 struct expire : timeout {

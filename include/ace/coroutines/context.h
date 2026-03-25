@@ -76,7 +76,12 @@ namespace ace::coroutines {
 
         void release_future() {
             _coroutine.promise()._runner_conductor.release();
-            _coroutine.promise()._future = nullptr;
+            _coroutine.promise()._busy_future = nullptr;
+        }
+
+        bool accessed_by_future() {
+            return not _coroutine.promise()._busy_future
+                or _coroutine.promise()._busy_future->await_ready();
         }
 
         control_block_handle observe() {
@@ -222,11 +227,11 @@ namespace ace::coroutines {
 
         bool await_ready() override {
             if (_coroutine.done()) return true;
-            if (_coroutine.promise()._future and not _coroutine.promise()._future->await_ready())
-                return false;
-            release_future();
-            _coroutine.resume();
-            return _coroutine.done();
+            if (accessed_by_future()) {
+                _coroutine.resume();
+                return _coroutine.done();
+            }
+            return false;
         }
 
         template<typename promiseT>
@@ -250,9 +255,9 @@ namespace ace::coroutines {
                 and _coroutine.promise()._status not_eq e_failed
                 and _coroutine.promise()._status not_eq e_finished
                 and _coroutine.promise()._status not_eq e_detached
-                and (not _coroutine.promise()._future or _coroutine.promise()._future->await_ready())
+                and accessed_by_future()
             };
-            // NOTE: Clear future and resume context
+            // NOTE: Releasing future and resume context
             if (is_ready) {
                 release_future();
                 _coroutine.resume();

@@ -12,25 +12,22 @@ using namespace std::chrono_literals;
 namespace ace::futures {
 
 
-class timeout : public busy_future_traits<timeout> {
+class timeout : public future_traits<timeout> {
 
     core::duration_t _duration;
-    bool _released {false};
 
     struct timeout_conductor;
     friend timeout_conductor;
 
 public:
 
-    IMPORT_BUSY_FUTURE_ENV(timeout)
+    IMPORT_FUTURE_ENV(timeout)
 
     template <typename I, typename T>
     requires std::is_integral_v<I>
     explicit timeout(std::chrono::duration<I, T> t) {
         _duration = std::chrono::duration_cast<std::chrono::milliseconds, uint64_t, std::milli>(t);
     };
-
-    bool await_ready() override { return _released; }
 
     bool await_suspend(auto coroutine);
 
@@ -62,10 +59,6 @@ struct ACE_FUTURE_TIMEOUT_SPACE timeout_conductor : conductor_handler_t {
         : _timeout(timeout_) {};
 
     void forward(async<>&& ctx) override {
-        // NOTE: Marking timeout released.
-        // NOTE: Because await_ready() will be called after context retreatment to runner.
-        // NOTE: And retreatment will happen only when timeout actually expired
-        _timeout->_released = true;
         _injected_node = core::clock::subscribe(std::move(ctx), _timeout->_duration);
     }
 

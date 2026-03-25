@@ -94,13 +94,13 @@ namespace ace::coroutines {
 
         std::suspend_always await_transform(const std::suspend_always& e) {
             _status = e_executed;
-            _future = nullptr;
+            _busy_future = nullptr;
             return e;
         }
 
         std::suspend_never await_transform(const std::suspend_never& e) {
             _status = e_executed;
-            _future = nullptr;
+            _busy_future = nullptr;
             return e;
         }
 
@@ -108,7 +108,7 @@ namespace ace::coroutines {
         requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, return_t>
         futureT& await_transform(futureT& command) {
             _status = e_executed;
-            _future = nullptr;
+            _busy_future = nullptr;
             return command;
         }
 
@@ -116,7 +116,7 @@ namespace ace::coroutines {
         requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, return_t>
         futureT&& await_transform(futureT&& command) {
             _status = e_executed;
-            _future = nullptr;
+            _busy_future = nullptr;
             return command;
         }
 
@@ -124,7 +124,7 @@ namespace ace::coroutines {
         requires ace::common::dispatch::is_busy_future<std::remove_reference_t<futureT>, return_t>
         futureT& await_transform(futureT& future) {
             _status = e_executed;
-            _future = &future;
+            _busy_future = &future;
             return future;
         }
 
@@ -132,7 +132,7 @@ namespace ace::coroutines {
         requires ace::common::dispatch::is_busy_future<std::remove_reference_t<futureT>, return_t>
         futureT&& await_transform(futureT&& future) {
             _status = e_executed;
-            _future = &future;
+            _busy_future = &future;
             return std::forward<futureT>(future);
         }
 
@@ -155,7 +155,7 @@ namespace ace::coroutines {
             return _trace_id.value();
         }
 
-        future_handler_ptr_t        _future { nullptr };
+        future_handler_ptr_t        _busy_future { nullptr };
         control_block*              _block  { nullptr };
         std::optional<std::size_t>  _trace_id;
     };
@@ -163,7 +163,7 @@ namespace ace::coroutines {
 #define DECLARE_PROMISE_TRAITS(return_type_t) typedef coroutines::promise_traits<return_type_t> promise_traits_t;
 
 #define IMPORT_PROMISE_TRAITS_ENV               \
-    using promise_traits_t::_future;            \
+    using promise_traits_t::_busy_future;       \
     using promise_traits_t::_block;             \
     using promise_traits_t::_status;
 

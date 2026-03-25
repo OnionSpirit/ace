@@ -31,7 +31,7 @@ namespace ace::commands {
             return false;
         }
 
-        [[nodiscard]] futures::async_handle await_resume() const { return futures::async_handle{_handle}; }
+        futures::async_handle await_resume() const { return futures::async_handle{_handle}; }
 
     };
 

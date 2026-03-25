@@ -4,7 +4,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
-#include "ace/core/io.h"
+#include "ace/core/io_query.h"
 
 namespace ace::futures {
 

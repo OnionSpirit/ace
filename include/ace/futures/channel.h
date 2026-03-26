@@ -81,7 +81,7 @@ public:
      * @param data data to push
      * @return False if inner buffer overflowed
      */
-    bool push(data_t data);
+    bool push(data_t& data);
 
     /**
      * @brief The function pushes data to the channel
@@ -238,8 +238,8 @@ ACE_FUTURE_CHANNEL_MEMBER(void) notify() {
 }
 
 
-ACE_FUTURE_CHANNEL_MEMBER(bool) push(data_t data) {
-    if (_container.push(std::forward<data_t>(data))) [[likely]] {
+ACE_FUTURE_CHANNEL_MEMBER(bool) push(data_t& data) {
+    if (_container.push(std::forward<data_t&>(data))) [[likely]] {
         notify();
         return true;
     }

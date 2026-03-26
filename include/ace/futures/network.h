@@ -113,6 +113,34 @@ namespace ace::futures {
 
     };
 
+    template <typename entry_t>
+    struct connect_query : core::io_query<connect_query<entry_t>> {
+
+        IMPORT_IO_QUERY_ENV(connect_query)
+
+        connect_query() = delete;
+
+        explicit connect_query(entry_t&& entry, const sockaddr* addr, const socklen_t addrlen)
+            : io_query_t(entry._fd)
+            , _entry(entry)
+            , _addr(addr)
+            , _addrlen(addrlen) {}
+
+        bool query(core::kernel_waiter* kwp) const {
+            return core::kernel_controller::connect(kwp, _fd, _addr, _addrlen);
+        }
+
+        [[nodiscard]] io_connection_entity await_resume() const {
+            if (_res > -1) {
+                return io_connection_entity::make_from_entry(&_entry);
+            }
+            return io_connection_entity {};
+        }
+
+        entry_t& _entry;
+        const sockaddr* _addr;
+        const socklen_t _addrlen;
+    };
 
     /**
      * @brief An @b io_entity class to represent listen socket
@@ -218,56 +246,31 @@ namespace ace::futures {
             const int _backlog;
         };
 
-        struct connect_query : core::io_query<connect_query> {
-
-            IMPORT_IO_QUERY_ENV(connect_query)
-
-            connect_query() = delete;
-
-            explicit connect_query(io_selection_entry&& entry, const sockaddr* addr, const socklen_t addrlen)
-                : io_query_t(entry._fd)
-                , _entry(entry)
-                , _addr(addr)
-                , _addrlen(addrlen) {}
-
-            bool query(core::kernel_waiter* kwp) const {
-                return core::kernel_controller::connect(kwp, _fd, _addr, _addrlen);
-            }
-
-            [[nodiscard]] io_connection_entity await_resume() const {
-                if (_res > -1) {
-                    return io_connection_entity::make_from_entry(&_entry);
-                }
-                return io_connection_entity {};
-            }
-
-            io_selection_entry& _entry;
-            const sockaddr* _addr;
-            const socklen_t _addrlen;
-        };
 
         [[nodiscard]] auto listen(const int backlog = 0)
         -> listen_query requires (type_v == SOCK_SEQPACKET or type_v == SOCK_STREAM) {
             return listen_query{ std::move(*this), backlog};
         }
 
+        using connect_query_t = connect_query<io_selection_entry>;
+
         [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen)
-        -> connect_query { return connect_query{ std::move(*this), addr, addrlen}; }
+        -> connect_query_t { return connect_query_t{ std::move(*this), addr, addrlen}; }
 
         [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
-        -> connect_query requires is_inet<domain_v> {
+        -> connect_query_t requires is_inet<domain_v> {
             PEER_SIN.sin_family = domain_v;
             PEER_SIN.sin_port = htons(port);
             PEER_SIN.sin_addr.s_addr = htonl(addr);
-            return connect_query { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
+            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
         }
 
         [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
-        -> connect_query requires is_inet<domain_v> {
+        -> connect_query_t requires is_inet<domain_v> {
             PEER_SIN.sin_family = domain_v;
             PEER_SIN.sin_port = htons(port);
             inet_pton(domain_v, addr.data(), &(PEER_SIN.sin_addr));
-            return connect_query { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
+            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
         }
 
     };
@@ -335,24 +338,25 @@ namespace ace::futures {
             return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&SELF_SIN), sizeof(SELF_SIN)};
         }
 
-        typedef io_selection_entry<domain_v, type_v>::connect_query connect_query;
+        using connect_query_t = connect_query<io_bind_entry>;
+
         [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen)
-        -> connect_query { return connect_query{ std::move(*this), addr, addrlen}; }
+        -> connect_query_t { return connect_query_t{ std::move(*this), addr, addrlen}; }
 
         [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
-        -> connect_query requires is_inet<domain_v> {
+        -> connect_query_t requires is_inet<domain_v> {
             PEER_SIN.sin_family = domain_v;
             PEER_SIN.sin_port = htons(port);
             PEER_SIN.sin_addr.s_addr = htonl(addr);
-            return connect_query { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
+            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
         }
 
         [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
-        -> connect_query requires is_inet<domain_v> {
+        -> connect_query_t requires is_inet<domain_v> {
             PEER_SIN.sin_family = domain_v;
             PEER_SIN.sin_port = htons(port);
             inet_pton(domain_v, addr.data(), &(PEER_SIN.sin_addr));
-            return connect_query { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
+            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
         }
 
     };

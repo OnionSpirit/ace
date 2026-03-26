@@ -223,8 +223,15 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_conductor : conductor_handler_t {
 
     void forward(async<>&& ctx) override { while (not _waiters->push(std::move(ctx))) {}; }
 
-    // TODO: Finish later
-    void cancel() override {  }
+
+    void cancel() override {
+        // NOTE: Reattaching all tasks because mpmc-queue doesn't allow ejection.
+        // NOTE: Target canceled task will be marked as detached and Runner will drop it
+        // TODO: Batch read needed
+        async<> ctx;
+        while (_waiters->pop(ctx))
+            core::runner::reattach(std::move(ctx));
+    }
 
     ~channel_conductor() override = default;
 

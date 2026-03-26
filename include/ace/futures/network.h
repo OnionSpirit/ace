@@ -8,152 +8,8 @@
 
 namespace ace::futures {
 
-    template <typename entry_t>
-    concept is_entity = requires(entry_t q) {
-        { q._fd } -> std::same_as<int>;
-        { q._is_closed } -> std::same_as<bool>;
-    };
-
-    template <typename entry_t>
-    concept is_entry = requires(entry_t q) {
-        { q._fd } -> std::same_as<int>;
-        { q._is_closed } -> std::same_as<bool>;
-        { q.clear() } -> std::same_as<void>;
-    };
-
-
-    /**
-     * @brief Handler for a file descriptor with RAII guard behavior.
-     * The io_entity derived types represents socket state and provides allowed async operations.
-     */
-    template <typename entity_t, typename ... Params>
-    struct io_entity {
-
-        int  _fd;                      ///< Socket file descriptor
-        bool _is_closed;               ///< Socket closed flag
-        std::tuple<Params...> _params; ///< FD related params
-
-        io_entity()
-            : _fd(-1)
-            , _is_closed(true) {}
-
-        io_entity(const int fd, const bool is_closed, std::tuple<Params...> params)
-            : _fd(fd)
-            , _is_closed(is_closed)
-            , _params(params) { };
-
-        template<typename entry_t>
-        static entity_t make_from_entry(entry_t* io) noexcept {
-            int fd = io->_fd;
-            bool is_closed;
-            if (fd > -1) is_closed = io->_is_closed;
-            else is_closed = true;
-            auto params = std::move(io->_params);
-            io->clear();
-            return entity_t {fd, is_closed, params};
-        }
-
-        io_entity(io_entity&& io) noexcept {
-            _fd = io._fd;
-            _is_closed = io._is_closed;
-            _params = std::move(io._params);
-            io._fd = -1;
-            io._is_closed = true;
-        }
-
-        io_entity& operator=(io_entity&& io)  noexcept {
-            _fd = io._fd;
-            _is_closed = io._is_closed;
-            _params = std::move(io._params);
-            io._fd = -1;
-            io._is_closed = true;
-            return *this;
-        }
-
-        [[nodiscard]] auto close()
-            -> core::close_query { _is_closed = true; return core::close_query{_fd}; }
-
-        virtual ~io_entity() = default;
-
-    private:
-
-        /**
-         * @brief RAII io guard
-         */
-        struct io_guard final {
-            io_guard() = delete;
-            explicit io_guard(const int& fd, const bool& closed)
-                : _fd(fd)
-                , _closed(closed) {}
-
-            const int& _fd;
-            const bool& _closed;
-
-            static async<> check_and_close(const bool closed, const int fd) noexcept {
-                if (not closed) {
-                    const int res = co_await core::close_query{fd};
-                    if (res < 0) std::cerr << strerror(res) << std::endl;
-                }
-            }
-
-            static void pending_close(const bool closed, const int fd) noexcept {
-                schedule(check_and_close(closed, fd));
-            }
-
-            ~io_guard() noexcept { pending_close(_closed, _fd); }
-        };
-
-        io_guard _guard {_fd, _is_closed};
-    };
-
-
-#define IMPORT_ERROR_HANDLING                                                                 \
-    operator bool() const { return _fd > -1 or INT_MIN == _fd; }                              \
-    std::string_view error() const {                                                          \
-        if (_fd > -1)                                                                         \
-            throw std::logic_error("can not receive 'error()' on successed 'io_entity'");     \
-        if (INT_MIN == _fd)                                                                   \
-            throw std::logic_error("can not receive 'error()' on idle 'io_entry'");           \
-        return strerror(_fd);                                                                 \
-    }
-
-
-#define IMPORT_IO_ENTITY_ENV(class, ...) typedef io_entity<class, __VA_ARGS__> io_entity_t;   \
-    class(const int fd, const bool is_closed, std::tuple<__VA_ARGS__> params)                 \
-        : io_entity_t(fd, is_closed, params) { };                                             \
-    using io_entity_t::_fd;                                                                   \
-    using io_entity_t::_is_closed;                                                            \
-    using io_entity_t::_params;                                                               \
-    class(class&& io) noexcept                                                                \
-        : io_entity_t(static_cast<io_entity_t>(std::move(io))) { }                            \
-    class& operator = (class&& io) noexcept {                                                 \
-        _fd = io._fd;                                                                         \
-        _is_closed = io._is_closed;                                                           \
-        _params = std::move(io._params);                                                      \
-        io._fd = -1;                                                                          \
-        io._is_closed = true;                                                                 \
-        return *this;                                                                         \
-    }                                                                                         \
-    IMPORT_ERROR_HANDLING
-
-    /**
-     * @brief Consumable mixin modification for the @b io_entity for the one-shot objects.
-     * The @b io_entry derived types are supposed to be invalid after calling any operation of them.
-     * The @b io_entity::make_from_entry(...) operation turns @b io_entry into the invalid state
-     */
     template <typename entity_t>
-    struct io_entry {
-
-        io_entry() = default;
-
-        void clear() noexcept {
-            static_cast<entity_t*>(this)->_is_closed = true;
-            static_cast<entity_t*>(this)->_fd = -1;
-        }
-    };
-
-    template <typename entity_t>
-    using io_net_entity = io_entity<entity_t, sockaddr_in, sockaddr_in>;
+    using io_net_entity = core::io_entity<entity_t, sockaddr_in, sockaddr_in>;
 
     #define IMPORT_IO_NET_ENTITY_ENV(class) IMPORT_IO_ENTITY_ENV(class, sockaddr_in, sockaddr_in);
 
@@ -331,7 +187,7 @@ namespace ace::futures {
     template <int domain_v = -1, int type_v = -1>
     struct io_selection_entry
         : io_net_entity<io_selection_entry<domain_v, type_v>>
-        , io_entry<io_selection_entry<domain_v, type_v>> {
+        , core::io_entry<io_selection_entry<domain_v, type_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_selection_entry)
 
@@ -423,7 +279,7 @@ namespace ace::futures {
     template <int domain_v = -1, int type_v = -1>
     struct io_bind_entry
         : io_net_entity<io_bind_entry<domain_v, type_v>>
-        , io_entry<io_bind_entry<domain_v, type_v>> {
+        , core::io_entry<io_bind_entry<domain_v, type_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_bind_entry)
 

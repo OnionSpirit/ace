@@ -4,7 +4,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
-#include "ace/core/io_query.h"
+#include "ace/core/io.h"
 
 namespace ace::futures {
 
@@ -18,6 +18,9 @@ namespace ace::futures {
 
     inline auto& self_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<0>(p); }
     inline auto& peer_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<1>(p); }
+
+    template <int domain_v>
+    inline constexpr bool is_inet = domain_v == AF_INET or domain_v == AF_INET6;
 
     /**
      * @brief An @b io_entity class to represent connection socket
@@ -108,8 +111,8 @@ namespace ace::futures {
         [[nodiscard]] auto recv(void *buf, const size_t len, const int flags = 0) const
         -> recv_query { return recv_query{_fd, buf, len, flags}; }
 
-        ~io_connection_entity() override = default;
     };
+
 
     /**
      * @brief An @b io_entity class to represent listen socket
@@ -158,7 +161,7 @@ namespace ace::futures {
         -> accept_query { return accept_query{this, addr, addrlen, flags}; }
 
         [[nodiscard]] auto accept(const in_addr_t addr, const uint16_t port)
-        -> accept_query requires (domain_v == AF_INET) {
+        -> accept_query requires is_inet<domain_v> {
             PEER_SIN.sin_family = domain_v;
             PEER_SIN.sin_port = htons(port);
             PEER_SIN.sin_addr.s_addr = htonl(addr);
@@ -166,7 +169,7 @@ namespace ace::futures {
         }
 
         [[nodiscard]] auto accept(const std::string_view addr, const uint16_t port)
-        -> accept_query requires (domain_v == AF_INET) {
+        -> accept_query requires is_inet<domain_v> {
             PEER_SIN.sin_family = domain_v;
             PEER_SIN.sin_port = htons(port);
             inet_pton(domain_v, addr.data(), &(PEER_SIN.sin_addr));
@@ -176,7 +179,6 @@ namespace ace::futures {
         socklen_t peer_sin_size = sizeof(PEER_SIN);
         socklen_t* peer_sin_len_ptr = &peer_sin_size;
 
-        ~io_listener_entity() override = default;
     };
 
 
@@ -253,7 +255,7 @@ namespace ace::futures {
         -> connect_query { return connect_query{ std::move(*this), addr, addrlen}; }
 
         [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
-        -> connect_query requires (domain_v == AF_INET) {
+        -> connect_query requires is_inet<domain_v> {
             PEER_SIN.sin_family = domain_v;
             PEER_SIN.sin_port = htons(port);
             PEER_SIN.sin_addr.s_addr = htonl(addr);
@@ -261,14 +263,13 @@ namespace ace::futures {
         }
 
         [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
-        -> connect_query requires (domain_v == AF_INET) {
+        -> connect_query requires is_inet<domain_v> {
             PEER_SIN.sin_family = domain_v;
             PEER_SIN.sin_port = htons(port);
             inet_pton(domain_v, addr.data(), &(PEER_SIN.sin_addr));
             return connect_query { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
         }
 
-        ~io_selection_entry() override = default;
     };
 
 
@@ -319,7 +320,7 @@ namespace ace::futures {
         -> bind_query { return bind_query { std::move(*this), addr, addrlen}; }
 
         [[nodiscard]] auto bind(const in_addr_t addr, const uint16_t port)
-        -> bind_query requires (domain_v == AF_INET) {
+        -> bind_query requires is_inet<domain_v> {
             SELF_SIN.sin_family = domain_v;
             SELF_SIN.sin_port = htons(port);
             SELF_SIN.sin_addr.s_addr = htonl(addr);
@@ -327,14 +328,13 @@ namespace ace::futures {
         }
 
         [[nodiscard]] auto bind(const std::string_view addr, const uint16_t port)
-        -> bind_query requires (domain_v == AF_INET) {
+        -> bind_query requires is_inet<domain_v> {
             SELF_SIN.sin_family = domain_v;
             SELF_SIN.sin_port = htons(port);
             inet_pton(domain_v, addr.data(), &(SELF_SIN.sin_addr));
             return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&SELF_SIN), sizeof(SELF_SIN)};
         }
 
-        ~io_bind_entry() override = default;
     };
 
 
@@ -389,7 +389,7 @@ namespace ace::futures {
             , _protocol(protocol)
             , _flags(flags) {}
 
-        bool query(core::kernel_waiter* kwp) const {
+        bool query(kernel_waiter* kwp) const {
             core::kernel_controller::socket(kwp, _domain, _type, _protocol, _flags);
             return true;
         }
@@ -411,4 +411,7 @@ namespace ace::futures {
 
 } // end namespace ace::futures
 
+#undef SELF_SIN
+#undef PEER_SIN
+#undef IMPORT_IO_NET_ENTITY_ENV
 #endif //ACE_NET_H

@@ -278,7 +278,9 @@ namespace ace::core {
         return *this;                                                                       \
     }                                                                                       \
                                                                                             \
-    IMPORT_ERROR_HANDLING
+    IMPORT_ERROR_HANDLING                                                                   \
+                                                                                            \
+    ~class() override = default;
 
     /**
      * @brief Mixin modification for the @b io_entity to make it one-shot objects.

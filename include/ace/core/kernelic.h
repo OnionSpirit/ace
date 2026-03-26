@@ -258,7 +258,7 @@ ping() {
 
         if (not waiter->_multishot)
             --_queries;
-        else if (waiter->_on_cancel)
+        else if (waiter->_multishot and waiter->_on_cancel)
             _queries -= cqe->res;
 
         io_uring_cqe_seen(&_ring, cqe);

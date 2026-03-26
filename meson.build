@@ -25,6 +25,18 @@ ace = declare_dependency(include_directories: include_dir, dependencies: [ nukes
 #     install: true,  # Устанавливаем библиотеку (опционально)
 # )
 
+# HTTP echo пример
+executable(
+    'http_echo',
+    sources: ['examples/http_echo.cpp'],
+    cpp_args: [
+        '-std=c++23',
+        '-fexperimental-library',
+        '-Wno-invalid-offsetof',
+    ],
+    dependencies: [ace],
+)
+
 # Опция компиляции тестов
 tests_enabled = get_option('tests')
 

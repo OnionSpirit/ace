@@ -58,19 +58,24 @@ struct channel_abuser {
     ace::async<> channel_sender() {
         once_suspend tests_future;
         co_await tests_future;
-        _channel.push(5);
+        std::string msg = "Ping";
+        _channel.push(msg);
         std::cout << "Channel send complete" << std::endl;
+        const auto received = co_await _channel.pull();
+        std::cout << "Channel received answer. DATA: " << received << std::endl;
         co_return;
     }
 
     ace::async<> channel_receiver() {
-        auto received = co_await _channel.pull();
+        const auto received = co_await _channel.pull();
         std::cout << "Channel receive complete. DATA: " << received << std::endl;
+        _channel << "pong";
+        std::cout << "Channel send answer" << std::endl;
         co_return;
     }
 
 
-    ace::futures::channel_dyn<int> _channel {};
+    ace::futures::channel_dyn<std::string> _channel {};
 };
 
 template<typename Rep, typename Period>

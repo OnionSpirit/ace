@@ -225,6 +225,7 @@ namespace ace::coroutines {
             alignas(ACE_BUS_SIZE) bool _roaming { false };
         };
 
+        // TODO: Fix runner nullptr on chain launching
         bool await_ready() override {
             if (_coroutine.done()) return true;
             if (accessed_by_future()) {

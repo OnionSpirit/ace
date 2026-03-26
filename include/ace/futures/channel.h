@@ -248,9 +248,21 @@ ACE_FUTURE_CHANNEL_MEMBER(bool) push(data_t& data) {
 
 
 ACE_FUTURE_CHANNEL_MEMBER(bool) push(data_t&& data) {
-    if (_container.push(std::forward<data_t&&>(data))) [[likely]] {
-        notify();
-        return true;
+    static constexpr bool is_move_only {
+        (std::is_move_constructible_v<data_t> or std::is_move_assignable_v<data_t>)
+        and not
+        (std::is_copy_constructible_v<data_t> or std::is_copy_assignable_v<data_t>)
+    };
+    if constexpr (is_move_only) {
+        if (_container.push(std::forward<data_t&&>(data))) [[likely]] {
+            notify();
+            return true;
+        }
+    } else {
+        if (data_t instance {std::forward<data_t>(data)}; _container.push(instance)) [[likely]] {
+            notify();
+            return true;
+        }
     }
     return false;
 }

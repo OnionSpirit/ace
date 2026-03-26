@@ -14,15 +14,13 @@ namespace ace::futures {
     concept is_entry = requires(entry_t q) {
         { q._fd } -> std::same_as<int>;
         { q._is_closed } -> std::same_as<bool>;
-        { q._self_sin } -> std::same_as<sockaddr_in>;
-        { q._peer_sin } -> std::same_as<sockaddr_in>;
         { q.clear() } -> std::same_as<void>;
     };
 
 
     /**
-     * @brief Base io class with socket data and guard behavior.
-     * The io_entity derived types represents socket state and provides allowed async operations
+     * @brief Handler for a file descriptor with RAII guard behavior.
+     * The io_entity derived types represents socket state and provides allowed async operations.
      */
     template <typename entity_t>
     struct io_entity {
@@ -183,11 +181,11 @@ namespace ace::futures {
      * <br>Turns out from the @b io_selection_entry as a result of processing its member @b connect(...)
      * or the result of @b io_listener.accept(...) via @b co_await
      */
-    struct io_connection : io_entity<io_connection> {
+    struct io_connection_entity : io_entity<io_connection_entity> {
 
-        IMPORT_IO_ENTITY_ENV(io_connection)
+        IMPORT_IO_ENTITY_ENV(io_connection_entity)
 
-        io_connection() = default;
+        io_connection_entity() = default;
 
         struct send_query : core::io_query<send_query> {
 
@@ -267,7 +265,7 @@ namespace ace::futures {
         [[nodiscard]] auto recv(void *buf, const size_t len, const int flags = 0) const
         -> recv_query { return recv_query{_fd, buf, len, flags}; }
 
-        ~io_connection() override = default;
+        ~io_connection_entity() override = default;
     };
 
     /**
@@ -276,11 +274,11 @@ namespace ace::futures {
      * via @b co_await
      */
     template <int domain_v = -1>
-    struct io_listener : io_entity<io_listener<domain_v>> {
+    struct io_listener_entity : io_entity<io_listener_entity<domain_v>> {
 
-        IMPORT_IO_ENTITY_ENV(io_listener);
+        IMPORT_IO_ENTITY_ENV(io_listener_entity);
 
-        io_listener() = default;
+        io_listener_entity() = default;
 
         struct accept_query : core::io_query<accept_query> {
 
@@ -288,7 +286,7 @@ namespace ace::futures {
 
             accept_query() = delete;
 
-            explicit accept_query(const io_listener* entry, sockaddr* addr, socklen_t* addrlen, const int flags = 0)
+            explicit accept_query(const io_listener_entity* entry, sockaddr* addr, socklen_t* addrlen, const int flags = 0)
                 : io_query_t(entry->_fd)
                 , _entry(entry)
                 , _addr(addr)
@@ -299,14 +297,14 @@ namespace ace::futures {
                 return core::kernel_controller::accept(kwp, _fd, _addr, _addrlen, _flags);
             }
 
-            [[nodiscard]] io_connection await_resume() const {
+            [[nodiscard]] io_connection_entity await_resume() const {
                 if (_res > -1)
-                    return io_connection { _res, false,
+                    return io_connection_entity { _res, false,
                         _entry->_self_sin, *reinterpret_cast<sockaddr_in*>(_addr) };
-                return io_connection {};
+                return io_connection_entity {};
             }
 
-            const io_listener* _entry;
+            const io_listener_entity* _entry;
             sockaddr* _addr;
             socklen_t* _addrlen;
             const int _flags;
@@ -334,7 +332,7 @@ namespace ace::futures {
         socklen_t peer_sin_size = sizeof(_peer_sin);
         socklen_t* peer_sin_len_ptr = &peer_sin_size;
 
-        ~io_listener() override = default;
+        ~io_listener_entity() override = default;
     };
 
 
@@ -364,8 +362,8 @@ namespace ace::futures {
                 return core::kernel_controller::listen(kwp, _fd, _backlog);
             }
 
-            [[nodiscard]] io_listener<domain_v> await_resume() const {
-                return io_listener<domain_v>::make_from_entry(&_entry);
+            [[nodiscard]] io_listener_entity<domain_v> await_resume() const {
+                return io_listener_entity<domain_v>::make_from_entry(&_entry);
             }
 
             io_selection_entry& _entry;
@@ -388,11 +386,11 @@ namespace ace::futures {
                 return core::kernel_controller::connect(kwp, _fd, _addr, _addrlen);
             }
 
-            [[nodiscard]] io_connection await_resume() const {
+            [[nodiscard]] io_connection_entity await_resume() const {
                 if (_res > -1) {
-                    return io_connection::make_from_entry(&_entry);
+                    return io_connection_entity::make_from_entry(&_entry);
                 }
-                return io_connection {};
+                return io_connection_entity {};
             }
 
             io_selection_entry& _entry;

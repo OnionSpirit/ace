@@ -185,27 +185,30 @@ namespace ace::futures {
             const int _flags;
         };
 
+        [[nodiscard]] auto accept()
+        -> accept_query { return accept_query { this, reinterpret_cast<sockaddr*>(&SELF_SIN), &self_sin_size}; }
+
         [[nodiscard]] auto accept(sockaddr* addr, const socklen_t* addrlen, const int flags = 0)
         -> accept_query { return accept_query{this, addr, addrlen, flags}; }
 
         [[nodiscard]] auto accept(const in_addr_t addr, const uint16_t port)
         -> accept_query requires is_inet<domain_v> {
-            PEER_SIN.sin_family = domain_v;
-            PEER_SIN.sin_port = htons(port);
-            PEER_SIN.sin_addr.s_addr = htonl(addr);
-            return accept_query { this, reinterpret_cast<sockaddr*>(&PEER_SIN), &peer_sin_size};
+            SELF_SIN.sin_family = domain_v;
+            SELF_SIN.sin_port = htons(port);
+            SELF_SIN.sin_addr.s_addr = htonl(addr);
+            return accept_query { this, reinterpret_cast<sockaddr*>(&SELF_SIN), &self_sin_size};
         }
 
         [[nodiscard]] auto accept(const std::string_view addr, const uint16_t port)
         -> accept_query requires is_inet<domain_v> {
-            PEER_SIN.sin_family = domain_v;
-            PEER_SIN.sin_port = htons(port);
-            inet_pton(domain_v, addr.data(), &(PEER_SIN.sin_addr));
-            return accept_query { this, reinterpret_cast<sockaddr*>(&PEER_SIN), peer_sin_len_ptr};
+            SELF_SIN.sin_family = domain_v;
+            SELF_SIN.sin_port = htons(port);
+            inet_pton(domain_v, addr.data(), &(SELF_SIN.sin_addr));
+            return accept_query { this, reinterpret_cast<sockaddr*>(&SELF_SIN), self_sin_len_ptr};
         }
 
-        socklen_t peer_sin_size = sizeof(PEER_SIN);
-        socklen_t* peer_sin_len_ptr = &peer_sin_size;
+        socklen_t self_sin_size = sizeof(SELF_SIN);
+        socklen_t* self_sin_len_ptr = &self_sin_size;
 
     };
 

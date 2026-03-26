@@ -335,6 +335,26 @@ namespace ace::futures {
             return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&SELF_SIN), sizeof(SELF_SIN)};
         }
 
+        typedef io_selection_entry<domain_v, type_v>::connect_query connect_query;
+        [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen)
+        -> connect_query { return connect_query{ std::move(*this), addr, addrlen}; }
+
+        [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
+        -> connect_query requires is_inet<domain_v> {
+            PEER_SIN.sin_family = domain_v;
+            PEER_SIN.sin_port = htons(port);
+            PEER_SIN.sin_addr.s_addr = htonl(addr);
+            return connect_query { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
+        }
+
+        [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
+        -> connect_query requires is_inet<domain_v> {
+            PEER_SIN.sin_family = domain_v;
+            PEER_SIN.sin_port = htons(port);
+            inet_pton(domain_v, addr.data(), &(PEER_SIN.sin_addr));
+            return connect_query { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
+        }
+
     };
 
 

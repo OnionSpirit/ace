@@ -1,6 +1,7 @@
 #ifndef ACE_CORE_KERNELIC_H
 #define ACE_CORE_KERNELIC_H
 
+#include <algorithm>
 #include <cstring>
 #include <liburing.h>
 
@@ -253,13 +254,12 @@ ping() {
         if (waiter == nullptr)
             continue;
 
-        if (waiter->_on_cancel) [[unlikely]]
-            _queries -= cqe->res;
-        else [[likely]]
-            waiter->activate(cqe->res);
+        waiter->activate(cqe->res);
 
         if (not waiter->_multishot)
             --_queries;
+        else if (waiter->_on_cancel)
+            _queries -= cqe->res;
 
         io_uring_cqe_seen(&_ring, cqe);
     }

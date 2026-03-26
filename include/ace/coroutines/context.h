@@ -225,9 +225,9 @@ namespace ace::coroutines {
             alignas(ACE_BUS_SIZE) bool _roaming { false };
         };
 
-        // TODO: Fix runner nullptr on chain launching
-        bool await_ready() override {
+        bool await_ready_impl() {
             if (_coroutine.done()) return true;
+            // NOTE: Checking future to be waited
             if (accessed_by_future()) {
                 _coroutine.resume();
                 return _coroutine.done();
@@ -235,8 +235,19 @@ namespace ace::coroutines {
             return false;
         }
 
+        bool await_ready() override {
+            // NOTE: Forcing await_suspend processing to define runner_pool
+            if (_coroutine.promise()._status == e_inited) return false;
+            return await_ready_impl();
+        }
+
         template<typename promiseT>
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
+            if (_coroutine.promise()._status == e_inited) {
+                _coroutine.promise()._runner_pool = outer.promise()._runner_pool;
+                // NOTE: Extra call of await_ready because it was skipped by initial state guard
+                if (await_ready_impl()) return false;
+            }
             // NOTE: No extra checks needed, because function would be called once before suspending.
             // NOTE: Just coping conductor ptr. Outer task will destroy conductor before current promise stack
             outer.promise()._runner_conductor << _coroutine.promise()._runner_conductor;
@@ -250,7 +261,7 @@ namespace ace::coroutines {
         }
 
         returnT awake(promise_touch_result *const _res = nullptr) noexcept {
-            // NOTE: Checking if promise are ready
+            // NOTE: Checking if promise is ready
             const bool is_ready {
                 is_resumable()
                 and _coroutine.promise()._status not_eq e_failed

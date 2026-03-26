@@ -24,6 +24,7 @@ namespace ace::coroutines {
 
     enum promise_touch_result : uint8_t  {
         e_failed,
+        e_inited,
         e_executed,
         e_executed_with_value,
         e_finished,
@@ -52,7 +53,7 @@ namespace ace::coroutines {
 
         alignas(ACE_BUS_SIZE) returnT _return_value {};
 
-        alignas(ACE_BUS_SIZE) promise_touch_result _status { e_executed };
+        alignas(ACE_BUS_SIZE) promise_touch_result _status { e_inited };
 
         auto return_value(returnT return_value) {
             _return_value = std::forward<std::remove_reference_t<returnT>>(return_value);
@@ -73,7 +74,7 @@ namespace ace::coroutines {
 
         alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this);
 
-        alignas(ACE_BUS_SIZE) promise_touch_result _status { e_executed };
+        alignas(ACE_BUS_SIZE) promise_touch_result _status { e_inited };
 
         auto return_void() { return std::suspend_never{}; }
     };

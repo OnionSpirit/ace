@@ -8,7 +8,11 @@
 
 namespace ace::futures {
 
-    // TODO: Make more common options for io_entity and io_query
+    template <typename entry_t>
+    concept is_entity = requires(entry_t q) {
+        { q._fd } -> std::same_as<int>;
+        { q._is_closed } -> std::same_as<bool>;
+    };
 
     template <typename entry_t>
     concept is_entry = requires(entry_t q) {
@@ -22,23 +26,21 @@ namespace ace::futures {
      * @brief Handler for a file descriptor with RAII guard behavior.
      * The io_entity derived types represents socket state and provides allowed async operations.
      */
-    template <typename entity_t>
+    template <typename entity_t, typename ... Params>
     struct io_entity {
 
-        int  _fd;                 ///< Socket file descriptor
-        bool _is_closed;          ///< Socket closed flag
-        sockaddr_in _self_sin{};  ///< Socket self sockaddr
-        sockaddr_in _peer_sin{};  ///< Socket peer sockaddr
+        int  _fd;                      ///< Socket file descriptor
+        bool _is_closed;               ///< Socket closed flag
+        std::tuple<Params...> _params; ///< FD related params
 
         io_entity()
             : _fd(-1)
             , _is_closed(true) {}
 
-        io_entity(const int fd, const bool is_closed, const sockaddr_in self, const sockaddr_in peer)
+        io_entity(const int fd, const bool is_closed, std::tuple<Params...> params)
             : _fd(fd)
             , _is_closed(is_closed)
-            , _self_sin(self)
-            , _peer_sin(peer) { };
+            , _params(params) { };
 
         template<typename entry_t>
         static entity_t make_from_entry(entry_t* io) noexcept {
@@ -46,17 +48,15 @@ namespace ace::futures {
             bool is_closed;
             if (fd > -1) is_closed = io->_is_closed;
             else is_closed = true;
-            sockaddr_in self = io->_self_sin;
-            sockaddr_in peer = io->_peer_sin;
+            auto params = std::move(io->_params);
             io->clear();
-            return entity_t {fd, is_closed, self, peer};
+            return entity_t {fd, is_closed, params};
         }
 
         io_entity(io_entity&& io) noexcept {
             _fd = io._fd;
             _is_closed = io._is_closed;
-            _self_sin = io._self_sin;
-            _peer_sin = io._peer_sin;
+            _params = std::move(io._params);
             io._fd = -1;
             io._is_closed = true;
         }
@@ -64,8 +64,7 @@ namespace ace::futures {
         io_entity& operator=(io_entity&& io)  noexcept {
             _fd = io._fd;
             _is_closed = io._is_closed;
-            _self_sin = io._self_sin;
-            _peer_sin = io._peer_sin;
+            _params = std::move(io._params);
             io._fd = -1;
             io._is_closed = true;
             return *this;
@@ -119,71 +118,59 @@ namespace ace::futures {
     }
 
 
-#define IMPORT_IO_ENTITY_ENV(class) typedef io_entity<class> io_entity_t;                     \
-    class(const int fd, const bool is_closed, const sockaddr_in self, const sockaddr_in peer) \
-        : io_entity_t(fd, is_closed, self, peer) { };                                         \
+#define IMPORT_IO_ENTITY_ENV(class, ...) typedef io_entity<class, __VA_ARGS__> io_entity_t;   \
+    class(const int fd, const bool is_closed, std::tuple<__VA_ARGS__> params)                 \
+        : io_entity_t(fd, is_closed, params) { };                                             \
     using io_entity_t::_fd;                                                                   \
-    using io_entity_t::_self_sin;                                                             \
-    using io_entity_t::_peer_sin;                                                             \
     using io_entity_t::_is_closed;                                                            \
+    using io_entity_t::_params;                                                               \
     class(class&& io) noexcept                                                                \
         : io_entity_t(static_cast<io_entity_t>(std::move(io))) { }                            \
     class& operator = (class&& io) noexcept {                                                 \
         _fd = io._fd;                                                                         \
         _is_closed = io._is_closed;                                                           \
-        _self_sin = io._self_sin;                                                             \
-        _peer_sin = io._peer_sin;                                                             \
+        _params = std::move(io._params);                                                      \
         io._fd = -1;                                                                          \
         io._is_closed = true;                                                                 \
         return *this;                                                                         \
     }                                                                                         \
     IMPORT_ERROR_HANDLING
 
-
-
-    // TODO: Use memmove instead of params on commonized io_entry
     /**
-     * @brief Consumable modification of the @b io_entity for the one-shot objects.
+     * @brief Consumable mixin modification for the @b io_entity for the one-shot objects.
      * The @b io_entry derived types are supposed to be invalid after calling any operation of them.
      * The @b io_entity::make_from_entry(...) operation turns @b io_entry into the invalid state
      */
-    template <typename entry_t>
-    struct io_entry : io_entity<entry_t> {
+    template <typename entity_t>
+    struct io_entry {
 
         io_entry() = default;
 
-        io_entry(const int fd, const bool is_closed, const sockaddr_in self, const sockaddr_in peer)
-            : io_entity<entry_t>(fd, is_closed, self, peer) { };
-
-        using io_entity<entry_t>::_fd;
-        using io_entity<entry_t>::_is_closed;
-
         void clear() noexcept {
-            _is_closed = true;
-            _fd = -1;
+            static_cast<entity_t*>(this)->_is_closed = true;
+            static_cast<entity_t*>(this)->_fd = -1;
         }
     };
 
-    // TODO: Use memmove instead of params on commonized io_entry
-    // TODO: Try to make it mixin
-    #define IMPORT_IO_ENTRY_ENV(class) typedef io_entry<class> io_entry_t;                       \
-    class(const int fd, const bool is_closed, const sockaddr_in self, const sockaddr_in peer)    \
-        : io_entry_t(fd, is_closed, self, peer) { };                                             \
-    using io_entry_t::_fd;                                                                       \
-    using io_entry_t::_self_sin;                                                                 \
-    using io_entry_t::_peer_sin;                                                                 \
-    using io_entry_t::_is_closed;                                                                \
-    IMPORT_ERROR_HANDLING
+    template <typename entity_t>
+    using io_net_entity = io_entity<entity_t, sockaddr_in, sockaddr_in>;
 
+    #define IMPORT_IO_NET_ENTITY_ENV(class) IMPORT_IO_ENTITY_ENV(class, sockaddr_in, sockaddr_in);
+
+    #define SELF_SIN std::get<0>(_params)
+    #define PEER_SIN std::get<1>(_params)
+
+    inline auto& self_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<0>(p); }
+    inline auto& peer_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<1>(p); }
 
     /**
      * @brief An @b io_entity class to represent connection socket
      * <br>Turns out from the @b io_selection_entry as a result of processing its member @b connect(...)
      * or the result of @b io_listener.accept(...) via @b co_await
      */
-    struct io_connection_entity : io_entity<io_connection_entity> {
+    struct io_connection_entity : io_net_entity<io_connection_entity> {
 
-        IMPORT_IO_ENTITY_ENV(io_connection_entity)
+        IMPORT_IO_NET_ENTITY_ENV(io_connection_entity)
 
         io_connection_entity() = default;
 
@@ -274,9 +261,9 @@ namespace ace::futures {
      * via @b co_await
      */
     template <int domain_v = -1>
-    struct io_listener_entity : io_entity<io_listener_entity<domain_v>> {
+    struct io_listener_entity : io_net_entity<io_listener_entity<domain_v>> {
 
-        IMPORT_IO_ENTITY_ENV(io_listener_entity);
+        IMPORT_IO_NET_ENTITY_ENV(io_listener_entity);
 
         io_listener_entity() = default;
 
@@ -298,9 +285,10 @@ namespace ace::futures {
             }
 
             [[nodiscard]] io_connection_entity await_resume() const {
-                if (_res > -1)
-                    return io_connection_entity { _res, false,
-                        _entry->_self_sin, *reinterpret_cast<sockaddr_in*>(_addr) };
+                if (_res > -1) {
+                    peer_sin_from(_entry->_params) = *reinterpret_cast<sockaddr_in*>(_addr);
+                    return io_connection_entity { _res, false, _entry->_params };
+                }
                 return io_connection_entity {};
             }
 
@@ -315,21 +303,21 @@ namespace ace::futures {
 
         [[nodiscard]] auto accept(const in_addr_t addr, const uint16_t port)
         -> accept_query requires (domain_v == AF_INET) {
-            _peer_sin.sin_family = domain_v;
-            _peer_sin.sin_port = htons(port);
-            _peer_sin.sin_addr.s_addr = htonl(addr);
-            return accept_query { this, reinterpret_cast<sockaddr*>(&_peer_sin), &peer_sin_size};
+            PEER_SIN.sin_family = domain_v;
+            PEER_SIN.sin_port = htons(port);
+            PEER_SIN.sin_addr.s_addr = htonl(addr);
+            return accept_query { this, reinterpret_cast<sockaddr*>(&PEER_SIN), &peer_sin_size};
         }
 
         [[nodiscard]] auto accept(const std::string_view addr, const uint16_t port)
         -> accept_query requires (domain_v == AF_INET) {
-            _peer_sin.sin_family = domain_v;
-            _peer_sin.sin_port = htons(port);
-            inet_pton(domain_v, addr.data(), &(_peer_sin.sin_addr));
-            return accept_query { this, reinterpret_cast<sockaddr*>(&_peer_sin), peer_sin_len_ptr};
+            PEER_SIN.sin_family = domain_v;
+            PEER_SIN.sin_port = htons(port);
+            inet_pton(domain_v, addr.data(), &(PEER_SIN.sin_addr));
+            return accept_query { this, reinterpret_cast<sockaddr*>(&PEER_SIN), peer_sin_len_ptr};
         }
 
-        socklen_t peer_sin_size = sizeof(_peer_sin);
+        socklen_t peer_sin_size = sizeof(PEER_SIN);
         socklen_t* peer_sin_len_ptr = &peer_sin_size;
 
         ~io_listener_entity() override = default;
@@ -341,11 +329,13 @@ namespace ace::futures {
      * <br>Turns out from the @b io_bind_entry as a result of processing its member @b bind(...) via @b co_await
      */
     template <int domain_v = -1, int type_v = -1>
-    struct io_selection_entry : io_entry<io_selection_entry<domain_v, type_v>> {
+    struct io_selection_entry
+        : io_net_entity<io_selection_entry<domain_v, type_v>>
+        , io_entry<io_selection_entry<domain_v, type_v>> {
 
-        IMPORT_IO_ENTRY_ENV(io_selection_entry)
+        IMPORT_IO_NET_ENTITY_ENV(io_selection_entry)
 
-        io_selection_entry() : io_entry_t() {};
+        io_selection_entry() : io_entity_t() {};
 
         struct listen_query : core::io_query<listen_query> {
 
@@ -408,18 +398,18 @@ namespace ace::futures {
 
         [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
         -> connect_query requires (domain_v == AF_INET) {
-            _peer_sin.sin_family = domain_v;
-            _peer_sin.sin_port = htons(port);
-            _peer_sin.sin_addr.s_addr = htonl(addr);
-            return connect_query { std::move(*this), reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(_peer_sin)};
+            PEER_SIN.sin_family = domain_v;
+            PEER_SIN.sin_port = htons(port);
+            PEER_SIN.sin_addr.s_addr = htonl(addr);
+            return connect_query { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
         }
 
         [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
         -> connect_query requires (domain_v == AF_INET) {
-            _peer_sin.sin_family = domain_v;
-            _peer_sin.sin_port = htons(port);
-            inet_pton(domain_v, addr.data(), &(_peer_sin.sin_addr));
-            return connect_query { std::move(*this), reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(_peer_sin)};
+            PEER_SIN.sin_family = domain_v;
+            PEER_SIN.sin_port = htons(port);
+            inet_pton(domain_v, addr.data(), &(PEER_SIN.sin_addr));
+            return connect_query { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
         }
 
         ~io_selection_entry() override = default;
@@ -431,15 +421,17 @@ namespace ace::futures {
      * <br>Turns out from @b io_socket_entry as a result of processing it via @b co_await
      */
     template <int domain_v = -1, int type_v = -1>
-    struct io_bind_entry : io_entry<io_bind_entry<domain_v, type_v>> {
+    struct io_bind_entry
+        : io_net_entity<io_bind_entry<domain_v, type_v>>
+        , io_entry<io_bind_entry<domain_v, type_v>> {
 
-        IMPORT_IO_ENTRY_ENV(io_bind_entry)
+        IMPORT_IO_NET_ENTITY_ENV(io_bind_entry)
 
-        io_bind_entry() : io_entry_t() {};
+        io_bind_entry() : io_entity_t() {};
 
         explicit io_bind_entry(const int fd) {
-            io_entry_t::_fd = fd;
-            if (io_entry_t::_fd > -1) io_entry_t::_is_closed = false;
+            io_entity_t::_fd = fd;
+            if (io_entity_t::_fd > -1) io_entity_t::_is_closed = false;
         }
 
         struct bind_query : core::io_query<bind_query> {
@@ -472,18 +464,18 @@ namespace ace::futures {
 
         [[nodiscard]] auto bind(const in_addr_t addr, const uint16_t port)
         -> bind_query requires (domain_v == AF_INET) {
-            _self_sin.sin_family = domain_v;
-            _self_sin.sin_port = htons(port);
-            _self_sin.sin_addr.s_addr = htonl(addr);
-            return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&_self_sin), sizeof(_self_sin)};
+            SELF_SIN.sin_family = domain_v;
+            SELF_SIN.sin_port = htons(port);
+            SELF_SIN.sin_addr.s_addr = htonl(addr);
+            return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&SELF_SIN), sizeof(SELF_SIN)};
         }
 
         [[nodiscard]] auto bind(const std::string_view addr, const uint16_t port)
         -> bind_query requires (domain_v == AF_INET) {
-            _self_sin.sin_family = domain_v;
-            _self_sin.sin_port = htons(port);
-            inet_pton(domain_v, addr.data(), &(_self_sin.sin_addr));
-            return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&_self_sin), sizeof(_self_sin)};
+            SELF_SIN.sin_family = domain_v;
+            SELF_SIN.sin_port = htons(port);
+            inet_pton(domain_v, addr.data(), &(SELF_SIN.sin_addr));
+            return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&SELF_SIN), sizeof(SELF_SIN)};
         }
 
         ~io_bind_entry() override = default;

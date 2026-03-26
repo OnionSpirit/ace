@@ -86,17 +86,18 @@ namespace ace::core {
         ~io_query() override = default;
     };
 
-#define IMPORT_IO_QUERY_ENV(class)                 \
-    typedef ace::core::io_query<class> io_query_t; \
-    using io_query_t::_fd;                         \
-    using io_query_t::_res;
+#define IMPORT_IO_QUERY_ENV(class)                    \
+    typedef ace::core::io_query<class> io_query_t;    \
+    using io_query_t::_fd;                            \
+    using io_query_t::_res;                           \
+    ~class() override = default;
 
 
     struct read_query : io_query<read_query> {
 
         read_query() = delete;
 
-        explicit read_query(const int fd, void *buf, const unsigned nbytes, const uint64_t offset = 0)
+        [[nodiscard]] explicit read_query(const int fd, void *buf, const unsigned nbytes, const uint64_t offset = 0)
             : io_query(fd)
             , _fd(fd)
             , _buf(buf)

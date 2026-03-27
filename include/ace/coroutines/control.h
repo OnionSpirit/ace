@@ -75,7 +75,7 @@ namespace ace::coroutines {
         ~control_block_handle() { release(); }
 
         void cancel() {
-            if (done() or not _block->_control_conductor) [[unlikely]]
+            if (is_idle() or not _block->_control_conductor or done()) [[unlikely]]
                 return;
             _block->_control_conductor->cancel();
             release();

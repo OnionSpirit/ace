@@ -20,7 +20,7 @@ namespace ace::commands {
         spawn(const spawn&) = delete;
         spawn& operator=(const spawn&) = delete;
 
-        explicit spawn(async<>&& new_task)
+        [[nodiscard]] explicit spawn(async<>&& new_task)
             : _task(std::move(new_task))
             , _handle(_task.observe()) {}
 

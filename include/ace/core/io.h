@@ -7,7 +7,7 @@ namespace ace::core {
 
     template <typename query_t>
     concept is_query = requires(query_t q, kernel_waiter* kwp) {
-        { q.query(kwp) } -> std::same_as<bool>;
+        { q.setup_query(kwp) } -> std::same_as<bool>;
     };
 
     template <typename entry_t>
@@ -34,7 +34,7 @@ namespace ace::core {
 
         explicit io_query(const int fd) : _fd(fd) {
             static_assert(is_query<query_core_t>,
-                "Query object shall implement 'bool query(ace::core::kernel_waiter*)' method");
+                "Query object shall implement 'bool setup_query(ace::core::kernel_waiter*)' method");
         }
 
         struct io_socket_query_conductor : conductor_handler_t {
@@ -71,14 +71,14 @@ namespace ace::core {
             if (INT_MIN == _fd)
                 throw std::logic_error("Trying to make query on idle 'io_entry' [Query object type: "
                     + std::string{typeid(query_core_t).name()} + "]");
-            if (static_cast<query_core_t*>(this)->query(this)) {
+            if (static_cast<query_core_t*>(this)->setup_query(this)) {
                 coroutine.promise()._runner_conductor = io_socket_query_conductor{this};
                 return true;
             }
             return false;
         }
 
-        void activate(const int res) override {
+        void on_result(const int res) override {
             _res = res;
             runner::reattach(std::move(_waiter));
         }
@@ -104,7 +104,7 @@ namespace ace::core {
             , _nbytes(nbytes)
             , _offset(offset) {}
 
-        bool query(kernel_waiter* kwp) const {
+        bool setup_query(kernel_waiter* kwp) const {
             return kernel_controller::read(kwp, _fd, _buf, _nbytes, _offset);
         }
 
@@ -132,7 +132,7 @@ namespace ace::core {
             , _nbytes(nbytes)
             , _offset(offset) {}
 
-        bool query(kernel_waiter* kwp) const {
+        bool setup_query(kernel_waiter* kwp) const {
             return ace::core::kernel_controller::write(kwp, _fd, _buf, _nbytes, _offset);
         }
 
@@ -153,7 +153,7 @@ namespace ace::core {
 
         explicit close_query(const int fd) : io_query_t(fd) {}
 
-        bool query(kernel_waiter* kwp) const noexcept {
+        bool setup_query(kernel_waiter* kwp) const noexcept {
             return kernel_controller::close(kwp, _fd);
         }
 

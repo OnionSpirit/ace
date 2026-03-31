@@ -43,7 +43,7 @@ namespace ace::futures {
                 , _len(len)
                 , _flags(flags) {}
 
-            bool query(kernel_waiter* kwp) const {
+            bool setup_query(kernel_waiter* kwp) const {
                 return core::kernel_controller::send(kwp, _fd, _buf, _len, _flags);
             }
 
@@ -67,7 +67,7 @@ namespace ace::futures {
                 , _addr(addr)
                 , _addrlen(addrlen) {}
 
-            bool query(kernel_waiter* kwp) const {
+            bool setup_query(kernel_waiter* kwp) const {
                 return core::kernel_controller::sendto(kwp, _fd, _buf, _len, _flags, _addr, _addrlen);
             }
 
@@ -90,7 +90,7 @@ namespace ace::futures {
                 , _len(len)
                 , _flags(flags) {}
 
-            bool query(kernel_waiter* kwp) const {
+            bool setup_query(kernel_waiter* kwp) const {
                 return core::kernel_controller::recv(kwp, _fd, _buf, _len, _flags);
             }
 
@@ -126,7 +126,7 @@ namespace ace::futures {
             , _addr(addr)
             , _addrlen(addrlen) {}
 
-        bool query(core::kernel_waiter* kwp) const {
+        bool setup_query(core::kernel_waiter* kwp) const {
             return core::kernel_controller::connect(kwp, _fd, _addr, _addrlen);
         }
 
@@ -167,7 +167,7 @@ namespace ace::futures {
                 , _addrlen(addrlen)
                 , _flags(flags) {}
 
-            bool query(core::kernel_waiter* kwp) const {
+            bool setup_query(core::kernel_waiter* kwp) const {
                 return core::kernel_controller::accept(kwp, _fd, _addr, _addrlen, _flags);
             }
 
@@ -237,7 +237,7 @@ namespace ace::futures {
                 , _entry(entry)
                 , _backlog(backlog) {}
 
-            bool query(core::kernel_waiter* kwp) const {
+            bool setup_query(core::kernel_waiter* kwp) const {
                 return core::kernel_controller::listen(kwp, _fd, _backlog);
             }
 
@@ -309,7 +309,7 @@ namespace ace::futures {
                 , _addr(addr)
                 , _addrlen(addrlen) {}
 
-            bool query(core::kernel_waiter* kwp) const {
+            bool setup_query(core::kernel_waiter* kwp) const {
                 return core::kernel_controller::bind(kwp, _fd, _addr, _addrlen);
             }
 
@@ -384,7 +384,7 @@ namespace ace::futures {
             : io_query_t(0)
             , _flags(flags) {}
 
-        bool query(core::kernel_waiter* kwp) const {
+        bool setup_query(core::kernel_waiter* kwp) const {
             core::kernel_controller::socket(kwp, domain_v, type_v, protocol_v, _flags);
             return true;
         }
@@ -416,7 +416,7 @@ namespace ace::futures {
             , _protocol(protocol)
             , _flags(flags) {}
 
-        bool query(kernel_waiter* kwp) const {
+        bool setup_query(kernel_waiter* kwp) const {
             core::kernel_controller::socket(kwp, _domain, _type, _protocol, _flags);
             return true;
         }

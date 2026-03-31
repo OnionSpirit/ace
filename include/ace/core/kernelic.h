@@ -46,7 +46,7 @@ namespace ace::core {
          * @brief Activates waiter with CQE result
          * @param res CQE result value
          */
-        virtual void activate(int res) = 0;
+        virtual void on_result(int res) = 0;
 
         bool _on_cancel = false; ///< Next response will indicate count of canceled operations
         bool _multishot = false; ///< Mark if multishot is enabled
@@ -254,7 +254,7 @@ ping() {
         if (waiter == nullptr)
             continue;
 
-        waiter->activate(cqe->res);
+        waiter->on_result(cqe->res);
 
         if (not waiter->_multishot)
             --_queries;

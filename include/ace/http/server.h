@@ -23,8 +23,9 @@ concept ws_handler = requires(H h, ws::connection conn, request req) {
 };
 
 struct server_config {
-    uint16_t port    = 8080;
-    int      backlog = 128;
+    in_addr_t addr    = INADDR_LOOPBACK;
+    uint16_t  port    = 8080;
+    int       backlog = 128;
 };
 
 /**
@@ -41,7 +42,7 @@ struct server_config {
  * @endcode
  */
 class server {
-    router                       _router;
+    router                        _router;
     std::vector<detail::ws_route> _ws_routes;
     server_config                 _cfg;
 
@@ -66,7 +67,7 @@ public:
      */
     [[nodiscard]] ace::async<> listen() {
         auto sock  = co_await ace::futures::io_socket_tcp{};
-        auto bound = co_await sock.bind(INADDR_ANY, _cfg.port);
+        auto bound = co_await sock.bind(_cfg.addr, _cfg.port);
         auto lstnr = co_await bound.listen(_cfg.backlog);
 
         while (true) {

@@ -35,19 +35,58 @@ struct ws_echo {
     }
 };
 
-ace::async<> run() {
-    ace::http::server s{{ .port = 8080 }};
+struct lifetime_watchdog {
 
-    s.get("/ping",        ping_handler{})
-     .post("/echo",       echo_handler{})
-     .get("/hello/:name", greet_handler{})
-     .ws("/ws",           ws_echo{});
+    std::string _name;
 
-    std::cout << "Listening on http://localhost:8080\n";
-    co_await s.listen();
+    explicit lifetime_watchdog(const std::string_view name) : _name(name) {
+        std::cout << _name << " constructed" << std::endl;
+    };
+
+    ~lifetime_watchdog() { std::cout << _name << " destroyed" << std::endl; }
+};
+
+ace::async<> commandor(ace::futures::async_handle loop) {
+    const auto _check = std::make_unique<lifetime_watchdog>("<commandor>");
+    static constexpr int READ_BUFF_LEN = 128;
+    char buff[READ_BUFF_LEN] = {};
+    while (true) {
+        if (co_await ace::core::read_query(STDIN_FILENO, buff, READ_BUFF_LEN) < 0) {
+            std::cout << _check->_name << " : failed to collect input" << std::endl;
+            loop.cancel();
+            co_return;
+        }
+        if (std::string_view{buff} == ":q\n") {
+            std::cout << _check->_name << " : exit command received...\n";
+            loop.cancel();
+            co_return;
+        }
+        bzero(buff, READ_BUFF_LEN);
+    }
+}
+
+
+ace::async<> co_main() {
+    const auto _check = std::make_unique<lifetime_watchdog>("<co_main>");
+
+    const ace::http::server_config config {
+        .addr = inet_network("127.0.0.1"),
+        .port = 8080
+    };
+
+    ace::http::server serv {config};
+
+    serv.get("/ping",        ping_handler{})
+        .post("/echo",       echo_handler{})
+        .get("/hello/:name", greet_handler{})
+        .ws("/ws",           ws_echo{});
+
+    std::cout << _check->_name << " : start listening on http://" << inet_ntoa(*(in_addr*)&config.addr) << ":" << config.port << '\n';
+    const auto loop = co_await ace::spawn(serv.listen());
+    ace::schedule(commandor(loop));
 }
 
 int main() {
-    ace::schedule(run());
+    ace::schedule(co_main());
     ace::run();
 }

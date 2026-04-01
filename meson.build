@@ -34,7 +34,7 @@ executable(
         '-fexperimental-library',
         '-Wno-invalid-offsetof',
     ],
-    dependencies: [ace],
+    dependencies: [ace_dep],
 )
 
 # Опция компиляции тестов

@@ -1,4 +1,4 @@
-project('ace', 'cpp', default_options: ['cpp_std=c++23'])
+project('ace', 'cpp', default_options: ['cpp_std=c++23'], version : '0.9.9')
 
 # Дериктория с файлами библиотеки
 include_dir = include_directories(['include'])
@@ -8,15 +8,11 @@ cmake = import('cmake')
 nukes = cmake.subproject('nukes')
 nukes = nukes.dependency('nukes')
 
-# Объявляем mimalloc
-mimalloc_dep = dependency('mimalloc', fallback : ['mimalloc', 'mimalloc_dep'], required : true)
-
 # Подключаем liburing
 liburing_dep = dependency('liburing')
 
 # Декларируем интерфейсную библеотеку
 ace = declare_dependency(include_directories: include_dir, dependencies: [ nukes, liburing_dep ])
-
 
 # # Создаем артифактную библиотеку
 # example_lib = library(
@@ -30,7 +26,9 @@ tests_enabled = get_option('tests')
 
 if tests_enabled
   message('Tests requested')
-  gtest_dep = dependency('gtest', main: true, fallback: ['gtest', 'gtest_dep'])
+  # Объявляем mimalloc
+  mimalloc_dep = dependency('mimalloc', fallback : ['mimalloc', 'mimalloc_dep'], required : true)
+  gtest_dep = dependency('gtest', main: true, fallback: ['gtest', 'gtest_dep'], required : true)
   ace_mimalloc = declare_dependency(include_directories: include_dir, dependencies: [ nukes, mimalloc_dep, liburing_dep ])
 
   test_sources = files(
@@ -40,16 +38,28 @@ if tests_enabled
     'tests/main.cpp',
   )
 
+  # NOTE: Defining compiler-dependent args
+  compiler = meson.get_compiler('cpp')
+  compiler = compiler.get_argument_syntax()
+
+  compile_args = []
+  if compiler == 'gcc'
+    compile_args = ['-std=c++23',
+                    '-Wno-invalid-offsetof',
+                    '-Mmodules',
+                    '-fconcepts-diagnostics-depth=2']
+  elif compiler == 'clang'
+    compile_args = ['-std=c++23',
+                    '-fexperimental-library',
+                    '-Wno-invalid-offsetof']
+  endif
+
+  message('Arguments for "@0@" compiler: '.format(compiler), compile_args)
+
   test_executable = executable (
       'ace_tests',
       sources: test_sources,
-      cpp_args: [
-        '-std=c++23',
-        '-fexperimental-library',
-        '-Wno-invalid-offsetof',
-#        '-Mmodules',
-#        '-fconcepts-diagnostics-depth=2'
-      ],
+      cpp_args: compile_args,
       dependencies: [
           gtest_dep,
           ace_mimalloc,

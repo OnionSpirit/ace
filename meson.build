@@ -14,13 +14,6 @@ liburing_dep = dependency('liburing')
 # Декларируем интерфейсную библеотеку
 ace = declare_dependency(include_directories: include_dir, dependencies: [ nukes, liburing_dep ])
 
-# # Создаем артифактную библиотеку
-# example_lib = library(
-#     'example_lib',  # Имя библиотеки
-#     include_directories: include_dir,  # Указываем директорию с заголовками
-#     install: true,  # Устанавливаем библиотеку (опционально)
-# )
-
 # Опция компиляции тестов
 tests_enabled = get_option('tests')
 
@@ -54,7 +47,7 @@ if tests_enabled
                     '-Wno-invalid-offsetof']
   endif
 
-  message('Arguments for "@0@" compiler: '.format(compiler), compile_args)
+  message('Arguments for @0@ compiler: '.format(compiler), compile_args)
 
   test_executable = executable (
       'ace_tests',

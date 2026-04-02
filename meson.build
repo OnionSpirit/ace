@@ -15,7 +15,7 @@ mimalloc_dep = dependency('mimalloc', fallback : ['mimalloc', 'mimalloc_dep'], r
 liburing_dep = dependency('liburing')
 
 # Декларируем интерфейсную библеотеку
-ace_dep = declare_dependency(include_directories: include_dir, dependencies: [ nukes, liburing_dep ])
+ace = declare_dependency(include_directories: include_dir, dependencies: [ nukes, liburing_dep ])
 
 
 # # Создаем артифактную библиотеку
@@ -31,7 +31,7 @@ tests_enabled = get_option('tests')
 if tests_enabled
   message('Tests requested')
   gtest_dep = dependency('gtest', main: true, fallback: ['gtest', 'gtest_dep'])
-  ace_dep_mimalloc = declare_dependency(include_directories: include_dir, dependencies: [ nukes, mimalloc_dep, liburing_dep ])
+  ace_mimalloc = declare_dependency(include_directories: include_dir, dependencies: [ nukes, mimalloc_dep, liburing_dep ])
 
   test_sources = files(
     'tests/environment.h',
@@ -52,7 +52,7 @@ if tests_enabled
       ],
       dependencies: [
           gtest_dep,
-          ace_dep_mimalloc,
+          ace_mimalloc,
       ],
   )
 

@@ -470,12 +470,9 @@ ACE_FUTURE_CHANNEL_ST_MEMBER(void) notify() {
 
 
 ACE_FUTURE_CHANNEL_ST_MEMBER(bool) push(data_t& data) {
-    if (not _container.empty()) [[likely]] {
-        _container.push(std::forward<data_t&>(data));
-        notify();
-        return true;
-    }
-    return false;
+    _container.push(std::forward<data_t&>(data));
+    notify();
+    return true;
 }
 
 
@@ -532,12 +529,12 @@ ACE_FUTURE_CHANNEL_ST_MEMBER(bool) pull_impl::await_ready() {
 }
 
 ACE_FUTURE_CHANNEL_ST_MEMBER(bool) pull_impl::await_suspend(auto ctx) {
-    if (not _container->empty()) {
-        _output_data = std::move(_container->front());
-        _container->pop();
+    if (_container->empty()) {
         ctx.promise()._runner_conductor = channel_conductor{_waiters};
         return true;
     }
+    _output_data = std::move(_container->front());
+    _container->pop();
     return false;
 }
 

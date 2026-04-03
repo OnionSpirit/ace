@@ -20,7 +20,9 @@
 #include "ace/common/terms.h"
 
 
-// ToDo: yield операцию преретащить в генератор/ пусть генератор имеет перегрузку итераторов чтобы запускать его в цикле for
+// ToDo: yield операцию надо преретащить в генератор,
+// пусть генератор имеет перегрузку итераторов,
+// чтобы запускать его в цикле for
 namespace ace::coroutines {
 
     template<typename returnT =void, is_promise_rule promise_rule_t =differed>

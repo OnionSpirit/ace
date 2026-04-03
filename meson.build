@@ -1,4 +1,9 @@
-project('ace', 'cpp', default_options: ['cpp_std=c++23'], version : '0.9.9')
+project(
+    'ace',
+    'cpp',
+    default_options: ['cpp_std=c++23'],
+    version : '0.9.9'
+)
 
 # Дериктория с файлами библиотеки
 include_dir = include_directories(['include'])
@@ -12,7 +17,11 @@ nukes = nukes.dependency('nukes')
 liburing_dep = dependency('liburing')
 
 # Декларируем интерфейсную библеотеку
-ace = declare_dependency(include_directories: include_dir, dependencies: [ nukes, liburing_dep ])
+ace_dep = declare_dependency(
+    include_directories: include_dir,
+    dependencies: [ nukes, liburing_dep ]
+)
+meson.override_dependency('ace', ace_dep)
 
 # Опция компиляции тестов
 tests_enabled = get_option('tests')
@@ -22,7 +31,6 @@ if tests_enabled
   # Объявляем mimalloc
   mimalloc_dep = dependency('mimalloc', fallback : ['mimalloc', 'mimalloc_dep'], required : true)
   gtest_dep = dependency('gtest', main: true, fallback: ['gtest', 'gtest_dep'], required : true)
-  ace_mimalloc = declare_dependency(include_directories: include_dir, dependencies: [ nukes, mimalloc_dep, liburing_dep ])
 
   test_sources = files(
     'tests/environment.h',
@@ -55,7 +63,8 @@ if tests_enabled
       cpp_args: compile_args,
       dependencies: [
           gtest_dep,
-          ace_mimalloc,
+          ace_dep,
+          mimalloc_dep
       ],
   )
 

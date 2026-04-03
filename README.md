@@ -47,33 +47,33 @@
 ```mermaid
 graph TB
     subgraph User["User Code"]
-        UC["ace::async&lt;T&gt; coroutine"]
+        UC["ace::async(T) coroutine"]
     end
 
-    subgraph API["Public API (ace::)"]
+    subgraph API["Public API — ace::"]
         SCH["ace::schedule()"]
         SPN["ace::spawn()"]
         RUN["ace::run()"]
     end
 
     subgraph Core["Core Runtime"]
-        DSP["dispatcher\n(singleton)"]
-        BAL["balancer\n(multi-thread)"]
-        R0["runner 0\n(main thread)"]
-        R1["runner 1\n(worker)"]
-        RN["runner N\n(worker)"]
+        DSP["dispatcher\nsingleton"]
+        BAL["balancer\nmulti-thread"]
+        R0["runner 0\nmain thread"]
+        R1["runner 1\nworker"]
+        RN["runner N\nworker"]
     end
 
-    subgraph Futures["Futures & Synchronization"]
+    subgraph Futures["Futures and Synchronization"]
         TO["timeout / expire"]
-        CH["channel&lt;T&gt;"]
-        CX["cutex (mutex)"]
-        AH["async_handle (join/cancel)"]
+        CH["channel(T)"]
+        CX["cutex mutex"]
+        AH["async_handle\njoin / cancel"]
     end
 
     subgraph Services["Background Services"]
-        CLK["clock\n(time-wheel vortex)"]
-        IO["kernelic\n(io_uring vortex)"]
+        CLK["clock\ntime-wheel vortex"]
+        IO["kernelic\nio_uring vortex"]
     end
 
     UC --> SCH
@@ -84,13 +84,13 @@ graph TB
     BAL --> R0
     BAL --> R1
     BAL --> RN
-    R0 -->|"co_await timeout"| CLK
-    R0 -->|"co_await channel"| CH
-    R0 -->|"co_await cutex"| CX
-    R0 -->|"co_await spawn"| AH
-    CLK -->|"timer expired"| R0
-    CH -->|"data available"| R0
-    CX -->|"mutex released"| R0
+    R0 -->|co_await timeout| CLK
+    R0 -->|co_await channel| CH
+    R0 -->|co_await cutex| CX
+    R0 -->|co_await spawn| AH
+    CLK -->|timer expired| R0
+    CH -->|data available| R0
+    CX -->|mutex released| R0
     RUN --> DSP
 ```
 
@@ -106,16 +106,16 @@ ACE provides two coroutine flavors that differ only in their **initial suspensio
 stateDiagram-v2
     direction LR
 
-    state "async&lt;T&gt; — Lazy" as Lazy {
+    state "async(T) — Lazy" as Lazy {
         [*] --> Created
-        Created --> Suspended : initial_suspend (suspend_always)
-        Suspended --> Executing : scheduled / awaited
+        Created --> Suspended : initial_suspend always
+        Suspended --> Executing : scheduled or awaited
         Executing --> Finished : co_return
         Executing --> Suspended : co_await future
         Finished --> [*]
     }
 
-    state "promise&lt;T&gt; — Eager" as Eager {
+    state "promise(T) — Eager" as Eager {
         [*] --> Executing2
         Executing2 --> Finished2 : co_return
         Executing2 --> Suspended2 : co_await future
@@ -184,15 +184,15 @@ The **conductor** is the mechanism that decouples task forwarding from the runne
 ```mermaid
 sequenceDiagram
     participant Runner
-    participant Task as async&lt;&gt; task
+    participant Task as Coroutine Task
     participant Promise as promise_type
     participant Future
-    participant Queue as Future's queue
+    participant Queue as Future Queue
 
     Runner->>Task: awake() — resume coroutine
     Task->>Future: co_await future
     Future->>Promise: install conductor_slot
-    Task-->>Runner: suspended (await_suspend returns true)
+    Task-->>Runner: suspended, await_suspend returns true
     Runner->>Promise: check _runner_conductor
     Runner->>Future: conductor.forward(task)
     Future->>Queue: enqueue task
@@ -217,11 +217,11 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     subgraph Producer
-        P["sender task\nchannel &lt;&lt; value"]
+        P["sender task\nchannel push value"]
     end
     subgraph Channel
-        DQ["data queue\n(mpmc_queue)"]
-        WQ["waiters queue\n(mpmc_queue)"]
+        DQ["data queue\nmpmc_queue"]
+        WQ["waiters queue\nmpmc_queue"]
     end
     subgraph Consumer
         C["receiver task\nco_await channel.pull()"]

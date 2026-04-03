@@ -118,10 +118,10 @@ namespace ace::coroutines {
 
         /**
          * @brief Check whether the coroutine can be resumed.
-         * @details Returns `true` iff all of the following hold:
+         * @details Returns `true` if all the following hold:
          *  - The handle is non-null.
          *  - The coroutine has not finished (`!done()`).
-         *  - The control block has not been disowned (not cancelled).
+         *  - The control block has not been disowned (not canceled).
          * @return `true` if resumable.
          */
         [[nodiscard]] bool is_resumable() const noexcept {

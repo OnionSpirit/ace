@@ -94,8 +94,8 @@ namespace ace::futures {
      * @details Returned by `co_await ace::spawn(task)`.  Provides join, done,
      * and cancel operations.
      *
-     * @note `async_handle` is **not** default-constructible.  It must be
-     * obtained via `co_await ace::spawn(...)`.
+     * @note @code async_handle @endcode is @b not default-constructible.  It must be
+     * obtained via @code co_await ace::spawn(...) @endcode.
      */
     class async_handle final : protected join_handler {
 

@@ -1,3 +1,44 @@
+/**
+ * @file cutex.h
+ * @brief Cooperative Userspace MuTEX (`ace::cutex`) and its RAII proxy.
+ *
+ * @details The **cutex** is a cooperative, non-blocking mutual exclusion
+ * primitive designed for use inside ACE coroutines.
+ *
+ * ### Fast path (uncontended)
+ * `try_lock()` performs a single `fetch_add(1)` on `_users`.  If the result
+ * is 0, the lock is acquired immediately — no suspension, no kernel call.
+ *
+ * ### Slow path (contended)
+ * If `try_lock()` fails, `await_suspend()` installs a `cutex_conductor` into
+ * the caller's promise.  The runner forwards the task into `_waiters`.  When
+ * the current owner calls `sync()`, it does a `fetch_sub(1)` and calls
+ * `notify()` which pops the next waiter and reattaches it to its runner.
+ *
+ * ### Deadlock recovery
+ * A rare race (OS interrupts the waiter between failed `try_lock()` and the
+ * enqueue) can leave the mutex unlocked with a waiter stuck in the queue.
+ * `pending_notify()` detects this and retries until the notification succeeds.
+ *
+ * ### Usage
+ * @code{.cpp}
+ * ace::cutex mtx;
+ *
+ * ace::async<> task() {
+ *     volatile auto guard = ace::guard(mtx);
+ *     auto future = co_await guard->capture();
+ *     // --- critical section ---
+ *     co_await future;
+ *     guard->sync();   // unlock (also called by ~proxy)
+ *     co_return;
+ * }
+ * @endcode
+ *
+ * @warning Always declare the `ace::guard` (i.e., `cutex::volatile_proxy`)
+ * as **`volatile`** to prevent the compiler from eliding its destructor.
+ *
+ * @see ace::guard, ace::futures::cutex_future, ace::futures::cutex::proxy
+ */
 #ifndef ACE_FUTURE_CUTEX_H
 #define ACE_FUTURE_CUTEX_H
 #include "future.h"
@@ -8,6 +49,15 @@
 
 namespace ace::futures {
 
+    /**
+     * @brief Internal implementation of the cutex locking future.
+     *
+     * @details `cutex_future` is the awaitable returned by `cutex::capture()`.
+     * It is separated from `cutex` itself to enforce RAII discipline through
+     * the `proxy` wrapper.
+     *
+     * @see ace::futures::cutex
+     */
     class cutex_future : public future_traits<cutex_future> {
 
         struct cutex_conductor;
@@ -18,46 +68,101 @@ namespace ace::futures {
         IMPORT_FUTURE_ENV(cutex_future)
 
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
-        std::atomic<int> _users { 0 };
-        nukes::dynamic::roaming_mpsc_queue<async<>> _waiters {};
-        std::atomic<runner_pool_t*> _runner_pool { nullptr };
-        bool _rescheduling { false };
+        std::atomic<int> _users { 0 };                                  ///< Number of active users (0 = unlocked).
+        nukes::dynamic::roaming_mpsc_queue<async<>> _waiters {};        ///< Tasks waiting to acquire the mutex.
+        std::atomic<runner_pool_t*> _runner_pool { nullptr };           ///< Runner pool of the task that currently owns the lock (used for rescheduling).
+        bool _rescheduling { false };                                   ///< When `true`, released waiters are migrated to `_runner_pool`.
 
+        /**
+         * @brief Attempt to wake one waiter from `_waiters`.
+         * @details Pops one context from the waiters queue and calls
+         * `runner::reattach()`.  If `_rescheduling` is set and the waiter
+         * does not support roaming, updates `_runner_pool` from the waiter's
+         * runner.
+         * @return `true` if a waiter was successfully notified.
+         */
         bool notify() noexcept;
 
         /**
-         * @brief Deadlock resolution helper
-         * @details Cutex can be deadlocked after an unexpected syscall of the process timeout.
-         * The halper figures this out <br><br>
-         * @b Cutex deadlock case:
-         * - thread @b A owns @b cutex
-         * - thread @b B tries to capture @b cutex but didn't receive success.
-         * - thread @b B going to sign up into @b cutex @b waiters queue
-         * - OS interrupts thread @b B, before it signed up.
-         * - thread @b A making @b cutex sync operation
-         * - @b cutex @b waiters queue is empty (thread @b B didn't finish signing up before interruption) notify noone
-         * - @b cutex is vacant but @b B thread isn't notified and waits inside @b cutex @b waiters queue
-         * - Got deadlock (notify sequence broken) @b B thread is forever blocked
+         * @brief Deadlock resolution coroutine.
+         *
+         * @details The cutex can enter a deadlock state when an OS preemption
+         * interrupts a waiter between a failed `try_lock()` and its enqueue
+         * into `_waiters`.  The sequence is:
+         *
+         *  1. Thread **A** owns the cutex.
+         *  2. Thread **B** calls `try_lock()` — fails (returns `false`).
+         *  3. OS interrupts thread **B** before it enqueues into `_waiters`.
+         *  4. Thread **A** calls `sync()` → `notify()` — queue is empty → no one woken.
+         *  5. Thread **B** resumes and enqueues itself → permanently stuck.
+         *
+         * `pending_notify()` detects this by retrying `notify()` while
+         * `_users > 0` (meaning at least one waiter exists), suspending between
+         * retries.
+         *
+         * @return An `ace::async<>` coroutine that retries notification.
          */
         async<> pending_notify() noexcept;
 
+        /**
+         * @brief Attempt to acquire the mutex without suspending.
+         * @details Atomically increments `_users`.  If the pre-increment value
+         * was 0, the lock is acquired.
+         * @return `true` if the lock was acquired.
+         */
         bool try_lock() noexcept;
 
+        /// @brief C++20 awaitable protocol — attempt fast-path acquire.
         bool await_ready() override { return try_lock(); }
 
+        /**
+         * @brief C++20 awaitable protocol — suspend and enqueue for wakeup.
+         * @details Installs a `cutex_conductor` so the runner forwards the
+         * calling context into `_waiters`.
+         * @param coroutine  Handle to the suspending coroutine's promise.
+         * @return Always `true` (always suspends on the slow path).
+         */
         bool await_suspend(auto coroutine);
 
-        // ReSharper disable once CppMemberFunctionMayBeStatic
-        void await_resume() {}
+        void await_resume() {} ///< No value produced; mutex is already acquired when resumed.
 
         ~cutex_future() override = default;
 
+        /**
+         * @brief Enable or disable rescheduling mode.
+         * @details When `true`, released waiters are migrated to the runner
+         * pool of the task that most recently released the cutex.  This keeps
+         * the critical section on the same CPU for better cache locality.
+         * @param rs  `true` to enable rescheduling.
+         */
         void set_rescheduling(const bool rs) noexcept { _rescheduling = rs; }
 
+        /// @brief Query the rescheduling mode.
         [[nodiscard]] bool get_rescheduling() const noexcept { return _rescheduling; }
     };
 
-    // NOTE: <C>ooperative <U>serspace mu<TEX>
+    /**
+     * @brief Cooperative Userspace MuTEX — public API wrapper.
+     *
+     * @details `cutex` is the user-facing type.  It inherits from
+     * `cutex_future` (protected) and exposes only the `volatile_proxy` RAII
+     * interface to prevent accidental direct `co_await`-ing.
+     *
+     * @par Usage
+     * @code{.cpp}
+     * ace::cutex mtx;
+     * ace::async<> task() {
+     *     volatile auto g = ace::guard(mtx);
+     *     auto f = co_await g->capture();
+     *     // critical section
+     *     co_await f;
+     *     g->sync();
+     *     co_return;
+     * }
+     * @endcode
+     *
+     * @see ace::guard (alias for `cutex::volatile_proxy`)
+     */
     class cutex final : protected cutex_future {
 
         [[nodiscard]] auto capture() noexcept -> cutex_future&;
@@ -70,34 +175,56 @@ namespace ace::futures {
 
         cutex() = default;
 
-        cutex(const cutex&) = delete;
+        cutex(const cutex&) = delete; ///< Mutexes are not copyable.
+        cutex(cutex&&) = delete;      ///< Mutexes are not movable.
 
-        cutex(cutex&&) = delete;
-
+        /// @brief RAII proxy type alias.  Use `volatile` to prevent elision.
         typedef volatile proxy volatile_proxy;
 
         ~cutex() override = default;
 
         using cutex_future::set_rescheduling;
-
         using cutex_future::get_rescheduling;
     };
 
+    /**
+     * @brief RAII proxy that enforces balanced `capture()` / `sync()` calls.
+     *
+     * @details The proxy prevents calling `capture()` twice without an
+     * intervening `sync()`, and automatically calls `sync()` on destruction.
+     *
+     * Declare as `volatile` to prevent the compiler from eliding the destructor:
+     * @code{.cpp}
+     * volatile auto guard = ace::guard(mtx);
+     * @endcode
+     *
+     * @warning Sharing a proxy between coroutines is undefined behaviour.
+     */
     class cutex::proxy {
 
         cutex& _cutex;
-        bool _is_synced { true };
+        bool _is_synced { true }; ///< `true` when the mutex is not held.
 
     public:
 
         proxy() = delete;
-
         proxy(const proxy&) = delete;
-
         proxy(proxy&&) = delete;
 
+        /**
+         * @brief Construct a proxy bound to the given cutex.
+         * @param cx  The cutex to manage.  Must outlive this proxy.
+         */
         explicit proxy(cutex& cx) : _cutex(cx) { }
 
+        /**
+         * @brief Acquire the cutex.
+         * @details Returns the underlying `cutex_future&` so the caller can
+         * `co_await` it.  Throws `std::logic_error` if called twice without
+         * an intervening `sync()`.
+         * @return Reference to the cutex's `cutex_future` interface.
+         * @throws std::logic_error if called while the lock is already held.
+         */
         [[nodiscard]] auto capture() volatile -> cutex_future& {
             if (not _is_synced)
                 throw std::logic_error {"cutex 'capture()' before 'sync()'"};
@@ -105,8 +232,13 @@ namespace ace::futures {
             return _cutex.capture();
         };
 
+        /**
+         * @brief Release the cutex.
+         * @details No-op if the lock is not currently held.
+         */
         void sync() volatile noexcept { if (not _is_synced) { _cutex.sync(); _is_synced = true; } };
 
+        /// @brief Destructor.  Automatically calls `sync()` if not already synced.
         ~proxy() { sync(); }
     };
 

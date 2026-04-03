@@ -1,6 +1,35 @@
 /**
-* @file
- * @details This file contains a minimal includes for a quick start with aliases
+ * @file ace.h
+ * @brief Main public entry point for the ACE framework.
+ *
+ * @details Include this single header to get access to the full public API:
+ *  - `ace::async<T>`   — lazy coroutine type (suspends on creation)
+ *  - `ace::promise<T>` — eager coroutine type (runs immediately)
+ *  - `ace::schedule()` — submit a task to the global dispatcher
+ *  - `ace::spawn()`    — spawn a parallel task inside a running coroutine
+ *  - `ace::run()`      — process all scheduled tasks (blocking)
+ *  - `ace::reload()`   — reconfigure the balancer
+ *
+ * Synchronization primitives are in their own headers:
+ *  - `ace/futures/channel.h`  — MPMC channel
+ *  - `ace/futures/cutex.h`    — cooperative userspace mutex
+ *  - `ace/futures/timeout.h`  — timer futures
+ *
+ * @par Minimal example
+ * @code{.cpp}
+ * #include "ace/ace.h"
+ *
+ * ace::async<> hello() {
+ *     co_return;
+ * }
+ *
+ * int main() {
+ *     ace::schedule(hello());
+ *     ace::run();
+ * }
+ * @endcode
+ *
+ * @see ace::async, ace::promise, ace::schedule, ace::run
  */
 
 #ifndef ACE_H

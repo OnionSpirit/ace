@@ -1,11 +1,36 @@
 /**
- * @file
- * @details The file contains a @b vortex class definition.
- * @b vortex aggregates queries and helps to avoid busy-polling.
- * Structurally, @b vortex is a special object with a promise for polling in the dispatcher.
- * The @b vortex polling promise maintains a detach state to stop polling when @b vortex runs out of active queries.
- * The return value of the @b ping() promise of the @b vortex derived type defines the detach state behavior.
- * @b false forces to suspend service, @b true means service must stay alive.
+ * @file vortex.h
+ * @brief CRTP base for background polling services ("vortices").
+ *
+ * @details A **vortex** is a lightweight background service that runs as a
+ * coroutine inside the dispatcher.  It calls its `ping()` method on every
+ * scheduler iteration and suspends when it has no work to do.
+ *
+ * ### Lifecycle
+ *
+ * 1. The first call to `touch(runner_pool)` spawns the vortex coroutine into
+ *    the dispatcher on the given runner (or the default runner).
+ * 2. On every dispatcher iteration the vortex coroutine resumes and calls
+ *    `ping()`.  If `ping()` returns `false`, the vortex suspends and marks
+ *    itself as detached.
+ * 3. The next call to `touch()` re-spawns the vortex if it was detached.
+ *
+ * ### Spawn modes (`vortex_spawn_mode`)
+ *
+ * | Mode | Behaviour |
+ * |---|---|
+ * | `e_thread_local` | Each OS thread gets its own independent vortex instance. |
+ * | `e_thread_shared` | A single shared vortex is used across all threads. |
+ *
+ * ### Example: clock vortex
+ *
+ * `ace::core::clock` derives from `vortex_traits<clock, e_thread_local>` and
+ * implements `bool ping()` which calls `multi_dial::release()`.
+ *
+ * @tparam derived_t      The concrete vortex type (CRTP).
+ * @tparam spawn_mode_v   Spawn mode — thread-local or thread-shared.
+ *
+ * @see ace::core::clock, ace::common::vortex_spawn_mode
  */
 #ifndef ACE_CORE_VORTEX_H
 #define ACE_CORE_VORTEX_H

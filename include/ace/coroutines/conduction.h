@@ -1,21 +1,31 @@
 /**
- * @file
- * @details The file contains a class defining for 'conductor' interface objects.
- * The 'runner_conductor' describes how to forward 'context' from the 'runner' storage
- * to the 'future' storage. When the 'future' decides to suspend 'context',
- * it puts its special 'conductor' in the 'promise_type' of the 'context'.
- * If 'context' is nested, it will pass 'conductor' to the outer 'context'.
- * The 'runner' always looking for the 'conductor' in the 'promise_type' of the 'context'.
- * If the 'runner' finds it, 'context' would be forwarded by the founded 'conductor',
- * instead of putting it into the own storage.
- * Also, 'runner_conductor' provides 'cancel' interface to support cancellation of the 'future'.
- * <br>The 'control_conductor' is almost the same as the 'runner_conductor' but for 'promise' objects.
- * The main purpose of this type of the 'conductor' is to provide handles to 'promise' control block.
- * Which is necessary to apply action onto 'promise' object from external or even shared context without ownage.
- * This 'conductor' also provides 'forward' and 'cancel' operations.
- * The 'forward' operation will store passed 'promise' object into a 'waiters' queue of a 'promise' object,
- * which is a producer of the 'conductor'.
- * The 'cancel' operation is a cancellation handle for a 'promise' object, which is a producer of the 'conductor'.
+ * @file conduction.h
+ * @brief Conductor interfaces and the `conductor_slot` in-place storage.
+ *
+ * @details The **conductor pattern** is the primary mechanism by which ACE
+ * decouples task forwarding from the runner's internal queue.
+ *
+ * ### How it works
+ *
+ * 1. A coroutine calls `co_await some_future`.
+ * 2. The future's `await_suspend()` places a concrete conductor object into
+ *    the `conductor_slot` stored in the coroutine's `promise_type`.
+ * 3. The runner calls `context::awake()`.  After resuming, it checks whether
+ *    `_runner_conductor` is set.  If so, it calls
+ *    `conductor->forward(std::move(context))` instead of re-queuing.
+ * 4. The conductor (owned by the future) enqueues the context in the future's
+ *    own waiting structure (e.g., a channel waiters queue or a time-wheel slot).
+ * 5. When the future becomes ready, it calls `runner::reattach(context)` to
+ *    return the context to its original runner.
+ *
+ * ### Two conductor families
+ *
+ * | Interface | Purpose |
+ * |---|---|
+ * | `runner_conductor_handle<C>` | Move a task into a future's storage and optionally cancel it. |
+ * | `control_conductor_handle`   | Provide join / cancel access to a promise's control block. |
+ *
+ * Both are stored in-place inside `conductor_slot` to avoid heap indirection.
  */
 #ifndef ACE_CONDUCTOR_H
 #define ACE_CONDUCTOR_H
@@ -24,6 +34,17 @@
 
 namespace ace::coroutines {
 
+    /**
+     * @brief Abstract interface for conductors that forward coroutine contexts
+     *        from the runner into a future's waiting structure.
+     *
+     * @details Derived conductors are created by futures (e.g., `channel`,
+     * `timeout`, `cutex`) and stored inside the coroutine's `conductor_slot`.
+     * The runner calls `forward()` after detecting the slot is occupied.
+     *
+     * @tparam runner_context_t  The coroutine context type being forwarded
+     *                           (typically `ace::async<>`).
+     */
     template <typename runner_context_t>
     struct runner_conductor_handle {
 
@@ -33,27 +54,86 @@ namespace ace::coroutines {
 
         runner_conductor_handle(runner_conductor_handle&&) noexcept = default;
 
+        /**
+         * @brief Transfer the coroutine context into the future's storage.
+         * @param context  The suspended coroutine context to enqueue.
+         */
         virtual void forward(runner_context_t&& context) = 0;
 
+        /**
+         * @brief Cancel the pending operation and wake all associated waiters.
+         * @details The conductor marks the context as `e_detached`; the runner
+         * will drop it on the next `yank()` call.
+         */
         virtual void cancel() = 0;
 
         virtual ~runner_conductor_handle() = default;
     };
 
+    /**
+     * @brief Abstract interface for conductors that manage a coroutine's
+     *        external control block (join / cancel from outside the scheduler).
+     *
+     * @details This conductor is installed into a `control_block` by
+     * `context::setup_control_block()` and accessed through
+     * `control_block_handle`.  It allows external code to:
+     *  - `forward(waiter)` — register a waiter that will be resumed when the
+     *    producer coroutine finishes.
+     *  - `cancel()` — request cancellation of the producer coroutine.
+     */
     struct control_conductor_handle {
 
         control_conductor_handle() noexcept = default;
 
-        virtual bool forward(void*) noexcept = 0;
+        /**
+         * @brief Register an external waiter that will be notified on finish.
+         * @param waiter  Pointer to the `ace::async<>` context to notify.
+         * @return `true` if the waiter was successfully registered.
+         */
+        virtual bool forward(void* waiter) noexcept = 0;
 
+        /**
+         * @brief Cancel the associated coroutine.
+         */
         virtual void cancel() noexcept = 0;
 
         virtual ~control_conductor_handle() = default;
     };
 
-    // NOTE: Static storage for conductor objects
+    /**
+     * @brief In-place storage that holds exactly one conductor object.
+     *
+     * @details `conductor_slot` avoids a heap allocation by storing the
+     * conductor in a fixed-size aligned byte array (`_area`).  A raw pointer
+     * `_conductor` is used as a discriminant (null ↔ empty).
+     *
+     * The slot supports three operations:
+     *  - **Assignment** (`operator=`) — placement-new a new conductor,
+     *    destroying the previous one if present.
+     *  - **Move-steal** (`operator<<`) — transfer ownership from another slot
+     *    without destroying.  Used to propagate conductors up a call stack.
+     *  - **Release** (`release()`) — explicitly destroy and nullify.
+     *
+     * @tparam conductor_handle_t  The abstract base type of stored conductors.
+     * @tparam slot_memsize_v      Maximum byte size of a concrete conductor
+     *                             object.  Defaults to `ACE_CONDUCTOR_MEM_SIZE`.
+     *
+     * @warning All concrete conductors stored in this slot **must** fit within
+     * `slot_memsize_v` bytes.  A `static_assert` enforces this at compile time.
+     */
     template <typename conductor_handle_t, std::size_t slot_memsize_v = ACE_CONDUCTOR_MEM_SIZE>
     struct conductor_slot {
+
+        /**
+         * @brief Copy-assign a concrete conductor into this slot.
+         * @details Uses placement-new; previous conductor is NOT destroyed
+         * before the new one is created (caller must ensure slot is empty or
+         * call `release()` first).
+         * @tparam conductor_t  Concrete conductor type (must derive from
+         *                      `conductor_handle_t`).
+         * @param conductor  Conductor to copy-construct in-place.
+         * @return Reference to `*this`.
+         */
         template <typename conductor_t>
         requires std::derived_from<conductor_t, conductor_handle_t>
         conductor_slot& operator =(const conductor_t& conductor) {
@@ -63,6 +143,15 @@ namespace ace::coroutines {
             return *this;
         }
 
+        /**
+         * @brief Move-assign a concrete conductor into this slot.
+         * @details Calls `release()` first to destroy any existing conductor,
+         * then move-constructs the new one in-place.
+         * @tparam conductor_t  Concrete conductor type (must derive from
+         *                      `conductor_handle_t`).
+         * @param conductor  Conductor to move-construct in-place.
+         * @return Reference to `*this`.
+         */
         template <typename conductor_t>
         requires std::derived_from<conductor_t, conductor_handle_t>
         conductor_slot& operator =(conductor_t&& conductor) {
@@ -73,6 +162,18 @@ namespace ace::coroutines {
             return *this;
         }
 
+        /**
+         * @brief Steal the conductor pointer from another slot without
+         *        invoking the destructor on the source.
+         *
+         * @details Used to propagate a conductor up the call stack when a
+         * nested coroutine suspends — the outer coroutine's promise takes
+         * ownership of the conductor so the runner can find it.
+         *
+         * @tparam carry_t  Any type with `_conductor` and `_area` members.
+         * @param carry     Source slot to steal from.
+         * @return Reference to `*this`.
+         */
         template<typename carry_t>
         requires requires { carry_t::_conductor; carry_t::_area; }
         conductor_slot& operator <<(carry_t& carry) noexcept {
@@ -83,7 +184,10 @@ namespace ace::coroutines {
             return *this;
         }
 
-        // NOTE: Releases conductor from carry with distracting
+        /**
+         * @brief Destroy the held conductor and set the pointer to null.
+         * @details Calls the virtual destructor of the concrete conductor type.
+         */
         void release() {
             if (_conductor) {
                 _conductor->~conductor_handle_t();
@@ -91,22 +195,29 @@ namespace ace::coroutines {
             }
         }
 
-        // NOTE: Wipes conductor data from carry without distracting
+        /**
+         * @brief Null the conductor pointer without calling its destructor.
+         * @details Use this when ownership has been transferred elsewhere
+         * (e.g., via `operator<<`).
+         */
         void reset() {
             if (_conductor)
                 _conductor = nullptr;
         }
 
+        /// @brief Access the held conductor.  Returns `nullptr` if empty.
         [[nodiscard]] conductor_handle_t* get() const { return _conductor; }
 
+        /// @brief Arrow operator for direct method access on the conductor.
         conductor_handle_t* operator->() const { return get(); }
 
+        /// @brief `true` if a conductor is currently held.
         explicit operator bool() const { return _conductor != nullptr; };
 
         ~conductor_slot() { release(); };
 
-        conductor_handle_t* _conductor {nullptr};
-        alignas(ACE_BUS_SIZE) uint8_t _area [slot_memsize_v] {};
+        conductor_handle_t* _conductor {nullptr};                        ///< Pointer into `_area` (discriminant).
+        alignas(ACE_BUS_SIZE) uint8_t _area [slot_memsize_v] {};         ///< In-place storage for the conductor object.
     };
 
 }

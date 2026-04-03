@@ -1,3 +1,28 @@
+/**
+ * @file balancer.h
+ * @brief Multi-threaded task balancer that distributes coroutines across runners.
+ *
+ * @details The `balancer` is the multi-thread layer of the ACE runtime.  It
+ * owns a vector of `runner` objects — one per OS thread — and drives them
+ * through a coordinated polling loop.
+ *
+ * ### Thread model
+ *
+ * - The **main thread** runs `runner[0]` directly from `balancer::run()`.
+ * - Each **worker thread** (jthread) runs its own `runner[i]` in a tight loop.
+ * - All threads call `worker_round()` which processes tasks for up to 1 ms,
+ *   then sleeps for 1 ms if no tasks were processed.
+ * - `run()` blocks until all runners have reported `_pending = true`
+ *   simultaneously (all queues empty).
+ *
+ * ### Task assignment
+ *
+ * New tasks are assigned to runners via a round-robin atomic counter
+ * (`_runner_selector`).  A specific runner can also be targeted by passing a
+ * non-null `runner*` to `schedule()`.
+ *
+ * @see ace::core::runner, ace::core::dispatcher, ace::core::s_balancer_config
+ */
 #ifndef ACE_CORE_BALANCER_H
 #define ACE_CORE_BALANCER_H
 
@@ -10,21 +35,48 @@
 
 namespace ace::core {
 
+    /**
+     * @brief Global configuration for the balancer.
+     *
+     * @details Modify `s_balancer_config` before calling `ace::reload()` to
+     * change the number of runner threads.  The reload takes effect only when
+     * all queues are empty.
+     *
+     * @par Example
+     * @code{.cpp}
+     * ace::core::s_balancer_config._runners_amount = 4;
+     * ace::reload();
+     * @endcode
+     */
     struct balancer_config {
-        std::size_t _runners_amount { 1 };
+        std::size_t _runners_amount { 1 }; ///< Number of runner threads (including the main thread).
         bool operator==(const balancer_config & balancer_config) const = default;
-    } inline s_balancer_config {};
+    } inline s_balancer_config {}; ///< Global singleton configuration instance.
 
+    /**
+     * @brief Schedules and drives task execution across multiple runner threads.
+     *
+     * @details `balancer` is the core multi-thread scheduler.  It creates one
+     * `runner` per configured thread, launches worker `jthread`s for runners
+     * 1..N-1, and runs runner 0 on the calling thread inside `run()`.
+     *
+     * The `run()` call blocks until all runners are idle simultaneously.
+     * Tasks are distributed round-robin unless a specific runner is specified.
+     */
     class balancer {
 
         static thread_local std::chrono::time_point<std::chrono::steady_clock> local_ts;
 
         static void fetch_time() { local_ts = std::chrono::steady_clock::now(); }
 
+        /**
+         * @brief Per-thread status record.  Cache-line aligned to prevent
+         * false sharing between worker threads.
+         */
         struct alignas(ACE_CACHE_LINE_SIZE) worker_state {
-            int _worker_id { 0 };
-            bool _pending { false };
-            int _rounds {0};
+            int _worker_id { 0 };  ///< Zero-based index of this worker's runner.
+            bool _pending { false };///< `true` when the runner found no tasks in the last round.
+            int _rounds {0};        ///< Number of consecutive 1 ms work rounds completed.
         };
 
         std::vector<runner> _runners {};

@@ -1,0 +1,34 @@
+<!-- Custom Doxygen HTML header — injects Mermaid.js for diagram rendering -->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta http-equiv="X-UA-Compatible" content="IE=9"/>
+  <title>$title</title>
+  <link href="$relpath^tabs.css" rel="stylesheet" type="text/css"/>
+  $treeview
+  $search
+  $mathjax
+  <link href="$relpath^doxygen.css" rel="stylesheet" type="text/css" />
+  <!-- Mermaid.js — renders diagrams injected via @mermaid alias -->
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      themeVariables: {
+        primaryColor: '#1e88e5',
+        primaryTextColor: '#fff',
+        primaryBorderColor: '#1565c0',
+        lineColor: '#90caf9',
+        secondaryColor: '#263238',
+        tertiaryColor: '#1c1c2e'
+      }
+    });
+  </script>
+  <style>
+    .mermaid { background: #1e1e2e; border-radius: 8px; padding: 16px; margin: 12px 0; }
+  </style>
+</head>
+<body>

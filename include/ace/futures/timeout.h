@@ -1,3 +1,36 @@
+/**
+ * @file timeout.h
+ * @brief Timer futures: `ace::futures::timeout` and `ace::futures::expire`.
+ *
+ * @details Both types suspend the calling coroutine for a time interval and
+ * resume it via the `clock` vortex service.
+ *
+ * ### How it works
+ *
+ * 1. `co_await timeout(dur)` calls `await_suspend()`.
+ * 2. A `timeout_conductor` is placed in the promise's conductor slot.
+ * 3. The runner sees the conductor and calls `conductor.forward(task)`.
+ * 4. The conductor calls `clock::subscribe(task, dur)` which inserts the
+ *    task into the time wheel.
+ * 5. When `dur` elapses the clock's `ping()` releases the task back to its
+ *    runner via `runner::reattach()`.
+ *
+ * `expire` is a thin wrapper around `timeout` that accepts an **absolute**
+ * `timepoint_t` instead of a relative duration.
+ *
+ * @par Example
+ * @code{.cpp}
+ * using namespace std::chrono_literals;
+ *
+ * ace::async<> timed() {
+ *     co_await ace::futures::timeout(500ms);
+ *
+ *     auto deadline = ace::core::clock::current_time() + 2s;
+ *     co_await ace::futures::expire(deadline);
+ *     co_return;
+ * }
+ * @endcode
+ */
 #ifndef ACE_FUTURE_TIMEOUT_H
 #define ACE_FUTURE_TIMEOUT_H
 
@@ -11,10 +44,15 @@ using namespace std::chrono_literals;
 
 namespace ace::futures {
 
-
+/**
+ * @brief Future that suspends the coroutine for a relative duration.
+ *
+ * @details The duration is converted to milliseconds at construction time.
+ * Minimum resolution is 1 ms (limited by the clock tick duration).
+ */
 class timeout : public future_traits<timeout> {
 
-    core::duration_t _duration;
+    core::duration_t _duration; ///< Suspension duration in milliseconds.
 
     struct timeout_conductor;
     friend timeout_conductor;
@@ -23,18 +61,46 @@ public:
 
     IMPORT_FUTURE_ENV(timeout)
 
+    /**
+     * @brief Construct a timeout future.
+     * @tparam I  Integer representation type of the duration.
+     * @tparam T  Period type of the duration.
+     * @param t   Duration to wait.  Converted to `std::chrono::milliseconds`.
+     */
     template <typename I, typename T>
     requires std::is_integral_v<I>
     explicit timeout(std::chrono::duration<I, T> t) {
         _duration = std::chrono::duration_cast<std::chrono::milliseconds, uint64_t, std::milli>(t);
     };
 
+    /**
+     * @brief C++20 awaitable protocol — install the `timeout_conductor`.
+     * @param coroutine  Handle to the suspending coroutine's promise.
+     * @return Always `true` — the coroutine always suspends.
+     */
     bool await_suspend(auto coroutine);
 
-    void await_resume() {}
+    void await_resume() {} ///< No value produced.
 };
 
+/**
+ * @brief Future that suspends the coroutine until an absolute timepoint.
+ *
+ * @details Computed as `expires - clock::current_time()` and delegated to
+ * `timeout`.
+ *
+ * @par Example
+ * @code{.cpp}
+ * auto deadline = ace::core::clock::current_time() + std::chrono::seconds(5);
+ * co_await ace::futures::expire(deadline);
+ * @endcode
+ */
 struct expire : timeout {
+    /**
+     * @brief Construct from an absolute timepoint.
+     * @param expires  The absolute deadline.  The computed duration is
+     *                 `expires - clock::current_time()`.
+     */
     explicit expire(core::timepoint_t expires)
         : timeout(expires - core::clock::current_time()) {}
 };

@@ -1,3 +1,21 @@
+/**
+ * @file get_runner.h
+ * @brief Command that retrieves a pointer to the current runner.
+ *
+ * @details Useful for explicitly targeting a specific runner when spawning
+ * tasks or for diagnostic purposes.
+ *
+ * @code{.cpp}
+ * ace::async<> my_task() {
+ *     auto* runner = co_await ace::commands::get_runner{};
+ *     // runner is the ace::core::runner that owns this coroutine
+ *     ace::schedule(other_task(), runner);  // schedule on the same runner
+ *     co_return;
+ * }
+ * @endcode
+ *
+ * The command never suspends (`await_suspend` returns `false`).
+ */
 #ifndef ACE_COMMANDS_GET_RUNNER_H
 #define ACE_COMMANDS_GET_RUNNER_H
 
@@ -5,17 +23,33 @@
 
 namespace ace::commands {
 
+    /**
+     * @brief Awaitable command that returns the calling coroutine's runner.
+     *
+     * @details Non-suspending — reads the `_runner_pool` pointer from the
+     * promise and converts it to a `runner*` via `pool_to_runner()`.
+     */
     struct get_runner : futures::future_traits<get_runner> {
 
-        core::runner* _ptr {};
+        core::runner* _ptr {}; ///< Pointer filled in by `await_suspend`.
 
         IMPORT_FUTURE_ENV(get_runner)
 
+        /**
+         * @brief Capture the current runner pointer from the promise.
+         * @param coroutine  Handle to the calling coroutine's promise.
+         * @return Always `false` — no suspension.
+         */
         bool await_suspend(auto coroutine) {
             _ptr = core::pool_to_runner(coroutine.promise()._runner_pool);
             return false;
         }
 
+        /**
+         * @brief Return the captured runner pointer.
+         * @return Pointer to the current `ace::core::runner`, or `nullptr`
+         *         if the coroutine has no associated runner yet.
+         */
         [[nodiscard]] core::runner* await_resume() const {
             return _ptr;
         }

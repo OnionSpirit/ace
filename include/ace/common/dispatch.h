@@ -2,17 +2,17 @@
  * @file dispatch.h
  * @brief C++20 concepts for ACE awaitable and future type classification.
  *
- * @details These concepts are used by `promise_traits::await_transform()` to
- * select the correct handling path for a `co_await` expression:
+ * @details These concepts are used by @c promise_traits::await_transform() to
+ * select the correct handling path for a @c co_await expression:
  *
- *  - **`is_awaitable`** — the minimal C++20 awaitable interface
- *    (`await_ready`, `await_suspend`, `await_resume`).
- *  - **`is_future`** — a type that additionally inherits from
- *    `ace::futures::future_traits<Derived>`.  The runner hands control
+ *  - <b>@c is_awaitable</b> — the minimal C++20 awaitable interface
+ *    (@c await_ready, @c await_suspend, @c await_resume).
+ *  - <b>@c is_future</b> — a type that additionally inherits from
+ *    @c ace::futures::future_traits<Derived>.  The runner hands control
  *    entirely to the future via the conductor mechanism.
- *  - **`is_busy_future`** — a type that inherits from
- *    `ace::futures::busy_future_traits<Derived>`.  The runner actively polls
- *    `await_ready()` before re-queueing the task.
+ *  - <b>@c is_busy_future</b> — a type that inherits from
+ *    @c ace::futures::busy_future_traits<Derived>.  The runner actively polls
+ *    @c await_ready() before re-queueing the task.
  *
  * @see ace::futures::future_traits, ace::futures::busy_future_traits,
  *      ace::coroutines::promise_traits
@@ -24,19 +24,19 @@
 #include <coroutine>
 
 /**
- * @brief Concepts used by `promise_traits::await_transform()` to classify
- *        types passed to `co_await`.
+ * @brief Concepts used by @c promise_traits::await_transform() to classify
+ *        types passed to @c co_await.
  */
 namespace ace::common::dispatch {
 
     /**
      * @brief Minimal C++20 awaitable interface.
      *
-     * @details A type satisfies `is_awaitable` if it provides:
-     *  - `bool await_ready()`
-     *  - `await_resume()`
-     *  - `await_suspend(coroutine_handle<P>)` returning `bool`, `void`, or
-     *    `coroutine_handle<P>`.
+     * @details A type satisfies @c is_awaitable if it provides:
+     *  - @c bool await_ready()
+     *  - @c await_resume()
+     *  - @c await_suspend(coroutine_handle<P>) returning @c bool, @c void, or
+     *    @c coroutine_handle<P>.
      *
      * @tparam awaitableT  Type to check.
      * @tparam promiseT    Promise type of the enclosing coroutine.
@@ -44,8 +44,9 @@ namespace ace::common::dispatch {
     template <typename awaitableT, typename promiseT>
     concept is_awaitable =
         requires (awaitableT awaitable_t, std::coroutine_handle<promiseT> promise_t) {
-            { awaitable_t.await_ready() } -> std::same_as<bool>;
-            awaitable_t.await_resume();
+        { awaitable_t.await_ready() } -> std::same_as<bool>;
+        awaitable_t.await_resume();
+        // awaitable_t.detach(promise_t);
         }
     and (
          requires (awaitableT awaitable_t, std::coroutine_handle<promiseT> promise_t) {
@@ -59,14 +60,14 @@ namespace ace::common::dispatch {
     /**
      * @brief ACE future concept (conductor-based suspension).
      *
-     * @details A type satisfies `is_future` if it:
-     *  1. Exposes a nested `future_traits_t` alias.
-     *  2. Is derived from `future_traits_t` (i.e., from
-     *     `ace::futures::future_traits<Derived>`).
-     *  3. Satisfies `is_awaitable`.
+     * @details A type satisfies @c is_future if it:
+     *  1. Exposes a nested @c future_traits_t alias.
+     *  2. Is derived from @c future_traits_t (i.e., from
+     *     @c ace::futures::future_traits<Derived>).
+     *  3. Satisfies @c is_awaitable.
      *
-     * When `promise_traits::await_transform()` detects this concept, it clears
-     * `_busy_future` so the runner uses the conductor for forwarding, avoiding busy-polling for tasks.
+     * When @c promise_traits::await_transform() detects this concept, it clears
+     * @c _busy_future so the runner uses the conductor for forwarding.
      *
      * @tparam futureT   Type to check.
      * @tparam promiseT  Promise type of the enclosing coroutine.
@@ -80,15 +81,16 @@ namespace ace::common::dispatch {
     /**
      * @brief ACE busy-future concept (active polling suspension).
      *
-     * @details A type satisfies `is_busy_future` if it:
-     *  1. Exposes a nested `busy_future_traits_t` alias.
-     *  2. Is derived from `busy_future_traits_t` (i.e., from
-     *     `ace::futures::busy_future_traits<Derived>`).
-     *  3. Satisfies `is_awaitable`.
+     * @details A type satisfies @c is_busy_future if it:
+     *  1. Exposes a nested @c busy_future_traits_t alias.
+     *  2. Is derived from @c busy_future_traits_t (i.e., from
+     *     @c ace::futures::busy_future_traits<Derived>).
+     *  3. Satisfies @c is_awaitable.
      *
-     * When `promise_traits::await_transform()` detects this concept, it stores
-     * a pointer in `_busy_future`.  The runner calls `await_ready()` repeatedly
-     * before deciding to re-queue the task. This type of future does not prevent busy-polling
+     * When @c promise_traits::await_transform() detects this concept, it stores
+     * a pointer in @c _busy_future.  The runner calls @c await_ready() repeatedly
+     * before deciding to re-queue the task, avoiding a full conductor round-trip
+     * for fast operations (e.g., channel pull when data is already available).
      *
      * @tparam futureT   Type to check.
      * @tparam promiseT  Promise type of the enclosing coroutine.

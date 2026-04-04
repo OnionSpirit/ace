@@ -2,30 +2,30 @@
  * @file vortex.h
  * @brief CRTP base for background polling services ("vortices").
  *
- * @details A **vortex** is a lightweight background service that runs as a
- * coroutine inside the dispatcher.  It calls its `ping()` method on every
+ * @details A @b vortex is a lightweight background service that runs as a
+ * coroutine inside the dispatcher.  It calls its @c ping() method on every
  * scheduler iteration and suspends when it has no work to do.
  *
  * ### Lifecycle
  *
- * 1. The first call to `touch(runner_pool)` spawns the vortex coroutine into
+ * 1. The first call to @c touch(runner_pool) spawns the vortex coroutine into
  *    the dispatcher on the given runner (or the default runner).
  * 2. On every dispatcher iteration the vortex coroutine resumes and calls
- *    `ping()`.  If `ping()` returns `false`, the vortex suspends and marks
+ *    @c ping().  If @c ping() returns @c false, the vortex suspends and marks
  *    itself as detached.
- * 3. The next call to `touch()` re-spawns the vortex if it was detached.
+ * 3. The next call to @c touch() re-spawns the vortex if it was detached.
  *
- * ### Spawn modes (`vortex_spawn_mode`)
+ * ### Spawn modes (@c vortex_spawn_mode)
  *
  * | Mode | Behaviour |
  * |---|---|
- * | `e_thread_local` | Each OS thread gets its own independent vortex instance. |
- * | `e_thread_shared` | A single shared vortex is used across all threads. |
+ * | @c e_thread_local | Each OS thread gets its own independent vortex instance. |
+ * | @c e_thread_shared | A single shared vortex is used across all threads. |
  *
  * ### Example: clock vortex
  *
- * `ace::core::clock` derives from `vortex_traits<clock, e_thread_local>` and
- * implements `bool ping()` which calls `multi_dial::release()`.
+ * @c ace::core::clock derives from @c vortex_traits<clock, e_thread_local> and
+ * implements @c bool ping() which calls @c multi_dial::release().
  *
  * @tparam derived_t      The concrete vortex type (CRTP).
  * @tparam spawn_mode_v   Spawn mode — thread-local or thread-shared.

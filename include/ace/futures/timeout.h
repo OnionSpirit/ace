@@ -1,22 +1,22 @@
 /**
  * @file timeout.h
- * @brief Timer futures: `ace::futures::timeout` and `ace::futures::expire`.
+ * @brief Timer futures: @c ace::futures::timeout and @c ace::futures::expire.
  *
  * @details Both types suspend the calling coroutine for a time interval and
- * resume it via the `clock` vortex service.
+ * resume it via the @c clock vortex service.
  *
  * ### How it works
  *
- * 1. `co_await timeout(dur)` calls `await_suspend()`.
- * 2. A `timeout_conductor` is placed in the promise's conductor slot.
- * 3. The runner sees the conductor and calls `conductor.forward(task)`.
- * 4. The conductor calls `clock::subscribe(task, dur)` which inserts the
+ * 1. @c co_await timeout(dur) calls @c await_suspend().
+ * 2. A @c timeout_conductor is placed in the promise's conductor slot.
+ * 3. The runner sees the conductor and calls @c conductor.forward(task).
+ * 4. The conductor calls @c clock::subscribe(task, dur) which inserts the
  *    task into the time wheel.
- * 5. When `dur` elapses the clock's `ping()` releases the task back to its
- *    runner via `runner::reattach()`.
+ * 5. When @c dur elapses the clock's @c ping() releases the task back to its
+ *    runner via @c runner::reattach().
  *
- * `expire` is a thin wrapper around `timeout` that accepts an **absolute**
- * `timepoint_t` instead of a relative duration.
+ * @c expire is a thin wrapper around @c timeout that accepts an @b absolute
+ * @c timepoint_t instead of a relative duration.
  *
  * @par Example
  * @code{.cpp}
@@ -65,7 +65,7 @@ public:
      * @brief Construct a timeout future.
      * @tparam I  Integer representation type of the duration.
      * @tparam T  Period type of the duration.
-     * @param t   Duration to wait.  Converted to `std::chrono::milliseconds`.
+     * @param t   Duration to wait.  Converted to @c std::chrono::milliseconds.
      */
     template <typename I, typename T>
     requires std::is_integral_v<I>
@@ -74,9 +74,9 @@ public:
     };
 
     /**
-     * @brief C++20 awaitable protocol — install the `timeout_conductor`.
+     * @brief C++20 awaitable protocol — install the @c timeout_conductor.
      * @param coroutine  Handle to the suspending coroutine's promise.
-     * @return Always `true` — the coroutine always suspends.
+     * @return Always @c true — the coroutine always suspends.
      */
     bool await_suspend(auto coroutine);
 
@@ -86,8 +86,8 @@ public:
 /**
  * @brief Future that suspends the coroutine until an absolute timepoint.
  *
- * @details Computed as `expires - clock::current_time()` and delegated to
- * `timeout`.
+ * @details Computed as @c expires - clock::current_time() and delegated to
+ * @c timeout.
  *
  * @par Example
  * @code{.cpp}
@@ -99,7 +99,7 @@ struct expire : timeout {
     /**
      * @brief Construct from an absolute timepoint.
      * @param expires  The absolute deadline.  The computed duration is
-     *                 `expires - clock::current_time()`.
+     *                 @c expires - clock::current_time().
      */
     explicit expire(core::timepoint_t expires)
         : timeout(expires - core::clock::current_time()) {}

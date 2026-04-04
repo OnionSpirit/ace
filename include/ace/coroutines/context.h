@@ -1,28 +1,28 @@
 /**
  * @file context.h
- * @brief Core coroutine context type (`ace::coroutines::context<T, Rule>`)
- *        and the public `ace::async<T>` / `ace::promise<T>` aliases.
+ * @brief Core coroutine context type (@c ace::coroutines::context<T, Rule>)
+ *        and the public @c ace::async<T> / @c ace::promise<T> aliases.
  *
  * @details This file defines the central type of the ACE framework.
- * `context<returnT, promise_rule_t>` is a C++20 coroutine type that:
+ * @c context<returnT, promise_rule_t> is a C++20 coroutine type that:
  *
- *  - Inherits from `busy_future_traits<context>` so that it can be directly
- *    `co_await`-ed from another coroutine (nested coroutines).
- *  - Owns its `std::coroutine_handle` and destroys it on destruction.
- *  - Carries a `runner_conductor_slot_t` that futures use to redirect the
+ *  - Inherits from @c busy_future_traits<context> so that it can be directly
+ *    @c co_await-ed from another coroutine (nested coroutines).
+ *  - Owns its @c std::coroutine_handle and destroys it on destruction.
+ *  - Carries a @c runner_conductor_slot_t that futures use to redirect the
  *    context into their own waiting structures (conductor pattern).
- *  - Can expose a `control_block_handle` via `observe()` for external
+ *  - Can expose a @c control_block_handle via @c observe() for external
  *    join / cancel operations.
  *
  * ### Public aliases
  *
- * ```cpp
+ * @code{.cpp}
  * // Lazy coroutine — suspends at creation (initial_suspend = suspend_always)
  * template<typename T = void> using ace::async   = context<T, differed>;
  *
  * // Eager coroutine — runs immediately (initial_suspend = suspend_never)
  * template<typename T = void> using ace::promise = context<T, permanent>;
- * ```
+ * @endcode
  *
  * @see ace::async, ace::promise, ace::coroutines::promise_traits,
  *      ace::coroutines::control_block
@@ -50,19 +50,19 @@ namespace ace::coroutines {
     /**
      * @brief Core coroutine context type.
      *
-     * @details `context<returnT, promise_rule_t>` represents a single
+     * @details @c context<returnT, promise_rule_t> represents a single
      * coroutine instance.  It is move-only (copy is deleted) and owns the
-     * underlying `std::coroutine_handle`.
+     * underlying @c std::coroutine_handle.
      *
-     * The type itself satisfies the `busy_future_traits` concept so that one
-     * context can be directly `co_await`-ed inside another, enabling nested
+     * The type itself satisfies the @c busy_future_traits concept so that one
+     * context can be directly @c co_await-ed inside another, enabling nested
      * coroutines.
      *
-     * @tparam returnT        Value type returned by `co_return`.
-     *                        Defaults to `void`.
+     * @tparam returnT        Value type returned by @c co_return.
+     *                        Defaults to @c void.
      * @tparam promise_rule_t Suspension policy tag.
-     *                        Use `differed` (default) for lazy execution or
-     *                        `permanent` for eager execution.
+     *                        Use @c differed (default) for lazy execution or
+     *                        @c permanent for eager execution.
      *
      * @see ace::async, ace::promise
      */
@@ -88,7 +88,7 @@ namespace ace::coroutines {
 
         /**
          * @brief Move constructor.  Transfers ownership of the coroutine handle.
-         * @param ctx  Source context.  Its `_coroutine` is set to null.
+         * @param ctx  Source context.  Its @c _coroutine is set to null.
          */
         context(context && ctx) noexcept {
             _coroutine = std::forward<coroutine_t>(ctx._coroutine);
@@ -97,8 +97,8 @@ namespace ace::coroutines {
 
         /**
          * @brief Move assignment.  Transfers ownership of the coroutine handle.
-         * @param ctx  Source context.  Its `_coroutine` is set to null.
-         * @return Reference to `*this`.
+         * @param ctx  Source context.  Its @c _coroutine is set to null.
+         * @return Reference to @c *this.
          */
         context &operator=(context && ctx)  noexcept {
             _coroutine = std::forward<coroutine_t>(ctx._coroutine);
@@ -111,24 +111,24 @@ namespace ace::coroutines {
 
         /**
          * @brief Construct from a raw coroutine handle.
-         * @details Used internally by `promise_type::get_return_object()`.
+         * @details Used internally by @c promise_type::get_return_object().
          * @param handler  Coroutine handle to take ownership of.
          */
         explicit context(coroutine_t &&handler) : _coroutine{handler} {};
 
         /**
          * @brief Check whether the coroutine can be resumed.
-         * @details Returns `true` if all the following hold:
+         * @details Returns @c true iff all of the following hold:
          *  - The handle is non-null.
-         *  - The coroutine has not finished (`!done()`).
-         *  - The control block has not been disowned (not canceled).
-         * @return `true` if resumable.
+         *  - The coroutine has not finished (@c !done()).
+         *  - The control block has not been disowned (not cancelled).
+         * @return @c true if resumable.
          */
         [[nodiscard]] bool is_resumable() const noexcept {
             return _coroutine and not _coroutine.done() and not control_block::is_disowned(_coroutine.address());
         }
 
-        /// @brief Equivalent to `is_resumable()`.
+        /// @brief Equivalent to @c is_resumable().
         explicit operator bool() const { return is_resumable(); }
 
         /**
@@ -154,9 +154,9 @@ namespace ace::coroutines {
 
         /**
          * @brief Check whether the context is ready to be resumed by the runner.
-         * @details Returns `true` if no busy future is pending, or if the
-         * pending busy future has become ready (`await_ready()` returns `true`).
-         * @return `true` if the runner may resume this context.
+         * @details Returns @c true if no busy future is pending, or if the
+         * pending busy future has become ready (@c await_ready() returns @c true).
+         * @return @c true if the runner may resume this context.
          */
         bool accessed_by_future() {
             return not _coroutine.promise()._busy_future
@@ -164,13 +164,13 @@ namespace ace::coroutines {
         }
 
         /**
-         * @brief Create a `control_block_handle` that allows external
+         * @brief Create a @c control_block_handle that allows external
          *        join / cancel operations on this coroutine.
          * @details Lazily initializes the control block and the internal
-         * `context_conductor`.  Safe to call multiple times; subsequent calls
+         * @c context_conductor.  Safe to call multiple times; subsequent calls
          * return handles that share the same underlying block.
-         * @return A new `control_block_handle` with an incremented weak ref-count.
-         * @note The context must not have been moved away before calling `observe()`.
+         * @return A new @c control_block_handle with an incremented weak ref-count.
+         * @note The context must not have been moved away before calling @c observe().
          */
         control_block_handle observe() {
             // NOTE: Setting up promise block by coroutine
@@ -180,7 +180,7 @@ namespace ace::coroutines {
 
         /**
          * @brief Wake all coroutines that are waiting for this context to finish.
-         * @details Drains the `_waiters` queue and re-attaches each context to
+         * @details Drains the @c _waiters queue and re-attaches each context to
          * its own runner pool.  Called automatically from the destructor.
          */
         void release_waiters() {
@@ -255,19 +255,19 @@ namespace ace::coroutines {
         };
 
         /**
-         * @brief C++20 promise type for `context<returnT, promise_rule_t>`.
+         * @brief C++20 promise type for @c context<returnT, promise_rule_t>.
          *
-         * @details Inherits return-value machinery and `await_transform`
-         * overloads from `promise_traits<returnT>`.  The concrete fields held
+         * @details Inherits return-value machinery and @c await_transform
+         * overloads from @c promise_traits<returnT>.  The concrete fields held
          * by this type (in declaration order, cache-line optimised) are:
          *
          *  | Field | Type | Purpose |
          *  |---|---|---|
-         *  | `_runner_conductor` | `runner_conductor_slot_t` | In-place storage for the active conductor. |
-         *  | `_runner_pool` | `runner_pool_t*` | Pointer to the owning runner's task queue. |
-         *  | `_waiters` | atomic `shared_ptr<runner_pool_t>` | Queue of contexts waiting for this one to finish. |
-         *  | `_self_conductor` | `optional<context_conductor>` | Conductor installed into the control block. |
-         *  | `_roaming` | `bool` | When `true` the balancer may migrate the task to another runner. |
+         *  | @c _runner_conductor | @c runner_conductor_slot_t | In-place storage for the active conductor. |
+         *  | @c _runner_pool | @c runner_pool_t* | Pointer to the owning runner's task queue. |
+         *  | @c _waiters | atomic @c shared_ptr<runner_pool_t> | Queue of contexts waiting for this one to finish. |
+         *  | @c _self_conductor | @c optional<context_conductor> | Conductor installed into the control block. |
+         *  | @c _roaming | @c bool | When @c true the balancer may migrate the task to another runner. |
          */
         struct promise_type : promise_traits<returnT> {
             DECLARE_PROMISE_TRAITS(returnT)
@@ -279,8 +279,8 @@ namespace ace::coroutines {
 
             /**
              * @brief C++20 protocol — initial suspension point.
-             * @return `std::suspend_always` for `ace::async` (lazy), or
-             *         `std::suspend_never` for `ace::promise` (eager).
+             * @return @c std::suspend_always for @c ace::async (lazy), or
+             *         @c std::suspend_never for @c ace::promise (eager).
              */
             [[nodiscard]] auto initial_suspend() const noexcept {
                 return promise_rule_t::action();
@@ -290,9 +290,9 @@ namespace ace::coroutines {
              * @brief C++20 protocol — final suspension point.
              * @details Decrements the strong reference count of the control
              * block (if any) before suspending.  The coroutine frame is not
-             * destroyed here; the runner or owning `context` destructor does
+             * destroyed here; the runner or owning @c context destructor does
              * that.
-             * @return `std::suspend_always` — coroutine frame is kept alive
+             * @return @c std::suspend_always — coroutine frame is kept alive
              *         until explicitly destroyed.
              */
             auto final_suspend() const noexcept {
@@ -304,7 +304,7 @@ namespace ace::coroutines {
             /**
              * @brief Called by the coroutine machinery when an exception
              *        escapes the coroutine body.
-             * @details Sets status to `e_failed` and prints the error.
+             * @details Sets status to @c e_failed and prints the error.
              */
             void unhandled_exception() {
                 _status = e_failed;
@@ -312,7 +312,7 @@ namespace ace::coroutines {
             }
 
             /**
-             * @brief Print an error message and call `final_suspend()`.
+             * @brief Print an error message and call @c final_suspend().
              * @param str  Error message.
              */
             void interrupt(const std::string_view &&str) const {
@@ -322,26 +322,26 @@ namespace ace::coroutines {
 
             /**
              * @brief C++20 protocol — construct the return object.
-             * @return A `context` that wraps the coroutine handle for this
+             * @return A @c context that wraps the coroutine handle for this
              *         promise.
              */
             auto get_return_object() noexcept { return context{coroutine_t::from_promise(*this)}; }
 
             /**
              * @brief C++20 protocol — fallback when allocation fails.
-             * @return A default-constructed (null) `context`.
+             * @return A default-constructed (null) @c context.
              */
             static auto get_return_object_on_allocation_failure() { return context(nullptr); }
 
             /**
              * @brief Lazily initialise the control block for external observation.
              *
-             * @details Retrieves the `control_block` prefix allocated before
-             * this promise, constructs a `context_conductor`, and links them so
-             * that `control_block_handle::cancel()` / `forward()` work.
+             * @details Retrieves the @c control_block prefix allocated before
+             * this promise, constructs a @c context_conductor, and links them so
+             * that @c control_block_handle::cancel() / @c forward() work.
              *
-             * Only available for lazy (`differed`) coroutines because eager
-             * coroutines may already be running by the time `observe()` is
+             * Only available for lazy (@c differed) coroutines because eager
+             * coroutines may already be running by the time @c observe() is
              * called.
              *
              * @tparam promise_t  Promise type of the coroutine handle.
@@ -359,13 +359,13 @@ namespace ace::coroutines {
             }
 
             /**
-             * @brief Construct a `context_conductor` and return a pointer to it.
+             * @brief Construct a @c context_conductor and return a pointer to it.
              * @details Used when a control conductor is needed without attaching
              * it to the control block immediately.
              * @tparam promise_t  Promise type of the coroutine handle.
              * @param self  Handle to the owning coroutine.
              * @return Pointer to the newly created conductor (lifetime tied to
-             *         `_self_conductor`).
+             *         @c _self_conductor).
              */
             template <typename promise_t>
             control_conductor_handle* get_promise_conductor(const std::coroutine_handle<promise_t>& self) {
@@ -377,7 +377,7 @@ namespace ace::coroutines {
             // NOTE: Order of the following variables is optimized. DO NOT SWAP THEM!!!
 
             runner_conductor_slot_t _runner_conductor {}; ///< In-place conductor slot.  Set by the awaited future; read by the runner.
-            runner_pool_t* _runner_pool {nullptr};         ///< Pointer to the owning runner's MPSC task queue.  Set by `runner::attach()`.
+            runner_pool_t* _runner_pool {nullptr};         ///< Pointer to the owning runner's MPSC task queue.  Set by @c runner::attach().
 #if defined(_MSC_VER)
             std::atomic<std::shared_ptr<runner_pool_t>> _waiters;
 #elif defined(__GNUC__)
@@ -397,10 +397,10 @@ namespace ace::coroutines {
         // -----------------------------------------------------------------------
 
         /**
-         * @brief Internal helper for `await_ready()`.
+         * @brief Internal helper for @c await_ready().
          * @details Resumes the coroutine inline if it is ready and no future
          * is blocking it.
-         * @return `true` if the coroutine finished synchronously.
+         * @return @c true if the coroutine finished synchronously.
          */
         bool await_ready_impl() {
             if (_coroutine.done()) return true;
@@ -414,9 +414,9 @@ namespace ace::coroutines {
 
         /**
          * @brief C++20 awaitable protocol — check if coroutine is already done.
-         * @details Forces `await_suspend` processing on first call (when status
-         * is `e_inited`) so the runner pool pointer can be propagated.
-         * @return `true` if the coroutine has finished and the outer coroutine
+         * @details Forces @c await_suspend processing on first call (when status
+         * is @c e_inited) so the runner pool pointer can be propagated.
+         * @return @c true if the coroutine has finished and the outer coroutine
          *         should not suspend.
          */
         bool await_ready() override {
@@ -427,13 +427,13 @@ namespace ace::coroutines {
 
         /**
          * @brief C++20 awaitable protocol — suspend the outer coroutine.
-         * @details On the first call (status `e_inited`), propagates the runner
+         * @details On the first call (status @c e_inited), propagates the runner
          * pool pointer from the outer promise.  In all cases, steals the
          * conductor slot from the inner promise so the runner can find it.
          * @tparam promiseT  Promise type of the outer coroutine.
          * @param outer      Handle to the outer (calling) coroutine.
-         * @return `false` if the inner coroutine finished synchronously (outer
-         *         should not suspend); `true` otherwise.
+         * @return @c false if the inner coroutine finished synchronously (outer
+         *         should not suspend); @c true otherwise.
          */
         template<typename promiseT>
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
@@ -450,8 +450,8 @@ namespace ace::coroutines {
 
         /**
          * @brief C++20 awaitable protocol — extract the return value.
-         * @return The value stored in `promise_type::_return_value`, or
-         *         nothing for `void` coroutines.
+         * @return The value stored in @c promise_type::_return_value, or
+         *         nothing for @c void coroutines.
          */
         returnT await_resume() {
             if constexpr (requires(promise_type promise_t) { promise_t._return_value; })
@@ -467,14 +467,14 @@ namespace ace::coroutines {
          * @brief Resume the coroutine from the runner.
          *
          * @details Checks whether the coroutine is in a resumable state, clears
-         * the current future binding, and calls `_coroutine.resume()`.
-         * The lifecycle status after the resume is written to `*_res` if the
+         * the current future binding, and calls @c _coroutine.resume().
+         * The lifecycle status after the resume is written to @c *_res if the
          * pointer is non-null.
          *
          * @param _res  Optional output pointer that receives the
-         *              `promise_touch_result` value after the resume.
+         *              @c promise_touch_result value after the resume.
          * @return The return value of the coroutine (only meaningful for
-         *         non-`void` types after `e_finished`).
+         *         non-@c void types after @c e_finished).
          */
         returnT awake(promise_touch_result *const _res = nullptr) noexcept {
             // NOTE: Checking if promise is ready

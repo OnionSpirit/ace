@@ -1,24 +1,24 @@
 /**
  * @file cutex.h
- * @brief Cooperative Userspace MuTEX (`ace::cutex`) and its RAII proxy.
+ * @brief Cooperative Userspace MuTEX (@c ace::cutex) and its RAII proxy.
  *
- * @details The **cutex** is a cooperative, non-blocking mutual exclusion
+ * @details The @b cutex is a cooperative, non-blocking mutual exclusion
  * primitive designed for use inside ACE coroutines.
  *
  * ### Fast path (uncontended)
- * `try_lock()` performs a single `fetch_add(1)` on `_users`.  If the result
+ * @c try_lock() performs a single @c fetch_add(1) on @c _users.  If the result
  * is 0, the lock is acquired immediately — no suspension, no kernel call.
  *
  * ### Slow path (contended)
- * If `try_lock()` fails, `await_suspend()` installs a `cutex_conductor` into
- * the caller's promise.  The runner forwards the task into `_waiters`.  When
- * the current owner calls `sync()`, it does a `fetch_sub(1)` and calls
- * `notify()` which pops the next waiter and reattaches it to its runner.
+ * If @c try_lock() fails, @c await_suspend() installs a @c cutex_conductor into
+ * the caller's promise.  The runner forwards the task into @c _waiters.  When
+ * the current owner calls @c sync(), it does a @c fetch_sub(1) and calls
+ * @c notify() which pops the next waiter and reattaches it to its runner.
  *
  * ### Deadlock recovery
- * A rare race (OS interrupts the waiter between failed `try_lock()` and the
+ * A rare race (OS interrupts the waiter between failed @c try_lock() and the
  * enqueue) can leave the mutex unlocked with a waiter stuck in the queue.
- * `pending_notify()` detects this and retries until the notification succeeds.
+ * @c pending_notify() detects this and retries until the notification succeeds.
  *
  * ### Usage
  * @code{.cpp}
@@ -34,8 +34,8 @@
  * }
  * @endcode
  *
- * @warning Always declare the `ace::guard` (i.e., `cutex::volatile_proxy`)
- * as **`volatile`** to prevent the compiler from eliding its destructor.
+ * @warning Always declare the @c ace::guard (i.e., @c cutex::volatile_proxy)
+ * as <b>@c volatile</b> to prevent the compiler from eliding its destructor.
  *
  * @see ace::guard, ace::futures::cutex_future, ace::futures::cutex::proxy
  */
@@ -52,9 +52,9 @@ namespace ace::futures {
     /**
      * @brief Internal implementation of the cutex locking future.
      *
-     * @details `cutex_future` is the awaitable returned by `cutex::capture()`.
-     * It is separated from `cutex` itself to enforce RAII discipline through
-     * the `proxy` wrapper.
+     * @details @c cutex_future is the awaitable returned by @c cutex::capture().
+     * It is separated from @c cutex itself to enforce RAII discipline through
+     * the @c proxy wrapper.
      *
      * @see ace::futures::cutex
      */
@@ -71,15 +71,15 @@ namespace ace::futures {
         std::atomic<int> _users { 0 };                                  ///< Number of active users (0 = unlocked).
         nukes::dynamic::roaming_mpsc_queue<async<>> _waiters {};        ///< Tasks waiting to acquire the mutex.
         std::atomic<runner_pool_t*> _runner_pool { nullptr };           ///< Runner pool of the task that currently owns the lock (used for rescheduling).
-        bool _rescheduling { false };                                   ///< When `true`, released waiters are migrated to `_runner_pool`.
+        bool _rescheduling { false };                                   ///< When @c true, released waiters are migrated to @c _runner_pool.
 
         /**
-         * @brief Attempt to wake one waiter from `_waiters`.
+         * @brief Attempt to wake one waiter from @c _waiters.
          * @details Pops one context from the waiters queue and calls
-         * `runner::reattach()`.  If `_rescheduling` is set and the waiter
-         * does not support roaming, updates `_runner_pool` from the waiter's
+         * @c runner::reattach().  If @c _rescheduling is set and the waiter
+         * does not support roaming, updates @c _runner_pool from the waiter's
          * runner.
-         * @return `true` if a waiter was successfully notified.
+         * @return @c true if a waiter was successfully notified.
          */
         bool notify() noexcept;
 
@@ -87,28 +87,28 @@ namespace ace::futures {
          * @brief Deadlock resolution coroutine.
          *
          * @details The cutex can enter a deadlock state when an OS preemption
-         * interrupts a waiter between a failed `try_lock()` and its enqueue
-         * into `_waiters`.  The sequence is:
+         * interrupts a waiter between a failed @c try_lock() and its enqueue
+         * into @c _waiters.  The sequence is:
          *
-         *  1. Thread **A** owns the cutex.
-         *  2. Thread **B** calls `try_lock()` — fails (returns `false`).
-         *  3. OS interrupts thread **B** before it enqueues into `_waiters`.
-         *  4. Thread **A** calls `sync()` → `notify()` — queue is empty → no one woken.
-         *  5. Thread **B** resumes and enqueues itself → permanently stuck.
+         *  1. Thread @b A owns the cutex.
+         *  2. Thread @b B calls @c try_lock() — fails (returns @c false).
+         *  3. OS interrupts thread @b B before it enqueues into @c _waiters.
+         *  4. Thread @b A calls @c sync() → @c notify() — queue is empty → no one woken.
+         *  5. Thread @b B resumes and enqueues itself → permanently stuck.
          *
-         * `pending_notify()` detects this by retrying `notify()` while
-         * `_users > 0` (meaning at least one waiter exists), suspending between
+         * @c pending_notify() detects this by retrying @c notify() while
+         * @c _users > 0 (meaning at least one waiter exists), suspending between
          * retries.
          *
-         * @return An `ace::async<>` coroutine that retries notification.
+         * @return An @c ace::async<> coroutine that retries notification.
          */
         async<> pending_notify() noexcept;
 
         /**
          * @brief Attempt to acquire the mutex without suspending.
-         * @details Atomically increments `_users`.  If the pre-increment value
+         * @details Atomically increments @c _users.  If the pre-increment value
          * was 0, the lock is acquired.
-         * @return `true` if the lock was acquired.
+         * @return @c true if the lock was acquired.
          */
         bool try_lock() noexcept;
 
@@ -117,10 +117,10 @@ namespace ace::futures {
 
         /**
          * @brief C++20 awaitable protocol — suspend and enqueue for wakeup.
-         * @details Installs a `cutex_conductor` so the runner forwards the
-         * calling context into `_waiters`.
+         * @details Installs a @c cutex_conductor so the runner forwards the
+         * calling context into @c _waiters.
          * @param coroutine  Handle to the suspending coroutine's promise.
-         * @return Always `true` (always suspends on the slow path).
+         * @return Always @c true (always suspends on the slow path).
          */
         bool await_suspend(auto coroutine);
 
@@ -130,10 +130,10 @@ namespace ace::futures {
 
         /**
          * @brief Enable or disable rescheduling mode.
-         * @details When `true`, released waiters are migrated to the runner
+         * @details When @c true, released waiters are migrated to the runner
          * pool of the task that most recently released the cutex.  This keeps
          * the critical section on the same CPU for better cache locality.
-         * @param rs  `true` to enable rescheduling.
+         * @param rs  @c true to enable rescheduling.
          */
         void set_rescheduling(const bool rs) noexcept { _rescheduling = rs; }
 
@@ -144,9 +144,9 @@ namespace ace::futures {
     /**
      * @brief Cooperative Userspace MuTEX — public API wrapper.
      *
-     * @details `cutex` is the user-facing type.  It inherits from
-     * `cutex_future` (protected) and exposes only the `volatile_proxy` RAII
-     * interface to prevent accidental direct `co_await`-ing.
+     * @details @c cutex is the user-facing type.  It inherits from
+     * @c cutex_future (protected) and exposes only the @c volatile_proxy RAII
+     * interface to prevent accidental direct @c co_await-ing.
      *
      * @par Usage
      * @code{.cpp}
@@ -161,7 +161,7 @@ namespace ace::futures {
      * }
      * @endcode
      *
-     * @see ace::guard (alias for `cutex::volatile_proxy`)
+     * @see ace::guard (alias for @c cutex::volatile_proxy)
      */
     class cutex final : protected cutex_future {
 
@@ -178,7 +178,7 @@ namespace ace::futures {
         cutex(const cutex&) = delete; ///< Mutexes are not copyable.
         cutex(cutex&&) = delete;      ///< Mutexes are not movable.
 
-        /// @brief RAII proxy type alias.  Use `volatile` to prevent elision.
+        /// @brief RAII proxy type alias.  Use @c volatile to prevent elision.
         typedef volatile proxy volatile_proxy;
 
         ~cutex() override = default;
@@ -188,12 +188,12 @@ namespace ace::futures {
     };
 
     /**
-     * @brief RAII proxy that enforces balanced `capture()` / `sync()` calls.
+     * @brief RAII proxy that enforces balanced @c capture() / @c sync() calls.
      *
-     * @details The proxy prevents calling `capture()` twice without an
-     * intervening `sync()`, and automatically calls `sync()` on destruction.
+     * @details The proxy prevents calling @c capture() twice without an
+     * intervening @c sync(), and automatically calls @c sync() on destruction.
      *
-     * Declare as `volatile` to prevent the compiler from eliding the destructor:
+     * Declare as @c volatile to prevent the compiler from eliding the destructor:
      * @code{.cpp}
      * volatile auto guard = ace::guard(mtx);
      * @endcode
@@ -203,7 +203,7 @@ namespace ace::futures {
     class cutex::proxy {
 
         cutex& _cutex;
-        bool _is_synced { true }; ///< `true` when the mutex is not held.
+        bool _is_synced { true }; ///< @c true when the mutex is not held.
 
     public:
 
@@ -219,10 +219,10 @@ namespace ace::futures {
 
         /**
          * @brief Acquire the cutex.
-         * @details Returns the underlying `cutex_future&` so the caller can
-         * `co_await` it.  Throws `std::logic_error` if called twice without
-         * an intervening `sync()`.
-         * @return Reference to the cutex's `cutex_future` interface.
+         * @details Returns the underlying @c cutex_future& so the caller can
+         * @c co_await it.  Throws @c std::logic_error if called twice without
+         * an intervening @c sync().
+         * @return Reference to the cutex's @c cutex_future interface.
          * @throws std::logic_error if called while the lock is already held.
          */
         [[nodiscard]] auto capture() volatile -> cutex_future& {
@@ -238,7 +238,7 @@ namespace ace::futures {
          */
         void sync() volatile noexcept { if (not _is_synced) { _cutex.sync(); _is_synced = true; } };
 
-        /// @brief Destructor.  Automatically calls `sync()` if not already synced.
+        /// @brief Destructor.  Automatically calls @c sync() if not already synced.
         ~proxy() { sync(); }
     };
 

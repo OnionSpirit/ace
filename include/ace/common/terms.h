@@ -8,32 +8,32 @@
  *
  * | Macro | Value | Purpose |
  * |---|---|---|
- * | `ACE_BUS_SIZE` | `sizeof(std::size_t)` | Native pointer/word size. Used for `alignas` on small fields. |
- * | `ACE_CONDUCTOR_MEM_SIZE` | cache line − bus size | Maximum byte size for a conductor in a `conductor_slot`. |
- * | `ACE_CACHE_LINE_SIZE` | `hardware_constructive_interference_size` | CPU cache line size. |
- * | `ACE_CACHE_LINE(n)` | zero-size struct | Inserts a named cache-line padding marker at position `n`. |
+ * | @c ACE_BUS_SIZE | @c sizeof(std::size_t) | Native pointer/word size. Used for @c alignas on small fields. |
+ * | @c ACE_CONDUCTOR_MEM_SIZE | cache line − bus size | Maximum byte size for a conductor in a @c conductor_slot. |
+ * | @c ACE_CACHE_LINE_SIZE | @c hardware_constructive_interference_size | CPU cache line size. |
+ * | @c ACE_CACHE_LINE(n) | zero-size struct | Inserts a named cache-line padding marker at position @c n. |
  */
 #ifndef ACE_COMMON_TERMS_H
 #define ACE_COMMON_TERMS_H
 
-/// @brief Native word size (bytes).  Used as `alignas` value for small fields.
+/// @brief Native word size (bytes).  Used as @c alignas value for small fields.
 #define ACE_BUS_SIZE sizeof(std::size_t)
 
 #ifndef ACE_CONDUCTOR_MEM_SIZE
-/// @brief Maximum byte size for a concrete conductor stored in a `conductor_slot`.
-/// @details Derived so that a `conductor_slot` including its pointer fits within
+/// @brief Maximum byte size for a concrete conductor stored in a @c conductor_slot.
+/// @details Derived so that a @c conductor_slot including its pointer fits within
 /// one cache line.
 #define ACE_CONDUCTOR_MEM_SIZE std::hardware_constructive_interference_size - ACE_BUS_SIZE
 #endif
 
 /// @brief CPU cache line size in bytes.
-/// @details Equal to `std::hardware_constructive_interference_size`.
-/// Used to size `alignas` on performance-critical structs.
+/// @details Equal to @c std::hardware_constructive_interference_size.
+/// Used to size @c alignas on performance-critical structs.
 #define ACE_CACHE_LINE_SIZE std::hardware_constructive_interference_size
 
 /**
  * @brief Insert a named zero-size padding sentinel at a cache-line boundary.
- * @details Used inside `alignas(ACE_CACHE_LINE_SIZE)` structs to visually
+ * @details Used inside @c alignas(ACE_CACHE_LINE_SIZE) structs to visually
  * mark where one cache line ends and another begins.
  * @param number  A unique integer suffix to prevent name collisions.
  */

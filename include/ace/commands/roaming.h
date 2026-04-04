@@ -2,9 +2,9 @@
  * @file roaming.h
  * @brief Command that controls whether a coroutine may migrate between runners.
  *
- * @details When a task is submitted via `ace::schedule()`, the dispatcher sets
- * `_roaming = true`, allowing the balancer to migrate the task to any available
- * runner.  When spawned via `ace::spawn()`, roaming is disabled (`false`) so
+ * @details When a task is submitted via @c ace::schedule(), the dispatcher sets
+ * @c _roaming = true, allowing the balancer to migrate the task to any available
+ * runner.  When spawned via @c ace::spawn(), roaming is disabled (@c false) so
  * the task stays on the same runner as its parent.
  *
  * This command lets the user toggle the flag mid-execution:
@@ -20,8 +20,8 @@
  * }
  * @endcode
  *
- * The command never actually suspends the coroutine (`await_suspend` returns
- * `false`) — it only mutates the promise flag.
+ * The command never actually suspends the coroutine (@c await_suspend returns
+ * @c false) — it only mutates the promise flag.
  */
 #ifndef ACE_COMMANDS_ROAMING_ROAMING_H
 #define ACE_COMMANDS_ROAMING_ROAMING_H
@@ -31,9 +31,9 @@
 namespace ace::commands {
 
     /**
-     * @brief Awaitable command that sets the `_roaming` flag on the current promise.
+     * @brief Awaitable command that sets the @c _roaming flag on the current promise.
      *
-     * @details Non-suspending — `await_suspend()` returns `false` immediately.
+     * @details Non-suspending — @c await_suspend() returns @c false immediately.
      */
     class roaming : public futures::future_traits<roaming> {
 
@@ -48,8 +48,8 @@ namespace ace::commands {
 
         /**
          * @brief Construct with an explicit roaming state.
-         * @param is_roaming  `true` to allow cross-runner migration;
-         *                    `false` to pin the task to its current runner.
+         * @param is_roaming  @c true to allow cross-runner migration;
+         *                    @c false to pin the task to its current runner.
          */
         explicit roaming(const bool is_roaming) : _is_roaming{is_roaming} {};
 
@@ -59,7 +59,7 @@ namespace ace::commands {
         /**
          * @brief Apply the roaming flag to the promise — never suspends.
          * @param coroutine  Handle to the calling coroutine's promise.
-         * @return Always `false` — no suspension.
+         * @return Always @c false — no suspension.
          */
         bool await_suspend(auto coroutine) {
             coroutine.promise()._roaming = _is_roaming;

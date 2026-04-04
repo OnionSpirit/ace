@@ -14,7 +14,7 @@
  * }
  * @endcode
  *
- * The command never suspends (`await_suspend` returns `false`).
+ * The command never suspends (@c await_suspend returns @c false).
  */
 #ifndef ACE_COMMANDS_GET_RUNNER_H
 #define ACE_COMMANDS_GET_RUNNER_H
@@ -26,19 +26,19 @@ namespace ace::commands {
     /**
      * @brief Awaitable command that returns the calling coroutine's runner.
      *
-     * @details Non-suspending — reads the `_runner_pool` pointer from the
-     * promise and converts it to a `runner*` via `pool_to_runner()`.
+     * @details Non-suspending — reads the @c _runner_pool pointer from the
+     * promise and converts it to a @c runner* via @c pool_to_runner().
      */
     struct get_runner : futures::future_traits<get_runner> {
 
-        core::runner* _ptr {}; ///< Pointer filled in by `await_suspend`.
+        core::runner* _ptr {}; ///< Pointer filled in by @c await_suspend.
 
         IMPORT_FUTURE_ENV(get_runner)
 
         /**
          * @brief Capture the current runner pointer from the promise.
          * @param coroutine  Handle to the calling coroutine's promise.
-         * @return Always `false` — no suspension.
+         * @return Always @c false — no suspension.
          */
         bool await_suspend(auto coroutine) {
             _ptr = core::pool_to_runner(coroutine.promise()._runner_pool);
@@ -47,7 +47,7 @@ namespace ace::commands {
 
         /**
          * @brief Return the captured runner pointer.
-         * @return Pointer to the current `ace::core::runner`, or `nullptr`
+         * @return Pointer to the current @c ace::core::runner, or @c nullptr
          *         if the coroutine has no associated runner yet.
          */
         [[nodiscard]] core::runner* await_resume() const {

@@ -2,18 +2,18 @@
  * @file control.h
  * @brief Intrusive control block and its external handle for ACE coroutines.
  *
- * @details Every ACE coroutine promise is allocated with a `control_block`
- * immediately *before* the promise in memory (see `promise_traits::operator new`).
+ * @details Every ACE coroutine promise is allocated with a @c control_block
+ * immediately *before* the promise in memory (see @c promise_traits::operator new).
  * This provides a zero-cost way to attach external observers without an
  * additional heap allocation.
  *
  * ### Reference counting
  *
  * The control block uses a dual reference-count scheme:
- *  - `_strong_refcount` — counts coroutine *owners* (always 1: the frame itself).
- *    Decremented by `disown()` when the coroutine finishes.
- *  - `_weak_refcount` — counts *watchers* (`control_block_handle` instances).
- *    Incremented by `watch()`, decremented by `unwatch()`.
+ *  - @c _strong_refcount — counts coroutine *owners* (always 1: the frame itself).
+ *    Decremented by @c disown() when the coroutine finishes.
+ *  - @c _weak_refcount — counts *watchers* (@c control_block_handle instances).
+ *    Incremented by @c watch(), decremented by @c unwatch().
  *
  * The block is freed only when both counts reach zero.
  *
@@ -41,20 +41,20 @@ namespace ace::coroutines {
      * @brief Intrusive reference-counted control block for a coroutine promise.
      *
      * @details Allocated immediately before the promise in memory by
-     * `promise_traits::operator new`.  Stores the reference counts and an
-     * optional pointer to a `control_conductor_handle` that enables external
+     * @c promise_traits::operator new.  Stores the reference counts and an
+     * optional pointer to a @c control_conductor_handle that enables external
      * join / cancel operations.
      *
-     * All static methods accept a raw `void*` pointing to **either** the
-     * block itself **or** a promise address; `get_block_from_address` converts
+     * All static methods accept a raw @c void* pointing to @b either the
+     * block itself @b or a promise address; @c get_block_from_address converts
      * the latter to the former.
      */
     struct control_block {
 
         uint64_t _weak_refcount {1};                          ///< Number of watchers (handles). Initial value: 1 (the block itself).
         uint64_t _strong_refcount {1};                        ///< Number of owners (always the coroutine frame). Initial value: 1.
-        control_conductor_handle* _control_conductor { nullptr }; ///< Optional conductor for external join/cancel; set by `setup_control_block()`.
-        alignas(ACE_BUS_SIZE) bool _exists {true};            ///< `false` once the coroutine has finished (`disown()` was called).
+        control_conductor_handle* _control_conductor { nullptr }; ///< Optional conductor for external join/cancel; set by @c setup_control_block().
+        alignas(ACE_BUS_SIZE) bool _exists {true};            ///< @c false once the coroutine has finished (@c disown() was called).
 
         control_block() = default;
 
@@ -63,57 +63,57 @@ namespace ace::coroutines {
         /**
          * @brief Check whether both reference counts are zero.
          * @param v_block  Pointer to the control block.
-         * @return `true` if both `_weak_refcount` and `_strong_refcount` are 0.
+         * @return @c true if both @c _weak_refcount and @c _strong_refcount are 0.
          */
         static bool is_untracked(void* v_block);
 
         /**
          * @brief Decrement the strong (owner) count and mark the block as dead.
-         * @details Called from `promise_type::final_suspend()` when the
+         * @details Called from @c promise_type::final_suspend() when the
          * coroutine has finished executing.
          * @param v_block  Pointer to the control block.
-         * @return `true` if the block became untracked and can be freed.
+         * @return @c true if the block became untracked and can be freed.
          */
         static bool disown(void* v_block);
 
         /**
          * @brief Increment the weak (watcher) count.
-         * @details Called when a new `control_block_handle` is constructed.
+         * @details Called when a new @c control_block_handle is constructed.
          * @param v_block  Pointer to the control block.
-         * @return `true` if the block became untracked after the operation
-         *         (only possible if `_weak_refcount` was already 0).
+         * @return @c true if the block became untracked after the operation
+         *         (only possible if @c _weak_refcount was already 0).
          */
         static bool watch(void* v_block);
 
         /**
          * @brief Decrement the weak (watcher) count.
-         * @details Called from `control_block_handle`'s destructor or `cancel()`.
+         * @details Called from @c control_block_handle's destructor or @c cancel().
          * @param v_block  Pointer to the control block.
-         * @return `true` if the block became untracked and can be freed.
+         * @return @c true if the block became untracked and can be freed.
          */
         static bool unwatch(void* v_block);
 
         /**
          * @brief Check whether the coroutine that owns this block has finished.
-         * @param address  Raw promise address (offset by `control_block_size`).
-         * @return `true` if `_exists == false`.
+         * @param address  Raw promise address (offset by @c control_block_size).
+         * @return @c true if @c _exists == false.
          */
         static bool is_disowned(void* address);
 
         /**
-         * @brief Convert a promise address to the `control_block*` that precedes it.
-         * @param address  Raw promise address returned by `operator new`.
+         * @brief Convert a promise address to the @c control_block* that precedes it.
+         * @param address  Raw promise address returned by @c operator new.
          * @return Pointer to the control block.
          */
         static control_block* get_block_from_address(void* address);
 
     };
 
-    /// @brief Byte size of `control_block`.  Used as an allocation prefix offset.
+    /// @brief Byte size of @c control_block.  Used as an allocation prefix offset.
     inline constexpr std::size_t control_block_size = sizeof(control_block);
 
     /**
-     * @brief Concept that checks whether a promise type carries a `control_block*`.
+     * @brief Concept that checks whether a promise type carries a @c control_block*.
      * @tparam promise_t  Promise type to inspect.
      */
     template <typename promise_t>
@@ -124,14 +124,14 @@ namespace ace::coroutines {
     /**
      * @brief Copyable external handle to a coroutine's control block.
      *
-     * @details Provides safe `cancel()`, `done()`, and `forward()` operations
-     * from outside the scheduler — for example from `ace::futures::async_handle`
-     * or user code that calls `context::observe()`.
+     * @details Provides safe @c cancel(), @c done(), and @c forward() operations
+     * from outside the scheduler — for example from @c ace::futures::async_handle
+     * or user code that calls @c context::observe().
      *
      * Copies increment the weak reference count; destruction decrements it.
      * When the count reaches zero the control block is freed.
      *
-     * @warning **Not thread-safe.**  Do not share a single handle across threads
+     * @warning <b>Not thread-safe.</b>  Do not share a single handle across threads
      * without external synchronization.
      */
     class control_block_handle {
@@ -159,8 +159,8 @@ namespace ace::coroutines {
 
         /**
          * @brief Construct from a coroutine handle whose promise satisfies
-         *        `is_controled_promise`.
-         * @tparam promise_t  Promise type (must have `_block` member).
+         *        @c is_controled_promise.
+         * @tparam promise_t  Promise type (must have @c _block member).
          * @param promise  Coroutine handle to observe.
          */
         template <is_controled_promise promise_t>
@@ -174,7 +174,7 @@ namespace ace::coroutines {
 
         /**
          * @brief Request cancellation of the associated coroutine.
-         * @details Calls `control_conductor->cancel()`, then releases this handle.
+         * @details Calls @c control_conductor->cancel(), then releases this handle.
          * No-op if the handle is idle or the coroutine has already finished.
          */
         void cancel() {
@@ -184,12 +184,12 @@ namespace ace::coroutines {
             release();
         }
 
-        /// @brief `true` if this handle does not reference any control block.
+        /// @brief @c true if this handle does not reference any control block.
         [[nodiscard]] bool is_idle() const { return not _block; }
 
         /**
-         * @brief `true` if the associated coroutine has finished.
-         * @return `false` if `is_idle()`, otherwise `!_exists`.
+         * @brief @c true if the associated coroutine has finished.
+         * @return @c false if @c is_idle(), otherwise @c !_exists.
          */
         [[nodiscard]] bool done() const {
             if (is_idle()) [[unlikely]] return false;
@@ -198,8 +198,8 @@ namespace ace::coroutines {
 
         /**
          * @brief Register a waiter context to be notified when the coroutine finishes.
-         * @param waiter  Pointer to the `ace::async<>` context to register.
-         * @return `true` if the waiter was accepted by the conductor.
+         * @param waiter  Pointer to the @c ace::async<> context to register.
+         * @return @c true if the waiter was accepted by the conductor.
          */
         bool forward(void* waiter) const {
             if (not _block) [[unlikely]] return false;

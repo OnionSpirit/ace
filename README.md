@@ -37,8 +37,6 @@
 | **Time-wheel timeouts** | O(1) insert/remove — hierarchical multi-dial wheel |
 | **Task cancellation** | External `async_handle` with join / cancel / done |
 | **io_uring integration** | Async read / write / network via Linux `io_uring` |
-| **Cache-line aligned** | Runners and workers are cache-line padded to prevent false sharing |
-| **Slab allocator** | Internal slab memory pool for queue nodes |
 
 ---
 

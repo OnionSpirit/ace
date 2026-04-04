@@ -142,7 +142,6 @@ namespace ace::core {
             return true;
         }
 
-        // TODO: Make return type as 'join_handler' future type, when I will write it
         /**
          * @details Function to schedule task at the dispatcher
          * @param new_task Task to be pushed into the dispatcher
@@ -199,10 +198,10 @@ namespace ace::core {
         static auto get_time()
             -> std::chrono::time_point<std::chrono::steady_clock> { return local_ts; }
 
-        // balancer(const balancer&) = delete;
-        // balancer(balancer&&) = delete;
-        // balancer& operator=(const balancer&) = delete;
-        // balancer& operator=(balancer&&) = delete;
+        balancer(const balancer&) = delete;
+        balancer(balancer&&) = delete;
+        balancer& operator=(const balancer&) = delete;
+        balancer& operator=(balancer&&) = delete;
 
     };
 

@@ -4,6 +4,8 @@
 
 > **Version:** 0.9.9 &nbsp;|&nbsp; **Language:** C++23
 
+> **Warning:** Documentation is AI generated and still under human moderation
+
 ---
 
 ## Table of Contents

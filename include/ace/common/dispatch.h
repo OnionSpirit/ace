@@ -44,9 +44,8 @@ namespace ace::common::dispatch {
     template <typename awaitableT, typename promiseT>
     concept is_awaitable =
         requires (awaitableT awaitable_t, std::coroutine_handle<promiseT> promise_t) {
-        { awaitable_t.await_ready() } -> std::same_as<bool>;
-        awaitable_t.await_resume();
-        // awaitable_t.detach(promise_t);
+            { awaitable_t.await_ready() } -> std::same_as<bool>;
+            awaitable_t.await_resume();
         }
     and (
          requires (awaitableT awaitable_t, std::coroutine_handle<promiseT> promise_t) {
@@ -67,7 +66,7 @@ namespace ace::common::dispatch {
      *  3. Satisfies `is_awaitable`.
      *
      * When `promise_traits::await_transform()` detects this concept, it clears
-     * `_busy_future` so the runner uses the conductor for forwarding.
+     * `_busy_future` so the runner uses the conductor for forwarding, avoiding busy-polling for tasks.
      *
      * @tparam futureT   Type to check.
      * @tparam promiseT  Promise type of the enclosing coroutine.
@@ -89,8 +88,7 @@ namespace ace::common::dispatch {
      *
      * When `promise_traits::await_transform()` detects this concept, it stores
      * a pointer in `_busy_future`.  The runner calls `await_ready()` repeatedly
-     * before deciding to re-queue the task, avoiding a full conductor round-trip
-     * for fast operations (e.g., channel pull when data is already available).
+     * before deciding to re-queue the task. This type of future does not prevent busy-polling
      *
      * @tparam futureT   Type to check.
      * @tparam promiseT  Promise type of the enclosing coroutine.

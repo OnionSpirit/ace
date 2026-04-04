@@ -291,8 +291,6 @@ ace::async<> critical_section() {
 }
 ```
 
-> **Important:** Always declare the guard as `volatile` (`volatile ace::guard`) to prevent the compiler from eliding the destructor call.
-
 ---
 
 #### Timeout & Expire

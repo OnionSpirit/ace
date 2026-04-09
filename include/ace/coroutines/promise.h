@@ -94,6 +94,22 @@ namespace ace::coroutines {
         and (std::same_as<decltype(modeT::action()), std::suspend_never>
         or std::same_as<decltype(modeT::action()), std::suspend_always>);
 
+    struct average_quants {
+        static constexpr std::size_t window_size = 4;
+        alignas(8) uint64_t _total_sum {};
+        alignas(8) uint64_t _curr_member = 0;
+        std::array<uint32_t, window_size> _members {};
+
+        [[nodiscard]] std::size_t value() const { return _total_sum / window_size; }
+
+        [[nodiscard]] std::size_t add(const std::size_t& new_one) {
+            _total_sum = _total_sum + new_one - _members[_curr_member % window_size];
+            _members[_curr_member % window_size] = new_one;
+            ++_curr_member;
+            return value();
+        }
+    };
+
     /**
      * @brief CRTP mixin that provides @c return_value() and @c yield_value()
      *        to a promise type for non-void coroutines.
@@ -326,9 +342,10 @@ namespace ace::coroutines {
             return _trace_id.value();
         }
 
-        future_handler_ptr_t        _busy_future { nullptr }; ///< Pointer to the currently active busy future, or @c nullptr.
+        future_handler_ptr_t        _busy_future { nullptr };  ///< Pointer to the currently active busy future, or @c nullptr.
         control_block*              _block  { nullptr };       ///< Pointer to the intrusive control block (set on first @c observe()).
         std::optional<std::size_t>  _trace_id;                 ///< Optional debugging trace ID.
+        average_quants              _quants {};                ///< Average amount of the time quants spent at the @c resume()
     };
 
 #define DECLARE_PROMISE_TRAITS(derived_t, return_type_t) typedef coroutines::promise_traits<derived_t, return_type_t> promise_traits_t;

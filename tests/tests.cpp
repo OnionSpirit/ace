@@ -43,7 +43,7 @@ TEST(core, do_runner_test) {
 
 TEST(futures, do_dynamic_channel_on_runner_test) {
 
-    const ace::core::runner runner;
+    ace::core::runner runner;
     channel_abuser abuser;
     runner.attach(abuser.channel_receiver());
     runner.attach(abuser.channel_sender());

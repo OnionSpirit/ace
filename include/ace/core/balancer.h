@@ -101,6 +101,10 @@ namespace ace::core {
                 now = get_time();
             }
 
+            // TODO: Debug logs
+            std::cout << "Total quants on the runner <" << worker_id << "> : "
+                      << _runners[worker_id]._total_quants << '\n';
+
             // NOTE: Updating runner status
             _workers_states[worker_id]._pending = not active;
             ++_workers_states[worker_id]._rounds;

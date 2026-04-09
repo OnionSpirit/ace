@@ -23,7 +23,8 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
 
     ACE_CACHE_LINE(0)
 
-    mutable runner_pool_t _pool; // Note: pool of task queue
+    mutable runner_pool_t _pool;              ///< Pool of the assigned tasks
+    long int              _total_quants   {}; ///< Total amount of the time quants from the all tasks on a pool
 
     runner() =default;
     // TODO: Need to figure out how to validate this wo warn cuz its important
@@ -57,19 +58,25 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
      * @details Resumes only one ready task
      * @return @b true if task was processed, @b false otherwise
      */
-    bool yank() const noexcept {
+    bool yank() noexcept {
         coroutines::promise_touch_result touch_result = coroutines::promise_touch_result::e_executed;
-        auto* async_n = _pool.pop_node();
+        auto* task_node = _pool.pop_node();
 
-        /// NOTE: Pulling new context from queue
-        if (not async_n) [[unlikely]] return false;
+        // NOTE: Pulling new context from queue
+        if (not task_node) [[unlikely]] return false;
+
+        // NOTE: Removing old quants amount
+        _total_quants -= task_node->_data._coroutine.promise()._quants.value();
+
+        // NOTE: Starting counter
+        const auto start_time = std::chrono::steady_clock::now();
 
         // NOTE: Proceeding context
-        async_n->_data.awake(&touch_result);
+        task_node->_data.awake(&touch_result);
 
         // NOTE: Checking if context can be resumed
         const bool is_resumable {
-                async_n->_data
+                task_node->_data
             and touch_result not_eq coroutines::promise_touch_result::e_failed
             and touch_result not_eq coroutines::promise_touch_result::e_finished
             and touch_result not_eq coroutines::promise_touch_result::e_detached
@@ -80,19 +87,24 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
         // NOTE: Checking if the context shall be forwarded via passed conductor
         const bool is_conducted {
             is_resumable
-            and async_n->_data._coroutine.promise()._runner_conductor
+            and task_node->_data._coroutine.promise()._runner_conductor
         };
 
         // NOTE: Decision if node shall be released or pushed back
         const bool is_idle = not is_resumable or is_conducted;
 
+        // NOTE: Increasing quants because task is resumable
+        if (is_resumable)
+            _total_quants += task_node->_data._coroutine.promise()._quants.add(
+            (std::chrono::steady_clock::now() - start_time).count());
+
         // NOTE: Forwarding via conductor if needed
         if (is_conducted) [[likely]]
-            async_n->_data._coroutine.promise()._runner_conductor->forward(std::forward<task>(async_n->_data));
+            task_node->_data._coroutine.promise()._runner_conductor->forward(std::forward<task>(task_node->_data));
 
         // NOTE: If async is idle, releasing it's node. Else returning it back to the local pool
-        if (is_idle) _pool.release_node(async_n);
-        else _pool.push_node(async_n);
+        if (is_idle) _pool.release_node(task_node);
+        else _pool.push_node(task_node);
 
         return true;
     }
@@ -111,7 +123,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
      * @details Resumes tasks from the ready task pool until it is empty, or limit (1024) reached.
      * @return @b true if runner made some tasks, @b false otherwise
      */
-    bool run() const noexcept {
+    bool run() noexcept {
         int i = 0;
         constexpr int yank_limit = 128;
         while (i < yank_limit and yank()) ++i;

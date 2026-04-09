@@ -469,4 +469,10 @@ inline ace::task timer_or_timer() {
     co_return;
 }
 
+inline ace::task timer_and_timer() {
+    auto long_timeout = ace::futures::timeout(100ms);
+    co_await (long_timeout and ace::futures::timeout(10ms));
+    co_return;
+}
+
 #endif // UNITS_H

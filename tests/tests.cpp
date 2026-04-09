@@ -387,8 +387,24 @@ TEST(futures, do_io_socket_echo) {
 }
 
 TEST(core, do_or_await_test) {
+    const auto start_time = std::chrono::steady_clock::now();
+
     ace::schedule(timer_or_timer());
     ace::run();
     ASSERT_TRUE(ace::empty());
+
+    const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
+    EXPECT_GE(ms_time, 100);
+    EXPECT_LT(ms_time, 500);
 }
 
+TEST(core, do_and_await_test) {
+    const auto start_time = std::chrono::steady_clock::now();
+
+    ace::schedule(timer_and_timer());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+
+    const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
+    EXPECT_GE(ms_time, 100);
+}

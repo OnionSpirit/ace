@@ -24,7 +24,7 @@
  * @code{.cpp}
  * ace::cutex mtx;
  *
- * ace::async<> task() {
+ * ace::task task() {
  *     volatile auto guard = ace::guard(mtx);
  *     auto future = co_await guard->capture();
  *     // --- critical section ---
@@ -69,7 +69,7 @@ namespace ace::futures {
 
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
         std::atomic<int> _users { 0 };                                  ///< Number of active users (0 = unlocked).
-        nukes::dynamic::roaming_mpsc_queue<async<>> _waiters {};        ///< Tasks waiting to acquire the mutex.
+        nukes::dynamic::roaming_mpsc_queue<task> _waiters {};        ///< Tasks waiting to acquire the mutex.
         std::atomic<runner_pool_t*> _runner_pool { nullptr };           ///< Runner pool of the task that currently owns the lock (used for rescheduling).
         bool _rescheduling { false };                                   ///< When @c true, released waiters are migrated to @c _runner_pool.
 
@@ -100,9 +100,9 @@ namespace ace::futures {
          * @c _users > 0 (meaning at least one waiter exists), suspending between
          * retries.
          *
-         * @return An @c ace::async<> coroutine that retries notification.
+         * @return An @c ace::task coroutine that retries notification.
          */
-        async<> pending_notify() noexcept;
+        task pending_notify() noexcept;
 
         /**
          * @brief Attempt to acquire the mutex without suspending.
@@ -151,7 +151,7 @@ namespace ace::futures {
      * @par Usage
      * @code{.cpp}
      * ace::cutex mtx;
-     * ace::async<> task() {
+     * ace::task task() {
      *     volatile auto g = ace::guard(mtx);
      *     auto f = co_await g->capture();
      *     // critical section
@@ -265,7 +265,7 @@ struct ACE_FUTURE_CUTEX_FUTURE_SPACE cutex_conductor : conductor_handler_t {
     explicit cutex_conductor(cutex_future* cutex_)
         : _cutex(cutex_) {};
 
-    void forward(async<>&& ctx) override {
+    void forward(task&& ctx) override {
         while (not _cutex->_waiters.push(std::move(ctx)));
     }
 
@@ -291,7 +291,7 @@ try_lock() noexcept {
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 notify() noexcept {
-    async<> waiter;
+    task waiter;
     // NOTE: Trying to fetch next waiter and release it on the runner
     if (not _waiters.pop(waiter))
         return false;
@@ -305,7 +305,7 @@ notify() noexcept {
     return true;
 }
 
-ACE_FUTURE_CUTEX_FUTURE_MEMBER(ace::async<>)
+ACE_FUTURE_CUTEX_FUTURE_MEMBER(ace::task)
 pending_notify() noexcept {
     do {
         if (notify()) co_return;

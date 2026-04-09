@@ -43,7 +43,7 @@ namespace ace::coroutines {
      * The runner calls @c forward() after detecting the slot is occupied.
      *
      * @tparam runner_context_t  The coroutine context type being forwarded
-     *                           (typically @c ace::async<>).
+     *                           (typically @c ace::task).
      */
     template <typename runner_context_t>
     struct runner_conductor_handle {
@@ -87,7 +87,7 @@ namespace ace::coroutines {
 
         /**
          * @brief Register an external waiter that will be notified on finish.
-         * @param waiter  Pointer to the @c ace::async<> context to notify.
+         * @param waiter  Pointer to the @c ace::task context to notify.
          * @return @c true if the waiter was successfully registered.
          */
         virtual bool forward(void* waiter) noexcept = 0;

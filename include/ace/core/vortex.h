@@ -105,7 +105,7 @@ namespace ace::core {
             detach_set(false);
         }
 
-        async<> vortex(sig_pipe_t& sig_pipe) {
+        task vortex(sig_pipe_t& sig_pipe) {
             std::unique_ptr<signal_handler> sig { nullptr };
             while (not detach_get()) {
                 if constexpr (is_vortex_promise<derived_t>)

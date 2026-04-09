@@ -39,7 +39,7 @@ namespace ace::commands {
      */
     class spawn final : public futures::future_traits<spawn> {
 
-        async<> _task {};                          ///< The task to be spawned.
+        task _task {};                          ///< The task to be spawned.
         coroutines::control_block_handle _handle;  ///< Control block handle obtained before attaching.
 
     public:
@@ -57,7 +57,7 @@ namespace ace::commands {
          * @c await_resume() is called.
          * @param new_task  The task to spawn.
          */
-        [[nodiscard]] explicit spawn(async<>&& new_task)
+        [[nodiscard]] explicit spawn(task&& new_task)
             : _task(std::move(new_task))
             , _handle(_task.observe()) {}
 
@@ -72,7 +72,7 @@ namespace ace::commands {
         bool await_suspend(auto coroutine) {
             const auto* runner_ptr = core::pool_to_runner(coroutine.promise()._runner_pool);
             _task._coroutine.promise()._roaming = coroutine.promise()._roaming = false;
-            runner_ptr->attach(std::forward<async<>>(_task));
+            runner_ptr->attach(std::forward<task>(_task));
             return false;
         }
 

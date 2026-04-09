@@ -10,7 +10,7 @@
  * This command lets the user toggle the flag mid-execution:
  *
  * @code{.cpp}
- * ace::async<> my_task() {
+ * ace::task my_task() {
  *     // Pin this coroutine to its current runner (no migration)
  *     co_await ace::commands::roaming{false};
  *     // ...

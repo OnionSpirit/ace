@@ -38,9 +38,9 @@ public:
      * @param rnr Specific runner to schedule on
      * @return void
      */
-    void schedule(async<>&& new_task, const runner* rnr = nullptr) noexcept {
+    void schedule(task&& new_task, const runner* rnr = nullptr) noexcept {
         new_task._coroutine.promise()._roaming = true;
-        _balancer.schedule(std::forward<async<>>(new_task), rnr);
+        _balancer.schedule(std::forward<task>(new_task), rnr);
     }
 
     /**
@@ -72,8 +72,8 @@ namespace ace {
      * @param rnr Specific runner to schedule on
      * @return void
      */
-    static void schedule(async<>&& new_task, const core::runner* rnr = nullptr) noexcept {
-        core::dispatcher::get_instance().schedule(std::forward<async<>>(new_task), rnr);
+    static void schedule(task&& new_task, const core::runner* rnr = nullptr) noexcept {
+        core::dispatcher::get_instance().schedule(std::forward<task>(new_task), rnr);
     }
 
     /**
@@ -81,7 +81,7 @@ namespace ace {
      * @param new_task Task to be pushed into the same runner as calling task
      * @return @b 'ace::core::commands::spawn' awaitable entity
      */
-    static commands::spawn spawn(async<>&& new_task) noexcept {
+    static commands::spawn spawn(task&& new_task) noexcept {
         return commands::spawn(std::move(new_task));
     }
 

@@ -237,13 +237,13 @@ flowchart LR
 ace::futures::channel<int> chan;
 
 // producer
-ace::schedule([&]() -> ace::async<> {
+ace::schedule([&]() -> ace::task {
     chan << 42;         // non-blocking push
     co_return;
 }());
 
 // consumer
-ace::schedule([&]() -> ace::async<> {
+ace::schedule([&]() -> ace::task {
     int val = co_await chan.pull();
     // val == 42
     co_return;
@@ -283,7 +283,7 @@ stateDiagram-v2
 ```cpp
 ace::cutex mtx;
 
-ace::async<> critical_section() {
+ace::task critical_section() {
     volatile auto guard = ace::guard(mtx);     // RAII proxy
     auto lock_future = co_await guard->capture();
     // --- critical section ---
@@ -300,7 +300,7 @@ ace::async<> critical_section() {
 ```cpp
 using namespace std::chrono_literals;
 
-ace::async<> timed_task() {
+ace::task timed_task() {
     co_await ace::futures::timeout(500ms);     // suspend for 500 ms
 
     // OR: suspend until absolute timepoint
@@ -331,7 +331,7 @@ sequenceDiagram
 ```
 
 ```cpp
-ace::async<> parent() {
+ace::task parent() {
     auto handle = co_await ace::spawn(child());
 
     // do other work concurrently...
@@ -446,7 +446,7 @@ target_link_libraries(my_target PRIVATE uring)
 #include "ace/ace.h"
 #include <iostream>
 
-ace::async<> hello() {
+ace::task hello() {
     std::cout << "Hello from coroutine!\n";
     co_return;
 }
@@ -471,7 +471,7 @@ ace::async<int> compute(int x) {
     co_return x * x;
 }
 
-ace::async<> main_task() {
+ace::task main_task() {
     // spawn two tasks in parallel
     auto h1 = co_await ace::spawn(compute(3));
     auto h2 = co_await ace::spawn(compute(7));
@@ -516,7 +516,7 @@ int main() {
 // Static channel: 8 data slots, 4 waiter slots — no heap allocation
 ace::futures::channel_static<int, 8, 4> chan;
 
-ace::async<> producer() {
+ace::task producer() {
     for (int i = 0; i < 20; ++i) {
         // pending_push waits (via co_await suspend) if channel is full
         co_await chan.pending_push(i);
@@ -524,7 +524,7 @@ ace::async<> producer() {
     co_return;
 }
 
-ace::async<> consumer() {
+ace::task consumer() {
     for (int i = 0; i < 20; ++i) {
         int val = co_await chan.pull();
         (void)val;
@@ -549,7 +549,7 @@ int main() {
 ace::cutex mtx;
 int shared_counter = 0;
 
-ace::async<> increment(int times) {
+ace::task increment(int times) {
     for (int i = 0; i < times; ++i) {
         volatile auto guard = ace::guard(mtx);
         auto future = co_await guard->capture();
@@ -582,12 +582,12 @@ int main() {
 
 using namespace std::chrono_literals;
 
-ace::async<> long_operation() {
+ace::task long_operation() {
     co_await ace::futures::timeout(10s);
     co_return;
 }
 
-ace::async<> watchdog() {
+ace::task watchdog() {
     auto handle = co_await ace::spawn(long_operation());
     co_await ace::futures::timeout(500ms);   // wait at most 500ms
     if (!handle.done()) {
@@ -607,7 +607,7 @@ int main() {
 ### External task observation
 
 ```cpp
-ace::async<> work() {
+ace::task work() {
     co_await ace::futures::timeout(std::chrono::milliseconds(100));
     co_return;
 }
@@ -717,10 +717,10 @@ Open `docs/doxygen/html/index.html` in a browser.
 
 ```cpp
 // Schedule task on the global dispatcher (marks task as roaming)
-void schedule(async<>&& task, const core::runner* rnr = nullptr);
+void schedule(task&& task, const core::runner* rnr = nullptr);
 
 // Spawn a parallel task pinned to the current runner (must be co_awaited)
-commands::spawn spawn(async<>&& task);
+commands::spawn spawn(task&& task);
 
 // Returns true when all runners are empty
 bool empty();

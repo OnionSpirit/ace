@@ -53,7 +53,7 @@ class channel {
     }
 
     static auto consteval define_waiters_storage() {
-        return define_storage<async<>, waiters_allocation_v, waiters_buffer_size_v>();
+        return define_storage<task, waiters_allocation_v, waiters_buffer_size_v>();
     }
 
     typedef std::decay_t<decltype(define_data_storage())> data_storage_t;
@@ -131,13 +131,13 @@ public:
      * @details @b pull method alternative interface
      * @param data Data to pull
      */
-    [[nodiscard]] async<> operator >> (data_t& data) { data = co_await pull(); }
+    [[nodiscard]] task operator >> (data_t& data) { data = co_await pull(); }
 
     /**
      * @details @b pull method alternative interface
      * @param data Data to pull
      */
-    [[nodiscard]] async<> operator >> (data_t&& data) { data = std::move(co_await pull()); }
+    [[nodiscard]] task operator >> (data_t&& data) { data = std::move(co_await pull()); }
 };
 
 template<typename data_t>
@@ -152,10 +152,10 @@ class channel_st {
     void notify();
 
     typedef std::queue<data_t> data_storage_t;
-    typedef std::queue<async<>> waiters_storage_t;
+    typedef std::queue<task> waiters_storage_t;
 
     // common::slab_mempool<data_t> _data_pool;
-    // common::slab_mempool<async<>> _waiter_pool;
+    // common::slab_mempool<task> _waiter_pool;
 
 public:
 
@@ -221,13 +221,13 @@ public:
      * @details @b pull method alternative interface
      * @param data Data to pull
      */
-    [[nodiscard]] async<> operator >> (data_t& data) { data = co_await pull(); }
+    [[nodiscard]] task operator >> (data_t& data) { data = co_await pull(); }
 
     /**
      * @details @b pull method alternative interface
      * @param data Data to pull
      */
-    [[nodiscard]] async<> operator >> (data_t&& data) { data = std::move(co_await pull()); }
+    [[nodiscard]] task operator >> (data_t&& data) { data = std::move(co_await pull()); }
 };
 
 
@@ -311,14 +311,14 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_conductor : conductor_handler_t {
 
     explicit channel_conductor(waiters_storage_t* waiters) : _waiters(waiters) {};
 
-    void forward(async<>&& ctx) override { while (not _waiters->push(std::move(ctx))) {}; }
+    void forward(task&& ctx) override { while (not _waiters->push(std::move(ctx))) {}; }
 
 
     void cancel() override {
         // NOTE: Reattaching all tasks because mpmc-queue doesn't allow ejection.
         // NOTE: Target canceled task will be marked as detached and Runner will drop it
         // TODO: Batch read needed
-        async<> ctx;
+        task ctx;
         while (_waiters->pop(ctx))
             core::runner::reattach(std::move(ctx));
     }
@@ -330,7 +330,7 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_conductor : conductor_handler_t {
 
 
 ACE_FUTURE_CHANNEL_MEMBER(void) notify() {
-    if (async<> ctx; _waiters.pop(ctx)) [[likely]]
+    if (task ctx; _waiters.pop(ctx)) [[likely]]
         core::runner::reattach(std::move(ctx));
 }
 
@@ -440,7 +440,7 @@ struct ACE_FUTURE_CHANNEL_ST_SPACE channel_conductor : conductor_handler_t {
 
     explicit channel_conductor(waiters_storage_t* waiters) : _waiters(waiters) {};
 
-    void forward(async<>&& ctx) override { _waiters->push(std::move(ctx)); }
+    void forward(task&& ctx) override { _waiters->push(std::move(ctx)); }
 
 
     void cancel() override {
@@ -448,7 +448,7 @@ struct ACE_FUTURE_CHANNEL_ST_SPACE channel_conductor : conductor_handler_t {
         // NOTE: Target canceled task will be marked as detached and Runner will drop it
         // TODO: Batch read needed
         while (not _waiters->empty()) {
-            async<> ctx = std::move(_waiters->front());
+            task ctx = std::move(_waiters->front());
             _waiters->pop();
             core::runner::reattach(std::move(ctx));
         }
@@ -462,7 +462,7 @@ struct ACE_FUTURE_CHANNEL_ST_SPACE channel_conductor : conductor_handler_t {
 
 ACE_FUTURE_CHANNEL_ST_MEMBER(void) notify() {
     if (not _waiters.empty()) [[likely]] {
-        async<> ctx = std::move(_waiters.front());
+        task ctx = std::move(_waiters.front());
         _waiters.pop();
         core::runner::reattach(std::move(ctx));
     }

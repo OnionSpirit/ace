@@ -19,7 +19,7 @@
  * @code{.cpp}
  * #include "ace/ace.h"
  *
- * ace::async<> hello() {
+ * ace::task hello() {
  *     co_return;
  * }
  *

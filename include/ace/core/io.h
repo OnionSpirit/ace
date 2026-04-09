@@ -44,7 +44,7 @@ namespace ace::core {
             explicit io_socket_query_conductor(io_query* query_)
                 : _query(query_) {};
 
-            void forward(async<>&& ctx) override {
+            void forward(task&& ctx) override {
                 _query->_waiter = std::move(ctx);
             }
 
@@ -58,7 +58,7 @@ namespace ace::core {
             io_query* _query;
         };
 
-        async<> _waiter;    ///< Awaited task storage
+        task _waiter;    ///< Awaited task storage
         int _res = INT_MIN;
         const int _fd;
 
@@ -227,7 +227,7 @@ namespace ace::core {
             const int& _fd;
             const bool& _closed;
 
-            static async<> check_and_close(const bool closed, const int fd) noexcept {
+            static task check_and_close(const bool closed, const int fd) noexcept {
                 if (not closed) {
                     const int res = co_await core::close_query{fd};
                     if (res < 0) std::cerr << strerror(res) << std::endl;

@@ -39,7 +39,7 @@ namespace ace::core {
      */
     struct clock_record {
         duration_t _duration {};
-        async<> _context;
+        task _context;
 
         clock_record() = default;
 
@@ -58,9 +58,9 @@ namespace ace::core {
             return *this;
         };
 
-        clock_record(async<>&& ctx, const duration_t dur)
+        clock_record(task&& ctx, const duration_t dur)
             : _duration(dur)
-            , _context(std::forward<async<>>(ctx)) {}
+            , _context(std::forward<task>(ctx)) {}
 
         static thread_local common::slab_mempool<clock_record> _clock_record_mempool;
     };
@@ -163,10 +163,10 @@ namespace ace::core {
          * @param [in] dur Duration of awaiting
          * @return Injected node ptr
          */
-        clock_node* inject_raw(async<>&& ctx, duration_t dur) {
+        clock_node* inject_raw(task&& ctx, duration_t dur) {
             const auto arrow_offset = (dur / _tick_duration) % _tick_count;
             const auto arrow = (_arrow + arrow_offset) % _tick_count;
-            return _dial.at(arrow)._records.enqueue(std::forward<clock_record>({std::forward<async<>>(ctx), dur}));
+            return _dial.at(arrow)._records.enqueue(std::forward<clock_record>({std::forward<task>(ctx), dur}));
         }
 
         /**
@@ -239,7 +239,7 @@ namespace ace::core {
 
     private:
 
-        typedef std::tuple<async<>, duration_t> input_record_t;
+        typedef std::tuple<task, duration_t> input_record_t;
 
         ACE_CACHE_LINE(0)
 
@@ -355,7 +355,7 @@ namespace ace::core {
          * @param [in] dur subscription duration
          * @return Injected node ptr
          */
-        clock_node* subscribe(async<>&& ctx, duration_t dur) {
+        clock_node* subscribe(task&& ctx, duration_t dur) {
 
             const auto idx = select_dial(dur);
 
@@ -364,7 +364,7 @@ namespace ace::core {
                 return nullptr;
             }
             ++_total_records;
-            return _dials[idx.value()].inject_raw(std::forward<async<>>(ctx), dur);
+            return _dials[idx.value()].inject_raw(std::forward<task>(ctx), dur);
         };
 
         /**
@@ -407,8 +407,8 @@ namespace ace::core {
 
         static auto detach(clock_node* node) { inspect()._multi_dial.detach_record(node); }
 
-        [[nodiscard]] static clock_node* subscribe(async<>&& ctx, const duration_t dur) {
-            return touch(ctx._coroutine.promise()._runner_pool)._multi_dial.subscribe(std::forward<async<>>(ctx), dur);
+        [[nodiscard]] static clock_node* subscribe(task&& ctx, const duration_t dur) {
+            return touch(ctx._coroutine.promise()._runner_pool)._multi_dial.subscribe(std::forward<task>(ctx), dur);
         };
 
         static bool ping() {

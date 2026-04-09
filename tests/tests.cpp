@@ -386,3 +386,9 @@ TEST(futures, do_io_socket_echo) {
     ASSERT_TRUE(ace::empty());
 }
 
+TEST(core, do_or_await_test) {
+    ace::schedule(timer_or_timer());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+}
+

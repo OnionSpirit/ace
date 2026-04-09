@@ -163,7 +163,7 @@ namespace ace::coroutines {
     /**
      * @brief Full promise base class for ACE coroutines.
      *
-     * @details @c promise_traits<T> combines:
+     * @details @c promise_traits<T, U> combines:
      *  - Return-value machinery from @c promise_return_traits.
      *  - @c await_transform() overloads that route @c co_await expressions to
      *    the appropriate future concept (@c is_future vs @c is_busy_future).
@@ -171,6 +171,8 @@ namespace ace::coroutines {
      *    @c control_block immediately before the promise, enabling external
      *    handles without a separate allocation.
      *  - Optional tracing support via @c setup_trace().
+     *
+     * @tparam derived_t  Derived type of inherited trait user
      *
      * @tparam return_t  The value type returned by @c co_return inside the
      *                   coroutine.  Use @c void for coroutines that do not
@@ -183,8 +185,8 @@ namespace ace::coroutines {
      *  base_ptr         mem_ptr  (returned by operator new)
      * @endcode
      */
-    template <typename return_t>
-    struct promise_traits : promise_return_traits<promise_traits<return_t>, return_t> {
+    template <typename derived_t, typename return_t>
+    struct promise_traits : promise_return_traits<promise_traits<derived_t, return_t>, return_t> {
 
         typedef futures::future_handle* future_handler_ptr_t; ///< Pointer type for the currently awaited busy future.
 
@@ -234,7 +236,7 @@ namespace ace::coroutines {
          * @return          The same lvalue reference.
          */
         template <typename futureT>
-        requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, return_t>
+        requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
         futureT& await_transform(futureT& command) {
             _status = e_executed;
             _busy_future = nullptr;
@@ -248,7 +250,7 @@ namespace ace::coroutines {
          * @return          An rvalue reference to the future.
          */
         template <typename futureT>
-        requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, return_t>
+        requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
         futureT&& await_transform(futureT&& command) {
             _status = e_executed;
             _busy_future = nullptr;
@@ -264,7 +266,7 @@ namespace ace::coroutines {
          * @return          The same lvalue reference.
          */
         template <typename futureT>
-        requires ace::common::dispatch::is_busy_future<std::remove_reference_t<futureT>, return_t>
+        requires ace::common::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
         futureT& await_transform(futureT& future) {
             _status = e_executed;
             _busy_future = &future;
@@ -278,7 +280,7 @@ namespace ace::coroutines {
          * @return          An rvalue reference to the future.
          */
         template <typename futureT>
-        requires ace::common::dispatch::is_busy_future<std::remove_reference_t<futureT>, return_t>
+        requires ace::common::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
         futureT&& await_transform(futureT&& future) {
             _status = e_executed;
             _busy_future = &future;
@@ -329,7 +331,7 @@ namespace ace::coroutines {
         std::optional<std::size_t>  _trace_id;                 ///< Optional debugging trace ID.
     };
 
-#define DECLARE_PROMISE_TRAITS(return_type_t) typedef coroutines::promise_traits<return_type_t> promise_traits_t;
+#define DECLARE_PROMISE_TRAITS(derived_t, return_type_t) typedef coroutines::promise_traits<derived_t, return_type_t> promise_traits_t;
 
 #define IMPORT_PROMISE_TRAITS_ENV               \
     using promise_traits_t::_busy_future;       \

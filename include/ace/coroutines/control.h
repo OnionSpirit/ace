@@ -198,7 +198,7 @@ namespace ace::coroutines {
 
         /**
          * @brief Register a waiter context to be notified when the coroutine finishes.
-         * @param waiter  Pointer to the @c ace::async<> context to register.
+         * @param waiter  Pointer to the @c ace::task context to register.
          * @return @c true if the waiter was accepted by the conductor.
          */
         bool forward(void* waiter) const {

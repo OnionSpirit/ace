@@ -269,8 +269,8 @@ namespace ace::coroutines {
          *  | @c _self_conductor | @c optional<context_conductor> | Conductor installed into the control block. |
          *  | @c _roaming | @c bool | When @c true the balancer may migrate the task to another runner. |
          */
-        struct promise_type : promise_traits<returnT> {
-            DECLARE_PROMISE_TRAITS(returnT)
+        struct promise_type : promise_traits<promise_type, returnT> {
+            DECLARE_PROMISE_TRAITS(promise_type, returnT)
             IMPORT_PROMISE_TRAITS_ENV
 
             promise_type() = default;
@@ -512,18 +512,21 @@ namespace ace {
     template<typename returnT =void>
     using async = coroutines::context<returnT>;
 
+    // NOTE: Type alias for runner task coroutines
+    using task = async<>;
+
     // NOTE: Wrapper to spawn and manage coroutines in runner pool
     template <typename async_return_t>
-    async<> async_wrap(async<async_return_t>&& some_async) {
+    task async_wrap(async<async_return_t>&& some_async) {
         co_await some_async;
         co_return;
     }
 
     // NOTE: Type of a pool for runner [Relates 'context' and 'runner']
-    typedef async<>::runner_pool_t runner_pool_t;
+    typedef task::runner_pool_t runner_pool_t;
 
     // NOTE: Type of a conductor handler for runner and future objects [Relates 'future' and 'runner']
-    typedef async<>::runner_conductor conductor_handler_t;
+    typedef task::runner_conductor conductor_handler_t;
 
     // NOTE: Type alias for std standard type
     typedef std::suspend_always suspend;

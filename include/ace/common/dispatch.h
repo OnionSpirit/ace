@@ -101,6 +101,16 @@ namespace ace::common::dispatch {
     and std::derived_from<futureT, typename futureT::busy_future_traits_t>
     and is_awaitable<futureT, promiseT>;
 
+    /**
+     * @brief ACE commonized future concept (active polling or conductor-based suspensions).
+     *
+     * @details Detects both @b active @b polling @c busy_future and @b conductor-based @c future
+     *
+     * @tparam futureT   Type to check.
+     * @tparam promiseT  Promise type of the enclosing coroutine.
+     */
+    template <typename futureT, typename promiseT>
+    concept is_any_future = is_busy_future<futureT, promiseT> or is_future<futureT, promiseT>;
 
 }
 #endif //DISPATCH_H

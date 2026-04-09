@@ -6,7 +6,7 @@
  * tasks or for diagnostic purposes.
  *
  * @code{.cpp}
- * ace::async<> my_task() {
+ * ace::task my_task() {
  *     auto* runner = co_await ace::commands::get_runner{};
  *     // runner is the ace::core::runner that owns this coroutine
  *     ace::schedule(other_task(), runner);  // schedule on the same runner

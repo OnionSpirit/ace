@@ -47,7 +47,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
      * @brief Returns task into source @b runner
      * @param ctx Task to be reattached into @b runner
      */
-    static void reattach(async<>&& ctx) {
+    static void reattach(task&& ctx) {
         if (not ctx.is_resumable() or not ctx._coroutine.promise()._runner_pool)
             return;
         ctx._coroutine.promise()._runner_pool->push(std::move(ctx));
@@ -88,7 +88,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
 
         // NOTE: Forwarding via conductor if needed
         if (is_conducted) [[likely]]
-            async_n->_data._coroutine.promise()._runner_conductor->forward(std::forward<async<>>(async_n->_data));
+            async_n->_data._coroutine.promise()._runner_conductor->forward(std::forward<task>(async_n->_data));
 
         // NOTE: If async is idle, releasing it's node. Else returning it back to the local pool
         if (is_idle) _pool.release_node(async_n);
@@ -101,8 +101,8 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
      * @brief Ejects task from runner
      * @return Optional of ejected task
      */
-    std::optional<async<>> eject() const noexcept {
-        if (async<> ejective; _pool.pop(ejective)) [[likely]]
+    std::optional<task> eject() const noexcept {
+        if (task ejective; _pool.pop(ejective)) [[likely]]
             return ejective;
         return std::nullopt;
     }
@@ -129,7 +129,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
     template <typename async_return_t>
     void attach(async<async_return_t>&& new_task) const noexcept {
         new_task._coroutine.promise()._runner_pool = &_pool;
-        _pool.push(std::forward<async<>>(async_wrap(std::forward<async<async_return_t>>(new_task))));
+        _pool.push(std::forward<task>(async_wrap(std::forward<async<async_return_t>>(new_task))));
     }
 
     /**
@@ -140,9 +140,9 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
 };
 
 template <>
-inline void runner::attach<void>(async<>&& new_task) const noexcept {
+inline void runner::attach<void>(task&& new_task) const noexcept {
     new_task._coroutine.promise()._runner_pool = &_pool;
-    _pool.push(std::forward<async<>>(new_task));
+    _pool.push(std::forward<task>(new_task));
 }
 
 inline auto pool_to_runner(runner_pool_t* pool) noexcept {

@@ -148,12 +148,13 @@ namespace ace::core {
          * @param rnr Specific runner to schedule on
          * @return void
          */
-        void schedule(async<>&& new_task, const runner* rnr = nullptr) noexcept {
+        void schedule(task&& new_task, const runner* rnr = nullptr) noexcept {
             if (not rnr) {
                 const auto runner_id = _runner_selector.fetch_add(1, std::memory_order_relaxed);
-                _runners[runner_id % _balancer_config._runners_amount].attach(std::forward<async<>>(new_task));
+                _runners[runner_id % _balancer_config._runners_amount].attach(std::forward<task>(new_task));
             } else {
-                rnr->attach(std::forward<async<>>(new_task));
+                new_task._coroutine.promise()._roaming = false;
+                rnr->attach(std::forward<task>(new_task));
             }
         }
 

@@ -22,7 +22,7 @@
  * @code{.cpp}
  * using namespace std::chrono_literals;
  *
- * ace::async<> timed() {
+ * ace::task timed() {
  *     co_await ace::futures::timeout(500ms);
  *
  *     auto deadline = ace::core::clock::current_time() + 2s;
@@ -33,8 +33,6 @@
  */
 #ifndef ACE_FUTURE_TIMEOUT_H
 #define ACE_FUTURE_TIMEOUT_H
-
-#include <future>
 
 #include "future.h"
 #include "ace/coroutines/context.h"
@@ -73,6 +71,8 @@ public:
         _duration = std::chrono::duration_cast<std::chrono::milliseconds, uint64_t, std::milli>(t);
     };
 
+    timeout() = default;
+
     /**
      * @brief C++20 awaitable protocol — install the @c timeout_conductor.
      * @param coroutine  Handle to the suspending coroutine's promise.
@@ -103,6 +103,8 @@ struct expire : timeout {
      */
     explicit expire(core::timepoint_t expires)
         : timeout(expires - core::clock::current_time()) {}
+
+    expire() = default;
 };
 
 } // end namespace ace::futures
@@ -124,7 +126,7 @@ struct ACE_FUTURE_TIMEOUT_SPACE timeout_conductor : conductor_handler_t {
     explicit timeout_conductor(timeout* timeout_)
         : _timeout(timeout_) {};
 
-    void forward(async<>&& ctx) override {
+    void forward(task&& ctx) override {
         _injected_node = core::clock::subscribe(std::move(ctx), _timeout->_duration);
     }
 

@@ -56,8 +56,8 @@ struct ACE_COMMANDS_REATTACH_SPACE reattach_conductor : conductor_handler_t {
     explicit reattach_conductor(core::runner* rnr)
         : target_runner(rnr) {};
 
-    void forward(async<>&& ctx) override {
-        target_runner->attach(std::forward<async<>>(ctx));
+    void forward(task&& ctx) override {
+        target_runner->attach(std::forward<task>(ctx));
     }
 
     ~reattach_conductor() override = default;

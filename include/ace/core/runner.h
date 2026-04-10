@@ -8,6 +8,7 @@
 
 #include "ace/common/terms.h"
 #include "ace/coroutines/context.h"
+#include "ace/common/prefetch.h"
 
 
 namespace ace::core {
@@ -23,8 +24,9 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
 
     ACE_CACHE_LINE(0)
 
-    mutable runner_pool_t _pool;              ///< Pool of the assigned tasks
-    long int              _total_quants   {}; ///< Total amount of the time quants from the all tasks on a pool
+    mutable runner_pool_t                  _pool;            ///< Pool of the assigned tasks
+    long int                               _total_quants {}; ///< Total amount of the time quants from the all tasks on a pool
+    std::optional<runner_pool_t::node_t*>  _nextup       {}; ///< Nextup task for running
 
     runner() =default;
     // TODO: Need to figure out how to validate this wo warn cuz its important
@@ -60,10 +62,23 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
      */
     bool yank() noexcept {
         coroutines::promise_touch_result touch_result = coroutines::promise_touch_result::e_executed;
-        auto* task_node = _pool.pop_node();
+        runner_pool_t::node_t* task_node;
 
-        // NOTE: Pulling new context from queue
+        // NOTE: Taking nextup node or pulling it from a pool
+        if (_nextup) [[likely]] {
+            task_node = _nextup.value();
+            _nextup.reset();
+        } else [[unlikely]]
+            task_node = _pool.pop_node();
+
+        // NOTE: Breaking if no more available nodes with tasks
         if (not task_node) [[unlikely]] return false;
+
+        // NOTE: Pulling next task node and prefetching it
+        if (auto next_node = _pool.pop_node()) [[likely]] {
+            _nextup = next_node;
+            prefetch<e_l1_cache>(_nextup.value()->_data._coroutine.address());
+        }
 
         // NOTE: Removing old quants amount
         _total_quants -= task_node->_data._coroutine.promise()._quants.value();
@@ -102,7 +117,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
         if (is_conducted) [[likely]]
             task_node->_data._coroutine.promise()._runner_conductor->forward(std::forward<task>(task_node->_data));
 
-        // NOTE: If async is idle, releasing it's node. Else returning it back to the local pool
+        // NOTE: If task is idle, releasing it's node. Else returning it back to the local pool
         if (is_idle) _pool.release_node(task_node);
         else _pool.push_node(task_node);
 

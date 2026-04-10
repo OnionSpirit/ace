@@ -95,14 +95,14 @@ namespace ace::coroutines {
         or std::same_as<decltype(modeT::action()), std::suspend_always>);
 
     struct average_quants {
-        static constexpr std::size_t window_size = 4;
-        alignas(8) uint64_t _total_sum {};
+        static constexpr long int window_size = 4;
+        alignas(8) long int _total_sum {};
         alignas(8) uint64_t _curr_member = 0;
         std::array<uint32_t, window_size> _members {};
 
-        [[nodiscard]] std::size_t value() const { return _total_sum / window_size; }
+        [[nodiscard]] long int value() const { return _total_sum / window_size; }
 
-        [[nodiscard]] std::size_t add(const std::size_t& new_one) {
+        [[nodiscard]] long int add(const long int& new_one) {
             _total_sum = _total_sum + new_one - _members[_curr_member % window_size];
             _members[_curr_member % window_size] = new_one;
             ++_curr_member;

@@ -35,6 +35,28 @@
 
 namespace ace::core {
 
+    struct route {
+        std::size_t _score = 0;
+        uint _id = 0;
+        uint _total_charges = 0;
+        uint _charges = 0;
+
+        // NOTE: Recharges route
+        void recharge() noexcept { _charges = _total_charges; }
+    };
+
+    struct balance_router {
+
+        std::vector<route> _routes;
+
+        uint _total_charges = 0;
+
+        route take_route() {
+            return route{};
+        };
+
+    };
+
     /**
      * @brief Global configuration for the balancer.
      *
@@ -101,9 +123,9 @@ namespace ace::core {
                 now = get_time();
             }
 
-            // TODO: Debug logs
-            std::cout << "Total quants on the runner <" << worker_id << "> : "
-                      << _runners[worker_id]._total_quants << '\n';
+            // // TODO: Debug logs
+            // std::cout << "Total quants on the runner <" << worker_id << "> : "
+            //           << _runners[worker_id]._total_quants << '\n';
 
             // NOTE: Updating runner status
             _workers_states[worker_id]._pending = not active;

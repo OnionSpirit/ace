@@ -20,30 +20,41 @@ namespace ace::futures {
     inline auto& peer_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<1>(p); }
 
     template <int domain_v>
-    inline constexpr bool is_inet = domain_v == AF_INET or domain_v == AF_INET6;
+    inline constexpr bool is_inet_domain = domain_v == AF_INET or domain_v == AF_INET6;
+
+    template <int type_v>
+    inline constexpr bool is_stream_type = type_v == SOCK_STREAM;
+
+    template <typename, int>
+    struct connect_query;
 
     /**
      * @brief An @b io_entity class to represent connection socket
      * <br>Turns out from the @b io_selection_entry as a result of processing its member @b connect(...)
      * or the result of @b io_listener.accept(...) via @b co_await
      */
-    struct io_connection_entity : io_net_entity<io_connection_entity> {
+    template <int domain_v = -1, bool is_connected_v = false>
+    struct io_connection_entity : io_net_entity<io_connection_entity<domain_v, is_connected_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_connection_entity)
 
         io_connection_entity() = default;
 
+        using connect_query_t = connect_query<io_connection_entity, domain_v>;
+
         struct send_query : core::io_query<send_query> {
+
+            IMPORT_IO_QUERY_ENV(send_query);
 
             send_query() = delete;
 
             explicit send_query(const int fd, const void *buf, const size_t len, const int flags = 0)
-                : io_query(fd)
+                : io_query_t(fd)
                 , _buf(buf)
                 , _len(len)
                 , _flags(flags) {}
 
-            bool setup_query(kernel_waiter* kwp) const {
+            bool setup_query(core::kernel_waiter* kwp) const {
                 return core::kernel_controller::send(kwp, _fd, _buf, _len, _flags);
             }
 
@@ -56,18 +67,20 @@ namespace ace::futures {
 
         struct sendto_query : core::io_query<sendto_query> {
 
+            IMPORT_IO_QUERY_ENV(sendto_query);
+
             sendto_query() = delete;
 
             explicit sendto_query(const int fd, const void *buf, const size_t len, const int flags,
                 const sockaddr *addr, const socklen_t addrlen)
-                : io_query(fd)
+                : io_query_t(fd)
                 , _buf(buf)
                 , _len(len)
                 , _flags(flags)
                 , _addr(addr)
                 , _addrlen(addrlen) {}
 
-            bool setup_query(kernel_waiter* kwp) const {
+            bool setup_query(core::kernel_waiter* kwp) const {
                 return core::kernel_controller::sendto(kwp, _fd, _buf, _len, _flags, _addr, _addrlen);
             }
 
@@ -82,15 +95,17 @@ namespace ace::futures {
 
         struct recv_query : core::io_query<recv_query> {
 
+            IMPORT_IO_QUERY_ENV(recv_query)
+
             recv_query() = delete;
 
             explicit recv_query(const int fd, void *buf, const size_t len, const int flags = 0)
-                : io_query(fd)
+                : io_query_t(fd)
                 , _buf(buf)
                 , _len(len)
                 , _flags(flags) {}
 
-            bool setup_query(kernel_waiter* kwp) const {
+            bool setup_query(core::kernel_waiter* kwp) const {
                 return core::kernel_controller::recv(kwp, _fd, _buf, _len, _flags);
             }
 
@@ -102,7 +117,26 @@ namespace ace::futures {
         };
 
         [[nodiscard]] auto send(const void *buf, const size_t len, const int flags = 0) const
-        -> send_query { return send_query{_fd, buf, len, flags}; }
+        -> send_query requires is_connected_v { return send_query{_fd, buf, len, flags}; }
+
+        [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen)
+        -> connect_query_t requires (not is_connected_v) { return connect_query_t{ std::move(*this), addr, addrlen}; }
+
+        [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
+        -> connect_query_t requires (is_inet_domain<domain_v> and not is_connected_v) {
+            PEER_SIN.sin_family = domain_v;
+            PEER_SIN.sin_port = htons(port);
+            PEER_SIN.sin_addr.s_addr = htonl(addr);
+            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
+        }
+
+        [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
+        -> connect_query_t requires (is_inet_domain<domain_v> and not is_connected_v) {
+            PEER_SIN.sin_family = domain_v;
+            PEER_SIN.sin_port = htons(port);
+            inet_pton(domain_v, addr.data(), &(PEER_SIN.sin_addr));
+            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
+        }
 
         [[nodiscard]] auto sendto(const void *buf, const size_t len, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
@@ -113,12 +147,14 @@ namespace ace::futures {
 
     };
 
-    template <typename entry_t>
-    struct connect_query : core::io_query<connect_query<entry_t>> {
+    template <typename entry_t, int domain_v = -1>
+    struct connect_query : core::io_query<connect_query<entry_t, domain_v>> {
 
         IMPORT_IO_QUERY_ENV(connect_query)
 
         connect_query() = delete;
+
+        typedef io_connection_entity<domain_v, true> io_connection_entity_t;
 
         explicit connect_query(entry_t&& entry, const sockaddr* addr, const socklen_t addrlen)
             : io_query_t(entry._fd)
@@ -130,11 +166,11 @@ namespace ace::futures {
             return core::kernel_controller::connect(kwp, _fd, _addr, _addrlen);
         }
 
-        [[nodiscard]] io_connection_entity await_resume() const {
+        [[nodiscard]] io_connection_entity_t await_resume() const {
             if (_res > -1) {
-                return io_connection_entity::make_from_entry(&_entry);
+                return io_connection_entity_t::make_from_entry(&_entry);
             }
-            return io_connection_entity {};
+            return io_connection_entity_t {};
         }
 
         entry_t& _entry;
@@ -160,6 +196,8 @@ namespace ace::futures {
 
             accept_query() = delete;
 
+            typedef io_connection_entity<domain_v, true> io_connection_entity_t;
+
             explicit accept_query(const io_listener_entity* entry, sockaddr* addr, socklen_t* addrlen, const int flags = 0)
                 : io_query_t(entry->_fd)
                 , _entry(entry)
@@ -171,12 +209,12 @@ namespace ace::futures {
                 return core::kernel_controller::accept(kwp, _fd, _addr, _addrlen, _flags);
             }
 
-            [[nodiscard]] io_connection_entity await_resume() const {
+            [[nodiscard]] io_connection_entity_t await_resume() const {
                 if (_res > -1) {
                     peer_sin_from(_entry->_params) = *reinterpret_cast<sockaddr_in*>(_addr);
-                    return io_connection_entity { _res, false, _entry->_params };
+                    return io_connection_entity_t { _res, false, _entry->_params };
                 }
-                return io_connection_entity {};
+                return io_connection_entity_t {};
             }
 
             const io_listener_entity* _entry;
@@ -192,7 +230,7 @@ namespace ace::futures {
         -> accept_query { return accept_query{this, addr, addrlen, flags}; }
 
         [[nodiscard]] auto accept(const in_addr_t addr, const uint16_t port)
-        -> accept_query requires is_inet<domain_v> {
+        -> accept_query requires is_inet_domain<domain_v> {
             SELF_SIN.sin_family = domain_v;
             SELF_SIN.sin_port = htons(port);
             SELF_SIN.sin_addr.s_addr = htonl(addr);
@@ -200,7 +238,7 @@ namespace ace::futures {
         }
 
         [[nodiscard]] auto accept(const std::string_view addr, const uint16_t port)
-        -> accept_query requires is_inet<domain_v> {
+        -> accept_query requires is_inet_domain<domain_v> {
             SELF_SIN.sin_family = domain_v;
             SELF_SIN.sin_port = htons(port);
             inet_pton(domain_v, addr.data(), &(SELF_SIN.sin_addr));
@@ -214,17 +252,19 @@ namespace ace::futures {
 
 
     /**
-     * @brief An @b io_entry class to represent socket type selection [ Listener | Connection ]
-     * <br>Turns out from the @b io_bind_entry as a result of processing its member @b bind(...) via @b co_await
+     * @brief An @c io_entry class to represent socket mode selection [ @b Listener | @b Connection ]
+     *
+     * Turns out from the @c io_mapping_entry only for the @b SOCK_STREAM socket type
+     * as a result of processing its member @c bind(...) via @c co_await
      */
     template <int domain_v = -1, int type_v = -1>
-    struct io_selection_entry
-        : io_net_entity<io_selection_entry<domain_v, type_v>>
-        , core::io_entry<io_selection_entry<domain_v, type_v>> {
+    struct io_stream_mode_entry
+        : io_net_entity<io_stream_mode_entry<domain_v, type_v>>
+        , core::io_entry<io_stream_mode_entry<domain_v, type_v>> {
 
-        IMPORT_IO_NET_ENTITY_ENV(io_selection_entry)
+        IMPORT_IO_NET_ENTITY_ENV(io_stream_mode_entry)
 
-        io_selection_entry() : io_entity_t() {};
+        io_stream_mode_entry() : io_entity_t() {};
 
         struct listen_query : core::io_query<listen_query> {
 
@@ -232,7 +272,7 @@ namespace ace::futures {
 
             listen_query() = delete;
 
-            explicit listen_query(io_selection_entry&& entry, const int backlog)
+            explicit listen_query(io_stream_mode_entry&& entry, const int backlog)
                 : io_query_t(entry._fd)
                 , _entry(entry)
                 , _backlog(backlog) {}
@@ -245,7 +285,7 @@ namespace ace::futures {
                 return io_listener_entity<domain_v>::make_from_entry(&_entry);
             }
 
-            io_selection_entry& _entry;
+            io_stream_mode_entry& _entry;
             const int _backlog;
         };
 
@@ -255,13 +295,13 @@ namespace ace::futures {
             return listen_query{ std::move(*this), backlog};
         }
 
-        using connect_query_t = connect_query<io_selection_entry>;
+        using connect_query_t = connect_query<io_stream_mode_entry, domain_v>;
 
         [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen)
         -> connect_query_t { return connect_query_t{ std::move(*this), addr, addrlen}; }
 
         [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
-        -> connect_query_t requires is_inet<domain_v> {
+        -> connect_query_t requires is_inet_domain<domain_v> {
             PEER_SIN.sin_family = domain_v;
             PEER_SIN.sin_port = htons(port);
             PEER_SIN.sin_addr.s_addr = htonl(addr);
@@ -269,7 +309,7 @@ namespace ace::futures {
         }
 
         [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
-        -> connect_query_t requires is_inet<domain_v> {
+        -> connect_query_t requires is_inet_domain<domain_v> {
             PEER_SIN.sin_family = domain_v;
             PEER_SIN.sin_port = htons(port);
             inet_pton(domain_v, addr.data(), &(PEER_SIN.sin_addr));
@@ -280,19 +320,20 @@ namespace ace::futures {
 
 
     /**
-     * @brief An @b io_entry class to represent waiting for binding
-     * <br>Turns out from @b io_socket_entry as a result of processing it via @b co_await
+     * @brief An @c io_entry class to represent waiting for @b binding or @b pending @b connection state
+     *
+     * Turns out from @c io_socket_entry as a result of processing it via @c co_await
      */
     template <int domain_v = -1, int type_v = -1>
-    struct io_bind_entry
-        : io_net_entity<io_bind_entry<domain_v, type_v>>
-        , core::io_entry<io_bind_entry<domain_v, type_v>> {
+    struct io_mapping_entry
+        : io_net_entity<io_mapping_entry<domain_v, type_v>>
+        , core::io_entry<io_mapping_entry<domain_v, type_v>> {
 
-        IMPORT_IO_NET_ENTITY_ENV(io_bind_entry)
+        IMPORT_IO_NET_ENTITY_ENV(io_mapping_entry)
 
-        io_bind_entry() : io_entity_t() {};
+        io_mapping_entry() : io_entity_t() {};
 
-        explicit io_bind_entry(const int fd) {
+        explicit io_mapping_entry(const int fd) {
             io_entity_t::_fd = fd;
             if (io_entity_t::_fd > -1) io_entity_t::_is_closed = false;
         }
@@ -303,7 +344,9 @@ namespace ace::futures {
 
             bind_query() = delete;
 
-            explicit bind_query(io_bind_entry&& entry, const sockaddr* addr, const socklen_t addrlen)
+            typedef io_connection_entity<domain_v, false> io_connection_entity_t;
+
+            explicit bind_query(io_mapping_entry&& entry, sockaddr* addr, const socklen_t addrlen)
                 : io_query_t(entry._fd)
                 , _entry(entry)
                 , _addr(addr)
@@ -313,12 +356,20 @@ namespace ace::futures {
                 return core::kernel_controller::bind(kwp, _fd, _addr, _addrlen);
             }
 
-            [[nodiscard]] io_selection_entry<domain_v, type_v> await_resume() {
-                return io_selection_entry<domain_v, type_v>::make_from_entry(&_entry);
+            [[nodiscard]] io_stream_mode_entry<domain_v, type_v> await_resume() {
+                if constexpr (is_stream_type<type_v>)
+                    return io_stream_mode_entry<domain_v, type_v>::make_from_entry(&_entry);
+                else {
+                    if (_res > -1) {
+                        peer_sin_from(_entry->_params) = *reinterpret_cast<sockaddr_in*>(_addr);
+                        return io_connection_entity_t { _res, false, _entry->_params };
+                    }
+                    return io_connection_entity_t {};
+                }
             }
 
-            io_bind_entry& _entry;
-            const sockaddr* _addr;
+            io_mapping_entry& _entry;
+            sockaddr* _addr;
             const socklen_t _addrlen;
         };
 
@@ -326,7 +377,7 @@ namespace ace::futures {
         -> bind_query { return bind_query { std::move(*this), addr, addrlen}; }
 
         [[nodiscard]] auto bind(const in_addr_t addr, const uint16_t port)
-        -> bind_query requires is_inet<domain_v> {
+        -> bind_query requires is_inet_domain<domain_v> {
             SELF_SIN.sin_family = domain_v;
             SELF_SIN.sin_port = htons(port);
             SELF_SIN.sin_addr.s_addr = htonl(addr);
@@ -334,20 +385,20 @@ namespace ace::futures {
         }
 
         [[nodiscard]] auto bind(const std::string_view addr, const uint16_t port)
-        -> bind_query requires is_inet<domain_v> {
+        -> bind_query requires is_inet_domain<domain_v> {
             SELF_SIN.sin_family = domain_v;
             SELF_SIN.sin_port = htons(port);
             inet_pton(domain_v, addr.data(), &(SELF_SIN.sin_addr));
             return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&SELF_SIN), sizeof(SELF_SIN)};
         }
 
-        using connect_query_t = connect_query<io_bind_entry>;
+        using connect_query_t = connect_query<io_mapping_entry, domain_v>;
 
         [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen)
         -> connect_query_t { return connect_query_t{ std::move(*this), addr, addrlen}; }
 
         [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
-        -> connect_query_t requires is_inet<domain_v> {
+        -> connect_query_t requires is_inet_domain<domain_v> {
             PEER_SIN.sin_family = domain_v;
             PEER_SIN.sin_port = htons(port);
             PEER_SIN.sin_addr.s_addr = htonl(addr);
@@ -355,7 +406,7 @@ namespace ace::futures {
         }
 
         [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
-        -> connect_query_t requires is_inet<domain_v> {
+        -> connect_query_t requires is_inet_domain<domain_v> {
             PEER_SIN.sin_family = domain_v;
             PEER_SIN.sin_port = htons(port);
             inet_pton(domain_v, addr.data(), &(PEER_SIN.sin_addr));
@@ -389,8 +440,8 @@ namespace ace::futures {
             return true;
         }
 
-        [[nodiscard]] io_bind_entry<domain_v, type_v> await_resume() const {
-            return io_bind_entry<domain_v, type_v>{_res};
+        [[nodiscard]] io_mapping_entry<domain_v, type_v> await_resume() const {
+            return io_mapping_entry<domain_v, type_v>{_res};
         }
 
         const int _flags;
@@ -421,7 +472,7 @@ namespace ace::futures {
             return true;
         }
 
-        [[nodiscard]] io_bind_entry<> await_resume() const { return io_bind_entry{_res}; }
+        [[nodiscard]] io_mapping_entry<> await_resume() const { return io_mapping_entry{_res}; }
 
         const int _domain;
         const int _type;

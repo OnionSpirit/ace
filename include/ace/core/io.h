@@ -23,7 +23,7 @@ namespace ace::core {
 
     /**
      * @brief An interface to interact with the
-     * @b ace::core::kernel_controller via @b co_await operator.
+     * @c ace::core::kernel_controller via @c co_await operator.
      * <br>Does not define 'resume(...)' logic.
      * @tparam query_core_t Specific query type.
      */
@@ -284,9 +284,9 @@ namespace ace::core {
     ~class() override = default;
 
     /**
-     * @brief Mixin modification for the @b io_entity to make it one-shot objects.
-     * The @b io_entry derived types are supposed to be invalid after calling any operation of them.
-     * The @b io_entity::make_from_entry(...) operation turns @b io_entry into the invalid state
+     * @brief Mixin modification for the @c io_entity to make it one-shot object.
+     * The @c io_entry derived types are supposed to be invalid after calling any operation of them.
+     * The @c io_entity::make_from_entry(...) operation turns @c io_entry into the invalid state
      */
     template <typename entity_t>
     struct io_entry {

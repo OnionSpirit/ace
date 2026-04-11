@@ -181,7 +181,7 @@ namespace ace::core {
             , _params(params) { };
 
         template<typename entry_t>
-        static entity_t make_from_entry(entry_t* io) noexcept {
+        static entity_t consume(entry_t* io) noexcept {
             int fd = io->_fd;
             bool is_closed;
             if (fd > -1) is_closed = io->_is_closed;
@@ -206,6 +206,11 @@ namespace ace::core {
             io._fd = -1;
             io._is_closed = true;
             return *this;
+        }
+
+        void clear() noexcept {
+            static_cast<entity_t*>(this)->_is_closed = true;
+            static_cast<entity_t*>(this)->_fd = -1;
         }
 
         [[nodiscard]] auto close()
@@ -282,22 +287,6 @@ namespace ace::core {
     IMPORT_ERROR_HANDLING                                                                   \
                                                                                             \
     ~class() override = default;
-
-    /**
-     * @brief Mixin modification for the @c io_entity to make it one-shot object.
-     * The @c io_entry derived types are supposed to be invalid after calling any operation of them.
-     * The @c io_entity::make_from_entry(...) operation turns @c io_entry into the invalid state
-     */
-    template <typename entity_t>
-    struct io_entry {
-
-        io_entry() = default;
-
-        void clear() noexcept {
-            static_cast<entity_t*>(this)->_is_closed = true;
-            static_cast<entity_t*>(this)->_fd = -1;
-        }
-    };
 
 }
 

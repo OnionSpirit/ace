@@ -29,9 +29,12 @@ namespace ace::futures {
     struct connect_query;
 
     /**
-     * @brief An @b io_entity class to represent connection socket
-     * <br>Turns out from the @b io_selection_entry as a result of processing its member @b connect(...)
-     * or the result of @b io_listener.accept(...) via @b co_await
+     * @brief An @c io_entity class to represent connection socket
+     *
+     * Turns out from the @c io_stream_mode_entity, @c io_mapping_entity
+     * or @c io_transport_entity @c [ is_connected = false ]
+     * as a result of processing its member @c connect(...)
+     * or the result of @c io_listener.accept(...) via @c co_await
      */
     template <int domain_v = -1, bool is_connected_v = false>
     struct io_transport_entity : io_net_entity<io_transport_entity<domain_v, is_connected_v>> {
@@ -119,9 +122,15 @@ namespace ace::futures {
         [[nodiscard]] auto send(const void *buf, const size_t len, const int flags = 0) const
         -> send_query requires is_connected_v { return send_query{_fd, buf, len, flags}; }
 
+        /**
+         * @warning This member operation causes @b consumption and will turn entire object into the invalid state
+         */
         [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen)
         -> connect_query_t requires (not is_connected_v) { return connect_query_t{ std::move(*this), addr, addrlen}; }
 
+        /**
+         * @warning This member operation causes @b consumption and will turn entire object into the invalid state
+         */
         [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
         -> connect_query_t requires (is_inet_domain<domain_v> and not is_connected_v) {
             PEER_SIN.sin_family = domain_v;
@@ -130,6 +139,9 @@ namespace ace::futures {
             return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
         }
 
+        /**
+         * @warning This member operation causes @b consumption and will turn entire object into the invalid state
+         */
         [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
         -> connect_query_t requires (is_inet_domain<domain_v> and not is_connected_v) {
             PEER_SIN.sin_family = domain_v;
@@ -147,8 +159,8 @@ namespace ace::futures {
 
     };
 
-    template <typename entry_t, int domain_v = -1>
-    struct connect_query : core::io_query<connect_query<entry_t, domain_v>> {
+    template <typename entity_t, int domain_v = -1>
+    struct connect_query : core::io_query<connect_query<entity_t, domain_v>> {
 
         IMPORT_IO_QUERY_ENV(connect_query)
 
@@ -156,9 +168,9 @@ namespace ace::futures {
 
         typedef io_transport_entity<domain_v, true> io_transport_entity_t;
 
-        explicit connect_query(entry_t&& entry, const sockaddr* addr, const socklen_t addrlen)
-            : io_query_t(entry._fd)
-            , _entry(entry)
+        explicit connect_query(entity_t&& entity, const sockaddr* addr, const socklen_t addrlen)
+            : io_query_t(entity._fd)
+            , _entity(entity)
             , _addr(addr)
             , _addrlen(addrlen) {}
 
@@ -168,12 +180,12 @@ namespace ace::futures {
 
         [[nodiscard]] io_transport_entity_t await_resume() const {
             if (_res > -1) {
-                return io_transport_entity_t::make_from_entry(&_entry);
+                return io_transport_entity_t::consume(&_entity);
             }
             return io_transport_entity_t {};
         }
 
-        entry_t& _entry;
+        entity_t& _entity;
         const sockaddr* _addr;
         const socklen_t _addrlen;
     };
@@ -181,7 +193,7 @@ namespace ace::futures {
     /**
      * @brief An @c io_entity class to represent listen socket
      *
-     * Turns out from the @c io_stream_mode_entry as a result of processing its member @c listen()
+     * Turns out from the @c io_stream_mode_entity as a result of processing its member @c listen()
      * via @c co_await
      */
     template <int domain_v = -1>
@@ -199,9 +211,9 @@ namespace ace::futures {
 
             typedef io_transport_entity<domain_v, true> io_transport_entity_t;
 
-            explicit accept_query(const io_listener_entity* entry, sockaddr* addr, socklen_t* addrlen, const int flags = 0)
-                : io_query_t(entry->_fd)
-                , _entry(entry)
+            explicit accept_query(const io_listener_entity* entity, sockaddr* addr, socklen_t* addrlen, const int flags = 0)
+                : io_query_t(entity->_fd)
+                , _entity(entity)
                 , _addr(addr)
                 , _addrlen(addrlen)
                 , _flags(flags) {}
@@ -212,13 +224,13 @@ namespace ace::futures {
 
             [[nodiscard]] io_transport_entity_t await_resume() const {
                 if (_res > -1) {
-                    peer_sin_from(_entry->_params) = *reinterpret_cast<sockaddr_in*>(_addr);
-                    return io_transport_entity_t { _res, false, _entry->_params };
+                    peer_sin_from(_entity->_params) = *reinterpret_cast<sockaddr_in*>(_addr);
+                    return io_transport_entity_t { _res, false, _entity->_params };
                 }
                 return io_transport_entity_t {};
             }
 
-            const io_listener_entity* _entry;
+            const io_listener_entity* _entity;
             sockaddr* _addr;
             socklen_t* _addrlen;
             const int _flags;
@@ -253,19 +265,17 @@ namespace ace::futures {
 
 
     /**
-     * @brief An @c io_entry class to represent socket mode selection [ @b Listener | @b Connection ]
+     * @brief An @c io_entity class to represent socket mode selection [ @b Listener | @b Connection ]
      *
-     * Turns out from the @c io_mapping_entry only for the @b SOCK_STREAM socket type
+     * Turns out from the @c io_mapping_entity only for the @b SOCK_STREAM socket type
      * as a result of processing its member @c bind(...) via @c co_await
      */
     template <int domain_v = -1, int type_v = -1>
-    struct io_stream_mode_entry
-        : io_net_entity<io_stream_mode_entry<domain_v, type_v>>
-        , core::io_entry<io_stream_mode_entry<domain_v, type_v>> {
+    struct io_stream_mode_entity : io_net_entity<io_stream_mode_entity<domain_v, type_v>> {
 
-        IMPORT_IO_NET_ENTITY_ENV(io_stream_mode_entry)
+        IMPORT_IO_NET_ENTITY_ENV(io_stream_mode_entity)
 
-        io_stream_mode_entry() : io_entity_t() {};
+        io_stream_mode_entity() : io_entity_t() {};
 
         struct listen_query : core::io_query<listen_query> {
 
@@ -273,9 +283,9 @@ namespace ace::futures {
 
             listen_query() = delete;
 
-            explicit listen_query(io_stream_mode_entry&& entry, const int backlog)
-                : io_query_t(entry._fd)
-                , _entry(entry)
+            explicit listen_query(io_stream_mode_entity&& entity, const int backlog)
+                : io_query_t(entity._fd)
+                , _entity(entity)
                 , _backlog(backlog) {}
 
             bool setup_query(core::kernel_waiter* kwp) const {
@@ -283,24 +293,33 @@ namespace ace::futures {
             }
 
             [[nodiscard]] io_listener_entity<domain_v> await_resume() const {
-                return io_listener_entity<domain_v>::make_from_entry(&_entry);
+                return io_listener_entity<domain_v>::consume(&_entity);
             }
 
-            io_stream_mode_entry& _entry;
+            io_stream_mode_entity& _entity;
             const int _backlog;
         };
 
 
+        /**
+         * @warning This member operation causes @b consumption and will turn entire object into the invalid state
+         */
         [[nodiscard]] auto listen(const int backlog = 0)
         -> listen_query requires (type_v == SOCK_SEQPACKET or type_v == SOCK_STREAM) {
             return listen_query{ std::move(*this), backlog};
         }
 
-        using connect_query_t = connect_query<io_stream_mode_entry, domain_v>;
+        using connect_query_t = connect_query<io_stream_mode_entity, domain_v>;
 
+        /**
+         * @warning This member operation causes @b consumption and will turn entire object into the invalid state
+         */
         [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen)
         -> connect_query_t { return connect_query_t{ std::move(*this), addr, addrlen}; }
 
+        /**
+         * @warning This member operation causes @b consumption and will turn entire object into the invalid state
+         */
         [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
         -> connect_query_t requires is_inet_domain<domain_v> {
             PEER_SIN.sin_family = domain_v;
@@ -309,6 +328,9 @@ namespace ace::futures {
             return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
         }
 
+        /**
+         * @warning This member operation causes @b consumption and will turn entire object into the invalid state
+         */
         [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
         -> connect_query_t requires is_inet_domain<domain_v> {
             PEER_SIN.sin_family = domain_v;
@@ -321,20 +343,18 @@ namespace ace::futures {
 
 
     /**
-     * @brief An @c io_entry class to represent waiting for @b binding or @b pending @b connection state
+     * @brief An @c io_entity class to represent waiting for @b binding or @b pending @b connection state
      *
-     * Turns out from @c io_socket_entry as a result of processing it via @c co_await
+     * Turns out from @c io_socket_entity as a result of processing it via @c co_await
      */
     template <int domain_v = -1, int type_v = -1>
-    struct io_mapping_entry
-        : io_net_entity<io_mapping_entry<domain_v, type_v>>
-        , core::io_entry<io_mapping_entry<domain_v, type_v>> {
+    struct io_mapping_entity : io_net_entity<io_mapping_entity<domain_v, type_v>> {
 
-        IMPORT_IO_NET_ENTITY_ENV(io_mapping_entry)
+        IMPORT_IO_NET_ENTITY_ENV(io_mapping_entity)
 
-        io_mapping_entry() : io_entity_t() {};
+        io_mapping_entity() : io_entity_t() {};
 
-        explicit io_mapping_entry(const int fd) {
+        explicit io_mapping_entity(const int fd) {
             io_entity_t::_fd = fd;
             if (io_entity_t::_fd > -1) io_entity_t::_is_closed = false;
         }
@@ -347,9 +367,9 @@ namespace ace::futures {
 
             typedef io_transport_entity<domain_v, false> io_transport_entity_t;
 
-            explicit bind_query(io_mapping_entry&& entry, sockaddr* addr, const socklen_t addrlen)
-                : io_query_t(entry._fd)
-                , _entry(entry)
+            explicit bind_query(io_mapping_entity&& entity, sockaddr* addr, const socklen_t addrlen)
+                : io_query_t(entity._fd)
+                , _entity(entity)
                 , _addr(addr)
                 , _addrlen(addrlen) {}
 
@@ -357,26 +377,32 @@ namespace ace::futures {
                 return core::kernel_controller::bind(kwp, _fd, _addr, _addrlen);
             }
 
-            [[nodiscard]] io_stream_mode_entry<domain_v, type_v> await_resume() {
+            [[nodiscard]] io_stream_mode_entity<domain_v, type_v> await_resume() {
                 if constexpr (is_stream_type<type_v>)
-                    return io_stream_mode_entry<domain_v, type_v>::make_from_entry(&_entry);
+                    return io_stream_mode_entity<domain_v, type_v>::consume(&_entity);
                 else {
                     if (_res > -1) {
-                        peer_sin_from(_entry->_params) = *reinterpret_cast<sockaddr_in*>(_addr);
-                        return io_transport_entity_t { _res, false, _entry->_params };
+                        peer_sin_from(_entity->_params) = *reinterpret_cast<sockaddr_in*>(_addr);
+                        return io_transport_entity_t { _res, false, _entity->_params };
                     }
                     return io_transport_entity_t {};
                 }
             }
 
-            io_mapping_entry& _entry;
+            io_mapping_entity& _entity;
             sockaddr* _addr;
             const socklen_t _addrlen;
         };
 
+        /**
+         * @warning This member operation causes @b consumption and will turn entire object into the invalid state
+         */
         [[nodiscard]] auto bind(const sockaddr* addr, const socklen_t addrlen)
         -> bind_query { return bind_query { std::move(*this), addr, addrlen}; }
 
+        /**
+         * @warning This member operation causes @b consumption and will turn entire object into the invalid state
+         */
         [[nodiscard]] auto bind(const in_addr_t addr, const uint16_t port)
         -> bind_query requires is_inet_domain<domain_v> {
             SELF_SIN.sin_family = domain_v;
@@ -385,6 +411,9 @@ namespace ace::futures {
             return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&SELF_SIN), sizeof(SELF_SIN)};
         }
 
+        /**
+         * @warning This member operation causes @b consumption and will turn entire object into the invalid state
+         */
         [[nodiscard]] auto bind(const std::string_view addr, const uint16_t port)
         -> bind_query requires is_inet_domain<domain_v> {
             SELF_SIN.sin_family = domain_v;
@@ -393,11 +422,17 @@ namespace ace::futures {
             return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&SELF_SIN), sizeof(SELF_SIN)};
         }
 
-        using connect_query_t = connect_query<io_mapping_entry, domain_v>;
+        using connect_query_t = connect_query<io_mapping_entity, domain_v>;
 
+        /**
+         * @warning This member operation causes @b consumption and will turn entire object into the invalid state
+         */
         [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen)
         -> connect_query_t { return connect_query_t{ std::move(*this), addr, addrlen}; }
 
+        /**
+         * @warning This member operation causes @b consumption and will turn entire object into the invalid state
+         */
         [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
         -> connect_query_t requires is_inet_domain<domain_v> {
             PEER_SIN.sin_family = domain_v;
@@ -406,6 +441,9 @@ namespace ace::futures {
             return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
         }
 
+        /**
+         * @warning This member operation causes @b consumption and will turn entire object into the invalid state
+         */
         [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
         -> connect_query_t requires is_inet_domain<domain_v> {
             PEER_SIN.sin_family = domain_v;
@@ -418,7 +456,7 @@ namespace ace::futures {
 
 
     /**
-     * @brief An @b io_entry for socket creation. Also, supports aliasing
+     * @brief An @b io_entity for socket creation. Also, supports aliasing
      * @tparam domain_v Communication domain
      * @tparam type_v Communication semantics
      * @tparam protocol_v Particular socket protol
@@ -441,8 +479,8 @@ namespace ace::futures {
             return true;
         }
 
-        [[nodiscard]] io_mapping_entry<domain_v, type_v> await_resume() const {
-            return io_mapping_entry<domain_v, type_v>{_res};
+        [[nodiscard]] io_mapping_entity<domain_v, type_v> await_resume() const {
+            return io_mapping_entity<domain_v, type_v>{_res};
         }
 
         const int _flags;
@@ -473,7 +511,7 @@ namespace ace::futures {
             return true;
         }
 
-        [[nodiscard]] io_mapping_entry<> await_resume() const { return io_mapping_entry{_res}; }
+        [[nodiscard]] io_mapping_entity<> await_resume() const { return io_mapping_entity{_res}; }
 
         const int _domain;
         const int _type;

@@ -34,13 +34,13 @@ namespace ace::futures {
      * or the result of @b io_listener.accept(...) via @b co_await
      */
     template <int domain_v = -1, bool is_connected_v = false>
-    struct io_connection_entity : io_net_entity<io_connection_entity<domain_v, is_connected_v>> {
+    struct io_transport_entity : io_net_entity<io_transport_entity<domain_v, is_connected_v>> {
 
-        IMPORT_IO_NET_ENTITY_ENV(io_connection_entity)
+        IMPORT_IO_NET_ENTITY_ENV(io_transport_entity)
 
-        io_connection_entity() = default;
+        io_transport_entity() = default;
 
-        using connect_query_t = connect_query<io_connection_entity, domain_v>;
+        using connect_query_t = connect_query<io_transport_entity, domain_v>;
 
         struct send_query : core::io_query<send_query> {
 
@@ -154,7 +154,7 @@ namespace ace::futures {
 
         connect_query() = delete;
 
-        typedef io_connection_entity<domain_v, true> io_connection_entity_t;
+        typedef io_transport_entity<domain_v, true> io_transport_entity_t;
 
         explicit connect_query(entry_t&& entry, const sockaddr* addr, const socklen_t addrlen)
             : io_query_t(entry._fd)
@@ -166,11 +166,11 @@ namespace ace::futures {
             return core::kernel_controller::connect(kwp, _fd, _addr, _addrlen);
         }
 
-        [[nodiscard]] io_connection_entity_t await_resume() const {
+        [[nodiscard]] io_transport_entity_t await_resume() const {
             if (_res > -1) {
-                return io_connection_entity_t::make_from_entry(&_entry);
+                return io_transport_entity_t::make_from_entry(&_entry);
             }
-            return io_connection_entity_t {};
+            return io_transport_entity_t {};
         }
 
         entry_t& _entry;
@@ -179,9 +179,10 @@ namespace ace::futures {
     };
 
     /**
-     * @brief An @b io_entity class to represent listen socket
-     * <br>Turns out from the @b io_selection_entry as a result of processing its member @b listen()
-     * via @b co_await
+     * @brief An @c io_entity class to represent listen socket
+     *
+     * Turns out from the @c io_stream_mode_entry as a result of processing its member @c listen()
+     * via @c co_await
      */
     template <int domain_v = -1>
     struct io_listener_entity : io_net_entity<io_listener_entity<domain_v>> {
@@ -196,7 +197,7 @@ namespace ace::futures {
 
             accept_query() = delete;
 
-            typedef io_connection_entity<domain_v, true> io_connection_entity_t;
+            typedef io_transport_entity<domain_v, true> io_transport_entity_t;
 
             explicit accept_query(const io_listener_entity* entry, sockaddr* addr, socklen_t* addrlen, const int flags = 0)
                 : io_query_t(entry->_fd)
@@ -209,12 +210,12 @@ namespace ace::futures {
                 return core::kernel_controller::accept(kwp, _fd, _addr, _addrlen, _flags);
             }
 
-            [[nodiscard]] io_connection_entity_t await_resume() const {
+            [[nodiscard]] io_transport_entity_t await_resume() const {
                 if (_res > -1) {
                     peer_sin_from(_entry->_params) = *reinterpret_cast<sockaddr_in*>(_addr);
-                    return io_connection_entity_t { _res, false, _entry->_params };
+                    return io_transport_entity_t { _res, false, _entry->_params };
                 }
-                return io_connection_entity_t {};
+                return io_transport_entity_t {};
             }
 
             const io_listener_entity* _entry;
@@ -344,7 +345,7 @@ namespace ace::futures {
 
             bind_query() = delete;
 
-            typedef io_connection_entity<domain_v, false> io_connection_entity_t;
+            typedef io_transport_entity<domain_v, false> io_transport_entity_t;
 
             explicit bind_query(io_mapping_entry&& entry, sockaddr* addr, const socklen_t addrlen)
                 : io_query_t(entry._fd)
@@ -362,9 +363,9 @@ namespace ace::futures {
                 else {
                     if (_res > -1) {
                         peer_sin_from(_entry->_params) = *reinterpret_cast<sockaddr_in*>(_addr);
-                        return io_connection_entity_t { _res, false, _entry->_params };
+                        return io_transport_entity_t { _res, false, _entry->_params };
                     }
-                    return io_connection_entity_t {};
+                    return io_transport_entity_t {};
                 }
             }
 
@@ -479,6 +480,11 @@ namespace ace::futures {
         const int _protocol;
         const int _flags;
     };
+
+    typedef io_listener_entity<2> io_listener;
+
+    typedef io_transport_entity<2, false> io_net;
+    typedef io_transport_entity<2, true> io_connection;
 
     using io_socket_raw      = io_socket<AF_INET , SOCK_RAW   , IPPROTO_RAW>;
     using io_socket_raw_dual = io_socket<AF_INET6, SOCK_RAW   , IPPROTO_RAW>;

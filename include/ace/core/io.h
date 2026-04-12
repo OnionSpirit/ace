@@ -167,10 +167,6 @@ namespace ace::core {
     template <typename entity_t, typename ... Params>
     struct io_entity {
 
-        int  _fd;                      ///< Socket file descriptor
-        bool _is_closed;               ///< Socket closed flag
-        std::tuple<Params...> _params; ///< FD related params
-
         io_entity()
             : _fd(-1)
             , _is_closed(true) {}
@@ -182,13 +178,8 @@ namespace ace::core {
 
         template<typename entry_t>
         static entity_t consume(entry_t& io) noexcept {
-            int fd = io._fd;
-            bool is_closed;
-            if (fd > -1) is_closed = io._is_closed;
-            else is_closed = true;
-            auto params = std::move(io._params);
-            io._is_closed = true;
-            io._fd = -1;
+            auto [fd, is_closed, params] = io.extract();
+            if (fd < 0) is_closed = true;
             return entity_t {fd, is_closed, params};
         }
 
@@ -210,6 +201,25 @@ namespace ace::core {
         }
 
         /**
+         * @brief Checks FD state
+         *
+         * If FD is closed or @c io_entity is invalid returns @c true, @c false otherwise
+         */
+        [[nodiscard]] auto is_closed() const
+            -> bool { return _is_closed; }
+
+        /**
+         * @brief Extracts all data from @c io_entity object and invalidates it
+         * @return A tuple of FD, @c is_closed() result and set of underlying params
+         */
+        [[nodiscard]] auto extract() {
+            const auto ret = std::tie(_fd, _is_closed, _params);
+            _fd = -1;
+            _is_closed = true;
+            return ret;
+        }
+
+        /**
          * @brief Closes file descriptor asynchronously
          * @return @c close_query future object that shall be processed via @c co_await operator
          */
@@ -217,6 +227,12 @@ namespace ace::core {
             -> core::close_query { _is_closed = true; return core::close_query{_fd}; }
 
         virtual ~io_entity() = default;
+
+    protected:
+
+        int  _fd;                      ///< Socket file descriptor
+        bool _is_closed;               ///< Socket closed flag
+        std::tuple<Params...> _params; ///< FD related params
 
     private:
 
@@ -268,9 +284,13 @@ namespace ace::core {
     class(const int fd, const bool is_closed, std::tuple<__VA_ARGS__> params)               \
         : io_entity_t(fd, is_closed, params) { };                                           \
                                                                                             \
+protected:                                                                                  \
+                                                                                            \
     using io_entity_t::_fd;                                                                 \
     using io_entity_t::_is_closed;                                                          \
     using io_entity_t::_params;                                                             \
+                                                                                            \
+public:                                                                                     \
                                                                                             \
     class(class&& io) noexcept                                                              \
         : io_entity_t(static_cast<io_entity_t>(std::move(io))) { }                          \

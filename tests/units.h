@@ -449,7 +449,8 @@ inline ace::task tcp_echo_server() {
         co_return;
     }
 
-    std::cout << "[ SERVER ] - Client [ id: " << connection._fd << " ] connected...\n";
+    // bind_entry.extract()
+    std::cout << "[ SERVER ] - Client connected...\n";
 
     static constexpr int READ_BUFF_LEN = 128;
 

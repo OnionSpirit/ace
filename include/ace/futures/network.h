@@ -45,7 +45,7 @@ namespace ace::futures {
         io_transport_entity() = default;
 
         using connect_query_t = connect_query<io_transport_entity, domain_v>;
-        friend connect_query_t::io_transport_entity_t;
+        friend connect_query_t;
 
         struct send_query : core::io_query<send_query> {
 
@@ -316,6 +316,7 @@ namespace ace::futures {
         }
 
         using connect_query_t = connect_query<io_stream_mode_entity, domain_v>;
+        friend connect_query_t;
 
         /**
          * @warning This member operation causes @b consumption and will turn entire object into the invalid state
@@ -431,6 +432,7 @@ namespace ace::futures {
         }
 
         using connect_query_t = connect_query<io_mapping_entity, domain_v>;
+        friend connect_query_t;
 
         /**
          * @warning This member operation causes @b consumption and will turn entire object into the invalid state

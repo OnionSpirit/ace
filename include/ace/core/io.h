@@ -178,7 +178,7 @@ namespace ace::core {
 
         template<typename entry_t>
         static entity_t consume(entry_t& io) noexcept {
-            auto [fd, is_closed, params] = io.extract();
+            auto [fd, is_closed, params] = std::move(io.extract());
             if (fd < 0) is_closed = true;
             return entity_t {fd, is_closed, params};
         }
@@ -213,10 +213,11 @@ namespace ace::core {
          * @return A tuple of FD, @c is_closed() result and set of underlying params
          */
         [[nodiscard]] auto extract() {
-            const auto ret = std::tie(_fd, _is_closed, _params);
-            _fd = -1;
-            _is_closed = true;
-            return ret;
+            return std::tuple {
+                std::exchange(_fd, -1),
+                std::exchange(_is_closed, true),
+                std::move(_params)
+            };
         }
 
         /**

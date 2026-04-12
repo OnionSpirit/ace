@@ -6,7 +6,7 @@
 namespace ace::core {
 
     template <typename query_t>
-    concept is_query = requires(query_t q, kernel_waiter* kwp) {
+    concept is_query = requires(query_t q, kernel_observer* kwp) {
         { q.setup_query(kwp) } -> std::same_as<bool>;
     };
 
@@ -28,7 +28,7 @@ namespace ace::core {
      * @tparam query_core_t Specific query type.
      */
     template <typename query_core_t>
-    struct io_query : futures::future_traits<query_core_t>, kernel_waiter {
+    struct io_query : futures::future_traits<query_core_t>, kernel_observer {
 
         IMPORT_FUTURE_ENV(query_core_t);
 
@@ -104,7 +104,7 @@ namespace ace::core {
             , _nbytes(nbytes)
             , _offset(offset) {}
 
-        bool setup_query(kernel_waiter* kwp) const {
+        bool setup_query(kernel_observer* kwp) const {
             return kernel_controller::read(kwp, _fd, _buf, _nbytes, _offset);
         }
 
@@ -132,7 +132,7 @@ namespace ace::core {
             , _nbytes(nbytes)
             , _offset(offset) {}
 
-        bool setup_query(kernel_waiter* kwp) const {
+        bool setup_query(kernel_observer* kwp) const {
             return ace::core::kernel_controller::write(kwp, _fd, _buf, _nbytes, _offset);
         }
 
@@ -153,7 +153,7 @@ namespace ace::core {
 
         explicit close_query(const int fd) : io_query_t(fd) {}
 
-        bool setup_query(kernel_waiter* kwp) const noexcept {
+        bool setup_query(kernel_observer* kwp) const noexcept {
             return kernel_controller::close(kwp, _fd);
         }
 
@@ -167,10 +167,6 @@ namespace ace::core {
     template <typename entity_t, typename ... Params>
     struct io_entity {
 
-        int  _fd;                      ///< Socket file descriptor
-        bool _is_closed;               ///< Socket closed flag
-        std::tuple<Params...> _params; ///< FD related params
-
         io_entity()
             : _fd(-1)
             , _is_closed(true) {}
@@ -181,13 +177,14 @@ namespace ace::core {
             , _params(params) { };
 
         template<typename entry_t>
-        static entity_t consume(entry_t* io) noexcept {
-            int fd = io->_fd;
+        static entity_t consume(entry_t& io) noexcept {
+            int fd = io._fd;
             bool is_closed;
-            if (fd > -1) is_closed = io->_is_closed;
+            if (fd > -1) is_closed = io._is_closed;
             else is_closed = true;
-            auto params = std::move(io->_params);
-            io->clear();
+            auto params = std::move(io._params);
+            io._is_closed = true;
+            io._fd = -1;
             return entity_t {fd, is_closed, params};
         }
 
@@ -208,15 +205,16 @@ namespace ace::core {
             return *this;
         }
 
-        void clear() noexcept {
-            static_cast<entity_t*>(this)->_is_closed = true;
-            static_cast<entity_t*>(this)->_fd = -1;
-        }
-
         [[nodiscard]] auto close()
             -> core::close_query { _is_closed = true; return core::close_query{_fd}; }
 
         virtual ~io_entity() = default;
+
+    protected:
+
+        int  _fd;                      ///< Socket file descriptor
+        bool _is_closed;               ///< Socket closed flag
+        std::tuple<Params...> _params; ///< FD related params
 
     private:
 

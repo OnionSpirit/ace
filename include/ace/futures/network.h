@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 
 #include "ace/core/io.h"
+#include "ace/common/selection.h"
 
 namespace ace::futures {
 
@@ -16,14 +17,14 @@ namespace ace::futures {
     #define SELF_SIN std::get<0>(_params)
     #define PEER_SIN std::get<1>(_params)
 
-    inline auto& self_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<0>(p); }
-    inline auto& peer_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<1>(p); }
+    static auto& self_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<0>(p); }
+    static auto& peer_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<1>(p); }
 
     template <int domain_v>
-    inline constexpr bool is_inet_domain = domain_v == AF_INET or domain_v == AF_INET6;
+    static inline constexpr bool is_inet_domain = domain_v == AF_INET or domain_v == AF_INET6;
 
     template <int type_v>
-    inline constexpr bool is_stream_type = type_v == SOCK_STREAM;
+    static inline constexpr bool is_stream_type = type_v == SOCK_STREAM;
 
     template <typename, int>
     struct connect_query;
@@ -36,14 +37,15 @@ namespace ace::futures {
      * as a result of processing its member @c connect(...)
      * or the result of @c io_listener.accept(...) via @c co_await
      */
-    template <int domain_v = -1, bool is_connected_v = false>
-    struct io_transport_entity : io_net_entity<io_transport_entity<domain_v, is_connected_v>> {
+    template <int domain_v = -1, transport_entity_state connection_state_v = e_indirect>
+    struct io_transport_entity : io_net_entity<io_transport_entity<domain_v, connection_state_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_transport_entity)
 
         io_transport_entity() = default;
 
         using connect_query_t = connect_query<io_transport_entity, domain_v>;
+        friend connect_query_t::io_transport_entity_t;
 
         struct send_query : core::io_query<send_query> {
 
@@ -57,7 +59,7 @@ namespace ace::futures {
                 , _len(len)
                 , _flags(flags) {}
 
-            bool setup_query(core::kernel_waiter* kwp) const {
+            bool setup_query(core::kernel_observer* kwp) const {
                 return core::kernel_controller::send(kwp, _fd, _buf, _len, _flags);
             }
 
@@ -83,7 +85,7 @@ namespace ace::futures {
                 , _addr(addr)
                 , _addrlen(addrlen) {}
 
-            bool setup_query(core::kernel_waiter* kwp) const {
+            bool setup_query(core::kernel_observer* kwp) const {
                 return core::kernel_controller::sendto(kwp, _fd, _buf, _len, _flags, _addr, _addrlen);
             }
 
@@ -108,7 +110,7 @@ namespace ace::futures {
                 , _len(len)
                 , _flags(flags) {}
 
-            bool setup_query(core::kernel_waiter* kwp) const {
+            bool setup_query(core::kernel_observer* kwp) const {
                 return core::kernel_controller::recv(kwp, _fd, _buf, _len, _flags);
             }
 
@@ -120,19 +122,21 @@ namespace ace::futures {
         };
 
         [[nodiscard]] auto send(const void *buf, const size_t len, const int flags = 0) const
-        -> send_query requires is_connected_v { return send_query{_fd, buf, len, flags}; }
+        -> send_query requires (connection_state_v == e_connected)
+        { return send_query{_fd, buf, len, flags}; }
 
         /**
          * @warning This member operation causes @b consumption and will turn entire object into the invalid state
          */
         [[nodiscard]] auto connect(const sockaddr* addr, const socklen_t addrlen)
-        -> connect_query_t requires (not is_connected_v) { return connect_query_t{ std::move(*this), addr, addrlen}; }
+        -> connect_query_t requires (connection_state_v == e_indirect)
+        { return connect_query_t{ std::move(*this), addr, addrlen}; }
 
         /**
          * @warning This member operation causes @b consumption and will turn entire object into the invalid state
          */
         [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
-        -> connect_query_t requires (is_inet_domain<domain_v> and not is_connected_v) {
+        -> connect_query_t requires (is_inet_domain<domain_v> and connection_state_v == e_indirect) {
             PEER_SIN.sin_family = domain_v;
             PEER_SIN.sin_port = htons(port);
             PEER_SIN.sin_addr.s_addr = htonl(addr);
@@ -143,7 +147,7 @@ namespace ace::futures {
          * @warning This member operation causes @b consumption and will turn entire object into the invalid state
          */
         [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
-        -> connect_query_t requires (is_inet_domain<domain_v> and not is_connected_v) {
+        -> connect_query_t requires (is_inet_domain<domain_v> and connection_state_v == e_indirect) {
             PEER_SIN.sin_family = domain_v;
             PEER_SIN.sin_port = htons(port);
             inet_pton(domain_v, addr.data(), &(PEER_SIN.sin_addr));
@@ -166,7 +170,7 @@ namespace ace::futures {
 
         connect_query() = delete;
 
-        typedef io_transport_entity<domain_v, true> io_transport_entity_t;
+        typedef io_transport_entity<domain_v, e_connected> io_transport_entity_t;
 
         explicit connect_query(entity_t&& entity, const sockaddr* addr, const socklen_t addrlen)
             : io_query_t(entity._fd)
@@ -174,13 +178,13 @@ namespace ace::futures {
             , _addr(addr)
             , _addrlen(addrlen) {}
 
-        bool setup_query(core::kernel_waiter* kwp) const {
+        bool setup_query(core::kernel_observer* kwp) const {
             return core::kernel_controller::connect(kwp, _fd, _addr, _addrlen);
         }
 
         [[nodiscard]] io_transport_entity_t await_resume() const {
             if (_res > -1) {
-                return io_transport_entity_t::consume(&_entity);
+                return io_transport_entity_t::consume(_entity);
             }
             return io_transport_entity_t {};
         }
@@ -209,7 +213,7 @@ namespace ace::futures {
 
             accept_query() = delete;
 
-            typedef io_transport_entity<domain_v, true> io_transport_entity_t;
+            typedef io_transport_entity<domain_v, e_connected> io_transport_entity_t;
 
             explicit accept_query(const io_listener_entity* entity, sockaddr* addr, socklen_t* addrlen, const int flags = 0)
                 : io_query_t(entity->_fd)
@@ -218,7 +222,7 @@ namespace ace::futures {
                 , _addrlen(addrlen)
                 , _flags(flags) {}
 
-            bool setup_query(core::kernel_waiter* kwp) const {
+            bool setup_query(core::kernel_observer* kwp) const {
                 return core::kernel_controller::accept(kwp, _fd, _addr, _addrlen, _flags);
             }
 
@@ -277,6 +281,8 @@ namespace ace::futures {
 
         io_stream_mode_entity() : io_entity_t() {};
 
+        typedef io_listener_entity<domain_v> io_listener_entity_t;
+
         struct listen_query : core::io_query<listen_query> {
 
             IMPORT_IO_QUERY_ENV(listen_query)
@@ -288,12 +294,12 @@ namespace ace::futures {
                 , _entity(entity)
                 , _backlog(backlog) {}
 
-            bool setup_query(core::kernel_waiter* kwp) const {
+            bool setup_query(core::kernel_observer* kwp) const {
                 return core::kernel_controller::listen(kwp, _fd, _backlog);
             }
 
-            [[nodiscard]] io_listener_entity<domain_v> await_resume() const {
-                return io_listener_entity<domain_v>::consume(&_entity);
+            [[nodiscard]] io_listener_entity_t await_resume() const {
+                return io_listener_entity_t::consume(_entity);
             }
 
             io_stream_mode_entity& _entity;
@@ -365,7 +371,9 @@ namespace ace::futures {
 
             bind_query() = delete;
 
-            typedef io_transport_entity<domain_v, false> io_transport_entity_t;
+            typedef io_transport_entity<domain_v, e_indirect> io_transport_entity_t;
+
+            typedef io_stream_mode_entity<domain_v, type_v> io_stream_mode_entity_t;
 
             explicit bind_query(io_mapping_entity&& entity, sockaddr* addr, const socklen_t addrlen)
                 : io_query_t(entity._fd)
@@ -373,13 +381,13 @@ namespace ace::futures {
                 , _addr(addr)
                 , _addrlen(addrlen) {}
 
-            bool setup_query(core::kernel_waiter* kwp) const {
+            bool setup_query(core::kernel_observer* kwp) const {
                 return core::kernel_controller::bind(kwp, _fd, _addr, _addrlen);
             }
 
-            [[nodiscard]] io_stream_mode_entity<domain_v, type_v> await_resume() {
+            [[nodiscard]] io_stream_mode_entity_t await_resume() {
                 if constexpr (is_stream_type<type_v>)
-                    return io_stream_mode_entity<domain_v, type_v>::consume(&_entity);
+                    return io_stream_mode_entity_t::consume(_entity);
                 else {
                     if (_res > -1) {
                         peer_sin_from(_entity->_params) = *reinterpret_cast<sockaddr_in*>(_addr);
@@ -474,7 +482,7 @@ namespace ace::futures {
             : io_query_t(0)
             , _flags(flags) {}
 
-        bool setup_query(core::kernel_waiter* kwp) const {
+        bool setup_query(core::kernel_observer* kwp) const {
             core::kernel_controller::socket(kwp, domain_v, type_v, protocol_v, _flags);
             return true;
         }
@@ -506,7 +514,7 @@ namespace ace::futures {
             , _protocol(protocol)
             , _flags(flags) {}
 
-        bool setup_query(kernel_waiter* kwp) const {
+        bool setup_query(kernel_observer* kwp) const {
             core::kernel_controller::socket(kwp, _domain, _type, _protocol, _flags);
             return true;
         }
@@ -521,8 +529,8 @@ namespace ace::futures {
 
     typedef io_listener_entity<2> io_listener;
 
-    typedef io_transport_entity<2, false> io_net;
-    typedef io_transport_entity<2, true> io_connection;
+    typedef io_transport_entity<2, e_indirect> io_net;
+    typedef io_transport_entity<2, e_connected> io_connection;
 
     using io_socket_raw      = io_socket<AF_INET , SOCK_RAW   , IPPROTO_RAW>;
     using io_socket_raw_dual = io_socket<AF_INET6, SOCK_RAW   , IPPROTO_RAW>;

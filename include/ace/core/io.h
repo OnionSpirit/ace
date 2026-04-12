@@ -167,6 +167,10 @@ namespace ace::core {
     template <typename entity_t, typename ... Params>
     struct io_entity {
 
+        int  _fd;                      ///< Socket file descriptor
+        bool _is_closed;               ///< Socket closed flag
+        std::tuple<Params...> _params; ///< FD related params
+
         io_entity()
             : _fd(-1)
             , _is_closed(true) {}
@@ -205,16 +209,14 @@ namespace ace::core {
             return *this;
         }
 
+        /**
+         * @brief Closes file descriptor asynchronously
+         * @return @c close_query future object that shall be processed via @c co_await operator
+         */
         [[nodiscard]] auto close()
             -> core::close_query { _is_closed = true; return core::close_query{_fd}; }
 
         virtual ~io_entity() = default;
-
-    protected:
-
-        int  _fd;                      ///< Socket file descriptor
-        bool _is_closed;               ///< Socket closed flag
-        std::tuple<Params...> _params; ///< FD related params
 
     private:
 

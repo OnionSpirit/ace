@@ -28,34 +28,13 @@
 
 #include <cstddef>
 #include <functional>
+#include <random>
 #include <thread>
 
 #include "runner.h"
 #include "ace/common/terms.h"
 
 namespace ace::core {
-
-    struct route {
-        std::size_t _score = 0;
-        uint _id = 0;
-        uint _total_charges = 0;
-        uint _charges = 0;
-
-        // NOTE: Recharges route
-        void recharge() noexcept { _charges = _total_charges; }
-    };
-
-    struct balance_router {
-
-        std::vector<route> _routes;
-
-        uint _total_charges = 0;
-
-        route take_route() {
-            return route{};
-        };
-
-    };
 
     /**
      * @brief Global configuration for the balancer.
@@ -104,7 +83,7 @@ namespace ace::core {
         std::vector<runner> _runners {};
         balancer_config _balancer_config {};
         std::vector<worker_state> _workers_states {};
-        std::atomic<std::size_t> _runner_selector {};
+        std::atomic<long int> _total_quants {};
 
         void worker_round(const int worker_id) {
             using namespace std::chrono_literals;
@@ -154,6 +133,8 @@ namespace ace::core {
         balancer() {
             fetch_config();
             _runners.resize(_balancer_config._runners_amount);
+            for (auto& runner : _runners)
+                runner._global_total_quants = &_total_quants;
             _workers_states.resize(_balancer_config._runners_amount);
         };
 
@@ -163,6 +144,8 @@ namespace ace::core {
             fetch_config();
             _runners.clear();
             _runners.resize(_balancer_config._runners_amount);
+            for (auto& runner : _runners)
+                runner._global_total_quants = &_total_quants;
             _workers_states.clear();
             _workers_states.resize(_balancer_config._runners_amount);
             return true;
@@ -175,9 +158,30 @@ namespace ace::core {
          * @return void
          */
         void schedule(task&& new_task, const runner* rnr = nullptr) noexcept {
+
             if (not rnr) {
-                const auto runner_id = _runner_selector.fetch_add(1, std::memory_order_relaxed);
-                _runners[runner_id % _balancer_config._runners_amount].attach(std::forward<task>(new_task));
+
+                const auto quants = static_cast<double>(_total_quants.load());
+                if (quants == 0 or _balancer_config._runners_amount == 1) {
+                    _runners[0].attach(std::forward<task>(new_task));
+                    return;
+                }
+
+                static std::random_device rd;
+                static std::mt19937 gen(rd());
+                static std::uniform_real_distribution<> distrib(0.0, 1.0);
+
+                const double probability { distrib(gen) };
+                double cumulate_probability { };
+
+                for (const auto& runner : _runners) {
+                    const double runner_probability = 1.0 - (static_cast<double>(runner._total_quants) / quants);
+                    cumulate_probability += runner_probability;
+                    if (probability < cumulate_probability) {
+                        runner.attach(std::forward<task>(new_task));
+                        return;
+                    }
+                }
             } else {
                 new_task._coroutine.promise()._roaming = false;
                 rnr->attach(std::forward<task>(new_task));

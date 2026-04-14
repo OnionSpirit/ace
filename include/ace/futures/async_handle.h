@@ -85,7 +85,7 @@ namespace ace::futures {
          * @brief C++20 awaitable protocol — return completion status.
          * @return @c true if the target coroutine has finished.
          */
-        [[nodiscard]] bool await_resume() const { return _handle.done(); }
+        bool await_resume() const { return _handle.done(); }
     };
 
     /**

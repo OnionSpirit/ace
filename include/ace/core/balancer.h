@@ -80,10 +80,11 @@ namespace ace::core {
             int _rounds {0};        ///< Number of consecutive 1 ms work rounds completed.
         };
 
-        std::vector<runner> _runners {};
-        balancer_config _balancer_config {};
-        std::vector<worker_state> _workers_states {};
-        std::atomic<long int> _total_quants {};
+        balancer_config            _balancer_config {};
+        std::vector<runner>        _runners {};
+        std::vector<worker_state>  _workers_states {};
+        std::atomic<uint32_t>      _runner_selector {};
+        std::atomic<int>           _total_quants {};
 
         void worker_round(const int worker_id) {
             using namespace std::chrono_literals;
@@ -101,10 +102,6 @@ namespace ace::core {
                 fetch_time();
                 now = get_time();
             }
-
-            // // TODO: Debug logs
-            // std::cout << "Total quants on the runner <" << worker_id << "> : "
-            //           << _runners[worker_id]._total_quants << '\n';
 
             // NOTE: Updating runner status
             _workers_states[worker_id]._pending = not active;
@@ -128,13 +125,19 @@ namespace ace::core {
 
         static constexpr uint8_t _min_service_skips = 3;
 
+        void round_robin(task&& new_task) noexcept {
+            const auto runner_id = _runner_selector.fetch_add(1, std::memory_order_relaxed);
+            _runners[runner_id % _balancer_config._runners_amount].attach(std::forward<task>(new_task));
+        }
+
     public:
 
         balancer() {
             fetch_config();
             _runners.resize(_balancer_config._runners_amount);
-            for (auto& runner : _runners)
-                runner._global_total_quants = &_total_quants;
+            if (_balancer_config._runners_amount > 1)
+                for (auto& runner : _runners)
+                    runner._global_total_quants = &_total_quants;
             _workers_states.resize(_balancer_config._runners_amount);
         };
 
@@ -144,8 +147,9 @@ namespace ace::core {
             fetch_config();
             _runners.clear();
             _runners.resize(_balancer_config._runners_amount);
-            for (auto& runner : _runners)
-                runner._global_total_quants = &_total_quants;
+            if (_balancer_config._runners_amount > 1)
+                for (auto& runner : _runners)
+                    runner._global_total_quants = &_total_quants;
             _workers_states.clear();
             _workers_states.resize(_balancer_config._runners_amount);
             return true;
@@ -158,30 +162,37 @@ namespace ace::core {
          * @return void
          */
         void schedule(task&& new_task, const runner* rnr = nullptr) noexcept {
-
             if (not rnr) {
-
-                const auto quants = static_cast<double>(_total_quants.load());
-                if (quants == 0 or _balancer_config._runners_amount == 1) {
+                // NOTE: No balancing for single runner
+                if (_balancer_config._runners_amount == 1) {
                     _runners[0].attach(std::forward<task>(new_task));
                     return;
                 }
-
+                // NOTE: Fetching amount of time quants around all runners
+                const auto quants = static_cast<double>(_total_quants.load());
+                // NOTE: Round-Robin balancing on Zero quants count
+                if (quants < 1) {
+                    round_robin(std::move(new_task));
+                    return;
+                }
+                // NOTE: Probability accumulation selection on charged runners
                 static std::random_device rd;
                 static std::mt19937 gen(rd());
                 static std::uniform_real_distribution<> distrib(0.0, 1.0);
 
                 const double probability { distrib(gen) };
-                double cumulate_probability { };
+                double probability_accumulator { };
 
                 for (const auto& runner : _runners) {
                     const double runner_probability = 1.0 - (static_cast<double>(runner._total_quants) / quants);
-                    cumulate_probability += runner_probability;
-                    if (probability < cumulate_probability) {
+                    probability_accumulator += runner_probability;
+                    if (probability < probability_accumulator) {
                         runner.attach(std::forward<task>(new_task));
                         return;
                     }
                 }
+                // NOTE: Round-Robin balancing on probability accumulation miss
+                round_robin(std::move(new_task));
             } else {
                 new_task._coroutine.promise()._roaming = false;
                 rnr->attach(std::forward<task>(new_task));
@@ -213,6 +224,9 @@ namespace ace::core {
                     is_running = not is_pending or worker_id not_eq workers_amount - 1;
                 }
             }
+            // NOTE: Clearing quant counters to be sure they are zero
+            for (auto& runner : _runners)
+                runner._total_quants = 0;
         }
 
         /**

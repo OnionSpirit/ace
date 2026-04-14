@@ -17,8 +17,8 @@ namespace ace::futures {
     #define SELF_SIN std::get<0>(_params)
     #define PEER_SIN std::get<1>(_params)
 
-    static auto& self_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<0>(p); }
-    static auto& peer_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<1>(p); }
+    [[maybe_unused]] static auto& self_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<0>(p); }
+    [[maybe_unused]] static auto& peer_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<1>(p); }
 
     template <int domain_v>
     static inline constexpr bool is_inet_domain = domain_v == AF_INET or domain_v == AF_INET6;

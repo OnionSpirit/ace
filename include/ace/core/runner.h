@@ -25,10 +25,10 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
 
     ACE_CACHE_LINE(0)
 
-    mutable runner_pool_t                  _pool;            ///< Pool of the assigned tasks
-    long int                               _total_quants {}; ///< Total amount of the time quants from the all tasks on a pool
-    std::optional<runner_pool_t::node_t*>  _nextup       {}; ///< Nextup task for running
-    std::atomic<long int>*                 _global_total_quants {};
+    mutable runner_pool_t                  _pool;                   ///< Pool of the assigned tasks
+    std::optional<runner_pool_t::node_t*>  _nextup              {}; ///< Nextup task for running
+    std::atomic<int>*                      _global_total_quants {}; ///< Pointer to common quant counter
+    int                                    _total_quants        {}; ///< Total amount of the time quants from the all tasks on a pool
 
     runner() =default;
     // TODO: Need to figure out how to validate this wo warn cuz its important
@@ -114,11 +114,13 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
         // NOTE: Increasing quants because task is resumable
         if (is_resumable)
             _total_quants += task_node->_data._coroutine.promise()._quants.add(
-            (std::chrono::steady_clock::now() - start_time).count());
+            static_cast<int>((std::chrono::steady_clock::now() - start_time).count()));
 
         // NOTE: Updating global total counter
-        if (_global_total_quants) [[likely]]
-            _global_total_quants->store(_global_total_quants->load() + _total_quants - old_total_quants);
+        if (_global_total_quants) {
+            _global_total_quants->fetch_add(_total_quants, std::memory_order_relaxed);
+            _global_total_quants->fetch_sub(old_total_quants, std::memory_order_relaxed);
+        }
 
         // NOTE: Forwarding via conductor if needed
         if (is_conducted) [[likely]]

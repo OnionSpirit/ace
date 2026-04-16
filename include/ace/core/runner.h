@@ -25,10 +25,10 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
 
     ACE_CACHE_LINE(0)
 
-    mutable runner_pool_t                  _pool;                   ///< Pool of the assigned tasks
-    std::optional<runner_pool_t::node_t*>  _nextup              {}; ///< Nextup task for running
-    std::atomic<int>*                      _global_total_quants {}; ///< Pointer to common quant counter
-    int                                    _total_quants        {}; ///< Total amount of the time quants from the all tasks on a pool
+    mutable runner_pool_t                  _pool;               ///< Pool of the assigned tasks
+    std::optional<runner_pool_t::node_t*>  _nextup          {}; ///< Nextup task for running
+    std::atomic<int>*                      _common_quants   {}; ///< Pointer to common quant counter
+    int                                    _total_quants    {}; ///< Total amount of the time quants from the all tasks on a pool
 
     runner() =default;
     // TODO: Need to figure out how to validate this wo warn cuz its important
@@ -63,8 +63,11 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
      * @return @b true if task was processed, @b false otherwise
      */
     bool yank() noexcept {
+
         coroutines::promise_touch_result touch_result = coroutines::promise_touch_result::e_executed;
         runner_pool_t::node_t* task_node;
+        int old_total_quants;
+        std::chrono::steady_clock::time_point start_time;
 
         // NOTE: Taking nextup node or pulling it from a pool
         if (_nextup) [[likely]] {
@@ -82,12 +85,12 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
             prefetch<e_l1_cache>(_nextup.value()->_data._coroutine.address());
         }
 
-        // NOTE: Removing old quants amount
-        const auto old_total_quants = _total_quants;
-        _total_quants -= task_node->_data._coroutine.promise()._quants.value();
-
-        // NOTE: Starting counter
-        const auto start_time = std::chrono::steady_clock::now();
+        // NOTE: Starting quants counter and removing old quants amount
+        if (_common_quants) {
+            start_time = std::chrono::steady_clock::now();
+            old_total_quants = _total_quants;
+            _total_quants -= task_node->_data._coroutine.promise()._quants.value();
+        }
 
         // NOTE: Proceeding context
         task_node->_data.awake(&touch_result);
@@ -111,15 +114,14 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
         // NOTE: Decision if node shall be released or pushed back
         const bool is_idle = not is_resumable or is_conducted;
 
-        // NOTE: Increasing quants because task is resumable
-        if (is_resumable)
-            _total_quants += task_node->_data._coroutine.promise()._quants.add(
-            static_cast<int>((std::chrono::steady_clock::now() - start_time).count()));
-
         // NOTE: Updating global total counter
-        if (_global_total_quants) {
-            _global_total_quants->fetch_add(_total_quants, std::memory_order_relaxed);
-            _global_total_quants->fetch_sub(old_total_quants, std::memory_order_relaxed);
+        if (_common_quants) {
+            // NOTE: Increasing quants because task is resumable
+            if (is_resumable)
+                _total_quants += task_node->_data._coroutine.promise()._quants.add(
+                static_cast<int>((std::chrono::steady_clock::now() - start_time).count()));
+            _common_quants->fetch_add(_total_quants, std::memory_order_relaxed);
+            _common_quants->fetch_sub(old_total_quants, std::memory_order_relaxed);
         }
 
         // NOTE: Forwarding via conductor if needed

@@ -84,7 +84,7 @@ namespace ace::core {
         std::vector<runner>        _runners {};
         std::vector<worker_state>  _workers_states {};
         std::atomic<uint32_t>      _runner_selector {};
-        std::atomic<int>           _total_quants {};
+        std::atomic<int>           _common_quants {};
 
         void worker_round(const int worker_id) {
             using namespace std::chrono_literals;
@@ -137,7 +137,7 @@ namespace ace::core {
             _runners.resize(_balancer_config._runners_amount);
             if (_balancer_config._runners_amount > 1)
                 for (auto& runner : _runners)
-                    runner._global_total_quants = &_total_quants;
+                    runner._common_quants = &_common_quants;
             _workers_states.resize(_balancer_config._runners_amount);
         };
 
@@ -149,7 +149,7 @@ namespace ace::core {
             _runners.resize(_balancer_config._runners_amount);
             if (_balancer_config._runners_amount > 1)
                 for (auto& runner : _runners)
-                    runner._global_total_quants = &_total_quants;
+                    runner._common_quants = &_common_quants;
             _workers_states.clear();
             _workers_states.resize(_balancer_config._runners_amount);
             return true;
@@ -169,9 +169,9 @@ namespace ace::core {
                     return;
                 }
                 // NOTE: Fetching amount of time quants around all runners
-                const auto quants = static_cast<double>(_total_quants.load());
+                const auto quants = static_cast<double>(_common_quants.load());
                 // NOTE: Round-Robin balancing on Zero quants count
-                if (quants < 1) {
+                if (quants < 1.0) {
                     round_robin(std::move(new_task));
                     return;
                 }

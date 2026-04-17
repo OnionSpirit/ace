@@ -301,7 +301,7 @@ notify() noexcept {
     // NOTE: Rescheduling waiter if rescheduling mode is on and waiter supports roaming
     else if (_rescheduling)
         waiter._coroutine.promise()._runner_pool = _runner_pool.load(std::memory_order_acquire);
-    core::runner::reattach(std::move(waiter));
+    core::runner::interthread_reattach(std::move(waiter));
     return true;
 }
 

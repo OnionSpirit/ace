@@ -32,10 +32,10 @@
 
 #include "ace/futures/future.h"
 #include "ace/coroutines/promise.h"
-#include "nukes/dynamic/mpsc_queue.h"
 #include <coroutine>
 #include <expected>
 #include <iostream>
+#include <queue>
 
 #include "conduction.h"
 #include "control.h"
@@ -73,11 +73,9 @@ namespace ace::coroutines {
 
         struct promise_type;
 
-        typedef std::coroutine_handle<promise_type> coroutine_t;           ///< Type of the underlying coroutine handle.
-
-        typedef nukes::dynamic::mpsc_queue<context<>> runner_pool_t;       ///< MPSC queue type used as the runner's task pool.
-
-        typedef runner_conductor_handle<context<>> runner_conductor;       ///< Abstract conductor interface for this context type.
+        typedef std::coroutine_handle<promise_type> coroutine_t;     ///< Type of the underlying coroutine handle.
+        typedef std::queue<context<>> runner_pool_t;                 ///< Queue type used as the runner's task pool.
+        typedef runner_conductor_handle<context<>> runner_conductor; ///< Abstract conductor interface for this context type.
 
         /// @brief In-place storage slot for a conductor object.
         typedef conductor_slot<runner_conductor> runner_conductor_slot_t;
@@ -185,14 +183,20 @@ namespace ace::coroutines {
          */
         void release_waiters() {
 #if defined(_MSC_VER)
-            if (context<> waiter; _coroutine.promise()._waiters.load()) {
-                while (_coroutine.promise()._waiters.load()->pop(waiter)) {
+            if (std::atomic_load(&_coroutine.promise()._waiters)) {
+                while (not std::atomic_load(&_coroutine.promise()._waiters)->empty()) {
+                    auto waiter = std::move(std::atomic_load(&_coroutine.promise()._waiters)->front());
+                    std::atomic_load(&_coroutine.promise()._waiters)->pop();
 #elif defined(__GNUC__)
-            if (context<> waiter; _coroutine.promise()._waiters.load()) {
-                while (_coroutine.promise()._waiters.load()->pop(waiter)) {
+            if (_coroutine.promise()._waiters.load()) {
+                while (not _coroutine.promise()._waiters.load()->empty()) {
+                    auto waiter = std::move(_coroutine.promise()._waiters.load()->front());
+                    _coroutine.promise()._waiters.load()->pop();
 #elif defined(__clang__)
-            if (context<> waiter; std::atomic_load(&_coroutine.promise()._waiters)) {
-                while (std::atomic_load(&_coroutine.promise()._waiters)->pop(waiter)) {
+            if (std::atomic_load(&_coroutine.promise()._waiters)) {
+                while (not std::atomic_load(&_coroutine.promise()._waiters)->empty()) {
+                    auto waiter = std::move(std::atomic_load(&_coroutine.promise()._waiters)->front());
+                    std::atomic_load(&_coroutine.promise()._waiters)->pop();
 #endif
                     waiter.release_future();
                     waiter._coroutine.promise()._runner_pool->push(std::move(waiter));

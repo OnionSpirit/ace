@@ -30,9 +30,12 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
 
     mutable runner_pool_t                    _pool            {}; ///< Pool of the assigned tasks
     std::optional<task>                      _nextup          {}; ///< Nextup task for running
+
+    ACE_CACHE_LINE(2)
+
+    mutable nukes::dynamic::mpsc_queue<task> _insert_pool     {}; ///< Pool for the interthread insertion
     std::atomic<int>*                        _common_quants   {}; ///< Pointer to common quant counter
     int                                      _total_quants    {}; ///< Total amount of the time quants from the all tasks on a pool
-    mutable nukes::dynamic::mpsc_queue<task> _insert_pool     {}; ///< Pool for the interthread insertion
 
     runner() =default;
     // TODO: Need to figure out how to validate this wo warn cuz its important
@@ -92,16 +95,20 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
      */
     bool yank() noexcept {
 
-        insert_pool_t::node_t* interthread_task;
-        while ((interthread_task = _insert_pool.pop_node())) {
-            _pool.push(std::move(interthread_task->_data));
-            _insert_pool.release_node(interthread_task);
-        }
-
         coroutines::promise_touch_result touch_result = coroutines::promise_touch_result::e_executed;
         task current_task;
         int old_total_quants;
         std::chrono::steady_clock::time_point start_time;
+
+        // // NOTE: Fetching tasks from interthread insert queue
+        // if (not _insert_pool.empty()) {
+        //     for (auto& inter_task : _insert_pool.pop_batch())
+        //         _pool.push(std::move(inter_task));
+        // }
+
+        // NOTE: Fetching task from interthread insert queue
+        if (task interthread_task; _insert_pool.pop(interthread_task))
+            _pool.push(std::move(interthread_task));
 
         // NOTE: Taking nextup node or pulling it from a pool
         if (_nextup) [[likely]] {

@@ -96,8 +96,8 @@ namespace ace::coroutines {
 
     struct average_quants {
         static constexpr int window_size = 4;
-        alignas(8) int _total_sum {};
-        alignas(8) uint64_t _curr_member = 0;
+        alignas(ACE_BUS_SIZE) int _total_sum {};
+        alignas(ACE_BUS_SIZE) uint64_t _curr_member = 0;
         std::array<int, window_size> _members {};
 
         [[nodiscard]] int value() const { return _total_sum / window_size; }

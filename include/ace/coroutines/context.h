@@ -39,6 +39,7 @@
 
 #include "conduction.h"
 #include "control.h"
+#include "nukes/dynamic/regular_queue.h"
 #include "ace/common/terms.h"
 
 
@@ -74,7 +75,7 @@ namespace ace::coroutines {
         struct promise_type;
 
         typedef std::coroutine_handle<promise_type> coroutine_t;     ///< Type of the underlying coroutine handle.
-        typedef std::queue<context<>> runner_pool_t;                 ///< Queue type used as the runner's task pool.
+        typedef nukes::dynamic::reg_queue<context<>> runner_pool_t;  ///< Queue type used as the runner's task pool.
         typedef runner_conductor_handle<context<>> runner_conductor; ///< Abstract conductor interface for this context type.
 
         /// @brief In-place storage slot for a conductor object.
@@ -183,9 +184,8 @@ namespace ace::coroutines {
          */
         void release_waiters() {
             if (_coroutine.promise()._waiters) {
-                while (not _coroutine.promise()._waiters->empty()) {
-                    auto waiter = std::move(_coroutine.promise()._waiters->front());
-                    _coroutine.promise()._waiters->pop();
+                context<> waiter;
+                while (_coroutine.promise()._waiters->pop(waiter)) {
                     waiter.release_future();
                     waiter._coroutine.promise()._runner_pool->push(std::move(waiter));
                 }

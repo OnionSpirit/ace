@@ -28,8 +28,11 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
 
     typedef nukes::dynamic::mpsc_queue<task> insert_pool_t;
 
-    mutable runner_pool_t                    _pool            {}; ///< Pool of the assigned tasks
-    std::optional<task>                      _nextup          {}; ///< Nextup task for running
+    typedef runner_pool_t::node_t* pool_node_ptr;
+    typedef insert_pool_t::node_t* insert_node_ptr;
+
+    mutable runner_pool_t            _pool   {}; ///< Pool of the assigned tasks
+    std::optional<pool_node_ptr>     _nextup {}; ///< Nextup task for running
 
     ACE_CACHE_LINE(2)
 
@@ -48,7 +51,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
 
     runner(runner &&t) noexcept {
         this->_pool = std::move(t._pool);
-        this->_nextup = std::move(t._nextup);
+        this->_nextup = t._nextup;
         t._nextup = std::nullopt;
         this->_common_quants = t._common_quants;
         t._common_quants = nullptr;
@@ -59,7 +62,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
 
     runner &operator=(runner &&t) noexcept {
         this->_pool = std::move(t._pool);
-        this->_nextup = std::move(t._nextup);
+        this->_nextup = t._nextup;
         t._nextup = std::nullopt;
         this->_common_quants = t._common_quants;
         t._common_quants = nullptr;
@@ -96,62 +99,54 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
     bool yank() noexcept {
 
         coroutines::promise_touch_result touch_result = coroutines::promise_touch_result::e_executed;
-        task current_task;
+        pool_node_ptr task_node;
         int old_total_quants;
         std::chrono::steady_clock::time_point start_time;
 
-        // // NOTE: Fetching tasks from interthread insert queue
-        // if (not _insert_pool.empty()) {
-        //     for (auto& inter_task : _insert_pool.pop_batch())
-        //         _pool.push(std::move(inter_task));
-        // }
-
         // NOTE: Fetching task from interthread insert queue
-        if (task interthread_task; _insert_pool.pop(interthread_task))
-            _pool.push(std::move(interthread_task));
+        if (const auto interthread_node = _insert_pool.pop_node(); interthread_node) {
+            auto placing_node = reinterpret_cast<pool_node_ptr>(interthread_node);
+            _pool.push_node(placing_node);
+        }
 
         // NOTE: Taking nextup node or pulling it from a pool
         if (_nextup) [[likely]] {
-            current_task = std::move(_nextup.value());
+            task_node = _nextup.value();
             _nextup.reset();
         } else if (not _pool.empty()) [[unlikely]] {
-            current_task = std::move(_pool.front());
-            _pool.pop();
+            task_node = _pool.pop_node();
         } else {
             return false;
         }
 
         // NOTE: Pulling next task and prefetching it
         if (not _pool.empty()) [[likely]] {
-            _nextup = std::move(_pool.front());
-            _pool.pop();
-            prefetch<e_l1_cache>(_nextup.value()._coroutine.address());
+            _nextup = _pool.pop_node();
+            prefetch<e_l1_cache>(_nextup.value()->_data._coroutine.address());
         }
 
         // NOTE: Starting quants counter and removing old quants amount
         if (_common_quants) {
             start_time = std::chrono::steady_clock::now();
             old_total_quants = _total_quants;
-            _total_quants -= current_task._coroutine.promise()._quants.value();
+            _total_quants -= task_node->_data._coroutine.promise()._quants.value();
         }
 
         // NOTE: Proceeding context
-        current_task.awake(&touch_result);
+        task_node->_data.awake(&touch_result);
 
         // NOTE: Checking if context can be resumed
         const bool is_resumable {
-                current_task
+                task_node->_data
             and touch_result not_eq coroutines::promise_touch_result::e_failed
             and touch_result not_eq coroutines::promise_touch_result::e_finished
             and touch_result not_eq coroutines::promise_touch_result::e_detached
         };
 
-        // TODO: Separate pool onto incoming pool (for task rescheduling) and processing pool (for task processing)
-
         // NOTE: Checking if the context shall be forwarded via passed conductor
         const bool is_conducted {
             is_resumable
-            and current_task._coroutine.promise()._runner_conductor
+            and task_node->_data._coroutine.promise()._runner_conductor
         };
 
         // NOTE: Decision if node shall be released or pushed back
@@ -161,7 +156,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
         if (_common_quants) {
             // NOTE: Increasing quants because task is resumable
             if (is_resumable)
-                _total_quants += current_task._coroutine.promise()._quants.add(
+                _total_quants += task_node->_data._coroutine.promise()._quants.add(
                 static_cast<int>((std::chrono::steady_clock::now() - start_time).count()));
             _common_quants->fetch_add(_total_quants, std::memory_order_relaxed);
             _common_quants->fetch_sub(old_total_quants, std::memory_order_relaxed);
@@ -169,10 +164,11 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
 
         // NOTE: Forwarding via conductor if needed
         if (is_conducted) [[likely]]
-            current_task._coroutine.promise()._runner_conductor->forward(std::forward<task>(current_task));
+            task_node->_data._coroutine.promise()._runner_conductor->forward(std::forward<task>(task_node->_data));
 
         // NOTE: If task is idle, releasing it's node. Else returning it back to the local pool
-        if (not is_idle) _pool.push(std::move(current_task));
+        if (is_idle) _pool.release_node(task_node);
+        else _pool.push_node(task_node);
 
         return true;
     }
@@ -182,10 +178,9 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
      * @return Optional of ejected task
      */
     std::optional<task> eject() const noexcept {
-        if (_pool.empty()) [[unlikely]] return std::nullopt;
-        auto ret_task = std::move(_pool.front());
-        _pool.pop();
-        return ret_task;
+        if (task ejective; _pool.pop(ejective)) [[likely]]
+            return ejective;
+        return std::nullopt;
     }
 
     /**

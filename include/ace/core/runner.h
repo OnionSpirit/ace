@@ -34,7 +34,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
     mutable runner_pool_t            _pool   {}; ///< Pool of the assigned tasks
     std::optional<pool_node_ptr>     _nextup {}; ///< Nextup task for running
 
-    ACE_CACHE_LINE(2)
+    ACE_CACHE_LINE(1)
 
     mutable nukes::dynamic::mpsc_queue<task> _insert_pool     {}; ///< Pool for the interthread insertion
     std::atomic<int>*                        _common_quants   {}; ///< Pointer to common quant counter
@@ -103,18 +103,16 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
         int old_total_quants;
         std::chrono::steady_clock::time_point start_time;
 
-        // NOTE: Fetching task from interthread insert queue
-        if (const auto interthread_node = _insert_pool.pop_node(); interthread_node) {
-            auto placing_node = reinterpret_cast<pool_node_ptr>(interthread_node);
-            _pool.push_node(placing_node);
-        }
-
         // NOTE: Taking nextup node or pulling it from a pool
         if (_nextup) [[likely]] {
             task_node = _nextup.value();
             _nextup.reset();
         } else if (not _pool.empty()) [[unlikely]] {
             task_node = _pool.pop_node();
+        } else if (const auto interthread_node = _insert_pool.pop_node(); interthread_node) {
+            // NOTE: Fetching task from interthread insert queue
+            const auto placing_node = reinterpret_cast<pool_node_ptr>(interthread_node);
+            task_node = placing_node;
         } else {
             return false;
         }
@@ -190,13 +188,22 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
     bool run() noexcept {
         int i = 0;
         constexpr int yank_limit = 128;
-        while (i < yank_limit and yank()) ++i;
+        while (i < yank_limit and yank()) {
+            if (i % 16 == 0) {
+                insert_node_ptr interthread_node;
+                while ((interthread_node = _insert_pool.pop_node())) {
+                    // NOTE: Fetching task from interthread insert queue
+                    auto placing_node = reinterpret_cast<pool_node_ptr>(interthread_node);
+                    _pool.push_node(placing_node);
+                }
+            }
+            ++i;
+        }
         return i not_eq 0;
         // NOTE: Old return
         // return i == yank_limit;
     }
 
-    // TODO: Make return type as 'join_handler' future type, when I will write it
     /**
      * @details Function to attach task to the runner
      * @param new_task Task to be pushed into the runner

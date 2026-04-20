@@ -28,10 +28,17 @@ namespace ace::core {
     );
 
     inline auto clock_now() {
-        return
-        std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
+        static auto curr_ts = std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
             std::chrono::steady_clock::now()
         );
+        static uint32_t counter = 0;
+        ++counter;
+        if (counter % 16 == 0) {
+            curr_ts = std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now());
+        }
+        return curr_ts;
+
     }
 
     /**

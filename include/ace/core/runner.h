@@ -73,8 +73,10 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
     };
 
     /**
-     * @brief Returns task into source @b runner
-     * @param ctx Task to be reattached into @b runner
+     * @brief Returns task into source @c runner
+     * @param ctx Task to be reattached into @c runner
+     *
+     * @warning @b NOT @b THREADSAFE
      */
     static void reattach(task&& ctx) {
         if (not ctx.is_resumable() or not ctx._coroutine.promise()._runner_pool)
@@ -83,13 +85,13 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
     }
 
     /**
-     * @brief Returns task into source @b runner
-     * @param ctx Task to be reattached into @b runner
+     * @brief Returns task into source @c runner
+     * @param ctx Task to be reattached into @c runner
      */
-    static void interthread_reattach(task&& ctx) {
+    static void threadsafe_reattach(task&& ctx) {
         if (not ctx.is_resumable() or not ctx._coroutine.promise()._runner_pool)
             return;
-        (reinterpret_cast<runner*>(ctx._coroutine.promise()._runner_pool)->*(&runner::_insert_pool)).push(std::move(ctx));
+        reinterpret_cast<runner*>(ctx._coroutine.promise()._runner_pool)->_insert_pool.push(std::move(ctx));
     }
 
     /**

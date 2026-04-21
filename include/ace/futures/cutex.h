@@ -68,10 +68,10 @@ namespace ace::futures {
         IMPORT_FUTURE_ENV(cutex_future)
 
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
-        std::atomic<int> _users { 0 };                                  ///< Number of active users (0 = unlocked).
-        nukes::dynamic::roaming_mpsc_queue<task> _waiters {};        ///< Tasks waiting to acquire the mutex.
-        std::atomic<runner_pool_t*> _runner_pool { nullptr };           ///< Runner pool of the task that currently owns the lock (used for rescheduling).
-        bool _rescheduling { false };                                   ///< When @c true, released waiters are migrated to @c _runner_pool.
+        std::atomic<long>                           _users            {0};         ///< Number of active users (0 = unlocked).
+        nukes::dynamic::roaming_mpsc_queue<task>    _waiters          { };            ///< Tasks waiting to acquire the mutex.
+        std::atomic<runner_pool_t*>                 _runner_pool      {nullptr};   ///< Runner pool of the task that currently owns the lock (used for rescheduling).
+        bool                                        _rescheduling     {false};        ///< When @c true, released waiters are migrated to @c _runner_pool.
 
         /**
          * @brief Attempt to wake one waiter from @c _waiters.
@@ -296,12 +296,17 @@ notify() noexcept {
     if (not _waiters.pop(waiter))
         return false;
     // NOTE: Updating rescheduling pool if rescheduling mode is on and waiter forbids roaming
-    if (const bool roaming = waiter._coroutine.promise()._roaming; _rescheduling and not roaming)
-        _runner_pool.store(waiter._coroutine.promise()._runner_pool, std::memory_order_release);
-    // NOTE: Rescheduling waiter if rescheduling mode is on and waiter supports roaming
-    else if (_rescheduling)
+    if (const bool roaming = waiter._coroutine.promise()._roaming; _rescheduling and not roaming) {
+        if (_runner_pool.load(std::memory_order_acquire) not_eq waiter._coroutine.promise()._runner_pool)
+            _runner_pool.store(waiter._coroutine.promise()._runner_pool, std::memory_order_release);
+        else
+            core::runner::reattach(std::move(waiter));
+        // NOTE: Rescheduling waiter if rescheduling mode is on and waiter supports roaming
+    } else if (_rescheduling) {
         waiter._coroutine.promise()._runner_pool = _runner_pool.load(std::memory_order_acquire);
-    core::runner::interthread_reattach(std::move(waiter));
+        core::runner::reattach(std::move(waiter));
+    }
+    core::runner::threadsafe_reattach(std::move(waiter));
     return true;
 }
 
@@ -316,8 +321,9 @@ pending_notify() noexcept {
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 await_suspend(auto coroutine) {
+
     // NOTE: Selecting rescheduling pool if it doesn't set and rescheduling mode on
-    if (not _runner_pool.load(std::memory_order_acquire))
+    if (_rescheduling and not _runner_pool.load(std::memory_order_acquire))
         _runner_pool.store(coroutine.promise()._runner_pool, std::memory_order_release);
 
     // NOTE: Setting conductor for dispatch to the cutex waiters queue

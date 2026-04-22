@@ -105,16 +105,18 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
         int old_total_quants;
         std::chrono::steady_clock::time_point start_time;
 
+        // NOTE: Fetching task from interthread insert queue
+        if (const auto interthread_node = _insert_pool.pop_node(); interthread_node) {
+            auto casted_node = cast_node(interthread_node);
+            _pool.push_node(casted_node);
+        }
+
         // NOTE: Taking nextup node or pulling it from a pool
         if (_nextup) [[likely]] {
             task_node = _nextup.value();
             _nextup.reset();
         } else if (not _pool.empty()) [[unlikely]] {
             task_node = _pool.pop_node();
-        } else if (const auto interthread_node = _insert_pool.pop_node(); interthread_node) {
-            // NOTE: Fetching task from interthread insert queue
-            const auto placing_node = reinterpret_cast<pool_node_ptr>(interthread_node);
-            task_node = placing_node;
         } else {
             return false;
         }
@@ -190,20 +192,8 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
     bool run() noexcept {
         int i = 0;
         constexpr int yank_limit = 128;
-        while (i < yank_limit and yank()) {
-            if (i % 16 == 0) {
-                insert_node_ptr interthread_node;
-                while ((interthread_node = _insert_pool.pop_node())) {
-                    // NOTE: Fetching task from interthread insert queue
-                    auto placing_node = reinterpret_cast<pool_node_ptr>(interthread_node);
-                    _pool.push_node(placing_node);
-                }
-            }
-            ++i;
-        }
+        while (i < yank_limit and yank()) ++i;
         return i not_eq 0;
-        // NOTE: Old return
-        // return i == yank_limit;
     }
 
     /**
@@ -221,7 +211,7 @@ struct alignas(ACE_CACHE_LINE_SIZE) runner {
      * @details Checks if any Tasks stored in the runner
      * @return @b true if empty, @b false otherwise
      */
-    [[nodiscard]] bool empty() const noexcept { return _pool.empty(); };
+    [[nodiscard]] bool empty() const noexcept { return _pool.empty() and _insert_pool.empty(); };
 };
 
 template <>

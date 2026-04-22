@@ -129,7 +129,7 @@ namespace ace::core {
 
         static derived_t& touch_impl(runner_pool_t* rnr = nullptr) noexcept {
             static derived_t instance;
-            if (instance.detach_get()) instance.respawn(reinterpret_cast<runner*>(rnr));
+            if (instance.detach_get()) instance.respawn(pool_to_runner(rnr));
             return instance;
         }
 

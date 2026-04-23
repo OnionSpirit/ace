@@ -1,68 +1,280 @@
 /**
-* @file
- * @details This file contains a @b dispatcher singleton object,
- * allows to schedule tasks from any place, execute them.
- * Provides necessary services for active futures
+* @file dispatcher.h
+ * @brief Multi-threaded task dispatcher that distributes coroutines across runners.
+ *
+ * @details The @c dispatcher is the multi-thread layer of the ACE runtime.  It
+ * owns a vector of @c runner objects — one per OS thread — and drives them
+ * through a coordinated polling loop.
+ *
+ * ### Thread model
+ *
+ * - The <b>main thread</b> runs @c runner[0] directly from @c dispatcher::run().
+ * - Each <b>worker thread</b> (jthread) runs its own @c runner[i] in a tight loop.
+ * - All threads call @c worker_round() which processes tasks for up to 1 ms,
+ *   then sleeps for 1 ms if no tasks were processed.
+ * - @c run() blocks until all runners have reported @c _pending = true
+ *   simultaneously (all queues empty).
+ *
+ * ### Task assignment
+ *
+ * New tasks are assigned to runners via a round-robin atomic counter
+ * (@c _runner_selector).  A specific runner can also be targeted by passing a
+ * non-null @c runner* to @c schedule().
+ *
+ * @see ace::core::runner, ace::core::dispatcher, ace::core::s_dispatcher_config
  */
 
 #ifndef ACE_CORE_DISPATCHER_H
 #define ACE_CORE_DISPATCHER_H
 
+#include <thread>
+#include <random>
+
+#include "ace/core/runner.h"
 #include "ace/commands/spawn.h"
 #include "ace/core/signal.h"
-#include "ace/core/balancer.h"
+#include "ace/common/terms.h"
 
 namespace ace::core {
 
-class dispatcher {
-
-    dispatcher() = default;
-
-    balancer _balancer {};
-    sig_pipe_t _sig_pipe{};
-
-public:
-
-    static dispatcher& get_instance() noexcept {
-        static dispatcher instance;
-        return instance;
-    }
-
-    static sig_pipe_t& get_sig_pipe() noexcept {
-        return get_instance()._sig_pipe;
-    }
+    /**
+     * @brief Global configuration for the dispatcher.
+     *
+     * @details Modify @c s_dispatcher_config before calling @c ace::reload() to
+     * change the number of runner threads.  The reload takes effect only when
+     * all queues are empty.
+     *
+     * @par Example
+     * @code{.cpp}
+     * ace::core::s_dispatcher_config._runners_amount = 4;
+     * ace::reload();
+     * @endcode
+     */
+    struct dispatcher_config {
+        std::size_t _runners_amount{1}; ///< Number of runner threads (including the main thread).
+        bool operator==(const dispatcher_config &dispatcher_config) const = default;
+    } inline s_dispatcher_config{}; ///< Global singleton configuration instance.
 
     /**
-     * @brief Function to schedule task at the dispatcher
-     * @param new_task Task to be pushed into the dispatcher
-     * @param rnr Specific runner to schedule on
-     * @return void
+     * @brief Schedules and drives task execution across multiple runner threads.
+     *
+     * @details @c dispatcher is the core multi-thread scheduler.  It creates one
+     * @c runner per configured thread, launches worker @c jthreads for runners
+     * 1..N-1, and runs runner 0 on the calling thread inside @c run().
+     *
+     * The @c run() call blocks until all runners are idle simultaneously.
+     * Tasks are distributed round-robin unless a specific runner is specified.
      */
-    void schedule(task&& new_task, const runner* rnr = nullptr) noexcept {
-        new_task._coroutine.promise()._roaming = true;
-        _balancer.schedule(std::forward<task>(new_task), rnr);
-    }
+    class dispatcher {
 
-    /**
-     * @brief Checks if any Tasks stored in the dispatcher
-     * @return @b true if empty, @b false otherwise
-     */
-    [[nodiscard]] bool empty() const noexcept { return _balancer.empty(); };
+        dispatcher() {
+            fetch_config();
+            _runners.resize(_dispatcher_config._runners_amount);
+            if (_dispatcher_config._runners_amount > 1)
+                for (auto &runner: _runners)
+                    runner._common_quants = &_common_quants;
+            _workers_states.resize(_dispatcher_config._runners_amount);
+        };
 
-    /**
-     * @brief Resumes all tasks from the runners.
-     */
-    void run() noexcept { while ( not empty() ) _balancer.run(); }
+        sig_pipe_t _sig_pipe{};
 
-    /**
-     * @brief Reloads balancer configuration
-     */
-    void reload() noexcept { while (not _balancer.reload()); }
+        static thread_local std::chrono::time_point<std::chrono::steady_clock> local_ts;
 
-};
+        static void fetch_time() { local_ts = std::chrono::steady_clock::now(); }
+
+        /**
+         * @brief Per-thread status record.  Cache-line aligned to prevent
+         * false sharing between worker threads.
+         */
+        struct alignas(ACE_CACHE_LINE_SIZE) worker_state {
+            int _worker_id{0}; ///< Zero-based index of this worker's runner.
+            bool _pending{false}; ///< @c true when the runner found no tasks in the last round.
+            int _rounds{0}; ///< Number of consecutive 1 ms work rounds completed.
+        };
+
+        dispatcher_config _dispatcher_config{};
+        std::vector<runner> _runners{};
+        std::vector<worker_state> _workers_states{};
+        std::atomic<uint32_t> _runner_selector{};
+        std::atomic<int> _common_quants{};
+
+        void worker_round(const int worker_id) {
+            using namespace std::chrono_literals;
+
+            // NOTE: Flag that indicates that runner processed some tasks in the interval
+            bool active = false;
+
+            // NOTE: Timepoint to track interval
+            const auto start = get_time();
+            auto now = start;
+
+            // NOTE: Working with runner until interval ends (also updating last ts)
+            while (now - start < 1ms) {
+                active = _runners[worker_id].run() or active;
+                fetch_time();
+                now = get_time();
+            }
+
+            // NOTE: Updating runner status
+            _workers_states[worker_id]._pending = not active;
+            ++_workers_states[worker_id]._rounds;
+
+            // NOTE: Making decision about sleeping
+            if (not active or _workers_states[worker_id]._rounds > 999) {
+                _workers_states[worker_id]._rounds = 0;
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+
+        void worker_tf(const std::stop_token &stoken, const int worker_id) {
+            _workers_states[worker_id]._worker_id = worker_id;
+            _workers_states[worker_id]._pending = false;
+            while (not stoken.stop_requested())
+                worker_round(worker_id);
+        }
+
+        void fetch_config() noexcept { _dispatcher_config = s_dispatcher_config; }
+
+        static constexpr uint8_t _min_service_skips = 3;
+
+        void round_robin(task &&new_task) noexcept {
+            const auto runner_id = _runner_selector.fetch_add(1, std::memory_order_relaxed);
+            _runners[runner_id % _dispatcher_config._runners_amount].attach(std::forward<task>(new_task));
+        }
+
+    public:
+
+        static dispatcher &get_instance() noexcept {
+            static dispatcher instance;
+            return instance;
+        }
+
+        static sig_pipe_t &get_sig_pipe() noexcept {
+            return get_instance()._sig_pipe;
+        }
+
+        /**
+         * @brief Reloads dispatcher configuration
+         */
+        static bool reload() noexcept {
+            auto& self = get_instance();
+            if (self._dispatcher_config == s_dispatcher_config) return true;
+            if (not empty()) return false;
+            self.fetch_config();
+            self._runners.clear();
+            self._runners.resize(self._dispatcher_config._runners_amount);
+            if (self._dispatcher_config._runners_amount > 1)
+                for (auto &runner: self._runners)
+                    runner._common_quants = &self._common_quants;
+            self._workers_states.clear();
+            self._workers_states.resize(self._dispatcher_config._runners_amount);
+            return true;
+        }
+
+        /**
+         * @brief Function to schedule task at the dispatcher
+         * @param new_task Task to be pushed into the dispatcher
+         * @param rnr Specific runner to schedule on
+         * @return void
+         */
+        static void schedule(task &&new_task, const runner *rnr = nullptr) noexcept {
+            auto& self = get_instance();
+            if (not rnr) {
+                // NOTE: No balancing for single runner
+                if (self._dispatcher_config._runners_amount == 1) {
+                    self._runners[0].attach(std::forward<task>(new_task));
+                    return;
+                }
+                // NOTE: Fetching amount of time quants around all runners
+                const auto quants = static_cast<double>(self._common_quants.load());
+                // NOTE: Round-Robin balancing on Zero quants count
+                if (quants < 1.0) {
+                    self.round_robin(std::move(new_task));
+                    return;
+                }
+                // NOTE: Probability accumulation selection on charged runners
+                static std::random_device rd;
+                static std::mt19937 gen(rd());
+                static std::uniform_real_distribution<> distrib(0.0, 1.0);
+
+                const double probability{distrib(gen)};
+                double probability_accumulator{};
+
+                for (const auto &runner: self._runners) {
+                    const double runner_probability = 1.0 - (static_cast<double>(runner._total_quants) / quants);
+                    probability_accumulator += runner_probability;
+                    if (probability < probability_accumulator) {
+                        runner.attach(std::forward<task>(new_task));
+                        return;
+                    }
+                }
+                // NOTE: Round-Robin balancing on probability accumulation miss
+                self.round_robin(std::move(new_task));
+            } else {
+                new_task._coroutine.promise()._roaming = false;
+                rnr->attach(std::forward<task>(new_task));
+            }
+        }
+
+        /**
+         * @details Resumes all tasks from the ready task pool until it is empty.
+         */
+        static void run() noexcept {
+            auto& self = get_instance();
+            // NOTE: Initiating
+            std::vector<std::jthread> workers{};
+
+            // NOTE: Launching
+            const int workers_amount = static_cast<int>(self._dispatcher_config._runners_amount);
+            workers.reserve(workers_amount - 1);
+            for (int worker_id = 1; worker_id < workers_amount; ++worker_id)
+                workers.emplace_back(std::bind_front(&dispatcher::worker_tf, &self), worker_id);
+
+            // NOTE: Polling
+            bool is_running{true};
+            while (is_running) {
+                // NOTE: Doing main thread job
+                self.worker_round(0);
+                // NOTE: Checking other threads for finish
+                bool is_pending{true};
+                for (int worker_id = 0; is_pending and worker_id < workers_amount; ++worker_id) {
+                    is_pending = self._workers_states[worker_id]._pending;
+                    is_running = not is_pending or worker_id not_eq workers_amount - 1;
+                }
+            }
+            // NOTE: Clearing quant counters to be sure they are zero
+            for (auto &runner: self._runners)
+                runner._total_quants = 0;
+        }
+
+        /**
+         * @details Checks if any Tasks stored in any of the runners
+         * @return @b true if empty, @b false otherwise
+         */
+        [[nodiscard]] static bool empty() noexcept {
+            const auto& self = get_instance();
+            bool res{true};
+            for (std::size_t runner_id = 0; runner_id < self._runners.size() and res; ++runner_id)
+                res &= self._runners[runner_id].empty();
+            return res;
+        };
+
+        static auto get_time()
+            -> std::chrono::time_point<std::chrono::steady_clock> { return local_ts; }
+
+        dispatcher(const dispatcher &) = delete;
+
+        dispatcher(dispatcher &&) = delete;
+
+        dispatcher &operator=(const dispatcher &) = delete;
+
+        dispatcher &operator=(dispatcher &&) = delete;
+    };
 
 } // end namespace ace::core
 
+thread_local std::chrono::time_point<std::chrono::steady_clock> ace::core::dispatcher::local_ts
+        = std::chrono::steady_clock::now();
 
 namespace ace {
 
@@ -72,51 +284,47 @@ namespace ace {
      * @param rnr Specific runner to schedule on
      * @return void
      */
-    static void schedule(task&& new_task, const core::runner* rnr = nullptr) noexcept {
-        core::dispatcher::get_instance().schedule(std::forward<task>(new_task), rnr);
-    }
+    inline auto schedule(task &&new_task, const core::runner *rnr = nullptr) noexcept
+      -> void { core::dispatcher::schedule(std::forward<task>(new_task), rnr); }
 
     /**
      * @details Function to spawn parallel task from calling task
      * @param new_task Task to be pushed into the same runner as calling task
      * @return @b 'ace::core::commands::spawn' awaitable entity
      */
-    static commands::spawn spawn(task&& new_task) noexcept {
-        return commands::spawn(std::move(new_task));
-    }
+    inline auto spawn(task &&new_task) noexcept
+      -> commands::spawn { return commands::spawn(std::move(new_task)); }
 
     /**
      * @details Checks if there are tasks to do
      * @return @b true if there are no tasks to proceed, @b false otherwise
      */
-    inline bool empty() noexcept { return core::dispatcher::get_instance().empty(); }
+    inline auto empty() noexcept
+      -> bool { return core::dispatcher::empty(); }
 
     /**
      * @details Processing all scheduled tasks.
      */
-    inline void run() noexcept { core::dispatcher::get_instance().run(); }
+    inline auto run() noexcept
+      -> void { while (not core::dispatcher::empty()) core::dispatcher::run(); }
 
     /**
      * @brief Reloads dispatcher configurations
      */
-    inline void reload() noexcept {
-        core::dispatcher::get_instance().reload();
-    }
+    inline auto reload() noexcept
+      -> void { core::dispatcher::reload(); }
 
     inline void reset_signal() {
-        std::unique_ptr<core::signal_handler> _sigh;
-        while (not core::dispatcher::get_sig_pipe().pop(_sigh) and not core::dispatcher::get_sig_pipe().empty()) _sigh.reset();
+        std::unique_ptr<core::signal_handler> sgl;
+        while (not core::dispatcher::get_sig_pipe().pop(sgl) and not core::dispatcher::get_sig_pipe().empty())
+            sgl.reset();
     }
 
-    inline void interrupt() {
-        core::dispatcher::get_sig_pipe().push(ace::core::make_signal(ace::core::interruption_signal{}));
-        // reset_signal();
-    }
+    inline auto interrupt()
+      -> void { core::dispatcher::get_sig_pipe().push(ace::core::make_signal(ace::core::interruption_signal{})); }
 
-    inline void terminate() {
-        core::dispatcher::get_sig_pipe().push(ace::core::make_signal(ace::core::termination_signal{}));
-        // reset_signal();
-    }
+    inline auto terminate()
+      -> void { core::dispatcher::get_sig_pipe().push(ace::core::make_signal(ace::core::termination_signal{})); }
 
 } // end namespace ace
 

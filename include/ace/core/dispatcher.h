@@ -111,10 +111,10 @@ namespace ace::core {
         };
 
         dispatcher_config _dispatcher_config{};
-        std::vector<runner> _runners{};
-        std::vector<worker_state> _workers_states{};
         std::atomic<uint32_t> _runner_selector{};
         std::atomic<int> _common_quants{};
+        std::vector<runner> _runners{};
+        std::vector<worker_state> _workers_states{};
 
         sig_pipe_t _sig_pipe{};
 
@@ -245,6 +245,7 @@ namespace ace {
      * @return void
      */
     inline void schedule(task &&new_task, const core::runner *rnr) noexcept {
+        new_task._coroutine.promise()._roaming = true;
         auto& self = core::dispatcher::get_instance();
         if (not rnr) {
             // NOTE: No balancing for single runner

@@ -192,7 +192,7 @@ TEST(futures, do_timer_on_runner_parallel_test) {
 
     std::cout << "Tasks spawned" << std::endl;
     const auto start_time = std::chrono::steady_clock::now();
-    while (not ace::core::dispatcher::get_instance().empty())
+    while (not ace::empty())
         ace::run();
     const auto end_time = std::chrono::steady_clock::now();
     const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();

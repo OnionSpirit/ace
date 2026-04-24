@@ -35,6 +35,26 @@
 #include "ace/core/signal.h"
 #include "ace/common/terms.h"
 
+namespace ace {
+
+    inline bool reload() noexcept;
+
+    inline void schedule(task &&new_task, const core::runner* = nullptr) noexcept;
+
+    inline void run() noexcept;
+
+    inline bool empty() noexcept;
+
+    inline commands::spawn spawn(task &&new_task) noexcept;
+
+    inline void reset_signal();
+
+    inline void interrupt();
+
+    inline void terminate();
+
+}
+
 namespace ace::core {
 
     /**
@@ -76,8 +96,6 @@ namespace ace::core {
             _workers_states.resize(_dispatcher_config._runners_amount);
         };
 
-        sig_pipe_t _sig_pipe{};
-
         static thread_local std::chrono::time_point<std::chrono::steady_clock> local_ts;
 
         static void fetch_time() { local_ts = std::chrono::steady_clock::now(); }
@@ -97,6 +115,8 @@ namespace ace::core {
         std::vector<worker_state> _workers_states{};
         std::atomic<uint32_t> _runner_selector{};
         std::atomic<int> _common_quants{};
+
+        sig_pipe_t _sig_pipe{};
 
         void worker_round(const int worker_id) {
             using namespace std::chrono_literals;
@@ -142,125 +162,35 @@ namespace ace::core {
             _runners[runner_id % _dispatcher_config._runners_amount].attach(std::forward<task>(new_task));
         }
 
-    public:
+        static auto get_time()
+            -> std::chrono::time_point<std::chrono::steady_clock> { return local_ts; }
 
         static dispatcher &get_instance() noexcept {
             static dispatcher instance;
             return instance;
         }
 
+    public:
+
         static sig_pipe_t &get_sig_pipe() noexcept {
             return get_instance()._sig_pipe;
         }
 
-        /**
-         * @brief Reloads dispatcher configuration
-         */
-        static bool reload() noexcept {
-            auto& self = get_instance();
-            if (self._dispatcher_config == s_dispatcher_config) return true;
-            if (not empty()) return false;
-            self.fetch_config();
-            self._runners.clear();
-            self._runners.resize(self._dispatcher_config._runners_amount);
-            if (self._dispatcher_config._runners_amount > 1)
-                for (auto &runner: self._runners)
-                    runner._common_quants = &self._common_quants;
-            self._workers_states.clear();
-            self._workers_states.resize(self._dispatcher_config._runners_amount);
-            return true;
-        }
+        friend inline bool ace::reload() noexcept;
 
-        /**
-         * @brief Function to schedule task at the dispatcher
-         * @param new_task Task to be pushed into the dispatcher
-         * @param rnr Specific runner to schedule on
-         * @return void
-         */
-        static void schedule(task &&new_task, const runner *rnr = nullptr) noexcept {
-            auto& self = get_instance();
-            if (not rnr) {
-                // NOTE: No balancing for single runner
-                if (self._dispatcher_config._runners_amount == 1) {
-                    self._runners[0].attach(std::forward<task>(new_task));
-                    return;
-                }
-                // NOTE: Fetching amount of time quants around all runners
-                const auto quants = static_cast<double>(self._common_quants.load());
-                // NOTE: Round-Robin balancing on Zero quants count
-                if (quants < 1.0) {
-                    self.round_robin(std::move(new_task));
-                    return;
-                }
-                // NOTE: Probability accumulation selection on charged runners
-                static std::random_device rd;
-                static std::mt19937 gen(rd());
-                static std::uniform_real_distribution<> distrib(0.0, 1.0);
+        friend inline void ace::schedule(task &&new_task, const runner*) noexcept;
 
-                const double probability{distrib(gen)};
-                double probability_accumulator{};
+        friend inline void ace::run() noexcept;
 
-                for (const auto &runner: self._runners) {
-                    const double runner_probability = 1.0 - (static_cast<double>(runner._total_quants) / quants);
-                    probability_accumulator += runner_probability;
-                    if (probability < probability_accumulator) {
-                        runner.attach(std::forward<task>(new_task));
-                        return;
-                    }
-                }
-                // NOTE: Round-Robin balancing on probability accumulation miss
-                self.round_robin(std::move(new_task));
-            } else {
-                new_task._coroutine.promise()._roaming = false;
-                rnr->attach(std::forward<task>(new_task));
-            }
-        }
+        friend inline bool ace::empty() noexcept;
 
-        /**
-         * @details Resumes all tasks from the ready task pool until it is empty.
-         */
-        static void run() noexcept {
-            auto& self = get_instance();
-            // NOTE: Initiating
-            std::vector<std::jthread> workers{};
+        friend inline commands::spawn ace::spawn(task &&new_task) noexcept;
 
-            // NOTE: Launching
-            const int workers_amount = static_cast<int>(self._dispatcher_config._runners_amount);
-            workers.reserve(workers_amount - 1);
-            for (int worker_id = 1; worker_id < workers_amount; ++worker_id)
-                workers.emplace_back(std::bind_front(&dispatcher::worker_tf, &self), worker_id);
+        friend inline void ace::reset_signal();
 
-            // NOTE: Polling
-            bool is_running{true};
-            while (is_running) {
-                // NOTE: Doing main thread job
-                self.worker_round(0);
-                // NOTE: Checking other threads for finish
-                bool is_pending{true};
-                for (int worker_id = 0; is_pending and worker_id < workers_amount; ++worker_id) {
-                    is_pending = self._workers_states[worker_id]._pending;
-                    is_running = not is_pending or worker_id not_eq workers_amount - 1;
-                }
-            }
-            // NOTE: Clearing quant counters to be sure they are zero
-            for (auto &runner: self._runners)
-                runner._total_quants = 0;
-        }
+        friend inline void ace::interrupt();
 
-        /**
-         * @details Checks if any Tasks stored in any of the runners
-         * @return @b true if empty, @b false otherwise
-         */
-        [[nodiscard]] static bool empty() noexcept {
-            const auto& self = get_instance();
-            bool res{true};
-            for (std::size_t runner_id = 0; runner_id < self._runners.size() and res; ++runner_id)
-                res &= self._runners[runner_id].empty();
-            return res;
-        };
-
-        static auto get_time()
-            -> std::chrono::time_point<std::chrono::steady_clock> { return local_ts; }
+        friend inline void ace::terminate();
 
         dispatcher(const dispatcher &) = delete;
 
@@ -279,40 +209,124 @@ thread_local std::chrono::time_point<std::chrono::steady_clock> ace::core::dispa
 namespace ace {
 
     /**
-     * @details Function to schedule task
+     * @details Checks if any Tasks stored in any of the runners
+     * @return @b true if empty, @b false otherwise
+     */
+    [[nodiscard]] inline bool empty() noexcept {
+        const auto& self = core::dispatcher::get_instance();
+        bool res{true};
+        for (std::size_t runner_id = 0; runner_id < self._runners.size() and res; ++runner_id)
+            res &= self._runners[runner_id].empty();
+        return res;
+    };
+
+    /**
+     * @brief Reloads dispatcher configuration
+     */
+    inline bool reload() noexcept {
+        auto& self = core::dispatcher::get_instance();
+        if (self._dispatcher_config == core::s_dispatcher_config) return true;
+        if (not empty()) return false;
+        self.fetch_config();
+        self._runners.clear();
+        self._runners.resize(self._dispatcher_config._runners_amount);
+        if (self._dispatcher_config._runners_amount > 1)
+            for (auto &runner: self._runners)
+                runner._common_quants = &self._common_quants;
+        self._workers_states.clear();
+        self._workers_states.resize(self._dispatcher_config._runners_amount);
+        return true;
+    }
+
+    /**
+     * @brief Function to schedule task at the dispatcher
      * @param new_task Task to be pushed into the dispatcher
      * @param rnr Specific runner to schedule on
      * @return void
      */
-    inline auto schedule(task &&new_task, const core::runner *rnr = nullptr) noexcept
-      -> void { core::dispatcher::schedule(std::forward<task>(new_task), rnr); }
+    inline void schedule(task &&new_task, const core::runner *rnr) noexcept {
+        auto& self = core::dispatcher::get_instance();
+        if (not rnr) {
+            // NOTE: No balancing for single runner
+            if (self._dispatcher_config._runners_amount == 1) {
+                self._runners[0].attach(std::forward<task>(new_task));
+                return;
+            }
+            // NOTE: Fetching amount of time quants around all runners
+            const auto quants = static_cast<double>(self._common_quants.load());
+            // NOTE: Round-Robin balancing on Zero quants count
+            if (quants < 1.0) {
+                self.round_robin(std::move(new_task));
+                return;
+            }
+            // NOTE: Probability accumulation selection on charged runners
+            static std::random_device rd;
+            static std::mt19937 gen(rd());
+            static std::uniform_real_distribution<> distrib(0.0, 1.0);
+
+            const double probability{distrib(gen)};
+            double probability_accumulator{};
+
+            for (const auto &runner: self._runners) {
+                const double runner_probability = 1.0 - (static_cast<double>(runner._total_quants) / quants);
+                probability_accumulator += runner_probability;
+                if (probability < probability_accumulator) {
+                    runner.attach(std::forward<task>(new_task));
+                    return;
+                }
+            }
+            // NOTE: Round-Robin balancing on probability accumulation miss
+            self.round_robin(std::move(new_task));
+        } else {
+            new_task._coroutine.promise()._roaming = false;
+            rnr->attach(std::forward<task>(new_task));
+        }
+    }
+
+    /**
+     * @details Resumes all tasks from the ready task pool until it is empty.
+     */
+    inline void run() noexcept {
+
+        auto& self = core::dispatcher::get_instance();
+        const int workers_amount = static_cast<int>(self._dispatcher_config._runners_amount);
+
+        do {
+            // NOTE: Initiating
+            std::vector<std::jthread> workers{};
+
+            // NOTE: Launching
+            workers.reserve(workers_amount - 1);
+            for (int worker_id = 1; worker_id < workers_amount; ++worker_id)
+                workers.emplace_back(std::bind_front(&core::dispatcher::worker_tf, &self), worker_id);
+
+            // NOTE: Polling
+            bool is_running{true};
+            while (is_running) {
+                // NOTE: Doing main thread job
+                self.worker_round(0);
+                // NOTE: Checking other threads for finish
+                bool is_pending{true};
+                for (int worker_id = 0; is_pending and worker_id < workers_amount; ++worker_id) {
+                    is_pending = self._workers_states[worker_id]._pending;
+                    is_running = not is_pending or worker_id not_eq workers_amount - 1;
+                }
+            }
+        } while (not empty());
+
+        // NOTE: Clearing quant counters to be sure they are zero
+        for (auto &runner: self._runners)
+            runner._total_quants = 0;
+    }
 
     /**
      * @details Function to spawn parallel task from calling task
      * @param new_task Task to be pushed into the same runner as calling task
      * @return @b 'ace::core::commands::spawn' awaitable entity
      */
-    inline auto spawn(task &&new_task) noexcept
-      -> commands::spawn { return commands::spawn(std::move(new_task)); }
-
-    /**
-     * @details Checks if there are tasks to do
-     * @return @b true if there are no tasks to proceed, @b false otherwise
-     */
-    inline auto empty() noexcept
-      -> bool { return core::dispatcher::empty(); }
-
-    /**
-     * @details Processing all scheduled tasks.
-     */
-    inline auto run() noexcept
-      -> void { while (not core::dispatcher::empty()) core::dispatcher::run(); }
-
-    /**
-     * @brief Reloads dispatcher configurations
-     */
-    inline auto reload() noexcept
-      -> void { core::dispatcher::reload(); }
+    inline commands::spawn spawn(task &&new_task) noexcept {
+        return commands::spawn(std::move(new_task));
+    }
 
     inline void reset_signal() {
         std::unique_ptr<core::signal_handler> sgl;
@@ -320,11 +334,13 @@ namespace ace {
             sgl.reset();
     }
 
-    inline auto interrupt()
-      -> void { core::dispatcher::get_sig_pipe().push(ace::core::make_signal(ace::core::interruption_signal{})); }
+    inline void interrupt() {
+        core::dispatcher::get_sig_pipe().push(ace::core::make_signal(ace::core::interruption_signal{}));
+    }
 
-    inline auto terminate()
-      -> void { core::dispatcher::get_sig_pipe().push(ace::core::make_signal(ace::core::termination_signal{})); }
+    inline void terminate() {
+        core::dispatcher::get_sig_pipe().push(ace::core::make_signal(ace::core::termination_signal{}));
+    }
 
 } // end namespace ace
 

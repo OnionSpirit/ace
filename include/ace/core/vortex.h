@@ -101,7 +101,7 @@ namespace ace::core {
         };
 
         void respawn(runner* rnr = nullptr) noexcept {
-            dispatcher::get_instance().schedule(vortex(dispatcher::get_sig_pipe()), rnr);
+            schedule(vortex(dispatcher::get_sig_pipe()), rnr);
             detach_set(false);
         }
 

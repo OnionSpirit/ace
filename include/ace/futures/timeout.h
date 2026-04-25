@@ -48,7 +48,7 @@ namespace ace::futures {
  * @details The duration is converted to milliseconds at construction time.
  * Minimum resolution is 1 ms (limited by the clock tick duration).
  */
-class timeout : public future_traits<timeout> {
+class timeout : public core::traits::future_traits<timeout> {
 
     core::duration_t _duration; ///< Suspension duration in milliseconds.
 

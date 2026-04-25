@@ -60,7 +60,7 @@ namespace ace::futures {
      *
      * @see ace::futures::cutex
      */
-    class cutex_future : public future_traits<cutex_future> {
+    class cutex_future : public core::traits::future_traits<cutex_future> {
 
         struct cutex_conductor;
         friend cutex_conductor;

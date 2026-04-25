@@ -23,12 +23,12 @@ namespace ace::core {
 
     /**
      * @brief An interface to interact with the
-     * @c ace::core::kernel_controller via @c co_await operator.
+     * @c ace::core::modules::kernel_controller via @c co_await operator.
      * <br>Does not define 'resume(...)' logic.
      * @tparam query_core_t Specific query type.
      */
     template <typename query_core_t>
-    struct io_query : futures::future_traits<query_core_t>, kernel_observer {
+    struct io_query : traits::future_traits<query_core_t>, kernel_observer {
 
         IMPORT_FUTURE_ENV(query_core_t);
 

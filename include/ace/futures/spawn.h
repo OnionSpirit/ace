@@ -37,7 +37,7 @@ namespace ace::futures {
      * @details Constructed by @c ace::spawn() and consumed by @c co_await.
      * Non-copyable, non-default-constructible.
      */
-    class spawn final : public futures::future_traits<spawn> {
+    class spawn final : public core::traits::future_traits<spawn> {
 
         task _task {};                          ///< The task to be spawned.
         coroutines::control_block_handle _handle;  ///< Control block handle obtained before attaching.

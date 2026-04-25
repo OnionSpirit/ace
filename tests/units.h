@@ -14,7 +14,7 @@
 #include <ace/core/compose.h>
 #include <ace/ace.h>
 
-struct once_suspend : ace::futures::busy_future_traits<once_suspend> {
+struct once_suspend : ace::core::traits::busy_future_traits<once_suspend> {
 
     IMPORT_BUSY_FUTURE_ENV(once_suspend)
 

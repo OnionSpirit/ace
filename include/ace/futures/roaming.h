@@ -35,7 +35,7 @@ namespace ace::futures {
      *
      * @details Non-suspending — @c await_suspend() returns @c false immediately.
      */
-    class roaming : public futures::future_traits<roaming> {
+    class roaming : public core::traits::future_traits<roaming> {
 
         bool _is_roaming { true }; ///< Target roaming state.
 

@@ -12,7 +12,7 @@
 namespace ace {
 
     template <typename l_future_t, typename r_future_t>
-    struct or_await final : futures::future_traits<or_await<l_future_t, r_future_t>> {
+    struct or_await final : core::traits::future_traits<or_await<l_future_t, r_future_t>> {
 
         IMPORT_FUTURE_ENV(or_await);
 
@@ -70,7 +70,7 @@ namespace ace {
     };
 
     template <typename l_future_t, typename r_future_t>
-    struct and_await final : futures::future_traits<and_await<l_future_t, r_future_t>> {
+    struct and_await final : core::traits::future_traits<and_await<l_future_t, r_future_t>> {
 
         IMPORT_FUTURE_ENV(and_await);
 

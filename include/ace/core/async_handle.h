@@ -40,7 +40,7 @@ namespace ace::futures {
      * @c forward() method enqueues the caller back into the target's waiters
      * queue, which is then drained — waking the caller.
      */
-    class join_handler : public future_traits<join_handler> {
+    class join_handler : public core::traits::future_traits<join_handler> {
 
     protected:
 

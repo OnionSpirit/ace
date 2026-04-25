@@ -279,7 +279,7 @@ ACE_FUTURE_CHANNEL_META returnT ACE_FUTURE_CHANNEL_SPACE
 
 
 ACE_FUTURE_CHANNEL_META
-class ACE_FUTURE_CHANNEL_SPACE pull_impl : public busy_future_traits<pull_impl> {
+class ACE_FUTURE_CHANNEL_SPACE pull_impl : public core::traits::busy_future_traits<pull_impl> {
 
     data_t _output_data{};
 
@@ -408,7 +408,7 @@ ace::futures::channel_st<data_t>::
 ACE_FUTURE_CHANNEL_ST_META returnT ACE_FUTURE_CHANNEL_ST_SPACE
 
 ACE_FUTURE_CHANNEL_ST_META
-class ACE_FUTURE_CHANNEL_ST_SPACE pull_impl : public busy_future_traits<pull_impl> {
+class ACE_FUTURE_CHANNEL_ST_SPACE pull_impl : public core::traits::busy_future_traits<pull_impl> {
 
     data_t _output_data{};
 

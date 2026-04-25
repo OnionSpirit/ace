@@ -13,7 +13,7 @@
 #include <concepts>
 #include <memory>
 
-namespace ace::futures {
+namespace ace::core::traits {
 
     /**
      * @details Handler for future objects
@@ -62,7 +62,7 @@ namespace ace::futures {
     };
 
     #define IMPORT_FUTURE_ENV(future_t)                                \
-        typedef ace::futures::future_traits<future_t> future_traits_t; \
+        typedef ace::core::traits::future_traits<future_t> future_traits_t; \
         using typename future_traits_t::derived_future_t;
 
 
@@ -103,7 +103,7 @@ namespace ace::futures {
     };
 
     #define IMPORT_BUSY_FUTURE_ENV(future_t)                                     \
-        typedef ace::futures::busy_future_traits<future_t> busy_future_traits_t; \
+        typedef ace::core::traits::busy_future_traits<future_t> busy_future_traits_t; \
         using typename busy_future_traits_t::derived_busy_future_t;
 
 }

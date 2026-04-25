@@ -35,7 +35,7 @@
 #include "ace/core/traits/conduction.h"
 #include "terms.h"
 
-namespace ace::core {
+namespace ace::core::misc {
 
     /**
      * @brief Intrusive reference-counted control block for a coroutine promise.

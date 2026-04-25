@@ -57,7 +57,7 @@ namespace ace::core {
 
         static constexpr unsigned max_entries = 4096;
 
-        static thread_local ace::misc::queue<kernel_entity> _submission_buffer;
+        static thread_local misc::queue<kernel_entity> _submission_buffer;
 
         static bool ping();
 
@@ -166,14 +166,14 @@ namespace ace::core {
         io_uring_sqe* _sqe = nullptr;
         void* _io_uring_foo = nullptr;
 
-        static thread_local ace::misc::slab_mempool<kernel_entity> _kernelic_entity_mempool;
+        static thread_local misc::slab_mempool<kernel_entity> _kernelic_entity_mempool;
     };
 
-    thread_local ace::misc::slab_mempool<kernel_controller::kernel_entity> kernel_controller::kernel_entity::_kernelic_entity_mempool {
-        ace::misc::slab_mempool<kernel_entity>()
+    thread_local misc::slab_mempool<kernel_controller::kernel_entity> kernel_controller::kernel_entity::_kernelic_entity_mempool {
+        misc::slab_mempool<kernel_entity>()
     };
 
-    thread_local ace::misc::queue<kernel_controller::kernel_entity> kernel_controller::_submission_buffer {
+    thread_local misc::queue<kernel_controller::kernel_entity> kernel_controller::_submission_buffer {
         kernel_entity::_kernelic_entity_mempool
     };
 

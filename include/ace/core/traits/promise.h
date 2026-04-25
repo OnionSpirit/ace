@@ -204,7 +204,7 @@ namespace ace::core {
     template <typename derived_t, typename return_t>
     struct promise_traits : promise_return_traits<promise_traits<derived_t, return_t>, return_t> {
 
-        typedef core::traits::future_handle* future_handler_ptr_t; ///< Pointer type for the currently awaited busy future.
+        typedef traits::future_handle* future_handler_ptr_t; ///< Pointer type for the currently awaited busy future.
 
         typedef promise_return_traits<promise_traits, return_t> promise_return_traits_t;
         using promise_return_traits_t::_status;
@@ -247,12 +247,12 @@ namespace ace::core {
          * @brief @c await_transform for lvalue-ref futures (@c is_future concept).
          * @details Resets @c _busy_future because a regular future takes over
          * forwarding control via the conductor mechanism.
-         * @tparam futureT  A type satisfying @c ace::common::dispatch::is_future.
+         * @tparam futureT  A type satisfying @c ace::core::misc::dispatch::is_future.
          * @param command   The future to await.
          * @return          The same lvalue reference.
          */
         template <typename futureT>
-        requires ace::misc::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
+        requires misc::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
         futureT& await_transform(futureT& command) {
             _status = e_executed;
             _busy_future = nullptr;
@@ -261,12 +261,12 @@ namespace ace::core {
 
         /**
          * @brief @c await_transform for rvalue-ref futures (@c is_future concept).
-         * @tparam futureT  A type satisfying @c ace::common::dispatch::is_future.
+         * @tparam futureT  A type satisfying @c ace::core::misc::dispatch::is_future.
          * @param command   The future to await.
          * @return          An rvalue reference to the future.
          */
         template <typename futureT>
-        requires ace::misc::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
+        requires misc::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
         futureT&& await_transform(futureT&& command) {
             _status = e_executed;
             _busy_future = nullptr;
@@ -282,7 +282,7 @@ namespace ace::core {
          * @return          The same lvalue reference.
          */
         template <typename futureT>
-        requires ace::misc::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
+        requires misc::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
         futureT& await_transform(futureT& future) {
             _status = e_executed;
             _busy_future = &future;
@@ -296,7 +296,7 @@ namespace ace::core {
          * @return          An rvalue reference to the future.
          */
         template <typename futureT>
-        requires ace::misc::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
+        requires misc::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
         futureT&& await_transform(futureT&& future) {
             _status = e_executed;
             _busy_future = &future;
@@ -313,9 +313,9 @@ namespace ace::core {
          * @return Pointer to the promise area (after the control block).
          */
         void* operator new(size_t mem_size) noexcept {
-            const auto ptr = static_cast<uint8_t*>(::operator new(mem_size + control_block_size));
-            void* mem_ptr = ptr + control_block_size;
-            new (ptr) control_block();
+            const auto ptr = static_cast<uint8_t*>(::operator new(mem_size + misc::control_block_size));
+            void* mem_ptr = ptr + misc::control_block_size;
+            new (ptr) misc::control_block();
             return mem_ptr;
         }
 
@@ -325,10 +325,10 @@ namespace ace::core {
          * @param mem_ptr  Pointer to the promise area.
          */
         void operator delete(void* mem_ptr) noexcept {
-            void* base_ptr = control_block::get_block_from_address(mem_ptr);
+            void* base_ptr = misc::control_block::get_block_from_address(mem_ptr);
             // NOTE: Trying to disown, and if it's untracked do delete
-            if (control_block::disown(base_ptr))
-                delete static_cast<control_block*>(base_ptr);
+            if (misc::control_block::disown(base_ptr))
+                delete static_cast<misc::control_block*>(base_ptr);
         }
 
         /**
@@ -343,7 +343,7 @@ namespace ace::core {
         }
 
         future_handler_ptr_t        _busy_future { nullptr };  ///< Pointer to the currently active busy future, or @c nullptr.
-        control_block*              _block  { nullptr };       ///< Pointer to the intrusive control block (set on first @c observe()).
+        misc::control_block*        _block  { nullptr };       ///< Pointer to the intrusive control block (set on first @c observe()).
         std::optional<std::size_t>  _trace_id;                 ///< Optional debugging trace ID.
         average_quants              _quants {};                ///< Average amount of the time quants spent at the @c resume()
     };

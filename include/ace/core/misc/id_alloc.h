@@ -3,7 +3,7 @@
 #include "atomic_stack.h"
 #include "nukes/dynamic/mpmc_queue.h"
 
-namespace ace::misc {
+namespace ace::core::misc {
 
     class id_allocator {
 

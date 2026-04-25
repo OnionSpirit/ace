@@ -27,7 +27,7 @@
  * @brief Concepts used by @c promise_traits::await_transform() to classify
  *        types passed to @c co_await.
  */
-namespace ace::misc::dispatch {
+namespace ace::core::misc::dispatch {
 
     /**
      * @brief Minimal C++20 awaitable interface.

@@ -50,7 +50,7 @@ namespace ace::futures {
  */
 class timeout : public core::traits::future_traits<timeout> {
 
-    core::modules::duration_t _duration; ///< Suspension duration in milliseconds.
+    core::duration_t _duration; ///< Suspension duration in milliseconds.
 
     struct timeout_conductor;
     friend timeout_conductor;
@@ -101,7 +101,7 @@ struct expire : timeout {
      * @param expires  The absolute deadline.  The computed duration is
      *                 @c expires - clock::current_time().
      */
-    explicit expire(core::modules::timepoint_t expires)
+    explicit expire(core::timepoint_t expires)
         : timeout(expires - core::modules::clock::current_time()) {}
 
     expire() = default;

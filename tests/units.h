@@ -97,7 +97,7 @@ ace::task timer_waiter_valued(std::chrono::duration<Rep, Period> wait_time, ace:
     co_return;
 }
 
-inline auto fancy(ace::core::modules::timepoint_t tp) {
+inline auto fancy(ace::core::timepoint_t tp) {
     auto offset =
         std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::system_clock::now()).time_since_epoch()
       - std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()).time_since_epoch();
@@ -106,7 +106,7 @@ inline auto fancy(ace::core::modules::timepoint_t tp) {
     };
 }
 
-inline ace::task expire_waiter_valued(ace::core::modules::timepoint_t wait_time, ace::futures::channel_dyn<ace::core::modules::timepoint_t>& ch) {
+inline ace::task expire_waiter_valued(ace::core::timepoint_t wait_time, ace::futures::channel_dyn<ace::core::timepoint_t>& ch) {
     std::cout << "Expires at: " << fancy(wait_time) << std::endl;
     co_await ace::futures::expire(wait_time);
     std::cout << "Expired at: " << fancy(wait_time) << std::endl;

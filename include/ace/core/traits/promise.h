@@ -34,7 +34,6 @@
 #include "ace/core/misc/dispatch.h"
 #include "ace/core/misc/id_alloc.h"
 
-
 namespace ace::core {
 
     /**
@@ -93,6 +92,10 @@ namespace ace::core {
     concept is_promise_rule = requires { typename modeT::e_promise_rule; }
         and (std::same_as<decltype(modeT::action()), std::suspend_never>
         or std::same_as<decltype(modeT::action()), std::suspend_always>);
+
+}
+
+namespace ace::core::traits {
 
     struct average_quants {
         static constexpr int window_size = 4;
@@ -348,7 +351,7 @@ namespace ace::core {
         average_quants              _quants {};                ///< Average amount of the time quants spent at the @c resume()
     };
 
-#define DECLARE_PROMISE_TRAITS(derived_t, return_type_t) typedef ace::core::promise_traits<derived_t, return_type_t> promise_traits_t;
+#define DECLARE_PROMISE_TRAITS(derived_t, return_type_t) typedef ace::core::traits::promise_traits<derived_t, return_type_t> promise_traits_t;
 
 #define IMPORT_PROMISE_TRAITS_ENV               \
     using promise_traits_t::_busy_future;       \

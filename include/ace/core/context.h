@@ -74,12 +74,12 @@ namespace ace::core {
 
         struct promise_type;
 
-        typedef std::coroutine_handle<promise_type> coroutine_t;     ///< Type of the underlying coroutine handle.
-        typedef nukes::dynamic::reg_queue<context<>> runner_pool_t;  ///< Queue type used as the runner's task pool.
-        typedef runner_conductor_handle<context<>> runner_conductor; ///< Abstract conductor interface for this context type.
+        typedef std::coroutine_handle<promise_type> coroutine_t;             ///< Type of the underlying coroutine handle.
+        typedef nukes::dynamic::reg_queue<context<>> runner_pool_t;          ///< Queue type used as the runner's task pool.
+        typedef traits::runner_conductor_handle<context<>> runner_conductor; ///< Abstract conductor interface for this context type.
 
         /// @brief In-place storage slot for a conductor object.
-        typedef conductor_slot<runner_conductor> runner_conductor_slot_t;
+        typedef traits::conductor_slot<runner_conductor> runner_conductor_slot_t;
 
         coroutine_t _coroutine; ///< Underlying coroutine handle.  Null after move.
 
@@ -205,7 +205,7 @@ namespace ace::core {
             return std::unexpected("context is already dead.");
         }
 
-        class context_conductor : public control_conductor_handle {
+        class context_conductor : public traits::control_conductor_handle {
 
             void* _address { nullptr };
 
@@ -253,7 +253,7 @@ namespace ace::core {
          *  | @c _self_conductor | @c optional<context_conductor> | Conductor installed into the control block. |
          *  | @c _roaming | @c bool | When @c true the balancer may migrate the task to another runner. |
          */
-        struct promise_type : promise_traits<promise_type, returnT> {
+        struct promise_type : traits::promise_traits<promise_type, returnT> {
             DECLARE_PROMISE_TRAITS(promise_type, returnT)
             IMPORT_PROMISE_TRAITS_ENV
 
@@ -352,7 +352,7 @@ namespace ace::core {
              *         @c _self_conductor).
              */
             template <typename promise_t>
-            control_conductor_handle* get_promise_conductor(const std::coroutine_handle<promise_t>& self) {
+            traits::control_conductor_handle* get_promise_conductor(const std::coroutine_handle<promise_t>& self) {
                 // NOTE: Initiating promise conductor
                 _self_conductor = context_conductor(self);
                 return &_self_conductor.value();

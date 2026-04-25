@@ -51,10 +51,10 @@ namespace ace::core::misc {
      */
     struct control_block {
 
-        uint64_t _weak_refcount {1};                          ///< Number of watchers (handles). Initial value: 1 (the block itself).
-        uint64_t _strong_refcount {1};                        ///< Number of owners (always the coroutine frame). Initial value: 1.
-        control_conductor_handle* _control_conductor { nullptr }; ///< Optional conductor for external join/cancel; set by @c setup_control_block().
-        alignas(ACE_BUS_SIZE) bool _exists {true};            ///< @c false once the coroutine has finished (@c disown() was called).
+        uint64_t _weak_refcount {1};                                      ///< Number of watchers (handles). Initial value: 1 (the block itself).
+        uint64_t _strong_refcount {1};                                    ///< Number of owners (always the coroutine frame). Initial value: 1.
+        traits::control_conductor_handle* _control_conductor { nullptr }; ///< Optional conductor for external join/cancel; set by @c setup_control_block().
+        alignas(ACE_BUS_SIZE) bool _exists {true};                        ///< @c false once the coroutine has finished (@c disown() was called).
 
         control_block() = default;
 

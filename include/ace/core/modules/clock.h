@@ -13,7 +13,7 @@
 #include "ace/core/context.h"
 #include "ace/core/misc/queue.h"
 
-namespace ace::core::modules {
+namespace ace::core {
 
     using timepoint_t = decltype(
         std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
@@ -40,6 +40,10 @@ namespace ace::core::modules {
         return curr_ts;
 
     }
+
+}
+
+namespace ace::core::modules {
 
     /**
      * @brief Type of stored context record. Contains context and it's awaiting duration

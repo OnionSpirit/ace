@@ -8,13 +8,18 @@
 #include <nukes/dynamic/mpmc_queue.h>
 #include <nukes/bounded/mpmc_queue.h>
 
-#include <ace/core/misc/selection.h>
 #include <ace/core/traits/future.h>
 #include <ace/core/runner.h>
 #include <ace/core/context.h>
 
 
 namespace ace::futures {
+
+    enum class allocation_type {
+        e_static,
+        e_on_init,
+        e_dynamic
+    };
 
 /**
  * @details Channel with async call operator @b(co_await) support.
@@ -262,13 +267,13 @@ using channel_dyn = channel
 
 //==============================DEFINITIONS==================================
 
-#define ACE_FUTURE_CHANNEL_META          \
-template<                                \
-    typename data_t,                     \
-    size_t data_buffer_size_v,           \
-    allocation_type data_allocation_v,   \
-    size_t waiters_buffer_size_v,        \
-    allocation_type waiters_allocation_v \
+#define ACE_FUTURE_CHANNEL_META                        \
+template<                                              \
+    typename data_t,                                   \
+    size_t data_buffer_size_v,                         \
+    ace::futures::allocation_type data_allocation_v,   \
+    size_t waiters_buffer_size_v,                      \
+    ace::futures::allocation_type waiters_allocation_v \
 >
 
 #define ACE_FUTURE_CHANNEL_SPACE \

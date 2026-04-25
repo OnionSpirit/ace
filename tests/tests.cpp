@@ -90,7 +90,7 @@ TEST(futures, do_timer_on_runner_test) {
 }
 
 TEST(futures, do_expire_on_runner_test) {
-    ace::futures::channel_dyn<ace::core::modules::timepoint_t> _channel {};
+    ace::futures::channel_dyn<ace::core::timepoint_t> _channel {};
 
     const auto now = ace::core::modules::clock::current_time();
     // NOTE: Spawning waiters with different duration and waited time count return
@@ -114,7 +114,7 @@ TEST(futures, do_expire_on_runner_test) {
     ASSERT_TRUE(ace::empty());
 
     // NOTE: Collecting waited time sequence
-    std::vector<ace::core::modules::timepoint_t> res{};
+    std::vector<ace::core::timepoint_t> res{};
     ace::schedule(channel_fetcher(_channel, res));
     ace::run();
     ASSERT_TRUE(ace::empty());

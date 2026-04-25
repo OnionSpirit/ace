@@ -36,11 +36,15 @@
 #define ACE_CORE_VORTEX_H
 
 #include "ace/core/dispatcher.h"
-#include "ace/core/misc/selection.h"
 #include "ace/core/signal.h"
 #include "ace/core/context.h"
 
 namespace ace::core {
+
+    enum class vortex_spawn_mode {
+        e_thread_shared, ///< Single vortex for all threads
+        e_thread_local,  ///< Local vortex instance for each thread
+    };
 
     template <typename vortex_t>
     concept is_vortex_routine = requires(vortex_t v) {

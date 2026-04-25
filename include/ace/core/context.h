@@ -46,7 +46,7 @@
 // ToDo: yield операцию надо преретащить в генератор,
 // пусть генератор имеет перегрузку итераторов,
 // чтобы запускать его в цикле for
-namespace ace::coroutines {
+namespace ace::core {
 
     /**
      * @brief Core coroutine context type.
@@ -483,11 +483,11 @@ namespace ace {
 
     // NOTE: Type alias for greedy coroutines
     template<typename returnT =void>
-    using promise = coroutines::context<returnT, coroutines::permanent>;
+    using promise = core::context<returnT, core::permanent>;
 
     // NOTE: Type alias for lazy coroutines
     template<typename returnT =void>
-    using async = coroutines::context<returnT>;
+    using async = core::context<returnT>;
 
     // NOTE: Type alias for runner task coroutines
     using task = async<>;

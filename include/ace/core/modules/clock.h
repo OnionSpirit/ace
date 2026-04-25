@@ -69,10 +69,10 @@ namespace ace::core {
             : _duration(dur)
             , _context(std::forward<task>(ctx)) {}
 
-        static thread_local common::slab_mempool<clock_record> _clock_record_mempool;
+        static thread_local ace::misc::slab_mempool<clock_record> _clock_record_mempool;
     };
 
-    using clock_node = common::q_node<clock_record>;
+    using clock_node = ace::misc::q_node<clock_record>;
 
     /**
      * @brief Represents time dial slot. Storing records with same expiration time and provides release functionality
@@ -124,7 +124,7 @@ namespace ace::core {
          */
         [[nodiscard]] bool empty() const { return _records.empty(); }
 
-        common::queue<clock_record> _records{clock_record::_clock_record_mempool}; ///< Queue of stored records
+        ace::misc::queue<clock_record> _records{clock_record::_clock_record_mempool}; ///< Queue of stored records
     };
 
     /**
@@ -424,8 +424,8 @@ namespace ace::core {
         }
     };
 
-    thread_local common::slab_mempool<clock_record> clock_record::_clock_record_mempool =
-        common::slab_mempool<clock_record>();
+    thread_local ace::misc::slab_mempool<clock_record> clock_record::_clock_record_mempool =
+        ace::misc::slab_mempool<clock_record>();
 
     thread_local multi_dial clock::_multi_dial =
         multi_dial{std::chrono::milliseconds(1), 256};

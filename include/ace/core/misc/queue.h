@@ -8,7 +8,7 @@
 #include <vector>
 #include <utility>
 
-namespace ace::common {
+namespace ace::misc {
 
     template <typename T>
     class queue;

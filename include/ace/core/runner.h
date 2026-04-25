@@ -157,7 +157,7 @@ namespace ace::core {
 
 
     inline bool runner::yank() noexcept {
-        coroutines::promise_touch_result touch_result = coroutines::promise_touch_result::e_executed;
+        core::promise_touch_result touch_result = core::promise_touch_result::e_executed;
         pool_node_ptr task_node;
         int old_total_quants;
         std::chrono::steady_clock::time_point start_time;
@@ -180,7 +180,7 @@ namespace ace::core {
         // NOTE: Pulling next task and prefetching it
         if (not _pool.empty()) [[likely]] {
             _nextup = _pool.pop_node();
-            prefetch<e_l1_cache>(_nextup.value()->_data._coroutine.address());
+            misc::prefetch<misc::e_l1_cache>(_nextup.value()->_data._coroutine.address());
         }
 
         // NOTE: Starting quants counter and removing old quants amount
@@ -196,9 +196,9 @@ namespace ace::core {
         // NOTE: Checking if context can be resumed
         const bool is_resumable{
             task_node->_data
-            and touch_result not_eq coroutines::promise_touch_result::e_failed
-            and touch_result not_eq coroutines::promise_touch_result::e_finished
-            and touch_result not_eq coroutines::promise_touch_result::e_detached
+            and touch_result not_eq core::promise_touch_result::e_failed
+            and touch_result not_eq core::promise_touch_result::e_finished
+            and touch_result not_eq core::promise_touch_result::e_detached
         };
 
         // NOTE: Checking if the context shall be forwarded via passed conductor

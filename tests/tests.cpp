@@ -29,7 +29,7 @@ TEST(context, do_const_nested_suspend_test) {
 
 TEST(context, do_empty_context_test) {
 
-    auto r = ace::coroutines::context<>();
+    auto r = ace::task();
     ASSERT_FALSE(r);
 }
 

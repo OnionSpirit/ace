@@ -5,7 +5,7 @@
 #include <mmintrin.h>
 #endif
 
-namespace ace {
+namespace ace::core::misc {
 
     enum cache_locality : int {
         e_temporal = 0, ///< Minimal stack pollution

@@ -32,7 +32,7 @@
 
 #include "ace/core/misc/terms.h"
 
-namespace ace::coroutines {
+namespace ace::core {
 
     /**
      * @brief Abstract interface for conductors that forward coroutine contexts

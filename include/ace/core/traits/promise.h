@@ -35,7 +35,7 @@
 #include "ace/core/misc/id_alloc.h"
 
 
-namespace ace::coroutines {
+namespace ace::core {
 
     /**
      * @brief Lifecycle state of a coroutine promise.
@@ -216,7 +216,7 @@ namespace ace::coroutines {
          */
         ~promise_traits() {
             if (_trace_id) [[unlikely]]
-                common::context_id_allocator::get_instance().id_free(_trace_id.value());
+                misc::context_id_allocator::get_instance().id_free(_trace_id.value());
         };
 
         /**
@@ -252,7 +252,7 @@ namespace ace::coroutines {
          * @return          The same lvalue reference.
          */
         template <typename futureT>
-        requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
+        requires ace::misc::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
         futureT& await_transform(futureT& command) {
             _status = e_executed;
             _busy_future = nullptr;
@@ -266,7 +266,7 @@ namespace ace::coroutines {
          * @return          An rvalue reference to the future.
          */
         template <typename futureT>
-        requires ace::common::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
+        requires ace::misc::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
         futureT&& await_transform(futureT&& command) {
             _status = e_executed;
             _busy_future = nullptr;
@@ -282,7 +282,7 @@ namespace ace::coroutines {
          * @return          The same lvalue reference.
          */
         template <typename futureT>
-        requires ace::common::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
+        requires ace::misc::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
         futureT& await_transform(futureT& future) {
             _status = e_executed;
             _busy_future = &future;
@@ -296,7 +296,7 @@ namespace ace::coroutines {
          * @return          An rvalue reference to the future.
          */
         template <typename futureT>
-        requires ace::common::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
+        requires ace::misc::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
         futureT&& await_transform(futureT&& future) {
             _status = e_executed;
             _busy_future = &future;
@@ -338,7 +338,7 @@ namespace ace::coroutines {
          * @return The allocated trace ID.
          */
         std::size_t setup_trace() {
-            _trace_id = common::context_id_allocator::get_instance().id_alloc();
+            _trace_id = misc::context_id_allocator::get_instance().id_alloc();
             return _trace_id.value();
         }
 
@@ -348,7 +348,7 @@ namespace ace::coroutines {
         average_quants              _quants {};                ///< Average amount of the time quants spent at the @c resume()
     };
 
-#define DECLARE_PROMISE_TRAITS(derived_t, return_type_t) typedef coroutines::promise_traits<derived_t, return_type_t> promise_traits_t;
+#define DECLARE_PROMISE_TRAITS(derived_t, return_type_t) typedef ace::core::promise_traits<derived_t, return_type_t> promise_traits_t;
 
 #define IMPORT_PROMISE_TRAITS_ENV               \
     using promise_traits_t::_busy_future;       \

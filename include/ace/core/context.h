@@ -38,9 +38,9 @@
 
 #include "ace/core/traits/future.h"
 #include "ace/core/traits/promise.h"
-#include "ace/core/misc/terms.h"
-#include "ace/core/tools/control.h"
-#include "ace/core/tools/conduction.h"
+#include "ace/core/tools/meta.h"
+#include "ace/core/control.h"
+#include "ace/core/traits/conduction.h"
 
 
 // ToDo: yield операцию надо преретащить в генератор,
@@ -124,7 +124,7 @@ namespace ace::core {
          * @return @c true if resumable.
          */
         [[nodiscard]] bool is_resumable() const noexcept {
-            return _coroutine and not _coroutine.done() and not misc::control_block::is_disowned(_coroutine.address());
+            return _coroutine and not _coroutine.done() and not control_block::is_disowned(_coroutine.address());
         }
 
         /// @brief Equivalent to @c is_resumable().
@@ -171,10 +171,10 @@ namespace ace::core {
          * @return A new @c control_block_handle with an incremented weak ref-count.
          * @note The context must not have been moved away before calling @c observe().
          */
-        misc::control_block_handle observe() {
+        control_block_handle observe() {
             // NOTE: Setting up promise block by coroutine
             _coroutine.promise().setup_control_block(_coroutine);
-            return misc::control_block_handle{ _coroutine };
+            return control_block_handle{ _coroutine };
         }
 
         /**
@@ -281,7 +281,7 @@ namespace ace::core {
              */
             auto final_suspend() const noexcept {
                 // NOTE: Decreasing strong counter on finish
-                if (_block) misc::control_block::disown(_block);
+                if (_block) control_block::disown(_block);
                 return std::suspend_always{};
             }
 
@@ -335,7 +335,7 @@ namespace ace::core {
             requires std::same_as<differed, promise_rule_t>
             void setup_control_block(const std::coroutine_handle<promise_t>& self) {
                 // NOTE: Getting control block address
-                _block = misc::control_block::get_block_from_address(self.address());
+                _block = control_block::get_block_from_address(self.address());
                 // NOTE: Initiating promise conductor
                 _self_conductor = context_conductor(self);
                 // NOTE: Passing reference of the inited conductor to the control block

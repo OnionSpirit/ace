@@ -32,10 +32,10 @@
 #include <atomic>
 #include <cstddef>
 
-#include "ace/core/tools/conduction.h"
-#include "ace/core/misc/terms.h"
+#include "ace/core/traits/conduction.h"
+#include "ace/core/tools/meta.h"
 
-namespace ace::core::misc {
+namespace ace::core {
 
     /**
      * @brief Intrusive reference-counted control block for a coroutine promise.

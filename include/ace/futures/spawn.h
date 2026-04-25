@@ -39,8 +39,8 @@ namespace ace::futures {
      */
     class spawn final : public core::traits::future_traits<spawn> {
 
-        task _task {};                             ///< The task to be spawned.
-        core::misc::control_block_handle _handle;  ///< Control block handle obtained before attaching.
+        task _task {};                       ///< The task to be spawned.
+        core::control_block_handle _handle;  ///< Control block handle obtained before attaching.
 
     public:
 

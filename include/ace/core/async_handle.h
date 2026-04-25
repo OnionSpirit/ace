@@ -44,7 +44,7 @@ namespace ace::core {
 
     protected:
 
-        core::misc::control_block_handle _handle; ///< Weak reference to the target coroutine's control block.
+        control_block_handle _handle; ///< Weak reference to the target coroutine's control block.
 
         struct join_handler_conductor;
 
@@ -58,7 +58,7 @@ namespace ace::core {
          * @brief Construct from an existing control block handle.
          * @param handle  Handle to the target coroutine.
          */
-        explicit join_handler(const core::misc::control_block_handle& handle)
+        explicit join_handler(const control_block_handle& handle)
             : _handle{handle} {}
 
         /**
@@ -108,7 +108,7 @@ namespace ace::core {
          * @details Called by @c commands::spawn::await_resume().
          * @param handle  Handle to the spawned coroutine's control block.
          */
-        explicit async_handle(const core::misc::control_block_handle& handle)
+        explicit async_handle(const control_block_handle& handle)
             : join_handler(handle) {}
 
         /**
@@ -136,11 +136,11 @@ namespace ace::core {
 
     struct join_handler::join_handler_conductor final : conductor_handler_t {
 
-        core::misc::control_block_handle _handle;
+        control_block_handle _handle;
 
         join_handler_conductor() = delete;
 
-        explicit join_handler_conductor(const core::misc::control_block_handle& handle) : _handle{handle} {}
+        explicit join_handler_conductor(const control_block_handle& handle) : _handle{handle} {}
 
         void forward(task&& ctx) override { _handle.forward(&ctx); }
 

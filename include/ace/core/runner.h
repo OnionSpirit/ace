@@ -9,8 +9,8 @@
 #include <chrono>
 #include <nukes/dynamic/mpsc_queue.h>
 
-#include "ace/core/misc/prefetch.h"
-#include "ace/core/misc/terms.h"
+#include "ace/core/tools/prefetch.h"
+#include "ace/core/tools/meta.h"
 #include "ace/core/context.h"
 
 
@@ -180,7 +180,7 @@ namespace ace::core {
         // NOTE: Pulling next task and prefetching it
         if (not _pool.empty()) [[likely]] {
             _nextup = _pool.pop_node();
-            misc::prefetch<misc::e_l1_cache>(_nextup.value()->_data._coroutine.address());
+            tools::prefetch<tools::e_l1_cache>(_nextup.value()->_data._coroutine.address());
         }
 
         // NOTE: Starting quants counter and removing old quants amount

@@ -30,7 +30,7 @@
 #ifndef ACE_CONDUCTOR_H
 #define ACE_CONDUCTOR_H
 
-#include "ace/core/misc/terms.h"
+#include "ace/core/tools/meta.h"
 
 namespace ace::core::traits {
 

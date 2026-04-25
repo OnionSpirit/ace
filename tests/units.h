@@ -6,7 +6,7 @@
 #include <memory>
 
 #include <ace/core/traits/future.h>
-#include <ace/core/tools/compose.h>
+#include <ace/core/compose.h>
 #include <ace/futures/get_runner.h>
 #include <ace/futures/channel.h>
 #include <ace/futures/timeout.h>

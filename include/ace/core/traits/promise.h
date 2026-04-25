@@ -29,10 +29,10 @@
 #include <optional>
 
 #include "ace/core/traits/future.h"
-#include "ace/core/tools/control.h"
-#include "ace/core/misc/terms.h"
-#include "ace/core/misc/dispatch.h"
-#include "ace/core/misc/id_alloc.h"
+#include "ace/core/control.h"
+#include "ace/core/tools/meta.h"
+#include "ace/core/tools/dispatch.h"
+#include "ace/core/tools/id_alloc.h"
 
 namespace ace::core {
 
@@ -219,7 +219,7 @@ namespace ace::core::traits {
          */
         ~promise_traits() {
             if (_trace_id) [[unlikely]]
-                misc::context_id_allocator::get_instance().id_free(_trace_id.value());
+                tools::context_id_allocator::get_instance().id_free(_trace_id.value());
         };
 
         /**
@@ -255,7 +255,7 @@ namespace ace::core::traits {
          * @return          The same lvalue reference.
          */
         template <typename futureT>
-        requires misc::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
+        requires tools::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
         futureT& await_transform(futureT& command) {
             _status = e_executed;
             _busy_future = nullptr;
@@ -269,7 +269,7 @@ namespace ace::core::traits {
          * @return          An rvalue reference to the future.
          */
         template <typename futureT>
-        requires misc::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
+        requires tools::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
         futureT&& await_transform(futureT&& command) {
             _status = e_executed;
             _busy_future = nullptr;
@@ -285,7 +285,7 @@ namespace ace::core::traits {
          * @return          The same lvalue reference.
          */
         template <typename futureT>
-        requires misc::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
+        requires tools::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
         futureT& await_transform(futureT& future) {
             _status = e_executed;
             _busy_future = &future;
@@ -299,7 +299,7 @@ namespace ace::core::traits {
          * @return          An rvalue reference to the future.
          */
         template <typename futureT>
-        requires misc::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
+        requires tools::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
         futureT&& await_transform(futureT&& future) {
             _status = e_executed;
             _busy_future = &future;
@@ -316,9 +316,9 @@ namespace ace::core::traits {
          * @return Pointer to the promise area (after the control block).
          */
         void* operator new(size_t mem_size) noexcept {
-            const auto ptr = static_cast<uint8_t*>(::operator new(mem_size + misc::control_block_size));
-            void* mem_ptr = ptr + misc::control_block_size;
-            new (ptr) misc::control_block();
+            const auto ptr = static_cast<uint8_t*>(::operator new(mem_size + control_block_size));
+            void* mem_ptr = ptr + control_block_size;
+            new (ptr) control_block();
             return mem_ptr;
         }
 
@@ -328,10 +328,10 @@ namespace ace::core::traits {
          * @param mem_ptr  Pointer to the promise area.
          */
         void operator delete(void* mem_ptr) noexcept {
-            void* base_ptr = misc::control_block::get_block_from_address(mem_ptr);
+            void* base_ptr = control_block::get_block_from_address(mem_ptr);
             // NOTE: Trying to disown, and if it's untracked do delete
-            if (misc::control_block::disown(base_ptr))
-                delete static_cast<misc::control_block*>(base_ptr);
+            if (control_block::disown(base_ptr))
+                delete static_cast<control_block*>(base_ptr);
         }
 
         /**
@@ -341,12 +341,12 @@ namespace ace::core::traits {
          * @return The allocated trace ID.
          */
         std::size_t setup_trace() {
-            _trace_id = misc::context_id_allocator::get_instance().id_alloc();
+            _trace_id = tools::context_id_allocator::get_instance().id_alloc();
             return _trace_id.value();
         }
 
         future_handler_ptr_t        _busy_future { nullptr };  ///< Pointer to the currently active busy future, or @c nullptr.
-        misc::control_block*        _block  { nullptr };       ///< Pointer to the intrusive control block (set on first @c observe()).
+        control_block*              _block  { nullptr };       ///< Pointer to the intrusive control block (set on first @c observe()).
         std::optional<std::size_t>  _trace_id;                 ///< Optional debugging trace ID.
         average_quants              _quants {};                ///< Average amount of the time quants spent at the @c resume()
     };

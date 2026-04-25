@@ -6,8 +6,7 @@
 #include <liburing.h>
 
 #include "ace/core/traits/vortex.h"
-#include "ace/core/misc/queue.h"
-#include "ace/core/misc/selection.h"
+#include "ace/core/tools/queue.h"
 
 namespace ace::core::modules {
 
@@ -57,7 +56,7 @@ namespace ace::core::modules {
 
         static constexpr unsigned max_entries = 4096;
 
-        static thread_local misc::queue<kernel_entity> _submission_buffer;
+        static thread_local tools::queue<kernel_entity> _submission_buffer;
 
         static bool ping();
 
@@ -166,14 +165,14 @@ namespace ace::core::modules {
         io_uring_sqe* _sqe = nullptr;
         void* _io_uring_foo = nullptr;
 
-        static thread_local misc::slab_mempool<kernel_entity> _kernelic_entity_mempool;
+        static thread_local tools::slab_mempool<kernel_entity> _kernelic_entity_mempool;
     };
 
-    thread_local misc::slab_mempool<kernel_controller::kernel_entity> kernel_controller::kernel_entity::_kernelic_entity_mempool {
-        misc::slab_mempool<kernel_entity>()
+    thread_local tools::slab_mempool<kernel_controller::kernel_entity> kernel_controller::kernel_entity::_kernelic_entity_mempool {
+        tools::slab_mempool<kernel_entity>()
     };
 
-    thread_local misc::queue<kernel_controller::kernel_entity> kernel_controller::_submission_buffer {
+    thread_local tools::queue<kernel_controller::kernel_entity> kernel_controller::_submission_buffer {
         kernel_entity::_kernelic_entity_mempool
     };
 

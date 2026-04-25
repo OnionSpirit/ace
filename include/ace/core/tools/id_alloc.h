@@ -1,9 +1,9 @@
 #ifndef ACE_COMMON_ID_ALLOCA_H
 #define ACE_COMMON_ID_ALLOCA_H
-#include "atomic_stack.h"
+
 #include "nukes/dynamic/mpmc_queue.h"
 
-namespace ace::core::misc {
+namespace ace::core::tools {
 
     class id_allocator {
 

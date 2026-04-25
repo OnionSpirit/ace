@@ -11,7 +11,7 @@
 
 #include "ace/core/traits/vortex.h"
 #include "ace/core/context.h"
-#include "ace/core/misc/queue.h"
+#include "ace/core/tools/queue.h"
 
 namespace ace::core {
 
@@ -73,10 +73,10 @@ namespace ace::core::modules {
             : _duration(dur)
             , _context(std::forward<task>(ctx)) {}
 
-        static thread_local misc::slab_mempool<clock_record> _clock_record_mempool;
+        static thread_local tools::slab_mempool<clock_record> _clock_record_mempool;
     };
 
-    using clock_node = misc::q_node<clock_record>;
+    using clock_node = tools::q_node<clock_record>;
 
     /**
      * @brief Represents time dial slot. Storing records with same expiration time and provides release functionality
@@ -128,7 +128,7 @@ namespace ace::core::modules {
          */
         [[nodiscard]] bool empty() const { return _records.empty(); }
 
-        misc::queue<clock_record> _records{clock_record::_clock_record_mempool}; ///< Queue of stored records
+        tools::queue<clock_record> _records{clock_record::_clock_record_mempool}; ///< Queue of stored records
     };
 
     /**
@@ -428,8 +428,8 @@ namespace ace::core::modules {
         }
     };
 
-    thread_local misc::slab_mempool<clock_record> clock_record::_clock_record_mempool =
-        misc::slab_mempool<clock_record>();
+    thread_local tools::slab_mempool<clock_record> clock_record::_clock_record_mempool =
+        tools::slab_mempool<clock_record>();
 
     thread_local multi_dial clock::_multi_dial =
         multi_dial{std::chrono::milliseconds(1), 256};

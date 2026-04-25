@@ -1,13 +1,13 @@
-#ifndef ACE_CORE_COMPOSED_H
-#define ACE_CORE_COMPOSED_H
+#ifndef ACE_CORE_COMPOSE_H
+#define ACE_CORE_COMPOSE_H
 
 #include <optional>
 #include <variant>
 
-#include "ace/coroutines/context.h"
-#include "dispatcher.h"
-#include "ace/futures/async_handle.h"
-#include "ace/futures/future.h"
+#include "ace/core/context.h"
+#include "ace/core/dispatcher.h"
+#include "ace/core/async_handle.h"
+#include "ace/core/traits/future.h"
 
 namespace ace {
 
@@ -136,7 +136,7 @@ namespace ace {
 
 //==============================- DEFINITIONS -==================================
 
-#define ACE_COMPOSED_AWAIT_FUTURE_META \
+#define ACE_COMPOSE_AWAIT_FUTURE_META \
     template <typename l_future_t, typename r_future_t>
 
 #define ACE_OR_AWAIT_FUTURE_SPACE \
@@ -151,7 +151,7 @@ namespace ace {
 #define ACE_AND_AWAIT_FUTURE_MEMBER(return_t) \
     return_t ace::and_await<l_future_t, r_future_t>::
 
-ACE_COMPOSED_AWAIT_FUTURE_META
+ACE_COMPOSE_AWAIT_FUTURE_META
 struct ACE_OR_AWAIT_FUTURE_SPACE or_await_conductor final : conductor_handler_t {
 
     or_await_conductor() = delete;
@@ -173,7 +173,7 @@ struct ACE_OR_AWAIT_FUTURE_SPACE or_await_conductor final : conductor_handler_t 
     or_await* _or_await;
 };
 
-ACE_COMPOSED_AWAIT_FUTURE_META
+ACE_COMPOSE_AWAIT_FUTURE_META
 ACE_OR_AWAIT_FUTURE_MEMBER(bool)
 await_suspend(auto external_coro) {
     // NOTE: Creating observers for each futures
@@ -190,7 +190,7 @@ await_suspend(auto external_coro) {
     return true;
 }
 
-ACE_COMPOSED_AWAIT_FUTURE_META
+ACE_COMPOSE_AWAIT_FUTURE_META
 struct ACE_AND_AWAIT_FUTURE_SPACE and_await_conductor final : conductor_handler_t {
 
     and_await_conductor() = delete;
@@ -212,7 +212,7 @@ struct ACE_AND_AWAIT_FUTURE_SPACE and_await_conductor final : conductor_handler_
     and_await* _and_await;
 };
 
-ACE_COMPOSED_AWAIT_FUTURE_META
+ACE_COMPOSE_AWAIT_FUTURE_META
 ACE_AND_AWAIT_FUTURE_MEMBER(bool)
 await_suspend(auto external_coro) {
     // NOTE: Creating observers for each futures
@@ -229,7 +229,7 @@ await_suspend(auto external_coro) {
     return true;
 }
 
-#undef ACE_COMPOSED_AWAIT_FUTURE_META
+#undef ACE_COMPOSE_AWAIT_FUTURE_META
 #undef ACE_AND_AWAIT_FUTURE_MEMBER
 #undef ACE_AND_AWAIT_FUTURE_SPACE
 #undef ACE_OR_AWAIT_FUTURE_MEMBER
@@ -277,4 +277,4 @@ ace::and_await<l_future_t, r_future_t> operator and(l_future_t& l_future, r_futu
     return ace::and_await{l_future, r_future};
 }
 
-#endif //ACE_CORE_COMPOSED_H
+#endif //ACE_CORE_COMPOSE_H

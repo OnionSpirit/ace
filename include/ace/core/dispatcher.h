@@ -30,10 +30,9 @@
 #include <thread>
 #include <random>
 
+#include "ace/core/misc/terms.h"
 #include "ace/core/runner.h"
-#include "ace/commands/spawn.h"
 #include "ace/core/signal.h"
-#include "ace/common/terms.h"
 
 namespace ace {
 
@@ -44,8 +43,6 @@ namespace ace {
     inline void run() noexcept;
 
     inline bool empty() noexcept;
-
-    inline commands::spawn spawn(task &&new_task) noexcept;
 
     inline void reset_signal();
 
@@ -184,8 +181,6 @@ namespace ace::core {
 
         friend inline bool ace::empty() noexcept;
 
-        friend inline commands::spawn ace::spawn(task &&new_task) noexcept;
-
         friend inline void ace::reset_signal();
 
         friend inline void ace::interrupt();
@@ -318,15 +313,6 @@ namespace ace {
         // NOTE: Clearing quant counters to be sure they are zero
         for (auto &runner: self._runners)
             runner._total_quants = 0;
-    }
-
-    /**
-     * @details Function to spawn parallel task from calling task
-     * @param new_task Task to be pushed into the same runner as calling task
-     * @return @b 'ace::core::commands::spawn' awaitable entity
-     */
-    inline commands::spawn spawn(task &&new_task) noexcept {
-        return commands::spawn(std::move(new_task));
     }
 
     inline void reset_signal() {

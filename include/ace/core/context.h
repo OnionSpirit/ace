@@ -30,17 +30,17 @@
 #ifndef ACE_ASYNC_H
 #define ACE_ASYNC_H
 
-#include "ace/futures/future.h"
-#include "ace/coroutines/promise.h"
 #include <coroutine>
 #include <expected>
 #include <iostream>
-#include <queue>
 
-#include "conduction.h"
-#include "control.h"
-#include "nukes/dynamic/regular_queue.h"
-#include "ace/common/terms.h"
+#include <nukes/dynamic/regular_queue.h>
+
+#include "ace/core/traits/conduction.h"
+#include "ace/core/traits/future.h"
+#include "ace/core/traits/promise.h"
+#include "ace/core/misc/control.h"
+#include "ace/core/misc/terms.h"
 
 
 // ToDo: yield операцию надо преретащить в генератор,

@@ -35,10 +35,10 @@
 #ifndef ACE_CORE_VORTEX_H
 #define ACE_CORE_VORTEX_H
 
-#include "dispatcher.h"
-#include "ace/common/selection.h"
+#include "ace/core/dispatcher.h"
+#include "ace/core/misc/selection.h"
 #include "ace/core/signal.h"
-#include "ace/coroutines/context.h"
+#include "ace/core/context.h"
 
 namespace ace::core {
 

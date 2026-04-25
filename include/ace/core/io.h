@@ -1,7 +1,7 @@
 #ifndef ACE_IO_H
 #define ACE_IO_H
 
-#include "kernelic.h"
+#include "ace/core/modules/kernelic.h"
 
 namespace ace::core {
 

@@ -7,7 +7,7 @@
  *
  * @code{.cpp}
  * ace::task my_task() {
- *     auto* runner = co_await ace::commands::get_runner{};
+ *     auto* runner = co_await ace::futures::get_runner{};
  *     // runner is the ace::core::runner that owns this coroutine
  *     ace::schedule(other_task(), runner);  // schedule on the same runner
  *     co_return;
@@ -16,12 +16,12 @@
  *
  * The command never suspends (@c await_suspend returns @c false).
  */
-#ifndef ACE_COMMANDS_GET_RUNNER_H
-#define ACE_COMMANDS_GET_RUNNER_H
+#ifndef ACE_FUTURE_GET_RUNNER_H
+#define ACE_FUTURE_GET_RUNNER_H
 
-#include "ace/futures/future.h"
+#include <ace/core/traits/future.h>
 
-namespace ace::commands {
+namespace ace::futures {
 
     /**
      * @brief Awaitable command that returns the calling coroutine's runner.
@@ -55,6 +55,6 @@ namespace ace::commands {
         }
     };
 
-} // end namespace ace::commands
+} // end namespace ace::futures
 
-#endif // ACE_COMMANDS_GET_RUNNER_H
+#endif // ACE_FUTURE_GET_RUNNER_H

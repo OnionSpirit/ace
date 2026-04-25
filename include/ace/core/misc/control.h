@@ -32,8 +32,8 @@
 #include <atomic>
 #include <cstddef>
 
-#include "conduction.h"
-#include "ace/common/terms.h"
+#include "ace/core/traits/conduction.h"
+#include "terms.h"
 
 namespace ace::coroutines {
 

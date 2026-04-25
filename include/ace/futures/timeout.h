@@ -34,9 +34,9 @@
 #ifndef ACE_FUTURE_TIMEOUT_H
 #define ACE_FUTURE_TIMEOUT_H
 
-#include "future.h"
-#include "ace/coroutines/context.h"
-#include "ace/core/clock.h"
+#include <ace/core/modules/clock.h>
+#include <ace/core/traits/future.h>
+#include <ace/core/context.h>
 
 using namespace std::chrono_literals;
 

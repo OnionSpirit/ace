@@ -30,7 +30,7 @@
 #ifndef ACE_CONDUCTOR_H
 #define ACE_CONDUCTOR_H
 
-#include "ace/common/terms.h"
+#include "ace/core/misc/terms.h"
 
 namespace ace::coroutines {
 
@@ -65,7 +65,7 @@ namespace ace::coroutines {
          * @details The conductor marks the context as @c e_detached; the runner
          * will drop it on the next @c yank() call.
          */
-        virtual void cancel() = 0;
+        virtual void cancel() {};
 
         virtual ~runner_conductor_handle() = default;
     };

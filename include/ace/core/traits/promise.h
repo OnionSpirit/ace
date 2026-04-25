@@ -23,17 +23,17 @@
 #ifndef ACE_PROMISE_H
 #define ACE_PROMISE_H
 
-#include "ace/futures/future.h"
-#include "ace/common/dispatch.h"
-#include "ace/common/id_alloc.h"
-
 #include <concepts>
 #include <coroutine>
 #include <type_traits>
 #include <optional>
 
-#include "control.h"
-#include "ace/common/terms.h"
+#include "ace/core/traits/future.h"
+#include "ace/core/misc/control.h"
+#include "ace/core/misc/terms.h"
+#include "ace/core/misc/dispatch.h"
+#include "ace/core/misc/id_alloc.h"
+
 
 namespace ace::coroutines {
 

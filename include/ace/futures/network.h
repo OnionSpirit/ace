@@ -4,10 +4,14 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
-#include "ace/core/io.h"
-#include "ace/common/selection.h"
+#include <ace/core/io.h>
 
 namespace ace::futures {
+
+    enum transport_entity_state {
+        e_indirect = 0,
+        e_connected = 1
+    };
 
     template <typename entity_t>
     using io_net_entity = core::io_entity<entity_t, sockaddr_in, sockaddr_in>;

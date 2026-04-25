@@ -12,9 +12,4 @@ enum class vortex_spawn_mode {
     e_thread_local,  ///< Local vortex instance for each thread
 };
 
-enum transport_entity_state {
-    e_indirect = 0,
-    e_connected = 1
-};
-
 #endif // ACE_COMMON_SELECTION_H

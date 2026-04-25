@@ -35,7 +35,21 @@
 #ifndef ACE_H
 #define ACE_H
 
-#include "ace/coroutines/context.h"
+#include "ace/core/context.h"
 #include "ace/core/dispatcher.h"
+#include "ace/core/compose.h"
+#include "ace/futures/spawn.h"
+#include "ace/futures/reattach.h"
+#include "futures/get_runner.h"
+#include "futures/roaming.h"
+
+namespace ace {
+
+    using spawn      = futures::spawn;
+    using roaming    = futures::roaming;
+    using get_runner = futures::get_runner;
+    using reattach   = futures::reattach;
+
+}
 
 #endif // ACE_H

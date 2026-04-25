@@ -1,10 +1,10 @@
-#ifndef ACE_COMMANDS_REATTACH_H
-#define ACE_COMMANDS_REATTACH_H
+#ifndef ACE_FUTURE_REATTACH_H
+#define ACE_FUTURE_REATTACH_H
 
-#include "ace/futures/future.h"
-#include "ace/core/runner.h"
+#include <ace/core/traits/future.h>
+#include <ace/core/runner.h>
 
-namespace ace::commands {
+namespace ace::futures {
 
     class reattach : public futures::future_traits<reattach> {
 
@@ -42,14 +42,14 @@ namespace ace::commands {
 //==============================- DEFINITIONS -==================================
 
 
-#define ACE_COMMANDS_REATTACH_SPACE \
-ace::commands::reattach::
+#define ACE_FUTURE_REATTACH_SPACE \
+ace::futures::reattach::
 
-#define ACE_COMMANDS_REATTACH_MEMBER(rtype) \
-rtype ACE_COMMANDS_REATTACH_SPACE
+#define ACE_FUTURE_REATTACH_MEMBER(rtype) \
+rtype ACE_FUTURE_REATTACH_SPACE
 
 
-struct ACE_COMMANDS_REATTACH_SPACE reattach_conductor : conductor_handler_t {
+struct ACE_FUTURE_REATTACH_SPACE reattach_conductor : conductor_handler_t {
 
     reattach_conductor() = delete;
 
@@ -65,12 +65,12 @@ struct ACE_COMMANDS_REATTACH_SPACE reattach_conductor : conductor_handler_t {
     core::runner* target_runner {};
 };
 
-ACE_COMMANDS_REATTACH_MEMBER(bool)
+ACE_FUTURE_REATTACH_MEMBER(bool)
 await_suspend(auto coroutine) {
     coroutine.promise()._conductor = reattach_conductor{_new_runner};
     return true;
 }
 
-#undef ACE_COMMANDS_REATTACH_SPACE
-#undef ACE_COMMANDS_REATTACH_MEMBER
-#endif // ACE_COMMANDS_REATTACH_H
+#undef ACE_FUTURE_REATTACH_SPACE
+#undef ACE_FUTURE_REATTACH_MEMBER
+#endif // ACE_FUTURE_REATTACH_H

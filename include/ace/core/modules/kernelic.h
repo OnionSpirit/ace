@@ -5,9 +5,9 @@
 #include <cstring>
 #include <liburing.h>
 
-#include "vortex.h"
-#include "ace/common/queue.h"
-#include "ace/common/selection.h"
+#include "ace/core/traits/vortex.h"
+#include "ace/core/misc/queue.h"
+#include "ace/core/misc/selection.h"
 
 namespace ace::core {
 

@@ -26,8 +26,8 @@
 #ifndef ACE_FUTURE_ASYNC_HANDLE_H
 #define ACE_FUTURE_ASYNC_HANDLE_H
 
-#include "future.h"
-#include "ace/coroutines/context.h"
+#include "ace/core/traits/future.h"
+#include "ace/core/context.h"
 
 namespace ace::futures {
 

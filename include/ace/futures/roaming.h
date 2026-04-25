@@ -12,10 +12,10 @@
  * @code{.cpp}
  * ace::task my_task() {
  *     // Pin this coroutine to its current runner (no migration)
- *     co_await ace::commands::roaming{false};
+ *     co_await ace::futures::roaming{false};
  *     // ...
  *     // Re-enable migration
- *     co_await ace::commands::roaming{true};
+ *     co_await ace::futures::roaming{true};
  *     co_return;
  * }
  * @endcode
@@ -23,12 +23,12 @@
  * The command never actually suspends the coroutine (@c await_suspend returns
  * @c false) — it only mutates the promise flag.
  */
-#ifndef ACE_COMMANDS_ROAMING_ROAMING_H
-#define ACE_COMMANDS_ROAMING_ROAMING_H
+#ifndef ACE_FUTURE_ROAMING_ROAMING_H
+#define ACE_FUTURE_ROAMING_ROAMING_H
 
-#include "ace/futures/future.h"
+#include <ace/core/traits/future.h>
 
-namespace ace::commands {
+namespace ace::futures {
 
     /**
      * @brief Awaitable command that sets the @c _roaming flag on the current promise.
@@ -72,4 +72,4 @@ namespace ace::commands {
 
 }
 
-#endif // ACE_COMMANDS_ROAMING_ROAMING_H
+#endif // ACE_FUTURE_ROAMING_ROAMING_H

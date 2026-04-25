@@ -9,9 +9,9 @@
 #include <complex>
 #include <list>
 
-#include "ace/core/vortex.h"
-#include "ace/coroutines/context.h"
-#include "ace/common/queue.h"
+#include "ace/core/traits/vortex.h"
+#include "ace/core/context.h"
+#include "ace/core/misc/queue.h"
 
 namespace ace::core {
 

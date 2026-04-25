@@ -29,20 +29,29 @@
 
 ## Features
 
-| Feature | Details |
-|---|---|
-| **Header-only** | Zero compilation overhead — just `#include "ace/ace.h"` |
-| **Lazy & eager coroutines** | `ace::async<T>` (lazy) and `ace::promise<T>` (eager) |
-| **Multi-threaded scheduler** | Work-stealing balancer with configurable runner count |
-| **Lock-free channels** | MPMC message passing with static / dynamic allocation |
-| **Cooperative mutex (cutex)** | Userspace mutex with zero kernel involvement on fast path |
-| **Time-wheel timeouts** | O(1) insert/remove — hierarchical multi-dial wheel |
-| **Task cancellation** | External `async_handle` with join / cancel / done |
-| **io_uring integration** | Async read / write / network via Linux `io_uring` |
+| Feature                      | Details                                                     |
+|------------------------------|-------------------------------------------------------------|
+| **Header-only**              | Zero compilation overhead — just `#include "ace/ace.h"`     |
+| **Lazy & eager coroutines**  | `ace::async<T>` (lazy) and `ace::promise<T>` (eager)        |
+| **Multi-threaded scheduler** | Work-stealing balancer with configurable runner count       |
+| **Lock-free channels**       | MPMC message passing with static / dynamic allocation       |
+| **Cooperative mutex (cutex)** | Userspace mutex with zero kernel involvement on fast path  |
+| **Time-wheel timeouts**      | O(1) insert/remove — hierarchical multi-dial wheel          |
+| **Task cancellation**        | External `async_handle` with join / cancel / done           |
+| **io_uring integration**     | Async read / write / network via Linux `io_uring`           |
 
 ---
 
 ## Architecture Overview
+
+### Files overview
+| Directory        | Content description                                  |
+|------------------|------------------------------------------------------|
+| **core**         | Core framework tools                                 |
+| **core/misc**    | Helpers and basic tools for the framework mechanisms |
+| **core/modules** | Vortex singletons for non-busy polling operations    |
+| **core/traits**  | Traits to define framework compatible units          |
+| **futures**      | Various future objects                               |
 
 ```mermaid
 graph TB

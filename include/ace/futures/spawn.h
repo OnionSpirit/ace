@@ -2,7 +2,7 @@
  * @file spawn.h
  * @brief Awaitable command that spawns a parallel task in the current runner.
  *
- * @details @c ace::commands::spawn is used via @c co_await ace::spawn(task).
+ * @details @c ace::futures::spawn is used via @c co_await ace::spawn(task).
  * It differs from @c ace::schedule() in two ways:
  *
  *  1. <b>Same runner</b> — the new task is attached to the *same* runner as the
@@ -22,14 +22,14 @@
  *
  * @see ace::futures::async_handle, ace::schedule
  */
-#ifndef ACE_COMMANDS_SPAWN_H
-#define ACE_COMMANDS_SPAWN_H
+#ifndef ACE_FUTURE_SPAWN_H
+#define ACE_FUTURE_SPAWN_H
 
-#include "ace/futures/future.h"
-#include "ace/core/runner.h"
-#include "ace/futures/async_handle.h"
+#include <ace/core/traits/future.h>
+#include <ace/core/runner.h>
+#include <ace/core/async_handle.h>
 
-namespace ace::commands {
+namespace ace::futures {
 
     /**
      * @brief Awaitable that attaches a new task to the current runner.
@@ -86,4 +86,4 @@ namespace ace::commands {
 
 }
 
-#endif // ACE_COMMANDS_SPAWN_H
+#endif // ACE_FUTURE_SPAWN_H

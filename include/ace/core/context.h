@@ -68,7 +68,7 @@ namespace ace::core {
      * @see ace::async, ace::promise
      */
     template<typename returnT =void, is_promise_rule promise_rule_t =differed>
-    struct context : core::traits::busy_future_traits<context<returnT, promise_rule_t>> {
+    struct context : traits::busy_future_traits<context<returnT, promise_rule_t>> {
 
         IMPORT_BUSY_FUTURE_ENV(context)
 

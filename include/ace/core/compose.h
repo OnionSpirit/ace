@@ -9,10 +9,10 @@
 #include "ace/core/async_handle.h"
 #include "ace/core/traits/future.h"
 
-namespace ace {
+namespace ace::core {
 
     template <typename l_future_t, typename r_future_t>
-    struct or_await final : core::traits::future_traits<or_await<l_future_t, r_future_t>> {
+    struct or_await final : traits::future_traits<or_await<l_future_t, r_future_t>> {
 
         IMPORT_FUTURE_ENV(or_await);
 
@@ -40,12 +40,12 @@ namespace ace {
         task _waiter;
         l_future_t& _l_future;
         r_future_t& _r_future;
-        std::optional<core::async_handle> _l_future_observer;
-        std::optional<core::async_handle> _r_future_observer;
+        std::optional<async_handle> _l_future_observer;
+        std::optional<async_handle> _r_future_observer;
         std::conditional_t<std::same_as<return_t, void>, int, return_t> _result;
 
         template <typename future_t>
-        task observer(future_t& future, std::optional<core::async_handle>& opposite_observer) {
+        task observer(future_t& future, std::optional<async_handle>& opposite_observer) {
 
             typedef decltype(future_t{}.await_resume()) future_ret_t;
 
@@ -57,7 +57,7 @@ namespace ace {
             if (opposite_observer)
                 opposite_observer->cancel();
 
-            core::runner::reattach(std::move(_waiter));
+            runner::reattach(std::move(_waiter));
         };
 
         bool await_suspend(auto);
@@ -70,7 +70,7 @@ namespace ace {
     };
 
     template <typename l_future_t, typename r_future_t>
-    struct and_await final : core::traits::future_traits<and_await<l_future_t, r_future_t>> {
+    struct and_await final : traits::future_traits<and_await<l_future_t, r_future_t>> {
 
         IMPORT_FUTURE_ENV(and_await);
 
@@ -100,12 +100,12 @@ namespace ace {
         task _waiter;
         l_future_t& _l_future;
         r_future_t& _r_future;
-        std::optional<core::async_handle> _l_future_observer;
-        std::optional<core::async_handle> _r_future_observer;
+        std::optional<async_handle> _l_future_observer;
+        std::optional<async_handle> _r_future_observer;
         std::conditional_t<std::same_as<return_t, void>, int, return_t> _result;
 
         template <size_t result_id, typename future_t>
-        task observer(future_t& future, std::optional<core::async_handle>& opposite_observer) {
+        task observer(future_t& future, std::optional<async_handle>& opposite_observer) {
 
             typedef decltype(future_t{}.await_resume()) future_ret_t;
 
@@ -120,7 +120,7 @@ namespace ace {
                 co_await opposite_observer->join();
 
             if constexpr (result_id == 0)
-                core::runner::reattach(std::move(_waiter));
+                runner::reattach(std::move(_waiter));
         };
 
         bool await_suspend(auto);
@@ -132,7 +132,7 @@ namespace ace {
         };
     };
 
-} // end namespace ace
+} // end namespace ace::core
 
 //==============================- DEFINITIONS -==================================
 
@@ -140,26 +140,26 @@ namespace ace {
     template <typename l_future_t, typename r_future_t>
 
 #define ACE_OR_AWAIT_FUTURE_SPACE \
-    ace::or_await<l_future_t, r_future_t>::
+    ace::core::or_await<l_future_t, r_future_t>::
 
 #define ACE_OR_AWAIT_FUTURE_MEMBER(return_t) \
-    return_t ace::or_await<l_future_t, r_future_t>::
+    return_t ACE_OR_AWAIT_FUTURE_SPACE
 
 #define ACE_AND_AWAIT_FUTURE_SPACE \
-    ace::and_await<l_future_t, r_future_t>::
+    ace::core::and_await<l_future_t, r_future_t>::
 
 #define ACE_AND_AWAIT_FUTURE_MEMBER(return_t) \
-    return_t ace::and_await<l_future_t, r_future_t>::
+    return_t ACE_AND_AWAIT_FUTURE_SPACE
 
 ACE_COMPOSE_AWAIT_FUTURE_META
 struct ACE_OR_AWAIT_FUTURE_SPACE or_await_conductor final : conductor_handler_t {
 
     or_await_conductor() = delete;
 
-    explicit or_await_conductor(ace::or_await<l_future_t, r_future_t>* or_await_)
+    explicit or_await_conductor(or_await* or_await_)
         : _or_await(or_await_) {};
 
-    void forward(ace::task&& ctx) override {
+    void forward(task&& ctx) override {
         _or_await->_waiter = std::move(ctx);
     }
 
@@ -180,11 +180,11 @@ await_suspend(auto external_coro) {
     task _l_observer = observer(_l_future, _r_future_observer);
     task _r_observer = observer(_r_future, _l_future_observer);
     // NOTE: Creating Handlers for observation tasks
-    _l_future_observer = core::async_handle {_l_observer.observe()};
-    _r_future_observer = core::async_handle {_r_observer.observe()};
+    _l_future_observer = async_handle {_l_observer.observe()};
+    _r_future_observer = async_handle {_r_observer.observe()};
     // NOTE: Scheduling observers
-    schedule(std::move(_l_observer), reinterpret_cast<core::runner*>(external_coro.promise()._runner_pool));
-    schedule(std::move(_r_observer), reinterpret_cast<core::runner*>(external_coro.promise()._runner_pool));
+    schedule(std::move(_l_observer), reinterpret_cast<runner*>(external_coro.promise()._runner_pool));
+    schedule(std::move(_r_observer), reinterpret_cast<runner*>(external_coro.promise()._runner_pool));
     // NOTE: Setting conductor for external waiter
     external_coro.promise()._runner_conductor = or_await_conductor {this};
     return true;
@@ -195,10 +195,10 @@ struct ACE_AND_AWAIT_FUTURE_SPACE and_await_conductor final : conductor_handler_
 
     and_await_conductor() = delete;
 
-    explicit and_await_conductor(ace::and_await<l_future_t, r_future_t>* and_await_)
+    explicit and_await_conductor(and_await* and_await_)
         : _and_await(and_await_) {};
 
-    void forward(ace::task&& ctx) override {
+    void forward(task&& ctx) override {
         _and_await->_waiter = std::move(ctx);
     }
 
@@ -219,11 +219,11 @@ await_suspend(auto external_coro) {
     task _l_observer = observer<0>(_l_future, _r_future_observer);
     task _r_observer = observer<1>(_r_future, _l_future_observer);
     // NOTE: Creating Handlers for observation tasks
-    _l_future_observer = core::async_handle {_l_observer.observe()};
-    _r_future_observer = core::async_handle {_r_observer.observe()};
+    _l_future_observer = async_handle {_l_observer.observe()};
+    _r_future_observer = async_handle {_r_observer.observe()};
     // NOTE: Scheduling observers
-    schedule(std::move(_l_observer), reinterpret_cast<core::runner*>(external_coro.promise()._runner_pool));
-    schedule(std::move(_r_observer), reinterpret_cast<core::runner*>(external_coro.promise()._runner_pool));
+    schedule(std::move(_l_observer), reinterpret_cast<runner*>(external_coro.promise()._runner_pool));
+    schedule(std::move(_r_observer), reinterpret_cast<runner*>(external_coro.promise()._runner_pool));
     // NOTE: Setting conductor for external waiter
     external_coro.promise()._runner_conductor = and_await_conductor {this};
     return true;
@@ -238,43 +238,43 @@ await_suspend(auto external_coro) {
 //==============================- OPERATOR DEFINITIONS -=========================
 
 template <typename l_future_t, typename r_future_t>
-ace::or_await<l_future_t, r_future_t> operator or(l_future_t&& l_future, r_future_t&& r_future) {
-    return ace::or_await{l_future, r_future};
+ace::core::or_await<l_future_t, r_future_t> operator or(l_future_t&& l_future, r_future_t&& r_future) {
+    return ace::core::or_await{l_future, r_future};
 }
 
 template <typename l_future_t, typename r_future_t>
-ace::or_await<l_future_t, r_future_t> operator or(l_future_t& l_future, r_future_t&& r_future) {
-    return ace::or_await{l_future, r_future};
+ace::core::or_await<l_future_t, r_future_t> operator or(l_future_t& l_future, r_future_t&& r_future) {
+    return ace::core::or_await{l_future, r_future};
 }
 
 template <typename l_future_t, typename r_future_t>
-ace::or_await<l_future_t, r_future_t> operator or(l_future_t&& l_future, r_future_t& r_future) {
-    return ace::or_await{l_future, r_future};
+ace::core::or_await<l_future_t, r_future_t> operator or(l_future_t&& l_future, r_future_t& r_future) {
+    return ace::core::or_await{l_future, r_future};
 }
 
 template <typename l_future_t, typename r_future_t>
-ace::or_await<l_future_t, r_future_t> operator or(l_future_t& l_future, r_future_t& r_future) {
-    return ace::or_await{l_future, r_future};
+ace::core::or_await<l_future_t, r_future_t> operator or(l_future_t& l_future, r_future_t& r_future) {
+    return ace::core::or_await{l_future, r_future};
 }
 
 template <typename l_future_t, typename r_future_t>
-ace::and_await<l_future_t, r_future_t> operator and(l_future_t&& l_future, r_future_t&& r_future) {
-    return ace::and_await{l_future, r_future};
+ace::core::and_await<l_future_t, r_future_t> operator and(l_future_t&& l_future, r_future_t&& r_future) {
+    return ace::core::and_await{l_future, r_future};
 }
 
 template <typename l_future_t, typename r_future_t>
-ace::and_await<l_future_t, r_future_t> operator and(l_future_t& l_future, r_future_t&& r_future) {
-    return ace::and_await{l_future, r_future};
+ace::core::and_await<l_future_t, r_future_t> operator and(l_future_t& l_future, r_future_t&& r_future) {
+    return ace::core::and_await{l_future, r_future};
 }
 
 template <typename l_future_t, typename r_future_t>
-ace::and_await<l_future_t, r_future_t> operator and(l_future_t&& l_future, r_future_t& r_future) {
-    return ace::and_await{l_future, r_future};
+ace::core::and_await<l_future_t, r_future_t> operator and(l_future_t&& l_future, r_future_t& r_future) {
+    return ace::core::and_await{l_future, r_future};
 }
 
 template <typename l_future_t, typename r_future_t>
-ace::and_await<l_future_t, r_future_t> operator and(l_future_t& l_future, r_future_t& r_future) {
-    return ace::and_await{l_future, r_future};
+ace::core::and_await<l_future_t, r_future_t> operator and(l_future_t& l_future, r_future_t& r_future) {
+    return ace::core::and_await{l_future, r_future};
 }
 
 #endif //ACE_CORE_COMPOSE_H

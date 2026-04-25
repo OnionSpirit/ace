@@ -29,7 +29,7 @@
 #include <optional>
 
 #include "ace/core/traits/future.h"
-#include "ace/core/misc/control.h"
+#include "ace/core/tools/control.h"
 #include "ace/core/misc/terms.h"
 #include "ace/core/misc/dispatch.h"
 #include "ace/core/misc/id_alloc.h"

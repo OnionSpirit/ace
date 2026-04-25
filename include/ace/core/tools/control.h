@@ -32,8 +32,8 @@
 #include <atomic>
 #include <cstddef>
 
-#include "ace/core/traits/conduction.h"
-#include "terms.h"
+#include "ace/core/tools/conduction.h"
+#include "ace/core/misc/terms.h"
 
 namespace ace::core::misc {
 

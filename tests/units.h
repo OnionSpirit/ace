@@ -6,12 +6,12 @@
 #include <memory>
 
 #include <ace/core/traits/future.h>
+#include <ace/core/tools/compose.h>
 #include <ace/futures/get_runner.h>
 #include <ace/futures/channel.h>
 #include <ace/futures/timeout.h>
 #include <ace/futures/cutex.h>
 #include <ace/futures/network.h>
-#include <ace/core/compose.h>
 #include <ace/ace.h>
 
 struct once_suspend : ace::core::traits::busy_future_traits<once_suspend> {

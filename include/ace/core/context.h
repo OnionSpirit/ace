@@ -36,11 +36,11 @@
 
 #include <nukes/dynamic/regular_queue.h>
 
-#include "ace/core/traits/conduction.h"
 #include "ace/core/traits/future.h"
 #include "ace/core/traits/promise.h"
-#include "ace/core/misc/control.h"
 #include "ace/core/misc/terms.h"
+#include "ace/core/tools/control.h"
+#include "ace/core/tools/conduction.h"
 
 
 // ToDo: yield операцию надо преретащить в генератор,

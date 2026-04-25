@@ -37,7 +37,7 @@
 
 #include "ace/core/context.h"
 #include "ace/core/dispatcher.h"
-#include "ace/core/compose.h"
+#include "ace/core/tools/compose.h"
 #include "ace/futures/spawn.h"
 #include "ace/futures/reattach.h"
 #include "futures/get_runner.h"

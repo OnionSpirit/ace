@@ -9,7 +9,7 @@
 #include "ace/core/misc/queue.h"
 #include "ace/core/misc/selection.h"
 
-namespace ace::core {
+namespace ace::core::modules {
 
     /**
      * @brief Proxy entity with activation method to use it as uring user_data
@@ -184,13 +184,13 @@ namespace ace::core {
 }
 
 #define ACE_CORE_KERNEL_CONTROLLER_SPACE \
-ace::core::kernel_controller::
+ace::core::modules::kernel_controller::
 
 #define ACE_CORE_KERNEL_CONTROLLER_MEMBER(returnT) \
 inline returnT ACE_CORE_KERNEL_CONTROLLER_SPACE
 
 #define ACE_CORE_KERNEL_ENTITY_SPACE \
-ace::core::kernel_controller::kernel_entity::
+ace::core::modules::kernel_controller::kernel_entity::
 
 #define ACE_CORE_KERNEL_ENTITY_MEMBER(returnT) \
 inline returnT ACE_CORE_KERNEL_ENTITY_SPACE

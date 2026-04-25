@@ -50,7 +50,7 @@ namespace ace::futures {
  */
 class timeout : public core::traits::future_traits<timeout> {
 
-    core::duration_t _duration; ///< Suspension duration in milliseconds.
+    core::modules::duration_t _duration; ///< Suspension duration in milliseconds.
 
     struct timeout_conductor;
     friend timeout_conductor;
@@ -101,8 +101,8 @@ struct expire : timeout {
      * @param expires  The absolute deadline.  The computed duration is
      *                 @c expires - clock::current_time().
      */
-    explicit expire(core::timepoint_t expires)
-        : timeout(expires - core::clock::current_time()) {}
+    explicit expire(core::modules::timepoint_t expires)
+        : timeout(expires - core::modules::clock::current_time()) {}
 
     expire() = default;
 };
@@ -127,17 +127,17 @@ struct ACE_FUTURE_TIMEOUT_SPACE timeout_conductor : conductor_handler_t {
         : _timeout(timeout_) {};
 
     void forward(task&& ctx) override {
-        _injected_node = core::clock::subscribe(std::move(ctx), _timeout->_duration);
+        _injected_node = core::modules::clock::subscribe(std::move(ctx), _timeout->_duration);
     }
 
     void cancel() override {
         if (_injected_node)
-            core::clock::detach(_injected_node);
+            core::modules::clock::detach(_injected_node);
     }
 
     ~timeout_conductor() override = default;
 
-    core::clock_node* _injected_node = nullptr;
+    core::modules::clock_node* _injected_node = nullptr;
     timeout* const _timeout;
 };
 

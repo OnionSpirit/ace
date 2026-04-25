@@ -13,7 +13,7 @@
 #include "ace/core/context.h"
 #include "ace/core/misc/queue.h"
 
-namespace ace::core {
+namespace ace::core::modules {
 
     using timepoint_t = decltype(
         std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(

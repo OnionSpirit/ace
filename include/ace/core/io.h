@@ -6,7 +6,7 @@
 namespace ace::core {
 
     template <typename query_t>
-    concept is_query = requires(query_t q, kernel_observer* kwp) {
+    concept is_query = requires(query_t q, modules::kernel_observer* kwp) {
         { q.setup_query(kwp) } -> std::same_as<bool>;
     };
 
@@ -28,7 +28,7 @@ namespace ace::core {
      * @tparam query_core_t Specific query type.
      */
     template <typename query_core_t>
-    struct io_query : traits::future_traits<query_core_t>, kernel_observer {
+    struct io_query : traits::future_traits<query_core_t>, modules::kernel_observer {
 
         IMPORT_FUTURE_ENV(query_core_t);
 
@@ -50,7 +50,7 @@ namespace ace::core {
 
             void cancel() override {
                 // TODO: Improve cancel with pop from local submission queue
-                kernel_controller::cancel(_query, 0);
+                modules::kernel_controller::cancel(_query, 0);
             }
 
             ~io_socket_query_conductor() override = default;
@@ -105,7 +105,7 @@ namespace ace::core {
             , _offset(offset) {}
 
         bool setup_query(kernel_observer* kwp) const {
-            return kernel_controller::read(kwp, _fd, _buf, _nbytes, _offset);
+            return modules::kernel_controller::read(kwp, _fd, _buf, _nbytes, _offset);
         }
 
         [[nodiscard]] int await_resume() const {
@@ -133,7 +133,7 @@ namespace ace::core {
             , _offset(offset) {}
 
         bool setup_query(kernel_observer* kwp) const {
-            return ace::core::kernel_controller::write(kwp, _fd, _buf, _nbytes, _offset);
+            return modules::kernel_controller::write(kwp, _fd, _buf, _nbytes, _offset);
         }
 
         [[nodiscard]] int await_resume() const { return _res; }
@@ -154,7 +154,7 @@ namespace ace::core {
         explicit close_query(const int fd) : io_query_t(fd) {}
 
         bool setup_query(kernel_observer* kwp) const noexcept {
-            return kernel_controller::close(kwp, _fd);
+            return modules::kernel_controller::close(kwp, _fd);
         }
 
         [[nodiscard]] int await_resume() const { return _res; }

@@ -40,12 +40,12 @@ namespace ace {
         task _waiter;
         l_future_t& _l_future;
         r_future_t& _r_future;
-        std::optional<futures::async_handle> _l_future_observer;
-        std::optional<futures::async_handle> _r_future_observer;
+        std::optional<core::async_handle> _l_future_observer;
+        std::optional<core::async_handle> _r_future_observer;
         std::conditional_t<std::same_as<return_t, void>, int, return_t> _result;
 
         template <typename future_t>
-        task observer(future_t& future, std::optional<futures::async_handle>& opposite_observer) {
+        task observer(future_t& future, std::optional<core::async_handle>& opposite_observer) {
 
             typedef decltype(future_t{}.await_resume()) future_ret_t;
 
@@ -100,12 +100,12 @@ namespace ace {
         task _waiter;
         l_future_t& _l_future;
         r_future_t& _r_future;
-        std::optional<futures::async_handle> _l_future_observer;
-        std::optional<futures::async_handle> _r_future_observer;
+        std::optional<core::async_handle> _l_future_observer;
+        std::optional<core::async_handle> _r_future_observer;
         std::conditional_t<std::same_as<return_t, void>, int, return_t> _result;
 
         template <size_t result_id, typename future_t>
-        task observer(future_t& future, std::optional<futures::async_handle>& opposite_observer) {
+        task observer(future_t& future, std::optional<core::async_handle>& opposite_observer) {
 
             typedef decltype(future_t{}.await_resume()) future_ret_t;
 
@@ -180,8 +180,8 @@ await_suspend(auto external_coro) {
     task _l_observer = observer(_l_future, _r_future_observer);
     task _r_observer = observer(_r_future, _l_future_observer);
     // NOTE: Creating Handlers for observation tasks
-    _l_future_observer = futures::async_handle {_l_observer.observe()};
-    _r_future_observer = futures::async_handle {_r_observer.observe()};
+    _l_future_observer = core::async_handle {_l_observer.observe()};
+    _r_future_observer = core::async_handle {_r_observer.observe()};
     // NOTE: Scheduling observers
     schedule(std::move(_l_observer), reinterpret_cast<core::runner*>(external_coro.promise()._runner_pool));
     schedule(std::move(_r_observer), reinterpret_cast<core::runner*>(external_coro.promise()._runner_pool));
@@ -219,8 +219,8 @@ await_suspend(auto external_coro) {
     task _l_observer = observer<0>(_l_future, _r_future_observer);
     task _r_observer = observer<1>(_r_future, _l_future_observer);
     // NOTE: Creating Handlers for observation tasks
-    _l_future_observer = futures::async_handle {_l_observer.observe()};
-    _r_future_observer = futures::async_handle {_r_observer.observe()};
+    _l_future_observer = core::async_handle {_l_observer.observe()};
+    _r_future_observer = core::async_handle {_r_observer.observe()};
     // NOTE: Scheduling observers
     schedule(std::move(_l_observer), reinterpret_cast<core::runner*>(external_coro.promise()._runner_pool));
     schedule(std::move(_r_observer), reinterpret_cast<core::runner*>(external_coro.promise()._runner_pool));

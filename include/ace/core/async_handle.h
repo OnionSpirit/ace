@@ -29,7 +29,7 @@
 #include "ace/core/traits/future.h"
 #include "ace/core/context.h"
 
-namespace ace::futures {
+namespace ace::core {
 
     /**
      * @brief Awaitable future that suspends the caller until a target coroutine finishes.
@@ -158,13 +158,13 @@ namespace ace::futures {
 
 
 #define ACE_FUTURE_ASYNC_HANDLE_SPACE \
-ace::futures::async_handle::
+ace::core::async_handle::
 
 #define ACE_FUTURE_ASYNC_HANDLE_MEMBER(returnT) \
 returnT ACE_FUTURE_ASYNC_HANDLE_SPACE
 
 #define ACE_FUTURE_JOIN_HANDLER_FUTURE_SPACE \
-ace::futures::join_handler::
+ace::core::join_handler::
 
 #define ACE_FUTURE_JOIN_HANDLER_FUTURE_MEMBER(returnT) \
 returnT ACE_FUTURE_JOIN_HANDLER_FUTURE_SPACE

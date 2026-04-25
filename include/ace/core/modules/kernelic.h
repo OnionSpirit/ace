@@ -39,7 +39,7 @@ namespace ace::core::modules {
     /**
      * @brief Thread local vortex to work with uring queues without kernel notification
      */
-    struct kernel_controller : vortex_traits<kernel_controller, vortex_spawn_mode::e_thread_local> {
+    struct kernel_controller : traits::vortex_traits<kernel_controller, vortex_spawn_mode::e_thread_local> {
 
     private:
 

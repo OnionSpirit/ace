@@ -408,7 +408,7 @@ namespace ace::core::modules {
 
     };
 
-    struct clock : vortex_traits<clock, vortex_spawn_mode::e_thread_local> {
+    struct clock : traits::vortex_traits<clock, vortex_spawn_mode::e_thread_local> {
 
         clock() = default;
 

@@ -59,6 +59,10 @@ namespace ace::core {
     template <typename vortex_t>
     concept is_vortex_compatible = is_vortex_promise<vortex_t> or is_vortex_routine<vortex_t>;
 
+}
+
+namespace ace::core::traits {
+
     template <typename derived_t, vortex_spawn_mode spawn_mode_v>
     class vortex_traits {
 

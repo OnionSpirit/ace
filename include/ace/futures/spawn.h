@@ -70,7 +70,7 @@ namespace ace::futures {
          * @return Always @c false — the caller is never suspended.
          */
         bool await_suspend(auto coroutine) {
-            const auto* runner_ptr = core::pool_to_runner(coroutine.promise()._runner_pool);
+            auto* runner_ptr = core::pool_to_runner(coroutine.promise()._runner_pool);
             _task._coroutine.promise()._roaming = coroutine.promise()._roaming = false;
             runner_ptr->attach(std::forward<task>(_task));
             return false;
@@ -80,7 +80,7 @@ namespace ace::futures {
          * @brief C++20 awaitable protocol — return the task handle.
          * @return An @c async_handle wrapping the spawned task's control block.
          */
-        ace::core::async_handle await_resume() const { return ace::core::async_handle{_handle}; }
+        core::async_handle await_resume() const { return core::async_handle{_handle}; }
 
     };
 

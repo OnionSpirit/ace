@@ -80,8 +80,8 @@ namespace ace::core {
 
         ACE_CACHE_LINE(4)
 
-        average_quants              _quants{}; ///< Average amount of the time quants for the run operation call
-        std::atomic<int>*           _common_quants{}; ///< Pointer to common quant counter
+        average_quants              _quants       {}; ///< Average amount of the time quants for the run operation call
+        int                         _tasks_amount {};
 
         runner() = default;
 
@@ -140,6 +140,22 @@ namespace ace::core {
         static void threadsafe_reattach(pool_node_ptr& node);
 
         /**
+         * @details Calculates runner's velocity
+         * @return Velocity value
+         */
+        double velocity() const noexcept;
+
+        /**
+         * @details Calculates runner's velocity
+         * @param interval Interval to add to time spent moving average
+         * @return Velocity value
+         */
+        template<typename Rep, typename Period>
+        double velocity(std::chrono::duration<Rep, Period> interval) noexcept {
+            return static_cast<double>(_tasks_amount) / _quants.add(interval.count());
+        }
+
+        /**
          * @details Resumes only one ready task
          * @return @b true if task was processed, @b false otherwise
          */
@@ -149,7 +165,7 @@ namespace ace::core {
          * @brief Ejects task from runner
          * @return Optional of ejected task
          */
-        std::optional<task> eject() const noexcept;
+        std::optional<task> eject() noexcept;
 
         /**
          * @details Resumes tasks from the ready task pool until it is empty, or limit (1024) reached.
@@ -163,7 +179,8 @@ namespace ace::core {
          * @return void
          */
         template<typename async_return_t>
-        void attach(async<async_return_t> &&new_task) const noexcept {
+        void attach(async<async_return_t> &&new_task) noexcept {
+            ++_tasks_amount;
             new_task._coroutine.promise()._runner_pool = &_pool;
             _pool.push(std::forward<task>(async_wrap(std::forward<async<async_return_t> >(new_task))));
         }
@@ -176,7 +193,8 @@ namespace ace::core {
     };
 
     template<>
-    inline void runner::attach<void>(task &&new_task) const noexcept {
+    inline void runner::attach<void>(task &&new_task) noexcept {
+        ++_tasks_amount;
         new_task._coroutine.promise()._runner_pool = &_pool;
         _pool.push(std::forward<task>(new_task));
     }
@@ -189,20 +207,20 @@ namespace ace::core {
         this->_pool = std::move(t._pool);
         this->_nextup = t._nextup;
         t._nextup = std::nullopt;
-        this->_common_quants = t._common_quants;
-        t._common_quants = nullptr;
         this->_quants = std::move(t._quants);
         this->_interthread_pool = std::move(t._interthread_pool);
+        this->_tasks_amount = t._tasks_amount;
+        t._tasks_amount = 0;
     };
 
     inline runner& runner::operator=(runner &&t) noexcept {
         this->_pool = std::move(t._pool);
         this->_nextup = t._nextup;
         t._nextup = std::nullopt;
-        this->_common_quants = t._common_quants;
-        t._common_quants = nullptr;
         this->_quants = std::move(t._quants);
         this->_interthread_pool = std::move(t._interthread_pool);
+        this->_tasks_amount = t._tasks_amount;
+        t._tasks_amount = 0;
         return *this;
     };
 
@@ -255,6 +273,11 @@ namespace ace::core {
     }
 
 
+
+    double runner::velocity() const noexcept {
+        return static_cast<double>(_tasks_amount) / _quants.value();
+    }
+
     inline bool runner::yank() noexcept {
         core::promise_touch_result touch_result = core::promise_touch_result::e_executed;
         pool_node_ptr task_node;
@@ -286,7 +309,7 @@ namespace ace::core {
         task_node->_data.awake(&touch_result);
 
         // NOTE: Checking if context can be resumed
-        const bool is_resumable{
+        const bool is_resumable {
             task_node->_data
             and touch_result not_eq core::promise_touch_result::e_failed
             and touch_result not_eq core::promise_touch_result::e_finished
@@ -294,7 +317,7 @@ namespace ace::core {
         };
 
         // NOTE: Checking if the context shall be forwarded via passed conductor
-        const bool is_conducted{
+        const bool is_conducted {
             is_resumable
             and task_node->_data._coroutine.promise()._runner_conductor
         };
@@ -306,6 +329,8 @@ namespace ace::core {
         if (is_conducted) [[likely]]
             task_node = task_node->_data._coroutine.promise()._runner_conductor->forward_node(task_node);
 
+        if (not is_resumable) [[unlikely]] --_tasks_amount;
+
         // NOTE: If task is idle, releasing it's node. Else returning it back to the local pool
         if (is_idle and task_node) _pool.release_node(task_node);
         else if (task_node) _pool.push_node(task_node);
@@ -313,13 +338,13 @@ namespace ace::core {
         return true;
     }
 
-
-    inline std::optional<task> runner::eject() const noexcept {
-        if (task ejective; _pool.pop(ejective)) [[likely]]
-                return ejective;
+    inline std::optional<task> runner::eject() noexcept {
+        if (task ejective; _pool.pop(ejective)) [[likely]] {
+            --_tasks_amount;
+            return ejective;
+        }
         return std::nullopt;
     }
-
 
     inline bool runner::run() noexcept {
         int i = 0;

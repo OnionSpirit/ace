@@ -38,7 +38,7 @@ namespace ace {
 
     inline bool reload() noexcept;
 
-    inline void schedule(task &&new_task, const core::runner* = nullptr) noexcept;
+    inline void schedule(task &&new_task, core::runner* = nullptr) noexcept;
 
     inline void run() noexcept;
 
@@ -87,9 +87,6 @@ namespace ace::core {
         dispatcher() {
             fetch_config();
             _runners.resize(_dispatcher_config._runners_amount);
-            if (_dispatcher_config._runners_amount > 1)
-                for (auto &runner: _runners)
-                    runner._common_quants = &_common_quants;
             _workers_states.resize(_dispatcher_config._runners_amount);
         };
 
@@ -107,11 +104,11 @@ namespace ace::core {
             int _rounds{0}; ///< Number of consecutive 1 ms work rounds completed.
         };
 
-        dispatcher_config _dispatcher_config{};
-        std::atomic<uint32_t> _runner_selector{};
-        std::atomic<int> _common_quants{};
-        std::vector<runner> _runners{};
-        std::vector<worker_state> _workers_states{};
+        dispatcher_config _dispatcher_config        {};
+        std::atomic<uint32_t> _runner_selector      {};
+        std::atomic<double>   _velocity             {};
+        std::vector<runner> _runners                {};
+        std::vector<worker_state> _workers_states   {};
 
         sig_pipe_t _sig_pipe{};
 
@@ -126,19 +123,20 @@ namespace ace::core {
             auto now = start;
 
             // NOTE: Working with runner until interval ends (also updating last ts)
-            int old_quants {};
+            double old_velocity {};
             while (now - start < 1ms) {
-                // if (_runners[worker_id]._common_quants)
-                //     old_quants = _runners[worker_id]._quants.value();
+                if (_dispatcher_config._runners_amount > 1) {
+                    old_velocity = _runners[worker_id].velocity();
+                    _velocity.fetch_add(old_velocity, std::memory_order_relaxed);
+                }
                 active = _runners[worker_id].run() or active;
                 fetch_time();
                 now = get_time();
-                // if (_runners[worker_id]._common_quants) {
-                //     _runners[worker_id]._common_quants->fetch_add(
-                //         _runners[worker_id]._quants.add((now - start).count()),
-                //         std::memory_order_relaxed);
-                //     _runners[worker_id]._common_quants->fetch_sub(old_quants, std::memory_order_relaxed);
-                // }
+                if (_dispatcher_config._runners_amount > 1) {
+                    const double new_velocity = _runners[worker_id].velocity(now - start);
+                    _velocity.fetch_add(new_velocity,std::memory_order_relaxed);
+                    _velocity.fetch_sub(old_velocity, std::memory_order_relaxed);
+                }
             }
 
             // NOTE: Updating runner status
@@ -184,7 +182,7 @@ namespace ace::core {
 
         friend inline bool ace::reload() noexcept;
 
-        friend inline void ace::schedule(task &&new_task, const runner*) noexcept;
+        friend inline void ace::schedule(task &&new_task, runner*) noexcept;
 
         friend inline void ace::run() noexcept;
 
@@ -234,9 +232,6 @@ namespace ace {
         self.fetch_config();
         self._runners.clear();
         self._runners.resize(self._dispatcher_config._runners_amount);
-        if (self._dispatcher_config._runners_amount > 1)
-            for (auto &runner: self._runners)
-                runner._common_quants = &self._common_quants;
         self._workers_states.clear();
         self._workers_states.resize(self._dispatcher_config._runners_amount);
         return true;
@@ -248,7 +243,7 @@ namespace ace {
      * @param rnr Specific runner to schedule on
      * @return void
      */
-    inline void schedule(task &&new_task, const core::runner *rnr) noexcept {
+    inline void schedule(task &&new_task, core::runner *rnr) noexcept {
         new_task._coroutine.promise()._roaming = true;
         auto& self = core::dispatcher::get_instance();
         if (not rnr) {
@@ -257,10 +252,10 @@ namespace ace {
                 self._runners[0].attach(std::forward<task>(new_task));
                 return;
             }
-            // NOTE: Fetching amount of time quants around all runners
-            const auto quants = static_cast<double>(self._common_quants.load());
-            // NOTE: Round-Robin balancing on Zero quants count
-            if (quants < 1.0) {
+            // NOTE: Fetching amount of load score around all runners
+            const auto velocity = self._velocity.load();
+            // NOTE: Round-Robin balancing on Zero score count
+            if (velocity < 1.0) {
                 self.round_robin(std::move(new_task));
                 return;
             }
@@ -272,9 +267,11 @@ namespace ace {
             const double probability{distrib(gen)};
             double probability_accumulator{};
 
-            for (const auto &runner: self._runners) {
-                const double runner_probability = 1.0 - (static_cast<double>(runner._quants.value()) / quants);
-                probability_accumulator += runner_probability;
+            for (auto &runner: self._runners) {
+                const double runner_velocity = runner.velocity();
+                const double normalized_velocity = runner_velocity / velocity;
+                const double runner_attractiveness = 1.0 - normalized_velocity;
+                probability_accumulator += runner_attractiveness;
                 if (probability < probability_accumulator) {
                     runner.attach(std::forward<task>(new_task));
                     return;

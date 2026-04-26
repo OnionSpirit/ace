@@ -26,8 +26,6 @@ namespace ace::futures {
  * @tparam data_t Storable data type.
  * @tparam data_buffer_size_v Size of data buffer
  * @tparam data_allocation_v Data buffer allocation policy
- * @tparam waiters_buffer_size_v Size of waiters buffer
- * @tparam waiters_allocation_v Waiters buffer allocation policy
  */
 template
 <
@@ -35,11 +33,7 @@ template
 
     size_t data_buffer_size_v = 1ul,
 
-    allocation_type data_allocation_v = allocation_type::e_dynamic,
-
-    size_t waiters_buffer_size_v = 1ul,
-
-    allocation_type waiters_allocation_v = allocation_type::e_dynamic
+    allocation_type data_allocation_v = allocation_type::e_dynamic
 >
 class channel {
 
@@ -57,12 +51,8 @@ class channel {
         return define_storage<data_t, data_allocation_v, data_buffer_size_v>();
     }
 
-    static auto consteval define_waiters_storage() {
-        return define_storage<task, waiters_allocation_v, waiters_buffer_size_v>();
-    }
-
     typedef std::decay_t<decltype(define_data_storage())> data_storage_t;
-    typedef std::decay_t<decltype(define_waiters_storage())> waiters_storage_t;
+    typedef nukes::dynamic::mpmc_queue<task> waiters_storage_t;
 
     class pull_impl;
     friend pull_impl;
@@ -157,10 +147,7 @@ class channel_st {
     void notify();
 
     typedef std::queue<data_t> data_storage_t;
-    typedef std::queue<task> waiters_storage_t;
-
-    // common::slab_mempool<data_t> _data_pool;
-    // common::slab_mempool<task> _waiter_pool;
+    typedef nukes::dynamic::reg_queue<task> waiters_storage_t;
 
 public:
 
@@ -239,28 +226,19 @@ public:
 /**
  * @brief Static Channel with bounded amount of waiters
  */
-template <typename Type, size_t DataBufferSize = 1ul, size_t WaitersBufferSize = 1ul>
+template <typename Type, size_t DataBufferSize = 1ul>
 using channel_static = channel
 <
     Type,
     DataBufferSize,
-    allocation_type::e_static,
-    WaitersBufferSize,
     allocation_type::e_static
 >;
 
 /**
  * @brief Dynamic Channel with bounded amount of waiters
  */
-template <typename Type, size_t WaitersBufferSize = 1ul>
-using channel_dyn = channel
-<
-    Type,
-    1ul,
-    allocation_type::e_dynamic,
-    WaitersBufferSize,
-    allocation_type::e_static
->;
+template <typename Type>
+using channel_dyn = channel<Type>;
 
 
 } // namespace ace::futures
@@ -271,13 +249,11 @@ using channel_dyn = channel
 template<                                              \
     typename data_t,                                   \
     size_t data_buffer_size_v,                         \
-    ace::futures::allocation_type data_allocation_v,   \
-    size_t waiters_buffer_size_v,                      \
-    ace::futures::allocation_type waiters_allocation_v \
+    ace::futures::allocation_type data_allocation_v    \
 >
 
 #define ACE_FUTURE_CHANNEL_SPACE \
-ace::futures::channel<data_t, data_buffer_size_v, data_allocation_v, waiters_buffer_size_v, waiters_allocation_v>::
+ace::futures::channel<data_t, data_buffer_size_v, data_allocation_v>::
 
 #define ACE_FUTURE_CHANNEL_MEMBER(returnT) \
 ACE_FUTURE_CHANNEL_META returnT ACE_FUTURE_CHANNEL_SPACE
@@ -316,16 +292,19 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_conductor : conductor_handler_t {
 
     explicit channel_conductor(waiters_storage_t* waiters) : _waiters(waiters) {};
 
-    void forward(task&& ctx) override { while (not _waiters->push(std::move(ctx))) {}; }
-
+    node_t* forward_node(node_t* node) override {
+        auto* n = nukes::details::nodes::cast_node(node);
+        _waiters->push_node(n);
+        return nullptr;
+    }
 
     void cancel() override {
         // NOTE: Reattaching all tasks because mpmc-queue doesn't allow ejection.
         // NOTE: Target canceled task will be marked as detached and Runner will drop it
         // TODO: Batch read needed
-        task ctx;
-        while (_waiters->pop(ctx))
-            core::runner::reattach(std::move(ctx));
+        auto* node = _waiters->pop_node();
+        while (node)
+            core::runner::threadsafe_reattach(node);
     }
 
     ~channel_conductor() override = default;
@@ -335,8 +314,8 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_conductor : conductor_handler_t {
 
 
 ACE_FUTURE_CHANNEL_MEMBER(void) notify() {
-    if (task ctx; _waiters.pop(ctx)) [[likely]]
-        core::runner::reattach(std::move(ctx));
+    if (auto* node = _waiters.pop_node(); node) [[likely]]
+        core::runner::reattach(node);
 }
 
 
@@ -445,18 +424,18 @@ struct ACE_FUTURE_CHANNEL_ST_SPACE channel_conductor : conductor_handler_t {
 
     explicit channel_conductor(waiters_storage_t* waiters) : _waiters(waiters) {};
 
-    void forward(task&& ctx) override { _waiters->push(std::move(ctx)); }
-
+    node_t* forward_node(node_t* node) override {
+        _waiters->push_node(node);
+        return nullptr;
+    }
 
     void cancel() override {
         // NOTE: Reattaching all tasks because mpmc-queue doesn't allow ejection.
         // NOTE: Target canceled task will be marked as detached and Runner will drop it
         // TODO: Batch read needed
-        while (not _waiters->empty()) {
-            task ctx = std::move(_waiters->front());
-            _waiters->pop();
-            core::runner::reattach(std::move(ctx));
-        }
+        auto* node = _waiters->pop_node();
+        while (node)
+            core::runner::reattach(node);
     }
 
     ~channel_conductor() override = default;
@@ -466,11 +445,8 @@ struct ACE_FUTURE_CHANNEL_ST_SPACE channel_conductor : conductor_handler_t {
 
 
 ACE_FUTURE_CHANNEL_ST_MEMBER(void) notify() {
-    if (not _waiters.empty()) [[likely]] {
-        task ctx = std::move(_waiters.front());
-        _waiters.pop();
-        core::runner::reattach(std::move(ctx));
-    }
+    if (auto* node = _waiters.pop_node(); node) [[likely]]
+        core::runner::reattach(node);
 }
 
 

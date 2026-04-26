@@ -267,9 +267,6 @@ struct ACE_FUTURE_CUTEX_FUTURE_SPACE cutex_conductor : conductor_handler_t {
     explicit cutex_conductor(cutex_future* cutex_)
         : _cutex(cutex_) {};
 
-    // void forward(task&& ctx) override {
-    //     while (not _cutex->_waiters.push(std::move(ctx)));
-    // }
     node_t* forward_node(node_t* node) override {
         auto n = nukes::details::nodes::cast_node(node);
         _cutex->_waiters.push_node(n);

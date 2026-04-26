@@ -68,9 +68,37 @@ namespace ace::core {
 
         /**
          * @brief Returns task into source @c runner
-         * @param ctx Task to be reattached into @c runner
+         * @param ctx Task to be reattached safely into @c runner
          */
         static void threadsafe_reattach(task &&ctx);
+
+        /**
+         * @brief Returns task node into source @c runner
+         * @param node Task node to be reattached into @c runner
+         *
+         * @warning @b NOT @b THREADSAFE
+         */
+        static void reattach(insert_node_ptr& node);
+
+        /**
+         * @brief Returns task node into source @c runner
+         * @param node Task node to be reattached into @c runner
+         *
+         * @warning @b NOT @b THREADSAFE
+         */
+        static void reattach(pool_node_ptr& node);
+
+        /**
+         * @brief Returns task node safely into source @c runner
+         * @param node Task node to be reattached into @c runner
+         */
+        static void threadsafe_reattach(insert_node_ptr& node);
+
+        /**
+         * @brief Returns task node safely into source @c runner
+         * @param node Task node to be reattached into @c runner
+         */
+        static void threadsafe_reattach(pool_node_ptr& node);
 
         /**
          * @details Resumes only one ready task
@@ -142,17 +170,51 @@ namespace ace::core {
     };
 
 
-    inline void runner::reattach(task &&ctx) {
+    inline void runner::reattach(task&& ctx) {
         if (not ctx.is_resumable() or not ctx._coroutine.promise()._runner_pool)
             return;
         ctx._coroutine.promise()._runner_pool->push(std::move(ctx));
     }
 
 
-    inline void runner::threadsafe_reattach(task &&ctx) {
+    inline void runner::threadsafe_reattach(task&& ctx) {
         if (not ctx.is_resumable() or not ctx._coroutine.promise()._runner_pool)
             return;
         pool_to_runner(ctx._coroutine.promise()._runner_pool)->_interthread_pool.push(std::move(ctx));
+    }
+
+
+    inline void runner::reattach(insert_node_ptr& node) {
+        if (not node or not node->_data.is_resumable() or not node->_data._coroutine.promise()._runner_pool)
+            return;
+        auto n = nukes::details::nodes::cast_node(node);
+        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node(n);
+        node = nullptr;
+    }
+
+
+    inline void runner::reattach(pool_node_ptr& node) {
+        if (not node or not node->_data.is_resumable() or not node->_data._coroutine.promise()._runner_pool)
+            return;
+        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node(node);
+        node = nullptr;
+    }
+
+
+    inline void runner::threadsafe_reattach(insert_node_ptr& node) {
+        if (not node or not node->_data.is_resumable() or not node->_data._coroutine.promise()._runner_pool)
+            return;
+        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_interthread_pool.push_node(node);
+        node = nullptr;
+    }
+
+
+    inline void runner::threadsafe_reattach(pool_node_ptr& node) {
+        if (not node or not node->_data.is_resumable() or not node->_data._coroutine.promise()._runner_pool)
+            return;
+        auto n = nukes::details::nodes::cast_node(node);
+        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_interthread_pool.push_node(n);
+        node = nullptr;
     }
 
 
@@ -222,11 +284,11 @@ namespace ace::core {
 
         // NOTE: Forwarding via conductor if needed
         if (is_conducted) [[likely]]
-                task_node->_data._coroutine.promise()._runner_conductor->forward(std::forward<task>(task_node->_data));
+            task_node = task_node->_data._coroutine.promise()._runner_conductor->forward_node(task_node);
 
         // NOTE: If task is idle, releasing it's node. Else returning it back to the local pool
-        if (is_idle) _pool.release_node(task_node);
-        else _pool.push_node(task_node);
+        if (is_idle and task_node) _pool.release_node(task_node);
+        else if (task_node) _pool.push_node(task_node);
 
         return true;
     }

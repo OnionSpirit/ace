@@ -267,8 +267,13 @@ struct ACE_FUTURE_CUTEX_FUTURE_SPACE cutex_conductor : conductor_handler_t {
     explicit cutex_conductor(cutex_future* cutex_)
         : _cutex(cutex_) {};
 
-    void forward(task&& ctx) override {
-        while (not _cutex->_waiters.push(std::move(ctx)));
+    // void forward(task&& ctx) override {
+    //     while (not _cutex->_waiters.push(std::move(ctx)));
+    // }
+    node_t* forward_node(node_t* node) override {
+        auto n = nukes::details::nodes::cast_node(node);
+        _cutex->_waiters.push_node(n);
+        return nullptr;
     }
 
     // NOTE: Tasks is resuming with wiped conductor.
@@ -293,22 +298,27 @@ try_lock() noexcept {
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 notify() noexcept {
-    task waiter;
+    typedef nukes::dynamic::roaming_mpsc_queue<task>::node_t waiter_node_t;
+    waiter_node_t* waiter_node = _waiters.pop_node();
     // NOTE: Trying to fetch next waiter and release it on the runner
-    if (not _waiters.pop(waiter))
+    if (not waiter_node)
         return false;
     // NOTE: Updating rescheduling pool if rescheduling mode is on and waiter forbids roaming
-    if (const bool roaming = waiter._coroutine.promise()._roaming; _rescheduling and not roaming) {
-        if (_runner_pool.load(std::memory_order_acquire) not_eq waiter._coroutine.promise()._runner_pool)
-            _runner_pool.store(waiter._coroutine.promise()._runner_pool, std::memory_order_release);
-        else
-            core::runner::reattach(std::move(waiter));
-        // NOTE: Rescheduling waiter if rescheduling mode is on and waiter supports roaming
-    } else if (_rescheduling) {
-        waiter._coroutine.promise()._runner_pool = _runner_pool.load(std::memory_order_acquire);
-        core::runner::reattach(std::move(waiter));
+    if (const bool roaming = waiter_node->_data._coroutine.promise()._roaming; _rescheduling and not roaming) {
+        if (_runner_pool.load(std::memory_order_acquire) not_eq waiter_node->_data._coroutine.promise()._runner_pool) {
+            _runner_pool.store(waiter_node->_data._coroutine.promise()._runner_pool, std::memory_order_release);
+            core::runner::threadsafe_reattach(waiter_node);
+        } else {
+            core::runner::reattach(waiter_node);
+        }
     }
-    core::runner::threadsafe_reattach(std::move(waiter));
+    // NOTE: Rescheduling waiter if rescheduling mode is on and waiter supports roaming
+    else if (_rescheduling) {
+        waiter_node->_data._coroutine.promise()._runner_pool = _runner_pool.load(std::memory_order_acquire);
+        core::runner::reattach(waiter_node);
+    } else {
+        core::runner::threadsafe_reattach(waiter_node);
+    }
     return true;
 }
 

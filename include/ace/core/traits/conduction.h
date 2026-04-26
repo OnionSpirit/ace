@@ -48,6 +48,8 @@ namespace ace::core::traits {
     template <typename runner_context_t>
     struct runner_conductor_handle {
 
+        typedef nukes::details::nodes::dyn_reg_node<runner_context_t> node_t;
+
         runner_conductor_handle() noexcept = default;
 
         runner_conductor_handle(const runner_conductor_handle&) noexcept = default;
@@ -56,9 +58,20 @@ namespace ace::core::traits {
 
         /**
          * @brief Transfer the coroutine context into the future's storage.
-         * @param context  The suspended coroutine context to enqueue.
+         * @param context The suspended coroutine context to enqueue.
          */
-        virtual void forward(runner_context_t&& context) = 0;
+        virtual void forward(runner_context_t&& context) {
+            throw std::logic_error("runner_conductor_handle::forward() - called but not overridden");
+        };
+
+        /**
+         * @brief Transfer the coroutine context into the future's storage.
+         * @param node Queue node for the suspended coroutine context to enqueue.
+         */
+        virtual node_t* forward_node(node_t* node) {
+            this->forward(std::move(node->_data));
+            return node;
+        };
 
         /**
          * @brief Cancel the pending operation and wake all associated waiters.

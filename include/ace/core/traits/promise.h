@@ -97,22 +97,6 @@ namespace ace::core {
 
 namespace ace::core::traits {
 
-    struct average_quants {
-        static constexpr int window_size = 4;
-        alignas(ACE_BUS_SIZE) int _total_sum {};
-        alignas(ACE_BUS_SIZE) uint64_t _curr_member = 0;
-        std::array<int, window_size> _members {};
-
-        [[nodiscard]] int value() const { return _total_sum / window_size; }
-
-        [[nodiscard]] int add(const int& new_one) {
-            _total_sum = _total_sum + new_one - _members[_curr_member % window_size];
-            _members[_curr_member % window_size] = new_one;
-            ++_curr_member;
-            return value();
-        }
-    };
-
     /**
      * @brief CRTP mixin that provides @c return_value() and @c yield_value()
      *        to a promise type for non-void coroutines.
@@ -348,7 +332,6 @@ namespace ace::core::traits {
         future_handler_ptr_t        _busy_future { nullptr };  ///< Pointer to the currently active busy future, or @c nullptr.
         control_block*              _block  { nullptr };       ///< Pointer to the intrusive control block (set on first @c observe()).
         std::optional<std::size_t>  _trace_id;                 ///< Optional debugging trace ID.
-        average_quants              _quants {};                ///< Average amount of the time quants spent at the @c resume()
     };
 
 #define DECLARE_PROMISE_TRAITS(derived_t, return_type_t) typedef ace::core::traits::promise_traits<derived_t, return_type_t> promise_traits_t;

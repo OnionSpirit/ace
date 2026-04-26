@@ -126,10 +126,19 @@ namespace ace::core {
             auto now = start;
 
             // NOTE: Working with runner until interval ends (also updating last ts)
+            int old_quants {};
             while (now - start < 1ms) {
+                // if (_runners[worker_id]._common_quants)
+                //     old_quants = _runners[worker_id]._quants.value();
                 active = _runners[worker_id].run() or active;
                 fetch_time();
                 now = get_time();
+                // if (_runners[worker_id]._common_quants) {
+                //     _runners[worker_id]._common_quants->fetch_add(
+                //         _runners[worker_id]._quants.add((now - start).count()),
+                //         std::memory_order_relaxed);
+                //     _runners[worker_id]._common_quants->fetch_sub(old_quants, std::memory_order_relaxed);
+                // }
             }
 
             // NOTE: Updating runner status
@@ -264,7 +273,7 @@ namespace ace {
             double probability_accumulator{};
 
             for (const auto &runner: self._runners) {
-                const double runner_probability = 1.0 - (static_cast<double>(runner._total_quants) / quants);
+                const double runner_probability = 1.0 - (static_cast<double>(runner._quants.value()) / quants);
                 probability_accumulator += runner_probability;
                 if (probability < probability_accumulator) {
                     runner.attach(std::forward<task>(new_task));
@@ -312,7 +321,7 @@ namespace ace {
 
         // NOTE: Clearing quant counters to be sure they are zero
         for (auto &runner: self._runners)
-            runner._total_quants = 0;
+            runner._quants.clear();
     }
 
     inline void reset_signal() {

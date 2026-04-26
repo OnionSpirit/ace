@@ -16,6 +16,45 @@
 
 namespace ace::core {
 
+    struct average_quants {
+        static constexpr int window_size = 4;
+        alignas(ACE_BUS_SIZE) int _total_sum {};
+        alignas(ACE_BUS_SIZE) uint64_t _curr_member = 0;
+        std::array<int, window_size> _members {};
+
+        average_quants() = default;
+
+        average_quants(average_quants&& aq) noexcept {
+            _total_sum = aq._total_sum;
+            _curr_member = aq._curr_member;
+            _members = aq._members;
+            aq.clear();
+        }
+
+        average_quants& operator=(average_quants&& aq) noexcept {
+            _total_sum = aq._total_sum;
+            _curr_member = aq._curr_member;
+            _members = aq._members;
+            aq.clear();
+            return *this;
+        }
+
+        [[nodiscard]] int value() const { return _total_sum / window_size; }
+
+        [[nodiscard]] int add(const int& new_one) {
+            _total_sum = _total_sum + new_one - _members[_curr_member % window_size];
+            _members[_curr_member % window_size] = new_one;
+            ++_curr_member;
+            return value();
+        }
+
+        void clear() {
+            _total_sum = 0;
+            _curr_member = 0;
+            _members.fill(0);
+        }
+    };
+
     /**
      * @details coroutines execution manager.
      * @tparam InitialSize Initial size of Pools
@@ -25,14 +64,14 @@ namespace ace::core {
      */
     struct runner {
 
-        ACE_CACHE_LINE(0)
-
         typedef nukes::dynamic::mpsc_queue<task> insert_pool_t;
 
         typedef runner_pool_t::node_t *pool_node_ptr;
         typedef insert_pool_t::node_t *insert_node_ptr;
 
-        mutable runner_pool_t _pool{}; ///< Pool of the assigned tasks
+        ACE_CACHE_LINE(0)
+
+        mutable runner_pool_t        _pool{}; ///< Pool of the assigned tasks
         std::optional<pool_node_ptr> _nextup{}; ///< Nextup task for running
 
         ACE_CACHE_LINE(1)
@@ -41,8 +80,8 @@ namespace ace::core {
 
         ACE_CACHE_LINE(4)
 
-        std::atomic<int> *_common_quants{}; ///< Pointer to common quant counter
-        int _total_quants{}; ///< Total amount of the time quants from the all tasks on a pool
+        average_quants              _quants{}; ///< Average amount of the time quants for the run operation call
+        std::atomic<int>*           _common_quants{}; ///< Pointer to common quant counter
 
         runner() = default;
 
@@ -133,7 +172,7 @@ namespace ace::core {
          * @details Checks if any Tasks stored in the runner
          * @return @b true if empty, @b false otherwise
          */
-        [[nodiscard]] bool empty() const noexcept { return _pool.empty() and _interthread_pool.empty(); };
+        [[nodiscard]] bool empty() const noexcept { return _pool.empty() and _interthread_pool.empty() and not _nextup; };
     };
 
     template<>
@@ -152,8 +191,7 @@ namespace ace::core {
         t._nextup = std::nullopt;
         this->_common_quants = t._common_quants;
         t._common_quants = nullptr;
-        this->_total_quants = t._total_quants;
-        t._total_quants = 0;
+        this->_quants = std::move(t._quants);
         this->_interthread_pool = std::move(t._interthread_pool);
     };
 
@@ -163,8 +201,7 @@ namespace ace::core {
         t._nextup = std::nullopt;
         this->_common_quants = t._common_quants;
         t._common_quants = nullptr;
-        this->_total_quants = t._total_quants;
-        t._total_quants = 0;
+        this->_quants = std::move(t._quants);
         this->_interthread_pool = std::move(t._interthread_pool);
         return *this;
     };
@@ -245,13 +282,6 @@ namespace ace::core {
             tools::prefetch<tools::e_l1_cache>(_nextup.value()->_data._coroutine.address());
         }
 
-        // NOTE: Starting quants counter and removing old quants amount
-        if (_common_quants) {
-            start_time = std::chrono::steady_clock::now();
-            old_total_quants = _total_quants;
-            _total_quants -= task_node->_data._coroutine.promise()._quants.value();
-        }
-
         // NOTE: Proceeding context
         task_node->_data.awake(&touch_result);
 
@@ -271,16 +301,6 @@ namespace ace::core {
 
         // NOTE: Decision if node shall be released or pushed back
         const bool is_idle = not is_resumable or is_conducted;
-
-        // NOTE: Updating global total counter
-        if (_common_quants) {
-            // NOTE: Increasing quants because task is resumable
-            if (is_resumable)
-                _total_quants += task_node->_data._coroutine.promise()._quants.add(
-                    static_cast<int>((std::chrono::steady_clock::now() - start_time).count()));
-            _common_quants->fetch_add(_total_quants, std::memory_order_relaxed);
-            _common_quants->fetch_sub(old_total_quants, std::memory_order_relaxed);
-        }
 
         // NOTE: Forwarding via conductor if needed
         if (is_conducted) [[likely]]

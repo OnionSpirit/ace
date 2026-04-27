@@ -252,6 +252,7 @@ namespace ace::core {
          *  | @c _waiters | @c shared_ptr<runner_pool_t> | Queue of contexts waiting for this one to finish. |
          *  | @c _self_conductor | @c optional<context_conductor> | Conductor installed into the control block. |
          *  | @c _roaming | @c bool | When @c true the balancer may migrate the task to another runner. |
+         *  | @c _polling | @c bool | When @c true the runner holds it in low priority task pool. |
          */
         struct promise_type : traits::promise_traits<promise_type, returnT> {
             DECLARE_PROMISE_TRAITS(promise_type, returnT)
@@ -366,7 +367,8 @@ namespace ace::core {
             // NOTE: Conductor to manage promise on suspended state.
             // NOTE: Context owns only one promise. Extra slot object is unnecessary
             std::optional<context_conductor> _self_conductor;
-            alignas(ACE_BUS_SIZE) bool _roaming { false };
+            bool _roaming { false };
+            bool _polling { false };
         };
 
         // -----------------------------------------------------------------------

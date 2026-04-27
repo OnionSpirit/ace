@@ -131,16 +131,20 @@ namespace ace::core {
 
             // NOTE: Working with runner until interval ends (also updating last ts)
             const bool velocity_tracking = _dispatcher_config._runners_amount > 1;
+            bool is_polling = false;
             while (now - start < 1ms) {
                 active = _runners[worker_id].run() or active;
                 fetch_time();
                 now = get_time();
-                if (velocity_tracking and now - start >= 1ms) {
+                // is_polling = _runners[worker_id].is_polling();
+                if (velocity_tracking and (now - start >= 1ms or is_polling)) {
                     const double old_velocity = _runners[worker_id].velocity();
                     const double new_velocity = _runners[worker_id].upgrade_velocity(now - start);
                     _aggregate_velocity.fetch_add(new_velocity,std::memory_order_acquire);
                     _aggregate_velocity.fetch_sub(old_velocity, std::memory_order_release);
                 }
+                // NOTE: Breaking if runner is on polling state to make sleep
+                if (is_polling) break;
             }
 
             // NOTE: Updating runner status
@@ -148,7 +152,7 @@ namespace ace::core {
             ++_workers_states[worker_id]._rounds;
 
             // NOTE: Making decision about sleeping
-            if (not active or _workers_states[worker_id]._rounds > 999) {
+            if (not active or is_polling or _workers_states[worker_id]._rounds > 999) {
                 _workers_states[worker_id]._rounds = 0;
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }

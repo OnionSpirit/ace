@@ -43,7 +43,8 @@ namespace ace::core {
         ACE_CACHE_LINE(4)
 
         tools::moving_average       _quants       {}; ///< Average amount of the time quants for the run operation call
-        int                         _tasks_amount {};
+        long                        _tasks_amount {};
+        runner_pool_t               _vortex_pool  {};
 
         runner() = default;
 
@@ -129,6 +130,20 @@ namespace ace::core {
         bool yank() noexcept;
 
         /**
+         * @details Resumes only vortex service tasks
+         * @return @b true if task was processed, @b false otherwise
+         */
+        bool yank_vortex() noexcept;
+
+        /**
+         * @details Checks if runner has only vortex polling tasks
+         * @return @c true if runner has only vortex tasks, @c false otherwise
+         */
+        bool is_polling() const noexcept {
+            return _pool.empty() and not _nextup and not _vortex_pool.empty();
+        };
+
+        /**
          * @brief Ejects task from runner
          * @return Optional of ejected task
          */
@@ -149,21 +164,29 @@ namespace ace::core {
         void attach(async<async_return_t> &&new_task) noexcept {
             ++_tasks_amount;
             new_task._coroutine.promise()._runner_pool = &_pool;
-            _pool.push(std::forward<task>(async_wrap(std::forward<async<async_return_t> >(new_task))));
+            if (new_task._coroutine.promise()._polling)
+                _vortex_pool.push(std::forward<task>(async_wrap(std::forward<async<async_return_t> >(new_task))));
+            else
+                _pool.push(std::forward<task>(async_wrap(std::forward<async<async_return_t> >(new_task))));
         }
 
         /**
          * @details Checks if any Tasks stored in the runner
          * @return @b true if empty, @b false otherwise
          */
-        [[nodiscard]] bool empty() const noexcept { return _pool.empty() and _interthread_pool.empty() and not _nextup; };
+        [[nodiscard]] bool empty() const noexcept {
+            return _pool.empty() and _vortex_pool.empty() and _interthread_pool.empty() and not _nextup;
+        };
     };
 
     template<>
     inline void runner::attach<void>(task &&new_task) noexcept {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner_pool = &_pool;
-        _pool.push(std::forward<task>(new_task));
+        if (new_task._coroutine.promise()._polling)
+            _vortex_pool.push(std::forward<task>(new_task));
+        else
+            _pool.push(std::forward<task>(new_task));
     }
 
     inline auto pool_to_runner(runner_pool_t *pool) noexcept {
@@ -195,7 +218,10 @@ namespace ace::core {
     inline void runner::reattach(task&& ctx) {
         if (not ctx.is_resumable() or not ctx._coroutine.promise()._runner_pool)
             return;
-        ctx._coroutine.promise()._runner_pool->push(std::move(ctx));
+        if (ctx._coroutine.promise()._polling)
+            pool_to_runner(ctx._coroutine.promise()._runner_pool)->_vortex_pool.push(std::move(ctx));
+        else
+            ctx._coroutine.promise()._runner_pool->push(std::move(ctx));
     }
 
 
@@ -210,7 +236,10 @@ namespace ace::core {
         if (not node or not node->_data.is_resumable() or not node->_data._coroutine.promise()._runner_pool)
             return;
         auto n = nukes::details::nodes::cast_node(node);
-        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node(n);
+        if (node->_data._coroutine.promise()._polling)
+            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_vortex_pool.push_node(n);
+        else
+            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node(n);
         node = nullptr;
     }
 
@@ -218,7 +247,10 @@ namespace ace::core {
     inline void runner::reattach(pool_node_ptr& node) {
         if (not node or not node->_data.is_resumable() or not node->_data._coroutine.promise()._runner_pool)
             return;
-        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node(node);
+        if (node->_data._coroutine.promise()._polling)
+            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_vortex_pool.push_node(node);
+        else
+            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node(node);
         node = nullptr;
     }
 
@@ -300,7 +332,53 @@ namespace ace::core {
 
         // NOTE: If task is idle, releasing it's node. Else returning it back to the local pool
         if (is_idle and task_node) _pool.release_node(task_node);
-        else if (task_node) _pool.push_node(task_node);
+        else if (task_node and not task_node->_data._coroutine.promise()._polling) _pool.push_node(task_node);
+        else if (task_node) _vortex_pool.push_node(task_node);
+
+        return true;
+    }
+
+
+    inline bool runner::yank_vortex() noexcept {
+
+        promise_touch_result touch_result = e_executed;
+        pool_node_ptr vortex_node;
+
+        // NOTE: Pulling task from a pool if there is not nextup task
+        if (not _vortex_pool.empty()) [[unlikely]] {
+            vortex_node = _vortex_pool.pop_node();
+        } else return false;
+
+        // NOTE: Proceeding context
+        vortex_node->_data.awake(&touch_result);
+
+        // NOTE: Checking if context can be resumed
+        const bool is_resumable {
+            vortex_node->_data
+            and touch_result not_eq e_failed
+            and touch_result not_eq e_finished
+            and touch_result not_eq e_detached
+        };
+
+        // NOTE: Checking if the context shall be forwarded via passed conductor
+        const bool is_conducted {
+            is_resumable
+            and vortex_node->_data._coroutine.promise()._runner_conductor
+        };
+
+        // NOTE: Decision if node shall be released or pushed back
+        const bool is_idle = not is_resumable or is_conducted;
+
+        // NOTE: Forwarding via conductor if needed
+        if (is_conducted) [[likely]]
+            vortex_node = vortex_node->_data._coroutine.promise()._runner_conductor->forward_node(vortex_node);
+
+        if (not is_resumable) [[unlikely]] --_tasks_amount;
+
+        // NOTE: If task is idle, releasing it's node. Else returning it back to the local pool
+        if (is_idle and vortex_node) _vortex_pool.release_node(vortex_node);
+        else if (vortex_node and vortex_node->_data._coroutine.promise()._polling) _vortex_pool.push_node(vortex_node);
+        else if (vortex_node) _pool.push_node(vortex_node);
 
         return true;
     }
@@ -319,6 +397,7 @@ namespace ace::core {
         int i = 0;
         for (constexpr int yank_limit = 128; i < yank_limit and yank(); ++i) {
             if (i % 16 == 0) {
+                yank_vortex();
                 insert_node_ptr interthread_node;
                 // TODO: Use batch pop instead of the loop
                 while ((interthread_node = _interthread_pool.pop_node())) {
@@ -328,7 +407,7 @@ namespace ace::core {
                 }
             }
         }
-        return i not_eq 0;
+        return i not_eq 0 or yank_vortex();
     }
 
 } // end namespace ace::core

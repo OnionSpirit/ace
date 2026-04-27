@@ -38,6 +38,7 @@
 #include "ace/core/dispatcher.h"
 #include "ace/core/signal.h"
 #include "ace/core/context.h"
+#include "ace/futures/polling.h"
 
 namespace ace::core {
 
@@ -115,6 +116,7 @@ namespace ace::core::traits {
 
         task vortex(sig_pipe_t& sig_pipe) {
             std::unique_ptr<signal_handler> sig { nullptr };
+            co_await futures::polling(true);
             while (not detach_get()) {
                 if constexpr (is_vortex_promise<derived_t>)
                     detach_set(not co_await static_cast<derived_t*>(this)->ping());

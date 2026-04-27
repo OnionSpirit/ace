@@ -293,6 +293,10 @@ namespace ace {
         auto& self = core::dispatcher::get_instance();
         const int workers_amount = static_cast<int>(self._dispatcher_config._runners_amount);
 
+        // NOTE: Clearing velocity to make it zero before run
+        for (auto &runner: self._runners) runner.clear_velocity();
+        self._aggregate_velocity.store(0.0, std::memory_order_release);
+
         do {
             // NOTE: Initiating
             std::vector<std::jthread> workers{};

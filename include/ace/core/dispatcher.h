@@ -29,6 +29,7 @@
 
 #include <thread>
 #include <random>
+#include <functional>
 
 #include "ace/core/tools/meta.h"
 #include "ace/core/runner.h"
@@ -192,7 +193,7 @@ namespace ace::core {
 
         friend inline bool ace::reload() noexcept;
 
-        friend inline void ace::schedule(task &&new_task, runner*) noexcept;
+        friend inline void ace::schedule(task &&new_task, core::runner*) noexcept;
 
         friend inline void ace::run() noexcept;
 

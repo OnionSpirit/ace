@@ -119,7 +119,7 @@ namespace ace::core {
          */
         template<typename Rep, typename Period>
         double upgrade_velocity(std::chrono::duration<Rep, Period> interval) noexcept {
-            return static_cast<double>(_tasks_amount) / _quants.add(interval.count());
+            return static_cast<double>(_tasks_amount) / static_cast<double>(_quants.add(interval.count()));
         }
 
         /**
@@ -242,15 +242,14 @@ namespace ace::core {
 
     inline double runner::velocity() const noexcept {
         if (_quants.value() == 0) [[unlikely]] return 0.0;
-        return abs(static_cast<double>(_tasks_amount) / _quants.value());
+        return static_cast<double>(_tasks_amount) / static_cast<double>(_quants.value());
     }
 
 
     inline bool runner::yank() noexcept {
-        core::promise_touch_result touch_result = core::promise_touch_result::e_executed;
+
+        promise_touch_result touch_result = e_executed;
         pool_node_ptr task_node;
-        int old_total_quants;
-        std::chrono::steady_clock::time_point start_time;
 
         // NOTE: Taking nextup node if it is exists
         if (_nextup) [[likely]] {
@@ -279,9 +278,9 @@ namespace ace::core {
         // NOTE: Checking if context can be resumed
         const bool is_resumable {
             task_node->_data
-            and touch_result not_eq core::promise_touch_result::e_failed
-            and touch_result not_eq core::promise_touch_result::e_finished
-            and touch_result not_eq core::promise_touch_result::e_detached
+            and touch_result not_eq e_failed
+            and touch_result not_eq e_finished
+            and touch_result not_eq e_detached
         };
 
         // NOTE: Checking if the context shall be forwarded via passed conductor

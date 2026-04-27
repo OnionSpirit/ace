@@ -10,10 +10,10 @@ namespace ace::core::tools {
 
     struct moving_average {
         static constexpr int window_size = 4;
-        alignas(ACE_BUS_SIZE) int _total_sum {};
-        alignas(ACE_BUS_SIZE) std::uint64_t _curr_member = 0;
-        std::array<int, window_size> _members {};
-        int _zeros = window_size - 1;
+        long                          _total_sum    { };
+        std::array<int, window_size>  _members      { };
+        std::uint32_t                 _curr_member  { };
+        int                           _zeros        { window_size - 1 };
 
         moving_average() = default;
 
@@ -43,9 +43,9 @@ namespace ace::core::tools {
             return *this;
         }
 
-        [[nodiscard]] int value() const { return _total_sum / (window_size - _zeros); }
+        [[nodiscard]] long value() const { return _total_sum / (window_size - _zeros); }
 
-        [[nodiscard]] int add(const int& new_one) {
+        [[nodiscard]] long add(const int& new_one) {
             _total_sum = _total_sum + new_one - _members[_curr_member % (window_size - _zeros)];
             _members[_curr_member % (window_size - _zeros)] = new_one;
             _zeros == 0 ? : --_zeros;

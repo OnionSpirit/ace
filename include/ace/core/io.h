@@ -191,7 +191,7 @@ namespace ace::core {
             io._is_closed = true;
         }
 
-        io_entity& operator=(io_entity&& io)  noexcept {
+        io_entity& operator=(io_entity&& io) noexcept {
             _fd = io._fd;
             _is_closed = io._is_closed;
             _params = std::move(io._params);
@@ -249,18 +249,14 @@ namespace ace::core {
             const int& _fd;
             const bool& _closed;
 
-            static task check_and_close(const bool closed, const int fd) noexcept {
-                if (not closed) {
-                    const int res = co_await core::close_query{fd};
-                    if (res < 0) std::cerr << strerror(res) << std::endl;
-                }
+            static task pending_close(const int fd) noexcept {
+                const int res = co_await close_query{fd};
+                if (res < 0) std::cerr << strerror(res) << std::endl;
             }
 
-            static void pending_close(const bool closed, const int fd) noexcept {
-                schedule(check_and_close(closed, fd));
+            ~io_guard() noexcept {
+                if (not _closed) schedule(pending_close(_fd));
             }
-
-            ~io_guard() noexcept { pending_close(_closed, _fd); }
         };
 
         io_guard _guard {_fd, _is_closed};

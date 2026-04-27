@@ -135,8 +135,8 @@ namespace ace::core {
             while (now - start < 1ms) {
                 active = _runners[worker_id].run() or active;
                 fetch_time();
-                now = get_time();
-                // is_polling = _runners[worker_id].is_polling();
+            now = get_time();
+                is_polling = _runners[worker_id].is_polling();
                 if (velocity_tracking and (now - start >= 1ms or is_polling)) {
                     const double old_velocity = _runners[worker_id].velocity();
                     const double new_velocity = _runners[worker_id].upgrade_velocity(now - start);
@@ -152,7 +152,9 @@ namespace ace::core {
             ++_workers_states[worker_id]._rounds;
 
             // NOTE: Making decision about sleeping
-            if (not active or is_polling or _workers_states[worker_id]._rounds > 999) {
+            if (is_polling)
+                std::this_thread::sleep_for(std::chrono::microseconds(1));
+            else if (not active or _workers_states[worker_id]._rounds > 999) {
                 _workers_states[worker_id]._rounds = 0;
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }

@@ -37,7 +37,7 @@
  * mark where one cache line ends and another begins.
  * @param number  A unique integer suffix to prevent name collisions.
  */
-#define ACE_CACHE_LINE(number) [[maybe_unused]] struct {} _cache_line_##number[0] {};
+#define ACE_CACHE_LINE(number) [[maybe_unused]] struct {} _ace_cache_line_##number[0] {};
 
 /// @brief A zero-byte type used as a default template argument placeholder.
 typedef struct {} ACE_EMPTY_TYPE;

@@ -9,51 +9,13 @@
 #include <chrono>
 #include <nukes/dynamic/mpsc_queue.h>
 
+#include "ace/core/tools/moving_average.h"
 #include "ace/core/tools/prefetch.h"
 #include "ace/core/tools/meta.h"
 #include "ace/core/context.h"
 
 
 namespace ace::core {
-
-    struct average_quants {
-        static constexpr int window_size = 4;
-        alignas(ACE_BUS_SIZE) int _total_sum {};
-        alignas(ACE_BUS_SIZE) uint64_t _curr_member = 0;
-        std::array<int, window_size> _members {};
-
-        average_quants() = default;
-
-        average_quants(average_quants&& aq) noexcept {
-            _total_sum = aq._total_sum;
-            _curr_member = aq._curr_member;
-            _members = aq._members;
-            aq.clear();
-        }
-
-        average_quants& operator=(average_quants&& aq) noexcept {
-            _total_sum = aq._total_sum;
-            _curr_member = aq._curr_member;
-            _members = aq._members;
-            aq.clear();
-            return *this;
-        }
-
-        [[nodiscard]] int value() const { return _total_sum / window_size; }
-
-        [[nodiscard]] int add(const int& new_one) {
-            _total_sum = _total_sum + new_one - _members[_curr_member % window_size];
-            _members[_curr_member % window_size] = new_one;
-            ++_curr_member;
-            return value();
-        }
-
-        void clear() {
-            _total_sum = 0;
-            _curr_member = 0;
-            _members.fill(0);
-        }
-    };
 
     /**
      * @details coroutines execution manager.
@@ -80,7 +42,7 @@ namespace ace::core {
 
         ACE_CACHE_LINE(4)
 
-        average_quants              _quants       {}; ///< Average amount of the time quants for the run operation call
+        tools::moving_average       _quants       {}; ///< Average amount of the time quants for the run operation call
         int                         _tasks_amount {};
 
         runner() = default;
@@ -146,12 +108,17 @@ namespace ace::core {
         double velocity() const noexcept;
 
         /**
+         * @details Clears runner's velocity
+         */
+        void clear_velocity() noexcept { _quants.clear(); }
+
+        /**
          * @details Calculates runner's velocity
          * @param interval Interval to add to time spent moving average
          * @return Velocity value
          */
         template<typename Rep, typename Period>
-        double velocity(std::chrono::duration<Rep, Period> interval) noexcept {
+        double upgrade_velocity(std::chrono::duration<Rep, Period> interval) noexcept {
             return static_cast<double>(_tasks_amount) / _quants.add(interval.count());
         }
 
@@ -273,10 +240,11 @@ namespace ace::core {
     }
 
 
-
-    double runner::velocity() const noexcept {
-        return static_cast<double>(_tasks_amount) / _quants.value();
+    inline double runner::velocity() const noexcept {
+        if (_quants.value() == 0) [[unlikely]] return 0.0;
+        return abs(static_cast<double>(_tasks_amount) / _quants.value());
     }
+
 
     inline bool runner::yank() noexcept {
         core::promise_touch_result touch_result = core::promise_touch_result::e_executed;
@@ -338,6 +306,7 @@ namespace ace::core {
         return true;
     }
 
+
     inline std::optional<task> runner::eject() noexcept {
         if (task ejective; _pool.pop(ejective)) [[likely]] {
             --_tasks_amount;
@@ -345,6 +314,7 @@ namespace ace::core {
         }
         return std::nullopt;
     }
+
 
     inline bool runner::run() noexcept {
         int i = 0;

@@ -99,16 +99,23 @@ namespace ace::core {
          * false sharing between worker threads.
          */
         struct alignas(ACE_CACHE_LINE_SIZE) worker_state {
-            int _worker_id{0}; ///< Zero-based index of this worker's runner.
-            bool _pending{false}; ///< @c true when the runner found no tasks in the last round.
-            int _rounds{0}; ///< Number of consecutive 1 ms work rounds completed.
+            int  _worker_id  { 0 };      ///< Zero-based index of this worker's runner.
+            bool _pending    { false };  ///< @c true when the runner found no tasks in the last round.
+            int  _rounds     { 0 };      ///< Number of consecutive 1 ms work rounds completed.
         };
 
-        dispatcher_config _dispatcher_config        {};
-        std::atomic<uint32_t> _runner_selector      {};
-        std::atomic<double>   _velocity             {};
-        std::vector<runner> _runners                {};
-        std::vector<worker_state> _workers_states   {};
+        ACE_CACHE_LINE(0)
+
+        std::vector<runner>        _runners             { };
+        std::vector<worker_state>  _workers_states      { };
+        std::atomic<double>        _aggregate_velocity  { };
+        dispatcher_config          _dispatcher_config   { };
+
+        ACE_CACHE_LINE(1)
+
+        std::atomic<uint64_t>      _runner_selector     { };
+
+        ACE_CACHE_LINE(2)
 
         sig_pipe_t _sig_pipe{};
 
@@ -123,19 +130,16 @@ namespace ace::core {
             auto now = start;
 
             // NOTE: Working with runner until interval ends (also updating last ts)
-            double old_velocity {};
+            const bool velocity_tracking = _dispatcher_config._runners_amount > 1;
             while (now - start < 1ms) {
-                if (_dispatcher_config._runners_amount > 1) {
-                    old_velocity = _runners[worker_id].velocity();
-                    _velocity.fetch_add(old_velocity, std::memory_order_relaxed);
-                }
                 active = _runners[worker_id].run() or active;
                 fetch_time();
                 now = get_time();
-                if (_dispatcher_config._runners_amount > 1) {
-                    const double new_velocity = _runners[worker_id].velocity(now - start);
-                    _velocity.fetch_add(new_velocity,std::memory_order_relaxed);
-                    _velocity.fetch_sub(old_velocity, std::memory_order_relaxed);
+                if (velocity_tracking and now - start >= 1ms) {
+                    const double old_velocity = _runners[worker_id].velocity();
+                    const double new_velocity = _runners[worker_id].upgrade_velocity(now - start);
+                    _aggregate_velocity.fetch_add(new_velocity,std::memory_order_acquire);
+                    _aggregate_velocity.fetch_sub(old_velocity, std::memory_order_release);
                 }
             }
 
@@ -252,10 +256,8 @@ namespace ace {
                 self._runners[0].attach(std::forward<task>(new_task));
                 return;
             }
-            // NOTE: Fetching amount of load score around all runners
-            const auto velocity = self._velocity.load();
             // NOTE: Round-Robin balancing on Zero score count
-            if (velocity < 1.0) {
+            if (self._aggregate_velocity.load() < 1.0) {
                 self.round_robin(std::move(new_task));
                 return;
             }
@@ -265,14 +267,12 @@ namespace ace {
             static std::uniform_real_distribution<> distrib(0.0, 1.0);
 
             const double probability{distrib(gen)};
-            double probability_accumulator{};
+            double attractiveness_accumulator{};
 
             for (auto &runner: self._runners) {
-                const double runner_velocity = runner.velocity();
-                const double normalized_velocity = runner_velocity / velocity;
-                const double runner_attractiveness = 1.0 - normalized_velocity;
-                probability_accumulator += runner_attractiveness;
-                if (probability < probability_accumulator) {
+                const double runner_attractiveness = 1.0 - (runner.velocity() / self._aggregate_velocity.load());
+                attractiveness_accumulator += runner_attractiveness;
+                if (probability <= attractiveness_accumulator) {
                     runner.attach(std::forward<task>(new_task));
                     return;
                 }
@@ -292,6 +292,11 @@ namespace ace {
 
         auto& self = core::dispatcher::get_instance();
         const int workers_amount = static_cast<int>(self._dispatcher_config._runners_amount);
+
+        // NOTE: Clearing velocity to make it zero before run
+        for (auto &runner: self._runners)
+            runner.clear_velocity();
+        self._aggregate_velocity.store(0.0, std::memory_order_release);
 
         do {
             // NOTE: Initiating
@@ -315,10 +320,6 @@ namespace ace {
                 }
             }
         } while (not empty());
-
-        // NOTE: Clearing quant counters to be sure they are zero
-        for (auto &runner: self._runners)
-            runner._quants.clear();
     }
 
     inline void reset_signal() {

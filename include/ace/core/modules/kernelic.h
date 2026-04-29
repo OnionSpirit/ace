@@ -35,6 +35,7 @@ namespace ace::core::modules {
     };
 
 
+    // TODO: Upgrade to buff operations
     /**
      * @brief Thread local vortex to work with uring queues without kernel notification
      */
@@ -203,7 +204,10 @@ kernel_controller() {
 
 
 ACE_CORE_KERNEL_CONTROLLER_MEMBER()
-~kernel_controller() { io_uring_queue_exit(&_ring); }
+~kernel_controller() {
+    io_uring_unregister_buffers(&_ring);
+    io_uring_queue_exit(&_ring);
+}
 
 
 ACE_CORE_KERNEL_CONTROLLER_MEMBER(bool)

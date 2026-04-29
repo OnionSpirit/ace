@@ -49,6 +49,7 @@ namespace ace {
     using roaming    = futures::roaming;
     using get_runner = futures::get_runner;
     using reattach   = futures::reattach;
+    using console    = core::console;
 
 }
 

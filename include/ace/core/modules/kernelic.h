@@ -83,7 +83,7 @@ namespace ace::core::modules {
         }
 
         static bool socket(kernel_observer* waiter, const int domain, const int type,
-        const int protocol, const unsigned int flags) {
+            const int protocol, const unsigned int flags) {
             return submit(io_uring_prep_socket, waiter, domain, type, protocol, flags);
         }
 
@@ -124,7 +124,7 @@ namespace ace::core::modules {
         }
 
         static bool sendto(kernel_observer* waiter, const int fd, const void *buf, const size_t len, const int flags,
-        const sockaddr *addr, const socklen_t addrlen) {
+            const sockaddr *addr, const socklen_t addrlen) {
             return submit(io_uring_prep_sendto, waiter, fd, buf, len, flags, addr, addrlen);
         }
 

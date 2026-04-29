@@ -8,22 +8,36 @@ project(
 # Дериктория с файлами библиотеки
 include_dir = include_directories(['include'])
 
-# Подключаем nukes
+# Deps list
+depends = []
+
+# Fetching nukes
 cmake = import('cmake')
 nukes = cmake.subproject('nukes')
 nukes = nukes.dependency('nukes')
+depends += nukes
 
-# Подключаем liburing
-liburing_dep = dependency('liburing')
+# Fetching liburing
+liburing = dependency('liburing')
+depends += liburing
 
-# Декларируем интерфейсную библеотеку
+# Tests compilation option
+use_fmt = get_option('use_fmt')
+
+# Fetching fmtlib
+if (use_fmt)
+    fmtlib = dependency('fmt')
+    depends += fmtlib
+endif
+
+# Declaring interfacial lib
 ace_dep = declare_dependency(
     include_directories: include_dir,
-    dependencies: [ nukes, liburing_dep ]
+    dependencies: depends
 )
 meson.override_dependency('ace', ace_dep)
 
-# Опция компиляции тестов
+# Tests compilation option
 tests_enabled = get_option('tests')
 
 if tests_enabled

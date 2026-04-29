@@ -1,8 +1,6 @@
 #ifndef ACE_IO_H
 #define ACE_IO_H
 
-#include <format>
-#include <fstream>
 
 #include "ace/core/modules/kernelic.h"
 
@@ -307,88 +305,6 @@ public:                                                                         
     IMPORT_ERROR_HANDLING                                                                   \
                                                                                             \
     ~class() override = default;
-
-
-    class console {
-
-        console() = default;
-
-    protected:
-
-        static constexpr int buff_len = 256;
-
-        static auto get_instance() {
-            static console instance {};
-            return instance;
-        }
-
-        static constexpr int stdin = STDIN_FILENO;
-
-        static constexpr int stdout = STDOUT_FILENO;
-
-    public:
-
-        static async<std::string> input() {
-            std::stringstream ss;
-            char buff[buff_len] = {};
-            int bytes_read = co_await read_query(STDIN_FILENO, buff, buff_len);
-            ss << buff;
-            while (bytes_read == buff_len) {
-                bzero(buff, buff_len);
-                bytes_read = co_await read_query(STDIN_FILENO, buff, buff_len);
-                ss << buff;
-            }
-            co_return ss.str();
-        }
-
-        template <class... Args>
-        static async<void> println(std::format_string<Args...> fmt, Args&&... args) {
-            static_assert(false, "<std::format> is not implemented by now");
-            const std::string output = std::format(fmt, std::make_format_args(args...)) + '\n';
-            const int res = co_await write_query(STDOUT_FILENO, output.data(), output.size());
-            if (res < 0)
-                throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
-        }
-
-        template <class... Args>
-        static async<void> println(std::FILE* file, std::format_string<Args...> fmt, Args&&... args) {
-            static_assert(false, "<std::format> is not implemented by now");
-            const std::string output = std::format(fmt, std::make_format_args(args...)) + '\n';
-            const int res = co_await write_query(file->_fileno, output.data(), output.size());
-            if (res < 0)
-                throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
-        }
-
-        static async<void> println(std::string str) {
-            str += '\n';
-            const int res = co_await write_query(STDOUT_FILENO, str.data(), str.size());
-            if (res < 0)
-                throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
-            co_return;
-        }
-
-        static async<void> println(std::FILE* file, std::string str) {
-            str += '\n';
-            const int res = co_await write_query(file->_fileno, str.data(), str.size());
-            if (res < 0)
-                throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
-        }
-
-        static async<void> println() {
-            const std::string output {'\n'};
-            const int res = co_await write_query(STDOUT_FILENO, output.data(), output.size());
-            if (res < 0)
-                throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
-        }
-
-        static async<void> println(std::FILE* file) {
-            const std::string output {'\n'};
-            const int res = co_await write_query(file->_fileno, output.data(), output.size());
-            if (res < 0)
-                throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
-        }
-
-    };
 
 }
 

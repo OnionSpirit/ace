@@ -109,7 +109,7 @@ inline auto fancy(ace::core::timepoint_t tp) {
 inline ace::task expire_waiter_valued(ace::core::timepoint_t wait_time, ace::futures::channel_dyn<ace::core::timepoint_t>& ch) {
     std::cout << "Expires at: " << fancy(wait_time) << std::endl;
     co_await ace::futures::expire(wait_time);
-    std::cout << "Expired at: " << fancy(wait_time) << std::endl;
+    co_await ace::console::println("Expired at: {}", fancy(wait_time));
     ch << wait_time;
     co_return;
 }

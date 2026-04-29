@@ -20,6 +20,7 @@
 #define ACE_FUTURE_GET_RUNNER_H
 
 #include <ace/core/traits/future.h>
+#include <ace/core/runner.h>
 
 namespace ace::futures {
 
@@ -31,7 +32,7 @@ namespace ace::futures {
      */
     struct get_runner : core::traits::future_traits<get_runner> {
 
-        core::runner* _ptr {}; ///< Pointer filled in by @c await_suspend.
+        runner_pool_t** _ptr {}; ///< Pointer filled in by @c await_suspend.
 
         IMPORT_FUTURE_ENV(get_runner)
 
@@ -41,8 +42,8 @@ namespace ace::futures {
          * @return Always @c false — no suspension.
          */
         bool await_suspend(auto coroutine) {
-            _ptr = core::pool_to_runner(coroutine.promise()._runner_pool);
-            return false;
+            _ptr = &coroutine.promise()._runner_pool;
+            return true;
         }
 
         /**
@@ -51,7 +52,7 @@ namespace ace::futures {
          *         if the coroutine has no associated runner yet.
          */
         [[nodiscard]] core::runner* await_resume() const {
-            return _ptr;
+            return core::pool_to_runner(*_ptr);
         }
     };
 

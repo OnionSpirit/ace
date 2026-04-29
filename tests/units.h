@@ -61,17 +61,19 @@ struct channel_abuser {
         co_await tests_future;
         std::string msg = "Ping";
         _channel.push(msg);
-        std::cout << "Channel send complete" << std::endl;
+        // std::cout << "Channel send complete" << std::endl;
+        co_await ace::console::println("Channel send complete");
         const auto received = co_await _channel.pull();
-        std::cout << "Channel received answer. DATA: " << received << std::endl;
+        // std::cout << "Channel received answer. DATA: " << received << std::endl;
+        co_await ace::console::println("Channel received answer. DATA: {}", received);
         co_return;
     }
 
     ace::task channel_receiver() {
         const auto received = co_await _channel.pull();
-        std::cout << "Channel receive complete. DATA: " << received << std::endl;
+        co_await ace::console::println("Channel receive complete. DATA: {}", received);
         _channel << "pong";
-        std::cout << "Channel send answer" << std::endl;
+        co_await ace::console::println("Channel send answer");
         co_return;
     }
 
@@ -90,9 +92,9 @@ ace::task timer_waiter(std::chrono::duration<Rep, Period> wait_time, ace::future
 
 template<typename Rep, typename Period>
 ace::task timer_waiter_valued(std::chrono::duration<Rep, Period> wait_time, ace::futures::channel_dyn<int>& ch) {
-    std::cout << "Timeout launched for: " << wait_time << std::endl;
+    co_await ace::console::println("Timeout launched for: {}", wait_time);
     co_await ace::futures::timeout(wait_time);
-    std::cout << "Timeout released after: " << wait_time << std::endl;
+    co_await ace::console::println("Timeout released after: {}", wait_time);
     ch << wait_time.count();
     co_return;
 }
@@ -107,7 +109,7 @@ inline auto fancy(ace::core::timepoint_t tp) {
 }
 
 inline ace::task expire_waiter_valued(ace::core::timepoint_t wait_time, ace::futures::channel_dyn<ace::core::timepoint_t>& ch) {
-    std::cout << "Expires at: " << fancy(wait_time) << std::endl;
+    co_await ace::console::println("Expires at: {}", fancy(wait_time));
     co_await ace::futures::expire(wait_time);
     co_await ace::console::println("Expired at: {}", fancy(wait_time));
     ch << wait_time;
@@ -162,20 +164,17 @@ struct lifetime_watchdog {
 };
 
 inline ace::promise<> to_spawn_nested(ace::futures::channel_dyn<ace::core::runner*>& output) {
-    std::cout << "'parallel-nested' started\n";
-    co_await ace::futures::timeout(10ms);
-    co_await ace::suspend();
     const auto _check = std::make_unique<lifetime_watchdog>("'parallel-nested'");
+    co_await ace::console::print("'parallel-nested' started\n");
     co_await ace::futures::timeout(1000ms);
     output << co_await ace::get_runner();
-    std::cout << _check->_name << " finished\n";
+    co_await ace::console::println("{} finished", _check->_name);
     co_return;
 }
 
 inline ace::task to_spawn_cancel(ace::futures::channel_dyn<ace::core::runner*>& output) {
-    std::cout << "'parallel' started\n";
-    co_await ace::futures::timeout(10ms);
     const auto _check = std::make_unique<lifetime_watchdog>("'parallel'");
+    co_await ace::console::print("'parallel' started\n");
     co_await to_spawn_nested(output);
     co_await ace::futures::timeout(1000ms);
     output << co_await ace::get_runner();

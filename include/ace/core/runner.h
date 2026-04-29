@@ -216,7 +216,7 @@ namespace ace::core {
 
 
     inline void runner::reattach(task&& ctx) {
-        if (not ctx.is_resumable() or not ctx._coroutine.promise()._runner_pool)
+        if (not ctx.is_exist() or not ctx._coroutine.promise()._runner_pool)
             return;
         if (ctx._coroutine.promise()._polling)
             pool_to_runner(ctx._coroutine.promise()._runner_pool)->_vortex_pool.push(std::move(ctx));
@@ -226,14 +226,14 @@ namespace ace::core {
 
 
     inline void runner::threadsafe_reattach(task&& ctx) {
-        if (not ctx.is_resumable() or not ctx._coroutine.promise()._runner_pool)
+        if (not ctx.is_exist() or not ctx._coroutine.promise()._runner_pool)
             return;
         pool_to_runner(ctx._coroutine.promise()._runner_pool)->_interthread_pool.push(std::move(ctx));
     }
 
 
     inline void runner::reattach(insert_node_ptr& node) {
-        if (not node or not node->_data.is_resumable() or not node->_data._coroutine.promise()._runner_pool)
+        if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
             return;
         auto n = nukes::details::nodes::cast_node(node);
         if (node->_data._coroutine.promise()._polling)
@@ -245,7 +245,7 @@ namespace ace::core {
 
 
     inline void runner::reattach(pool_node_ptr& node) {
-        if (not node or not node->_data.is_resumable() or not node->_data._coroutine.promise()._runner_pool)
+        if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
             return;
         if (node->_data._coroutine.promise()._polling)
             pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_vortex_pool.push_node(node);
@@ -256,7 +256,7 @@ namespace ace::core {
 
 
     inline void runner::threadsafe_reattach(insert_node_ptr& node) {
-        if (not node or not node->_data.is_resumable() or not node->_data._coroutine.promise()._runner_pool)
+        if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
             return;
         pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_interthread_pool.push_node(node);
         node = nullptr;
@@ -264,7 +264,7 @@ namespace ace::core {
 
 
     inline void runner::threadsafe_reattach(pool_node_ptr& node) {
-        if (not node or not node->_data.is_resumable() or not node->_data._coroutine.promise()._runner_pool)
+        if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
             return;
         auto n = nukes::details::nodes::cast_node(node);
         pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_interthread_pool.push_node(n);

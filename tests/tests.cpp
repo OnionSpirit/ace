@@ -4,6 +4,7 @@
 
 TEST(context, do_co_await_test) {
     auto r = simple_context_test();
+    r._coroutine.promise()._runner_pool = reinterpret_cast<ace::task::runner_pool_t*>(uintptr_t{1});
     ASSERT_TRUE(r);
     r.awake();
     ASSERT_FALSE(r);
@@ -13,6 +14,7 @@ TEST(context, do_co_await_test) {
 TEST(context, do_nested_suspend_test) {
 
     auto r = nested_context_suspender();
+    r._coroutine.promise()._runner_pool = reinterpret_cast<ace::task::runner_pool_t*>(uintptr_t{1});
     ASSERT_TRUE(r);
     r.awake(); // NOTE: Делаем так потому что ASSERT_TRUE может вызвать только константный оператор
     r.awake();
@@ -23,6 +25,7 @@ TEST(context, do_nested_suspend_test) {
 TEST(context, do_const_nested_suspend_test) {
 
     const auto r = nested_context_suspender();
+    r._coroutine.promise()._runner_pool = reinterpret_cast<ace::task::runner_pool_t*>(uintptr_t{1});
     ASSERT_TRUE(r);
     ASSERT_TRUE(r);
 }

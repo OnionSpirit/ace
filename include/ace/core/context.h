@@ -116,19 +116,19 @@ namespace ace::core {
         explicit context(coroutine_t &&handler) : _coroutine{handler} {};
 
         /**
-         * @brief Check whether the coroutine can be resumed.
+         * @brief Check whether the coroutine is exist.
          * @details Returns @c true iff all of the following hold:
          *  - The handle is non-null.
          *  - The coroutine has not finished (@c !done()).
          *  - The control block has not been disowned (not cancelled).
          * @return @c true if resumable.
          */
-        [[nodiscard]] bool is_resumable() const noexcept {
+        [[nodiscard]] bool is_exist() const noexcept {
             return _coroutine and not _coroutine.done() and not control_block::is_disowned(_coroutine.address());
         }
 
-        /// @brief Equivalent to @c is_resumable().
-        explicit operator bool() const { return is_resumable(); }
+        /// @brief Equivalent to @c is_exist().
+        explicit operator bool() const { return is_exist(); }
 
         /**
          * @brief Destructor.  Wakes all registered waiters then destroys the
@@ -157,9 +157,9 @@ namespace ace::core {
          * pending busy future has become ready (@c await_ready() returns @c true).
          * @return @c true if the runner may resume this context.
          */
-        bool accessed_by_future() {
-            return not _coroutine.promise()._busy_future
-                or _coroutine.promise()._busy_future->await_ready();
+        bool is_resumable() {
+                return (not _coroutine.promise()._busy_future or _coroutine.promise()._busy_future->await_ready())
+                        and _coroutine.promise()._runner_pool;
         }
 
         /**
@@ -376,22 +376,6 @@ namespace ace::core {
         // -----------------------------------------------------------------------
 
         /**
-         * @brief Internal helper for @c await_ready().
-         * @details Resumes the coroutine inline if it is ready and no future
-         * is blocking it.
-         * @return @c true if the coroutine finished synchronously.
-         */
-        bool await_ready_impl() {
-            if (_coroutine.done()) return true;
-            // NOTE: Checking future to be waited
-            if (accessed_by_future()) {
-                _coroutine.resume();
-                return _coroutine.done();
-            }
-            return false;
-        }
-
-        /**
          * @brief C++20 awaitable protocol — check if coroutine is already done.
          * @details Forces @c await_suspend processing on first call (when status
          * is @c e_inited) so the runner pool pointer can be propagated.
@@ -399,9 +383,12 @@ namespace ace::core {
          *         should not suspend.
          */
         bool await_ready() override {
-            // NOTE: Forcing await_suspend processing to define runner_pool
-            if (_coroutine.promise()._status == e_inited) return false;
-            return await_ready_impl();
+            if (_coroutine.done()) return true;
+            if (is_resumable()) {
+                _coroutine.resume();
+                return _coroutine.done();
+            }
+            return false;
         }
 
         /**
@@ -416,11 +403,11 @@ namespace ace::core {
          */
         template<typename promiseT>
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
-            if (_coroutine.promise()._status == e_inited) {
+            if (not _coroutine.promise()._runner_pool)
                 _coroutine.promise()._runner_pool = outer.promise()._runner_pool;
-                // NOTE: Extra call of await_ready because it was skipped by initial state guard
-                if (await_ready_impl()) return false;
-            }
+            // NOTE: Extra call of await_ready fore differed context because it was skipped by idle runner pool ptr
+            if (_coroutine.promise()._status == e_inited)
+                if (await_ready()) return false;
             // NOTE: No extra checks needed, because function would be called once before suspending.
             // NOTE: Just coping conductor ptr. Outer task will destroy conductor before current promise stack
             outer.promise()._runner_conductor << _coroutine.promise()._runner_conductor;
@@ -458,11 +445,11 @@ namespace ace::core {
         returnT awake(promise_touch_result *const _res = nullptr) noexcept {
             // NOTE: Checking if promise is ready
             const bool is_ready {
-                is_resumable()
+                is_exist()
                 and _coroutine.promise()._status not_eq e_failed
                 and _coroutine.promise()._status not_eq e_finished
                 and _coroutine.promise()._status not_eq e_detached
-                and accessed_by_future()
+                and is_resumable()
             };
             // NOTE: Releasing future and resume context
             if (is_ready) {

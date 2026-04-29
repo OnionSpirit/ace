@@ -235,29 +235,29 @@ namespace ace::core::traits {
          * @details Resets @c _busy_future because a regular future takes over
          * forwarding control via the conductor mechanism.
          * @tparam futureT  A type satisfying @c ace::core::misc::dispatch::is_future.
-         * @param command   The future to await.
+         * @param future    The future to await.
          * @return          The same lvalue reference.
          */
         template <typename futureT>
         requires tools::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
-        futureT& await_transform(futureT& command) {
+        futureT& await_transform(futureT& future) {
             _status = e_executed;
             _busy_future = nullptr;
-            return command;
+            return future;
         }
 
         /**
          * @brief @c await_transform for rvalue-ref futures (@c is_future concept).
          * @tparam futureT  A type satisfying @c ace::core::misc::dispatch::is_future.
-         * @param command   The future to await.
+         * @param future    The future to await.
          * @return          An rvalue reference to the future.
          */
         template <typename futureT>
         requires tools::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
-        futureT&& await_transform(futureT&& command) {
+        futureT&& await_transform(futureT&& future) {
             _status = e_executed;
             _busy_future = nullptr;
-            return command;
+            return future;
         }
 
         /**

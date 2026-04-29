@@ -1,2 +1,1 @@
 option('tests', type: 'boolean', value: false, description: 'Build tests')
-option('use_fmt', type: 'boolean', value: false, description: 'Use fmt lib for formatting')

@@ -5,7 +5,7 @@ project(
     version : '0.9.9'
 )
 
-# Дериктория с файлами библиотеки
+# Declaring lib dir
 include_dir = include_directories(['include'])
 
 # Deps list
@@ -20,15 +20,6 @@ depends += nukes
 # Fetching liburing
 liburing = dependency('liburing')
 depends += liburing
-
-# Tests compilation option
-use_fmt = get_option('use_fmt')
-
-# Fetching fmtlib
-if (use_fmt)
-    fmtlib = dependency('fmt')
-    depends += fmtlib
-endif
 
 # Declaring interfacial lib
 ace_dep = declare_dependency(

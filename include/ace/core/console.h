@@ -4,9 +4,6 @@
 #include <ace/core/context.h>
 #include <ace/core/io.h>
 
-// TODO: Add selection between fmt and std C++26 at build system level
-// #include <fmt/format.h>
-#define FORMAT std
 
 namespace ace {
 
@@ -40,24 +37,24 @@ namespace ace {
 
         // TODO: figure out if that vfromat way better
         // template <class... Args>
-        // [[nodiscard]] static async<void> println(FORMAT::string_view fmt, Args&&... args) {
-        //     const std::string output = FORMAT::vformat(fmt, FORMAT::make_format_args(args...)) + "\n";
+        // [[nodiscard]] static async<void> println(std::string_view fmt, Args&&... args) {
+        //     const std::string output = std::vformat(fmt, std::make_format_args(args...)) + "\n";
         //     const int res = co_await core::write_query(stdout->_fileno, output.data(), output.size());
         //     if (res < 0)
         //         throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
         // }
 
         template <class... Args>
-        [[nodiscard]] static async<void> println(FORMAT::format_string<Args...> fmt, Args&&... args) {
-            const std::string output = FORMAT::format(fmt, std::forward<Args>(args)...) + "\n";
+        [[nodiscard]] static async<void> println(std::format_string<Args...> fmt, Args&&... args) {
+            const std::string output = std::format(fmt, std::forward<Args>(args)...) + "\n";
             const int res = co_await core::write_query(STDOUT_FILENO, output.data(), output.size());
             if (res < 0)
                 throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
         }
 
         template <class... Args>
-        [[nodiscard]] static async<void> println(std::FILE* file, FORMAT::format_string<Args...> fmt, Args&&... args) {
-            const std::string output = FORMAT::format(fmt, std::forward<Args>(args)...) + "\n";
+        [[nodiscard]] static async<void> println(std::FILE* file, std::format_string<Args...> fmt, Args&&... args) {
+            const std::string output = std::format(fmt, std::forward<Args>(args)...) + "\n";
             const int res = co_await core::write_query(file->_fileno, output.data(), output.size());
             if (res < 0)
                 throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
@@ -93,16 +90,16 @@ namespace ace {
         }
 
         template <class... Args>
-        [[nodiscard]] static async<void> print(FORMAT::format_string<Args...> fmt, Args&&... args) {
-            const std::string output = FORMAT::format(fmt, std::forward<Args>(args)...);
+        [[nodiscard]] static async<void> print(std::format_string<Args...> fmt, Args&&... args) {
+            const std::string output = std::format(fmt, std::forward<Args>(args)...);
             const int res = co_await core::write_query(STDOUT_FILENO, output.data(), output.size());
             if (res < 0)
                 throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
         }
 
         template <class... Args>
-        [[nodiscard]] static async<void> print(std::FILE* file, FORMAT::format_string<Args...> fmt, Args&&... args) {
-            const std::string output = FORMAT::format(fmt, std::forward<Args>(args)...);
+        [[nodiscard]] static async<void> print(std::FILE* file, std::format_string<Args...> fmt, Args&&... args) {
+            const std::string output = std::format(fmt, std::forward<Args>(args)...);
             const int res = co_await core::write_query(file->_fileno, output.data(), output.size());
             if (res < 0)
                 throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
@@ -125,6 +122,6 @@ namespace ace {
 
 }
 
-#undef FORMAT
+#undef std
 
 #endif //ACE_CONSOLE_H

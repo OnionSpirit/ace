@@ -48,7 +48,7 @@ namespace ace::futures {
  * @details The duration is converted to milliseconds at construction time.
  * Minimum resolution is 1 ms (limited by the clock tick duration).
  */
-class timeout : public core::traits::future_traits<timeout> {
+class ACE_AWAIT_NODISCARD timeout : public core::traits::future_traits<timeout> {
 
     core::duration_t _duration; ///< Suspension duration in milliseconds.
 
@@ -95,7 +95,7 @@ public:
  * co_await ace::futures::expire(deadline);
  * @endcode
  */
-struct expire : timeout {
+struct ACE_AWAIT_NODISCARD expire : timeout {
     /**
      * @brief Construct from an absolute timepoint.
      * @param expires  The absolute deadline.  The computed duration is

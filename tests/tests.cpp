@@ -4,16 +4,17 @@
 
 TEST(context, do_co_await_test) {
     auto r = simple_context_test();
+    // NOTE: To let it be resumable
     r._coroutine.promise()._runner_pool = reinterpret_cast<ace::task::runner_pool_t*>(uintptr_t{1});
     ASSERT_TRUE(r);
     r.awake();
     ASSERT_FALSE(r);
 }
 
-// NOTE: Проверка разрешения не константных реакций
 TEST(context, do_nested_suspend_test) {
 
     auto r = nested_context_suspender();
+    // NOTE: To let it be resumable
     r._coroutine.promise()._runner_pool = reinterpret_cast<ace::task::runner_pool_t*>(uintptr_t{1});
     ASSERT_TRUE(r);
     r.awake(); // NOTE: Делаем так потому что ASSERT_TRUE может вызвать только константный оператор
@@ -21,10 +22,10 @@ TEST(context, do_nested_suspend_test) {
     ASSERT_FALSE(r);
 }
 
-// NOTE: Разрешать константные реакции не по деструктору запрещено
 TEST(context, do_const_nested_suspend_test) {
 
     const auto r = nested_context_suspender();
+    // NOTE: To let it be resumable
     r._coroutine.promise()._runner_pool = reinterpret_cast<ace::task::runner_pool_t*>(uintptr_t{1});
     ASSERT_TRUE(r);
     ASSERT_TRUE(r);
@@ -45,13 +46,11 @@ TEST(core, do_runner_test) {
 }
 
 TEST(futures, do_dynamic_channel_on_runner_test) {
-
-    ace::core::runner runner;
     channel_abuser abuser;
-    runner.attach(abuser.channel_receiver());
-    runner.attach(abuser.channel_sender());
-    ASSERT_TRUE(runner.run());
-    ASSERT_TRUE(runner.empty());
+    ace::schedule(abuser.channel_receiver());
+    ace::schedule(abuser.channel_sender());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
     ASSERT_TRUE(abuser._channel.empty());
 }
 

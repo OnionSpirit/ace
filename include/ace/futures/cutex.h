@@ -60,7 +60,7 @@ namespace ace::futures {
      *
      * @see ace::futures::cutex
      */
-    class cutex_future : public core::traits::future_traits<cutex_future> {
+    class ACE_AWAIT_NODISCARD cutex_future : public core::traits::future_traits<cutex_future> {
 
         struct cutex_conductor;
         friend cutex_conductor;
@@ -227,7 +227,7 @@ namespace ace::futures {
          * @return Reference to the cutex's @c cutex_future interface.
          * @throws std::logic_error if called while the lock is already held.
          */
-        [[nodiscard]] auto capture() volatile -> cutex_future& {
+        ACE_AWAIT_NODISCARD auto capture() volatile -> cutex_future& {
             if (not _is_synced)
                 throw std::logic_error {"cutex 'capture()' before 'sync()'"};
             _is_synced = false;

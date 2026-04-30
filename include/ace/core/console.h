@@ -37,7 +37,8 @@ namespace ace {
 
         // TODO: figure out if that vfromat way better
         // template <class... Args>
-        // [[nodiscard]] static async<void> println(std::string_view fmt, Args&&... args) {
+        // ACE_AWAIT_NODISCARD
+        // static async<void> println(std::string_view fmt, Args&&... args) {
         //     const std::string output = std::vformat(fmt, std::make_format_args(args...)) + "\n";
         //     const int res = co_await core::write_query(stdout->_fileno, output.data(), output.size());
         //     if (res < 0)
@@ -45,7 +46,7 @@ namespace ace {
         // }
 
         template <class... Args>
-        [[nodiscard]] static promise<void> println(std::format_string<Args...> fmt, Args&&... args) {
+        static promise<void> println(std::format_string<Args...> fmt, Args&&... args) {
             const std::string output = std::format(fmt, std::forward<Args>(args)...) + "\n";
             const int res = co_await core::write_query(STDOUT_FILENO, output.data(), output.size());
             if (res < 0)
@@ -53,14 +54,14 @@ namespace ace {
         }
 
         template <class... Args>
-        [[nodiscard]] static promise<void> println(std::FILE* file, std::format_string<Args...> fmt, Args&&... args) {
+        static promise<void> println(std::FILE* file, std::format_string<Args...> fmt, Args&&... args) {
             const std::string output = std::format(fmt, std::forward<Args>(args)...) + "\n";
             const int res = co_await core::write_query(file->_fileno, output.data(), output.size());
             if (res < 0)
                 throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
         }
 
-        [[nodiscard]] static promise<void> println(std::string str) {
+        static promise<void> println(std::string str) {
             str += '\n';
             const int res = co_await core::write_query(STDOUT_FILENO, str.data(), str.size());
             if (res < 0)
@@ -68,21 +69,21 @@ namespace ace {
             co_return;
         }
 
-        [[nodiscard]] static promise<void> println(const std::FILE* file, std::string str) {
+        static promise<void> println(const std::FILE* file, std::string str) {
             str += '\n';
             const int res = co_await core::write_query(file->_fileno, str.data(), str.size());
             if (res < 0)
                 throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
         }
 
-        [[nodiscard]] static promise<void> println() {
+        static promise<void> println() {
             const std::string output {'\n'};
             const int res = co_await core::write_query(STDOUT_FILENO, output.data(), output.size());
             if (res < 0)
                 throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
         }
 
-        [[nodiscard]] static promise<void> println(const std::FILE* file) {
+        static promise<void> println(const std::FILE* file) {
             const std::string output {'\n'};
             const int res = co_await core::write_query(file->_fileno, output.data(), output.size());
             if (res < 0)
@@ -90,7 +91,7 @@ namespace ace {
         }
 
         template <class... Args>
-        [[nodiscard]] static promise<void> print(std::format_string<Args...> fmt, Args&&... args) {
+        static promise<void> print(std::format_string<Args...> fmt, Args&&... args) {
             const std::string output = std::format(fmt, std::forward<Args>(args)...);
             const int res = co_await core::write_query(STDOUT_FILENO, output.data(), output.size());
             if (res < 0)
@@ -98,21 +99,21 @@ namespace ace {
         }
 
         template <class... Args>
-        [[nodiscard]] static promise<void> print(std::FILE* file, std::format_string<Args...> fmt, Args&&... args) {
+        static promise<void> print(std::FILE* file, std::format_string<Args...> fmt, Args&&... args) {
             const std::string output = std::format(fmt, std::forward<Args>(args)...);
             const int res = co_await core::write_query(file->_fileno, output.data(), output.size());
             if (res < 0)
                 throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
         }
 
-        [[nodiscard]] static promise<void> print(const std::string_view str) {
+        static promise<void> print(const std::string_view str) {
             const int res = co_await core::write_query(STDOUT_FILENO, str.data(), str.size());
             if (res < 0)
                 throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));
             co_return;
         }
 
-        [[nodiscard]] static promise<void> print(const std::FILE* file, const std::string_view str) {
+        static promise<void> print(const std::FILE* file, const std::string_view str) {
             const int res = co_await core::write_query(file->_fileno, str.data(), str.size());
             if (res < 0)
                 throw std::runtime_error(std::string("stdout write failed: ") + strerror(-res));

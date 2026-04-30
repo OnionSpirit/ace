@@ -6,7 +6,7 @@
 
 namespace ace::futures {
 
-    class reattach : public core::traits::future_traits<reattach> {
+    class ACE_AWAIT_NODISCARD reattach : public core::traits::future_traits<reattach> {
 
         core::runner* _new_runner {};
 

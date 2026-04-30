@@ -61,10 +61,8 @@ struct channel_abuser {
         co_await tests_future;
         std::string msg = "Ping";
         _channel.push(msg);
-        // std::cout << "Channel send complete" << std::endl;
         co_await ace::console::println("Channel send complete");
         const auto received = co_await _channel.pull();
-        // std::cout << "Channel received answer. DATA: " << received << std::endl;
         co_await ace::console::println("Channel received answer. DATA: {}", received);
         co_return;
     }
@@ -72,7 +70,7 @@ struct channel_abuser {
     ace::task channel_receiver() {
         const auto received = co_await _channel.pull();
         co_await ace::console::println("Channel receive complete. DATA: {}", received);
-        _channel << "pong";
+        _channel << "Pong";
         co_await ace::console::println("Channel send answer");
         co_return;
     }

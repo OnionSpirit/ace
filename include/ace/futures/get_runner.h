@@ -30,7 +30,7 @@ namespace ace::futures {
      * @details Non-suspending — reads the @c _runner_pool pointer from the
      * promise and converts it to a @c runner* via @c pool_to_runner().
      */
-    struct get_runner : core::traits::future_traits<get_runner> {
+    struct ACE_AWAIT_NODISCARD get_runner : core::traits::future_traits<get_runner> {
 
         runner_pool_t** _ptr {}; ///< Pointer filled in by @c await_suspend.
 

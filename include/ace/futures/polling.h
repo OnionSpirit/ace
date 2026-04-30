@@ -10,7 +10,7 @@ namespace ace::futures {
      *
      * @details Non-suspending — @c await_suspend() returns @c false immediately.
      */
-    class polling : public core::traits::future_traits<polling> {
+    class ACE_AWAIT_NODISCARD polling : public core::traits::future_traits<polling> {
 
         bool _is_polling { true }; ///< Target polling state.
 

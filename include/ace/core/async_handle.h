@@ -40,7 +40,7 @@ namespace ace::core {
      * @c forward() method enqueues the caller back into the target's waiters
      * queue, which is then drained — waking the caller.
      */
-    class join_handler : public core::traits::future_traits<join_handler> {
+    class ACE_AWAIT_NODISCARD join_handler : public core::traits::future_traits<join_handler> {
 
     protected:
 
@@ -97,7 +97,7 @@ namespace ace::core {
      * @note @c async_handle is @b not default-constructible.  It must be
      * obtained via @c co_await ace::spawn(...).
      */
-    class async_handle final : protected join_handler {
+    class ACE_AWAIT_NODISCARD async_handle final : protected join_handler {
 
     public:
 
@@ -117,7 +117,7 @@ namespace ace::core {
          * coroutine until the target finishes.
          * @return Reference to the @c join_handler base.
          */
-        [[nodiscard]] auto join() noexcept -> join_handler&;
+        ACE_AWAIT_NODISCARD auto join() noexcept -> join_handler&;
 
         /**
          * @brief Check if the target coroutine has finished.

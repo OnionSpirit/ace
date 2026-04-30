@@ -108,7 +108,7 @@ public:
      * @return Returns instance of future pull object,
      * that can be processed with @b co_await
      */
-    [[nodiscard]] pull_impl pull();
+    ACE_AWAIT_NODISCARD pull_impl pull();
 
     /**
      * @details @b push method alternative interface
@@ -126,13 +126,13 @@ public:
      * @details @b pull method alternative interface
      * @param data Data to pull
      */
-    [[nodiscard]] task operator >> (data_t& data) { data = co_await pull(); }
+    ACE_AWAIT_NODISCARD task operator >> (data_t& data) { data = co_await pull(); }
 
     /**
      * @details @b pull method alternative interface
      * @param data Data to pull
      */
-    [[nodiscard]] task operator >> (data_t&& data) { data = std::move(co_await pull()); }
+    ACE_AWAIT_NODISCARD task operator >> (data_t&& data) { data = std::move(co_await pull()); }
 };
 
 template<typename data_t>
@@ -195,7 +195,7 @@ public:
      * @return Returns instance of future pull object,
      * that can be processed with @b co_await
      */
-    [[nodiscard]] pull_impl pull();
+    ACE_AWAIT_NODISCARD pull_impl pull();
 
     /**
      * @details @b push method alternative interface
@@ -213,13 +213,13 @@ public:
      * @details @b pull method alternative interface
      * @param data Data to pull
      */
-    [[nodiscard]] task operator >> (data_t& data) { data = co_await pull(); }
+    ACE_AWAIT_NODISCARD task operator >> (data_t& data) { data = co_await pull(); }
 
     /**
      * @details @b pull method alternative interface
      * @param data Data to pull
      */
-    [[nodiscard]] task operator >> (data_t&& data) { data = std::move(co_await pull()); }
+    ACE_AWAIT_NODISCARD task operator >> (data_t&& data) { data = std::move(co_await pull()); }
 };
 
 

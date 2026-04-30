@@ -214,7 +214,8 @@ inline ace::task racer(const int& max, std::string& shared_counter, ace::cutex& 
     }
     co_await crx.capture();
     std::cout << "'racer' finished\n";
-    // co_await ace::console::println("'racer' finished");
+    // TODO: WTF
+    // co_await (crx.capture() and ace::console::println("'racer' finished"));
 }
 
 template<typename Rep, typename Period>
@@ -276,7 +277,7 @@ inline ace::task cutex_spawner(ace::futures::channel_dyn<ace::core::runner*>& ou
     else
         std::cout << "'cutex_carry' joined as alive. Failure\n";
     //     co_await ace::console::println("'cutex_carry' joined as alive. Failure");
-    output << co_await ace::get_runner();;
+    output << co_await ace::get_runner();
     std::cout << "'cutex_spawner' finished\n";
     // co_await ace::console::println("'cutex_spawner' finished");
 }

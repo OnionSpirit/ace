@@ -21,13 +21,14 @@ namespace ace::core::modules {
             : _runner_identity(identity) {}
 
         /**
-         * @brief Activates waiter with CQE result
+         * @brief Activates observer with CQE result
          * @param res CQE result value
          */
         virtual void on_result(int res) = 0;
 
         bool _on_cancel = false; ///< Next response will indicate count of canceled operations
         bool _multishot = false; ///< Mark if multishot is enabled
+        // bool _abandoned = false; ///< Mark if task doesn't need to use 'on_result()'
 
         runner_pool_t* _runner_identity = nullptr;
 
@@ -64,80 +65,80 @@ namespace ace::core::modules {
         /**
          * @brief Submits IO request to controller.
          * @param [in] io_uring_foo IO function ptr.
-         * @param [in] waiter pointer to an external object that waits
+         * @param [in] observer pointer to an external object that waits
          * for the operation result of the requested operation.
          * @param [in, out] params... IO function params (without sqe).
          * @warning IO function params shall be passed without SQE ptr.
          *
-         * Same order but waiter ptr required instead of the SQE ptr:
+         * Same order but observer ptr required instead of the SQE ptr:
          *
          * @c io_uring_prep_open(sqe, path, flags, mode) - @b liburing @b interface.
          *
-         * @c submit(io_uring_prep_open, waiter, path, flags, mode) - @b submit @b interface.
+         * @c submit(io_uring_prep_open, observer, path, flags, mode) - @b submit @b interface.
          */
         template <typename foo_t, typename ... Params>
-        static bool submit(foo_t io_uring_foo, kernel_observer* waiter, Params... params) noexcept;
+        static bool submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept;
 
-        static bool nop(kernel_observer* waiter) {
-            return submit(io_uring_prep_nop, waiter);
+        static bool nop(kernel_observer* observer) {
+            return submit(io_uring_prep_nop, observer);
         }
 
-        static bool socket(kernel_observer* waiter, const int domain, const int type,
+        static bool socket(kernel_observer* observer, const int domain, const int type,
             const int protocol, const unsigned int flags) {
-            return submit(io_uring_prep_socket, waiter, domain, type, protocol, flags);
+            return submit(io_uring_prep_socket, observer, domain, type, protocol, flags);
         }
 
-        static bool cancel(kernel_observer* waiter, const int flags) {
-            return waiter->_on_cancel = submit(io_uring_prep_cancel, waiter, waiter, flags);
+        static bool cancel(kernel_observer* observer, const int flags) {
+            return observer->_on_cancel = submit(io_uring_prep_cancel, observer, observer, flags);
         }
 
-        static bool cancel_fd(kernel_observer* waiter, const int fd, const int flags) {
-            return waiter->_on_cancel = submit(io_uring_prep_cancel_fd, waiter, fd, flags);
+        static bool cancel_fd(kernel_observer* observer, const int fd, const int flags) {
+            return observer->_on_cancel = submit(io_uring_prep_cancel_fd, observer, fd, flags);
         }
 
-        static bool open(kernel_observer* waiter, const char* path, const int flags, const mode_t mode) {
-            return submit(io_uring_prep_open, waiter, path, flags, mode);
+        static bool open(kernel_observer* observer, const char* path, const int flags, const mode_t mode) {
+            return submit(io_uring_prep_open, observer, path, flags, mode);
         }
 
-        static bool close(kernel_observer* waiter, const int fd) noexcept {
-            return submit(io_uring_prep_close, waiter, fd);
+        static bool close(kernel_observer* observer, const int fd) noexcept {
+            return submit(io_uring_prep_close, observer, fd);
         }
 
-        static bool bind(kernel_observer* waiter, const int fd, const sockaddr *addr, const socklen_t addrlen) {
-            return submit(io_uring_prep_bind, waiter, fd, addr, addrlen);
+        static bool bind(kernel_observer* observer, const int fd, const sockaddr *addr, const socklen_t addrlen) {
+            return submit(io_uring_prep_bind, observer, fd, addr, addrlen);
         }
 
-        static bool connect(kernel_observer* waiter, const int fd, const sockaddr *addr, const socklen_t addrlen) {
-            return submit(io_uring_prep_connect, waiter, fd, addr, addrlen);
+        static bool connect(kernel_observer* observer, const int fd, const sockaddr *addr, const socklen_t addrlen) {
+            return submit(io_uring_prep_connect, observer, fd, addr, addrlen);
         }
 
-        static bool listen(kernel_observer* waiter, const int fd, const int backlog) {
-            return submit(io_uring_prep_listen, waiter, fd, backlog);
+        static bool listen(kernel_observer* observer, const int fd, const int backlog) {
+            return submit(io_uring_prep_listen, observer, fd, backlog);
         }
 
-        static bool accept(kernel_observer* waiter, const int fd, sockaddr *addr, socklen_t *addrlen, const int flags) {
-            return submit(io_uring_prep_accept, waiter, fd, addr, addrlen, flags);
+        static bool accept(kernel_observer* observer, const int fd, sockaddr *addr, socklen_t *addrlen, const int flags) {
+            return submit(io_uring_prep_accept, observer, fd, addr, addrlen, flags);
         }
 
-        static bool send(kernel_observer* waiter, const int fd, const void *buf, const size_t len, const int flags) {
-            return submit(io_uring_prep_send, waiter, fd, buf, len, flags);
+        static bool send(kernel_observer* observer, const int fd, const void *buf, const size_t len, const int flags) {
+            return submit(io_uring_prep_send, observer, fd, buf, len, flags);
         }
 
-        static bool sendto(kernel_observer* waiter, const int fd, const void *buf, const size_t len, const int flags,
+        static bool sendto(kernel_observer* observer, const int fd, const void *buf, const size_t len, const int flags,
             const sockaddr *addr, const socklen_t addrlen) {
-            return submit(io_uring_prep_sendto, waiter, fd, buf, len, flags, addr, addrlen);
+            return submit(io_uring_prep_sendto, observer, fd, buf, len, flags, addr, addrlen);
         }
 
-        static bool recv(kernel_observer* waiter, const int fd, void *buf, const size_t len, const int flags) {
-            return submit(io_uring_prep_recv, waiter, fd, buf, len, flags);
+        static bool recv(kernel_observer* observer, const int fd, void *buf, const size_t len, const int flags) {
+            return submit(io_uring_prep_recv, observer, fd, buf, len, flags);
         }
 
-        static bool read(kernel_observer* waiter, const int fd, void *buf, const unsigned nbytes, const uint64_t offset) {
-            return submit(io_uring_prep_read, waiter, fd, buf, nbytes, offset);
+        static bool read(kernel_observer* observer, const int fd, void *buf, const unsigned nbytes, const uint64_t offset) {
+            return submit(io_uring_prep_read, observer, fd, buf, nbytes, offset);
         }
 
-        static bool write(kernel_observer* waiter, const int fd, const void *buf, const unsigned nbytes, const uint64_t offset) {
-            return submit(io_uring_prep_write, waiter, fd, buf, nbytes, offset);
+        static bool write(kernel_observer* observer, const int fd, const void *buf, const unsigned nbytes, const uint64_t offset) {
+            return submit(io_uring_prep_write, observer, fd, buf, nbytes, offset);
         }
 
     };
@@ -230,16 +231,19 @@ ping() {
 
         const auto cqe = cqe_s[i];
         const auto identity = io_uring_cqe_get_data64(cqe);
-        const auto waiter = reinterpret_cast<kernel_observer*>(identity);
+        const auto observer = reinterpret_cast<kernel_observer*>(identity);
 
-        if (waiter == nullptr)
+        if (observer == nullptr) {
+            // if (cqe->res < 0) std::cerr << strerror(-cqe->res) << '\n';
+            // --_queries;
             continue;
+        }
 
-        waiter->on_result(cqe->res);
+        observer->on_result(cqe->res);
 
-        if (not waiter->_multishot)
+        if (not observer->_multishot)
             --_queries;
-        else if (waiter->_multishot and waiter->_on_cancel)
+        else if (observer->_multishot and observer->_on_cancel)
             _queries -= cqe->res;
 
         io_uring_cqe_seen(&_ring, cqe);
@@ -251,15 +255,20 @@ ping() {
 
 template <typename foo_t, typename ... Params> bool
 ACE_CORE_KERNEL_CONTROLLER_SPACE
-submit(foo_t io_uring_foo, kernel_observer* waiter, Params... params) noexcept {
-    touch(waiter->_runner_identity);
+submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept {
+    touch(observer->_runner_identity);
     io_uring_sqe *sqe = io_uring_get_sqe(&_ring);
-    io_uring_sqe_set_data(sqe, waiter);
+    // TODO: Use when go to iovec
+    // if (observer->_abandoned) {
+    //     observer = nullptr;
+    //     sqe->flags |= IOSQE_CQE_SKIP_SUCCESS;
+    // }
+    io_uring_sqe_set_data(sqe, observer);
     ++_queries;
     if (not _submission_buffer.enqueue( kernel_entity{io_uring_foo, sqe, params...} )) [[unlikely]] {
         sqe = io_uring_get_sqe(&_ring);
         io_uring_sqe_set_data(sqe, nullptr);
-        io_uring_prep_cancel(sqe, waiter, 0);
+        io_uring_prep_cancel(sqe, observer, 0);
         --_queries;
         return false;
     }

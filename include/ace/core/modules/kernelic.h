@@ -49,6 +49,7 @@ namespace ace::core::modules {
         static thread_local io_uring_params _ring_params;
         static thread_local io_uring _ring;
         static thread_local int _queries;
+        static thread_local bool _need_submission;
 
     public:
 
@@ -181,6 +182,7 @@ namespace ace::core::modules {
     thread_local io_uring_params kernel_controller::_ring_params {};
     thread_local io_uring kernel_controller::_ring {};
     thread_local int kernel_controller::_queries {};
+    thread_local bool kernel_controller::_need_submission {false};
 
 }
 
@@ -214,15 +216,17 @@ ACE_CORE_KERNEL_CONTROLLER_MEMBER()
 ACE_CORE_KERNEL_CONTROLLER_MEMBER(bool)
 ping() {
     // NOTE: Setting requests to the io_uring
-    const bool need_submission = not _submission_buffer.empty();
+    _need_submission = _need_submission or not _submission_buffer.empty();
     for (unsigned int i = 0; i < max_entries and not _submission_buffer.empty(); ++i) {
         auto entity = _submission_buffer.dequeue();
         entity.apply();
     }
 
     // NOTE: Requesting submission if it's needed
-    if (need_submission)
+    if (_need_submission) {
         io_uring_submit(&_ring);
+        _need_submission = false;
+    }
 
     // NOTE: Receiving responses from the io_uring
     io_uring_cqe* cqe_s[max_entries] {};
@@ -265,13 +269,12 @@ submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept
     // }
     io_uring_sqe_set_data(sqe, observer);
     ++_queries;
-    if (not _submission_buffer.enqueue( kernel_entity{io_uring_foo, sqe, params...} )) [[unlikely]] {
-        sqe = io_uring_get_sqe(&_ring);
-        io_uring_sqe_set_data(sqe, nullptr);
-        io_uring_prep_cancel(sqe, observer, 0);
-        --_queries;
-        return false;
+    if (_queries < 4096) {
+        io_uring_foo(sqe, params...);
+        _need_submission = true;
     }
+    else if (not _submission_buffer.enqueue( kernel_entity{io_uring_foo, sqe, params...} )) [[unlikely]]
+        return false;
     return true;
 }
 

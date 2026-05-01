@@ -214,7 +214,8 @@ inline ace::task racer(const int& max, std::string& shared_counter, ace::cutex& 
     }
     co_await crx.capture();
     std::cout << "'racer' finished\n";
-    // TODO: WTF
+    // TODO: WTF???
+    // co_await ace::console::println("'racer' finished");
     // co_await (crx.capture() and ace::console::println("'racer' finished"));
 }
 

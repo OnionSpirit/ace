@@ -213,9 +213,9 @@ inline ace::task racer(const int& max, std::string& shared_counter, ace::cutex& 
         crx.sync();
     }
     co_await crx.capture();
-    ace::console::println("'racer' finished");
+    // ace::console::println("'racer' finished");
     // TODO: WTF???
-    // co_await (crx.capture() and ace::console::println("'racer' finished"));
+    co_await ace::console_async::println("'racer' finished");
 }
 
 template<typename Rep, typename Period>

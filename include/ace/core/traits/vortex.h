@@ -138,9 +138,15 @@ namespace ace::core::traits {
         }
 
         static derived_t& touch_impl(runner_pool_t* rnr = nullptr) noexcept {
-            static derived_t instance;
-            if (instance.detach_get()) instance.respawn(pool_to_runner(rnr));
-            return instance;
+            if constexpr (spawn_mode_v == vortex_spawn_mode::e_thread_shared) {
+                static derived_t instance;
+                if (instance.detach_get()) instance.respawn(pool_to_runner(rnr));
+                return instance;
+            } else if constexpr (spawn_mode_v == vortex_spawn_mode::e_thread_local) {
+                static thread_local derived_t instance;
+                if (instance.detach_get()) instance.respawn(pool_to_runner(rnr));
+                return instance;
+            }
         }
 
     public:

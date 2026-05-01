@@ -66,6 +66,7 @@ namespace ace::core {
         bool await_ready() override { return false; };
 
         bool await_suspend(auto coroutine) {
+            _runner_identity = coroutine.promise()._runner_pool;
             if (_fd < 0)
                 throw std::logic_error("Trying to make query on failed 'io_entity' [Query object type: "
                     + std::string{typeid(query_core_t).name()} + "]");
@@ -82,7 +83,6 @@ namespace ace::core {
             //     coroutine.promise()._runner_conductor = io_socket_query_conductor{this};
             //     return true;
             // }
-            // return _abandoned;
         }
 
         void on_result(const int res) override {

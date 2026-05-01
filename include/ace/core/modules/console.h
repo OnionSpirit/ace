@@ -55,6 +55,12 @@ namespace ace::core::modules {
             }
 
             bool setup_query(kernel_observer* kwp) const {
+                // TODO: Need to use this instead of waiting print result
+                // auto* observer_ptr = kernel_controller::create_observer();
+                // std::string buff = std::format(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
+                // observer_ptr->_buffer.assign(buff.begin(), buff.end());
+                // kernel_controller::write(observer_ptr, file->_fileno, observer_ptr->_buffer.data(), observer_ptr->_buffer.size(), 0);
+                // return false;
                 return kernel_controller::write(kwp, _fd, _buff.data(), _buff.size(), 0);
             }
 

@@ -244,7 +244,7 @@ ping() {
 
         observer->on_result(cqe->res);
 
-        if (not observer->_multishot and not observer->_silent)
+        if (not observer->_multishot)
             --_queries;
         else if (observer->_multishot and observer->_on_cancel)
             _queries -= cqe->res;
@@ -262,10 +262,7 @@ submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept
     touch(observer->_runner_identity);
     io_uring_sqe *sqe = io_uring_get_sqe(&_ring);
     io_uring_sqe_set_data(sqe, observer);
-    if (observer->_silent)
-        sqe->flags |= IOSQE_CQE_SKIP_SUCCESS_BIT;
-    else
-        ++_queries;
+    ++_queries;
     if (_queries < 4096) {
         io_uring_foo(sqe, params...);
         _need_submission = true;

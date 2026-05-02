@@ -114,66 +114,75 @@ namespace ace::core::modules {
 
     public:
 
-        [[nodiscard]] static promise<std::string> input() {
-            std::stringstream ss;
-            char buff[buff_len] = {};
-            int bytes_read = co_await read_query(STDIN_FILENO, buff, buff_len);
-            ss << buff;
-            while (bytes_read == buff_len) {
-                bzero(buff, buff_len);
-                bytes_read = co_await read_query(STDIN_FILENO, buff, buff_len);
+        struct async {
+
+            [[nodiscard]] static promise<std::string> input() {
+                std::stringstream ss;
+                char buff[buff_len] = {};
+                int bytes_read = co_await read_query(STDIN_FILENO, buff, buff_len);
                 ss << buff;
+                while (bytes_read == buff_len) {
+                    bzero(buff, buff_len);
+                    bytes_read = co_await read_query(STDIN_FILENO, buff, buff_len);
+                    ss << buff;
+                }
+                co_return ss.str();
             }
-            co_return ss.str();
-        }
 
-        template <class... Args>
-        static auto lprintln(std::format_string<Args...>&& fmt, Args&&... args) {
-            const std::FILE* file = _output.load(std::memory_order_acquire);
-            return println_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
-        }
+            template <class... Args>
+            static auto println(std::format_string<Args...>&& fmt, Args&&... args) {
+                const std::FILE* file = _output.load(std::memory_order_acquire);
+                return println_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            }
 
-        template <class... Args>
-        static auto lprintln(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args) {
-            return println_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
-        }
+            template <class... Args>
+            static auto println(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args) {
+                return println_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            }
 
-        static auto lprintln(const std::string_view&& str) {
-            const std::FILE* file = _output.load(std::memory_order_acquire);
-            return println_query(file, std::forward<const std::string_view>(str));
-        }
+            static auto println(const std::string_view&& str) {
+                const std::FILE* file = _output.load(std::memory_order_acquire);
+                return println_query(file, std::forward<const std::string_view>(str));
+            }
 
-        static auto lprintln(const std::FILE* file, const std::string_view&& str) {
-            return println_query(file, std::forward<const std::string_view>(str));
-        }
+            static auto println(const std::FILE* file, const std::string_view&& str) {
+                return println_query(file, std::forward<const std::string_view>(str));
+            }
 
-        static auto lprintln() {
-            const std::FILE* file = _output.load(std::memory_order_acquire);
-            return println_query(file, "");
-        }
+            static auto println() {
+                const std::FILE* file = _output.load(std::memory_order_acquire);
+                return println_query(file, "");
+            }
 
-        static auto lprintln(const std::FILE* file) {
-            return println_query(file, "");
-        }
+            static auto println(const std::FILE* file) {
+                return println_query(file, "");
+            }
 
-        template <class... Args>
-        static auto lprint(std::format_string<Args...>&& fmt, Args&&... args) {
-            const std::FILE* file = _output.load(std::memory_order_acquire);
-            return print_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
-        }
+            template <class... Args>
+            static auto print(std::format_string<Args...>&& fmt, Args&&... args) {
+                const std::FILE* file = _output.load(std::memory_order_acquire);
+                return print_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            }
 
-        template <class... Args>
-        static auto lprint(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args) {
-            return print_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
-        }
+            template <class... Args>
+            static auto print(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args) {
+                return print_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            }
 
-        static auto lprint(const std::string_view&& str) {
-            const std::FILE* file = _output.load(std::memory_order_acquire);
-            return print_query(file, std::forward<const std::string_view>(str));
-        }
+            static auto print(const std::string_view&& str) {
+                const std::FILE* file = _output.load(std::memory_order_acquire);
+                return print_query(file, std::forward<const std::string_view>(str));
+            }
 
-        static auto lprint(const std::FILE* file, const std::string_view&& str) {
-            return print_query(file, std::forward<const std::string_view>(str));
+            static auto print(const std::FILE* file, const std::string_view&& str) {
+                return print_query(file, std::forward<const std::string_view>(str));
+            }
+        };
+
+        [[nodiscard]] static std::string input() {
+            std::string s;
+            std::cin >> s;
+            return s;
         }
 
         template <class... Args>

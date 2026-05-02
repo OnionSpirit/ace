@@ -29,22 +29,10 @@ namespace ace::core::modules {
         runner_pool_t* _runner_identity = nullptr;
         bool _on_cancel = false; ///< Next response will indicate count of canceled operations
         bool _multishot = false; ///< Mark if multishot is enabled
+        bool _silent    = false; ///< Mark to not notify on completion
 
         virtual ~kernel_observer() = default;
     };
-
-    struct hanged_observer : kernel_observer {
-
-        std::vector<uint8_t> _buffer;
-
-        void on_result(const int res) override {
-            if (res < 0)
-                throw std::runtime_error(std::format("Kernel response handling failed: {}", strerror(-res)));
-        }
-
-        ~hanged_observer() override = default;
-    };
-
 
     // TODO: Upgrade to buff operations
     /**
@@ -70,7 +58,6 @@ namespace ace::core::modules {
         static constexpr unsigned max_entries = 4096;
 
         static thread_local tools::queue<kernel_entity> _submission_buffer;
-        static thread_local nukes::dynamic::reg_freelist<hanged_observer> _observers_pool;
 
         static bool ping();
 
@@ -196,7 +183,6 @@ namespace ace::core::modules {
     thread_local io_uring kernel_controller::_ring {};
     thread_local int kernel_controller::_queries {};
     thread_local bool kernel_controller::_need_submission {false};
-    thread_local nukes::dynamic::reg_freelist<hanged_observer> kernel_controller::_observers_pool {};
 
 }
 
@@ -258,7 +244,7 @@ ping() {
 
         observer->on_result(cqe->res);
 
-        if (not observer->_multishot)
+        if (not observer->_multishot and not observer->_silent)
             --_queries;
         else if (observer->_multishot and observer->_on_cancel)
             _queries -= cqe->res;
@@ -276,7 +262,10 @@ submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept
     touch(observer->_runner_identity);
     io_uring_sqe *sqe = io_uring_get_sqe(&_ring);
     io_uring_sqe_set_data(sqe, observer);
-    ++_queries;
+    if (observer->_silent)
+        sqe->flags |= IOSQE_CQE_SKIP_SUCCESS_BIT;
+    else
+        ++_queries;
     if (_queries < 4096) {
         io_uring_foo(sqe, params...);
         _need_submission = true;
@@ -286,12 +275,6 @@ submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept
     return true;
 }
 
-ACE_CORE_KERNEL_CONTROLLER_MEMBER(auto)
-create_observer() noexcept {
-    hanged_observer* observer = nullptr;
-    _observers_pool.capture(observer);
-    return observer;
-}
 
 template <typename io_uring_foo_t, typename ... Args>
 ACE_CORE_KERNEL_ENTITY_SPACE

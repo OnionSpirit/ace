@@ -20,16 +20,31 @@ namespace ace::core::modules {
 
     protected:
 
+        struct lazy_print_observer : kernel_observer {
+
+            std::vector<uint8_t> _buffer;
+
+            lazy_print_observer() { _silent = true; }
+
+            void on_result(const int res) override {
+                if (res < 0)
+                    throw std::runtime_error(std::format("Kernel response handling failed: {}", strerror(-res)));
+            }
+
+            ~lazy_print_observer() override = default;
+        };
+
         static constexpr int buff_len = 256;
 
         static std::atomic<std::FILE*> _output;
 
+        static thread_local nukes::dynamic::reg_freelist<lazy_print_observer> _observers_pool;
+
         static auto get_instance() {
-            static console instance {};
+            thread_local console instance {};
             return instance;
         }
 
-        // TODO: Make it abandoned on iovec kernelic support
         template <bool new_line = false>
         struct ACE_AWAIT_NODISCARD print_query : io_query<print_query<new_line>> {
 
@@ -208,6 +223,9 @@ namespace ace::core::modules {
 
     template<console_mode mode>
     std::atomic<std::FILE*> console<mode>::_output = stdout;
+
+    template<console_mode mode>
+    thread_local nukes::dynamic::reg_freelist<typename console<mode>::lazy_print_observer> console<mode>::_observers_pool {};
 
 }
 

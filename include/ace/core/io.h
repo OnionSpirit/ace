@@ -73,16 +73,11 @@ namespace ace::core {
             if (INT_MIN == _fd)
                 throw std::logic_error("Trying to make query on idle 'io_entry' [Query object type: "
                     + std::string{typeid(query_core_t).name()} + "]");
-            if (static_cast<query_core_t*>(this)->setup_query(this)) {
+            if (static_cast<query_core_t*>(this)->setup_query(this) and not _silent) {
                 coroutine.promise()._runner_conductor = io_socket_query_conductor{this};
                 return true;
             }
-            return false;
-            // TODO: Use when go to iovec
-            // if (static_cast<query_core_t*>(this)->setup_query(this) and not _abandoned) {
-            //     coroutine.promise()._runner_conductor = io_socket_query_conductor{this};
-            //     return true;
-            // }
+            return _silent;
         }
 
         void on_result(const int res) override {

@@ -29,7 +29,6 @@ namespace ace::core::modules {
         runner_pool_t* _runner_identity = nullptr;
         bool _on_cancel = false; ///< Next response will indicate count of canceled operations
         bool _multishot = false; ///< Mark if multishot is enabled
-        bool _silent    = false; ///< Mark to not notify on completion
 
         virtual ~kernel_observer() = default;
     };

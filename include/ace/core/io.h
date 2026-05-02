@@ -62,6 +62,7 @@ namespace ace::core {
         task _waiter;    ///< Awaited task storage
         int _res = INT_MIN;
         const int _fd;
+        bool _is_silent = false; ///< Mark to not suspend
 
         bool await_ready() override { return false; };
 
@@ -73,16 +74,17 @@ namespace ace::core {
             if (INT_MIN == _fd)
                 throw std::logic_error("Trying to make query on idle 'io_entry' [Query object type: "
                     + std::string{typeid(query_core_t).name()} + "]");
-            if (static_cast<query_core_t*>(this)->setup_query(this) and not _silent) {
+            if (static_cast<query_core_t*>(this)->setup_query(this) and not _is_silent) {
                 coroutine.promise()._runner_conductor = io_socket_query_conductor{this};
                 return true;
             }
-            return _silent;
+            return _is_silent;
         }
 
         void on_result(const int res) override {
             _res = res;
-            runner::reattach(std::move(_waiter));
+            if (_waiter)
+                runner::reattach(std::move(_waiter));
         }
 
         ~io_query() override = default;

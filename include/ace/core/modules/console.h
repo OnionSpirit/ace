@@ -4,7 +4,7 @@
 #include <fstream>
 #include <ace/core/context.h>
 #include <ace/core/io.h>
-// #include <ace/futures/get_runner.h>
+#include <ace/futures/get_runner.h>
 
 
 namespace ace::core::modules {
@@ -15,27 +15,23 @@ namespace ace::core::modules {
 
     protected:
 
-        // struct lazy_print_observer : kernel_observer {
-        //
-        //     std::vector<uint8_t> _buffer;
-        //
-        //     lazy_print_observer() { _silent = true; }
-        //
-        //     void on_result(const int res) override {
-        //         auto* self = this;
-        //         _observers_pool.sync(self);
-        //         if (res < 0)
-        //             throw std::runtime_error(std::format("Kernel response handling failed: {}", strerror(-res)));
-        //     }
-        //
-        //     ~lazy_print_observer() override = default;
-        // };
+        struct lazy_print_observer : kernel_observer {
+
+            std::vector<uint8_t> _buffer;
+
+            void on_result(const int res) override {
+                auto* self = this;
+                _observers_pool.sync(self);
+            }
+
+            ~lazy_print_observer() override = default;
+        };
 
         static constexpr int buff_len = 256;
 
         static std::atomic<std::FILE*> _output;
 
-        // static thread_local nukes::dynamic::reg_freelist<lazy_print_observer> _observers_pool;
+        static thread_local nukes::dynamic::reg_freelist<lazy_print_observer> _observers_pool;
 
         static auto get_instance() {
             thread_local console instance {};
@@ -66,8 +62,14 @@ namespace ace::core::modules {
                     _buff = std::string(std::forward<const std::string_view>(str));
             }
 
-            bool setup_query(kernel_observer* kwp) const {
-                return kernel_controller::write(kwp, _fd, _buff.data(), _buff.size(), 0);
+            bool setup_query(kernel_observer* kwp) {
+                // lazy_print_observer* observer_ptr;
+                // if (not _observers_pool.capture(observer_ptr))
+                    return kernel_controller::write(kwp, _fd, _buff.data(), _buff.size(), 0);
+                // io_query_t::_is_silent = true;
+                // observer_ptr->_runner_identity = this->_runner_identity;
+                // observer_ptr->_buffer.assign(_buff.begin(), _buff.end());
+                // return kernel_controller::write(observer_ptr, _fd, _buff.data(), _buff.size(), 0);
             }
 
             void await_resume() const {
@@ -77,38 +79,6 @@ namespace ace::core::modules {
 
             std::string _buff;
         };
-
-        // static promise<> write_lazy(int fileno, const std::string& str) {
-        //     auto* runner = co_await futures::get_runner();
-        //     lazy_print_observer* observer_ptr;
-        //     if (not _observers_pool.capture(observer_ptr)) co_return;
-        //     observer_ptr->_runner_identity = reinterpret_cast<runner_pool_t*>(runner);
-        //     observer_ptr->_silent = true;
-        //     observer_ptr->_buffer.assign(str.begin(), str.end());
-        //     kernel_controller::write(observer_ptr, fileno, observer_ptr->_buffer.data(), observer_ptr->_buffer.size(), 0);
-        // }
-        //
-        // template <class... Args>
-        // static task print_lazy(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args) {
-        //     const std::string buff = std::format(std::forward<std::format_string<Args...> >(fmt), std::forward<Args>(args)...);
-        //     co_await write_lazy(file->_fileno, buff);
-        // }
-        //
-        // template <class... Args>
-        // static task println_lazy(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args) {
-        //     const std::string buff = std::format(std::forward<std::format_string<Args...> >(fmt), std::forward<Args>(args)...) + '\n';
-        //     co_await write_lazy(file->_fileno, buff);
-        // }
-        //
-        // static task print_lazy(const std::FILE* file, const std::string_view&& str) {
-        //     const auto buff = std::string(std::forward<const std::string_view>(str));
-        //     co_await write_lazy(file->_fileno, buff);
-        // }
-        //
-        // static task println_lazy(const std::FILE* file, const std::string_view&& str) {
-        //     const std::string buff = std::string(std::forward<const std::string_view>(str)) + '\n';
-        //     co_await write_lazy(file->_fileno, buff);
-        // }
 
         template <class... Args>
         static void print_busy(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args) {
@@ -160,59 +130,49 @@ namespace ace::core::modules {
         template <class... Args>
         static auto lprintln(std::format_string<Args...>&& fmt, Args&&... args) {
             const std::FILE* file = _output.load(std::memory_order_acquire);
-            // return ace::schedule(println_lazy(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...));
             return println_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
         template <class... Args>
         static auto lprintln(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args) {
-            // return ace::schedule(println_lazy(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...));
             return println_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
         static auto lprintln(const std::string_view&& str) {
             const std::FILE* file = _output.load(std::memory_order_acquire);
-            // return ace::schedule(println_lazy(file, std::forward<const std::string_view>(str)));
             return println_query(file, std::forward<const std::string_view>(str));
         }
 
         static auto lprintln(const std::FILE* file, const std::string_view&& str) {
-            // return ace::schedule(println_lazy(file, std::forward<const std::string_view>(str)));
             return println_query(file, std::forward<const std::string_view>(str));
         }
 
         static auto lprintln() {
             const std::FILE* file = _output.load(std::memory_order_acquire);
-            // return ace::schedule(println_lazy(file, ""));
             return println_query(file, "");
         }
 
         static auto lprintln(const std::FILE* file) {
-            // return ace::schedule(println_lazy(file, ""));
             return println_query(file, "");
         }
 
         template <class... Args>
         static auto lprint(std::format_string<Args...>&& fmt, Args&&... args) {
             const std::FILE* file = _output.load(std::memory_order_acquire);
-            // return ace::schedule(print_lazy(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...));
             return print_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
         template <class... Args>
         static auto lprint(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args) {
-            // return ace::schedule(print_lazy(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...));
             return print_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
         static auto lprint(const std::string_view&& str) {
             const std::FILE* file = _output.load(std::memory_order_acquire);
-            // return ace::schedule(print_lazy(file, std::forward<const std::string_view>(str)));
             return print_query(file, std::forward<const std::string_view>(str));
         }
 
         static auto lprint(const std::FILE* file, const std::string_view&& str) {
-            // return ace::schedule(print_lazy(file, std::forward<const std::string_view>(str)));
             return print_query(file, std::forward<const std::string_view>(str));
         }
 
@@ -269,7 +229,7 @@ namespace ace::core::modules {
 
     std::atomic<std::FILE*> console::_output = stdout;
 
-    // thread_local nukes::dynamic::reg_freelist<console::lazy_print_observer> console::_observers_pool {};
+    thread_local nukes::dynamic::reg_freelist<console::lazy_print_observer> console::_observers_pool {};
 
 }
 

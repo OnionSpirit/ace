@@ -187,7 +187,6 @@ inline ace::task spawner_cancel(ace::futures::channel_dyn<ace::core::runner*>& o
     co_await ace::console::async::println("'spawner' awake, canceling...");
     handle.cancel();
     output << co_await ace::get_runner();
-    co_await ace::futures::timeout(10ms);
     co_await ace::console::async::println("'spawner' finished");
 }
 
@@ -197,7 +196,6 @@ inline ace::task spawner_join_canceled(ace::futures::channel_dyn<ace::core::runn
     co_await ace::futures::timeout(100ms);
     co_await ace::console::async::println("'spawner' awake, canceling...");
     handle.cancel();
-    co_await ace::futures::timeout(10ms);
     if (not co_await handle.join())
         co_await ace::console::async::println("'parallel' canceled. Joining is 'false'");
     else co_await ace::console::async::println("'parallel' joined as alive. Failure");

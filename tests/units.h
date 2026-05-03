@@ -18,12 +18,6 @@ struct once_suspend : ace::core::traits::busy_future_traits<once_suspend> {
 
     IMPORT_BUSY_FUTURE_ENV(once_suspend)
 
-    // once_suspend() { std::cout << "Future constructed" << '\n'; }
-    // once_suspend(const once_suspend& t) { std::cout << "once_suspend copy const" << std::endl; }
-    // once_suspend(const once_suspend&& t) {
-    //     std::cout << "once_suspend move constr" << std::endl;
-    // }
-
     bool _trigger { false };
 
     bool await_ready() override {
@@ -44,13 +38,13 @@ inline ace::promise<bool> simple_context_test() {
     once_suspend tests_future;
 
     co_await tests_future;
-    std::cout << "One suspend complete" << std::endl;
+    ace::console::println("One suspend complete");
     co_return true;
 }
 
 inline ace::task nested_context_suspender() {
     co_await simple_context_test();
-    std::cout << "Nested call complete" << std::endl;
+    ace::console::println("Nested call complete");
     co_return;
 }
 
@@ -125,7 +119,7 @@ ace::task channel_fetcher(ace::futures::channel_dyn<channel_t>& ch, std::vector<
 inline ace::task to_spawn(ace::futures::channel_dyn<ace::core::runner*>& output) {
     auto curr_runner = co_await ace::get_runner();
     co_await ace::futures::timeout(100ms);
-    std::cout << "'spawned' runned out\n";
+    co_await ace::console::async::println("'spawned' runned out");
     output << curr_runner;
     co_return;
 }
@@ -135,19 +129,19 @@ inline ace::task spawner(ace::futures::channel_dyn<ace::core::runner*>& output) 
     output << curr_runner;
     const auto handle = co_await ace::spawn(to_spawn(output));
     while (not handle.done()) {
-        std::cout << "'spawned' not done\n";
+        co_await ace::console::async::println("'spawned' not done");
         co_await ace::futures::timeout(10ms);
     }
-    std::cout << "'spawned' done!!!\n";
+    co_await ace::console::async::println("'spawned' done!!!");
 }
 
 inline ace::task join_spawner(ace::futures::channel_dyn<ace::core::runner*>& output) {
     auto curr_runner = co_await ace::get_runner();
     output << curr_runner;
     auto handle = co_await ace::spawn(to_spawn(output));
-    std::cout << "'spawned' is spawned\n";
-    if (co_await handle.join()) std::cout << "'spawned' done!!!\n";
-    else std::cout << "'spawned' broken!!!\n";
+    co_await ace::console::async::println("'spawned' is spawned");
+    if (co_await handle.join()) ace::console::println("'spawned' done!!!");
+    else co_await ace::console::async::println("'spawned' broken!!!");
 }
 
 struct lifetime_watchdog {
@@ -155,10 +149,10 @@ struct lifetime_watchdog {
     std::string _name;
 
     explicit lifetime_watchdog(const std::string_view name) : _name(name) {
-        std::cout << _name << " constructed" << std::endl;
+        ace::console::println("{} constructed", _name);
     };
 
-    ~lifetime_watchdog() { std::cout << _name << " destroyed" << std::endl; }
+    ~lifetime_watchdog() { ace::console::println("{} destroyed", _name); }
 };
 
 inline ace::promise<> to_spawn_nested(ace::futures::channel_dyn<ace::core::runner*>& output) {
@@ -305,7 +299,7 @@ inline ace::task socket_abuser() {
     for (int i =1; i < 6; ++i) {
         std::string msg = "Echo message " + std::to_string(i);
         if (co_await connection.send(msg.c_str(), msg.size()) == msg.size())
-            std::cout << "Client sent: '" << msg << "'\n";
+            co_await ace::console::async::println("Client sent: '{}'", msg);
     }
 
     co_return;
@@ -341,26 +335,7 @@ inline ace::task socket_listener() {
     for (int i =0; i < 5; ++i) {
         memset(buff, 0, 128);
         if (co_await connection.recv(buff, 128) > 0)
-            std::cout << "Server received: '" << buff << "'\n";
-    }
-
-    co_return;
-}
-
-
-inline ace::task input_echo() {
-
-    static constexpr int READ_BUFF_LEN = 128;
-    char buff[READ_BUFF_LEN];
-    auto msg = "[ TEST MESSAGE ]";
-
-    for (int i =0; i < 5; ++i) {
-        memset(buff, 0, 128);
-        if (co_await ace::core::read_query(STDIN_FILENO, buff, READ_BUFF_LEN) > 0) {
-            std::string send_buff = "[ ECHO ] : " + std::string(buff) + "\n";
-            if (co_await ace::core::write_query(STDIN_FILENO, send_buff.c_str(), send_buff.size()) < 1)
-                co_return;
-        }
+            co_await ace::console::async::println("Server received: '{}'", buff);
     }
 
     co_return;
@@ -371,42 +346,32 @@ inline ace::task tcp_echo_client() {
 
     auto bind_entry = co_await ace::futures::io_socket_tcp();
     if (not bind_entry) {
-        std::cout << "[ CLIENT ERROR ] - " << bind_entry.error() << std::endl;
+        co_await ace::console::async::println("[ CLIENT ERROR ] - {}", bind_entry.error());
         co_return;
     }
 
-    std::cout << "[ CLIENT ] - Socket created...\n";
+    co_await ace::console::async::println("[ CLIENT ] - Socket created...");
 
     auto selection_entry = co_await bind_entry.bind("127.0.0.1", 8001);
     if (not selection_entry) {
-        std::cout << "[ CLIENT ERROR ] - " << selection_entry.error() << std::endl;
+        co_await ace::console::async::println("[ CLIENT ERROR ] - {}", selection_entry.error());
         co_return;
     }
 
-    std::cout << "[ CLIENT ] - Socket bint...\n";
+    co_await ace::console::async::println("[ CLIENT ] - Socket bint...");
 
     const auto connection = co_await selection_entry.connect("127.0.0.1", 8000);
     if (not connection) {
-        std::cout << "[ CLIENT ERROR ] - " << connection.error() << std::endl;
+        co_await ace::console::async::println("[ CLIENT ERROR ] - {}", connection.error());
         co_return;
     }
 
-    std::cout << "[ CLIENT ] - Connected to server...\n";
-
-    static constexpr int READ_BUFF_LEN = 128;
-
-    char buff[READ_BUFF_LEN];
+    co_await ace::console::async::println("[ CLIENT ] - Connected to server...");
 
     for (int i =1; i < 6; ++i) {
-        memset(buff, 0, READ_BUFF_LEN);
-        const bool is_sent = co_await ace::core::read_query(STDIN_FILENO, buff, READ_BUFF_LEN)
-            and co_await connection.send(buff, READ_BUFF_LEN);
-
-        if (is_sent) {
-            std::string msg = "[ CLIENT SENT ] : " + std::string(buff);
-            if (co_await ace::core::write_query(STDIN_FILENO, msg.c_str(), msg.size()) < 1)
-                co_return;
-        }
+        const std::string input = co_await ace::console::async::input();
+        if (co_await connection.send(input))
+            co_await ace::console::async::println("[ CLIENT SENT ] : {}", input);
     }
 
     co_return;
@@ -416,35 +381,35 @@ inline ace::task tcp_echo_server() {
 
     auto bind_entry = co_await ace::futures::io_socket_tcp();
     if (not bind_entry) {
-        std::cout << "[ SERVER ERROR ] - " << bind_entry.error() << std::endl;
+        co_await ace::console::async::println("[ SERVER ERROR ] - {}", bind_entry.error());
         co_return;
     }
 
-    std::cout << "[ SERVER ] - Socket created...\n";
+    co_await ace::console::async::println("[ SERVER ] - Socket created...");
 
     auto selection_entry = co_await bind_entry.bind("127.0.0.1", 8000);
     if (not selection_entry) {
-        std::cout << "[ SERVER ERROR ] - " << selection_entry.error() << std::endl;
+        co_await ace::console::async::println("[ SERVER ERROR ] - {}", selection_entry.error());
         co_return;
     }
 
-    std::cout << "[ SERVER ] - Socket bint...\n";
+    co_await ace::console::async::println("[ SERVER ] - Socket bint...");
 
     auto listener = co_await selection_entry.listen();
     if (not listener) {
-        std::cout << "[ SERVER ERROR ] - " << listener.error() << std::endl;
+        co_await ace::console::async::println("[ SERVER ERROR ] - {}", listener.error());
         co_return;
     }
 
-    std::cout << "[ SERVER ] - Pending connections...\n";
+    co_await ace::console::async::println("[ SERVER ] - Pending connections...");
 
     const auto connection = co_await listener.accept("127.0.0.1", 8001);
     if (not connection) {
-        std::cout << "[ SERVER ERROR ] - " << connection.error() << std::endl;
+        co_await ace::console::async::println("[ SERVER ERROR ] - {}", connection.error());
         co_return;
     }
 
-    std::cout << "[ SERVER ] - Client connected...\n";
+    co_await ace::console::async::println("[ SERVER ] - Client connected...");
 
     static constexpr int READ_BUFF_LEN = 128;
 
@@ -452,7 +417,7 @@ inline ace::task tcp_echo_server() {
     for (int i =0; i < 5; ++i) {
         memset(buff, 0, READ_BUFF_LEN);
         if (co_await connection.recv(buff, READ_BUFF_LEN) > 0)
-            std::cout << "[ SERVER RECEIVED ] : " << std::string(buff);
+            co_await ace::console::async::println("[ SERVER RECEIVED ] : {}", buff);
     }
 
     co_return;

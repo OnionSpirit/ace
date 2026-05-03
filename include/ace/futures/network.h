@@ -129,6 +129,14 @@ namespace ace::futures {
         -> send_query requires (connection_state_v == e_connected)
         { return send_query{_fd, buf, len, flags}; }
 
+        [[nodiscard]] auto send(const std::string_view buf, const int flags = 0) const
+        -> send_query requires (connection_state_v == e_connected)
+        { return send_query{_fd, buf.data(), buf.size(), flags}; }
+
+        [[nodiscard]] auto send(const std::vector<uint8_t>& buf, const int flags = 0) const
+        -> send_query requires (connection_state_v == e_connected)
+        { return send_query{_fd, buf.data(), buf.size(), flags}; }
+
         /**
          * @warning This member operation causes @b consumption and will turn entire object into the invalid state
          */

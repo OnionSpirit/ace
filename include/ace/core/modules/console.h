@@ -9,6 +9,15 @@
 
 namespace ace::core::modules {
 
+    /**
+     * @warning Don't take it serious. For the most part this is a dumb joke.
+     * 0, 1, 2, 3, 4... Guinnesses and then things went wrong.
+     * Actually I've just wanned an abstraction for the async input.
+     * I've improved this thing up just to debug @c vortex mechanism and @c kernelic module.
+     * @c console module helped me to reveal a bunch of shitty bugs.
+     * That is why console has a set of async print functions.
+     * There are no blazing features just printing via @c io_uring
+     */
     class console {
 
         console() = default;
@@ -17,11 +26,10 @@ namespace ace::core::modules {
 
         struct lazy_print_observer : kernel_observer {
 
-            std::vector<uint8_t> _buffer;
+            std::vector<uint8_t> _buffer{};
 
             void on_result(const int res) override {
-                auto* self = this;
-                _observers_pool.sync(self);
+                _observers_pool.raw_sync(this);
             }
 
             ~lazy_print_observer() override = default;
@@ -63,19 +71,17 @@ namespace ace::core::modules {
             }
 
             bool setup_query(kernel_observer* kwp) {
-                // lazy_print_observer* observer_ptr;
-                // if (not _observers_pool.capture(observer_ptr))
+                lazy_print_observer* observer_ptr;
+                if (not _observers_pool.capture(observer_ptr))
                     return kernel_controller::write(kwp, _fd, _buff.data(), _buff.size(), 0);
-                // io_query_t::_is_silent = true;
-                // observer_ptr->_runner_identity = this->_runner_identity;
-                // observer_ptr->_buffer.assign(_buff.begin(), _buff.end());
-                // return kernel_controller::write(observer_ptr, _fd, _buff.data(), _buff.size(), 0);
+                io_query_t::_is_silent = true;
+                observer_ptr->_runner_identity = this->_runner_identity;
+                observer_ptr->_buffer.assign(_buff.begin(), _buff.end());
+                return kernel_controller::write(observer_ptr, _fd,
+                    observer_ptr->_buffer.data(), observer_ptr->_buffer.size(), 0);
             }
 
-            void await_resume() const {
-                if (_res < 0)
-                    throw std::runtime_error(std::string("print failed: ") + strerror(-_res));
-             }
+            void await_resume() const { }
 
             std::string _buff;
         };

@@ -59,10 +59,10 @@ namespace ace::core {
             io_query* _query;
         };
 
-        task _waiter;    ///< Awaited task storage
-        int _res = INT_MIN;
-        const int _fd;
-        bool _is_silent = false; ///< Mark to not suspend
+        task       _waiter;               ///< Awaited task storage
+        int        _res       = INT_MIN;  ///< IO_URING operation result
+        const int  _fd;                   ///< FD to interact with
+        bool       _is_silent = false;    ///< Mark to detach and not suspend
 
         bool await_ready() override { return false; };
 
@@ -78,7 +78,7 @@ namespace ace::core {
                 coroutine.promise()._runner_conductor = io_socket_query_conductor{this};
                 return true;
             }
-            return _is_silent;
+            return false;
         }
 
         void on_result(const int res) override {

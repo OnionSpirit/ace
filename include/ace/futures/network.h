@@ -133,9 +133,20 @@ namespace ace::futures {
         -> send_query requires (connection_state_v == e_connected)
         { return send_query{_fd, buf.data(), buf.size(), flags}; }
 
-        [[nodiscard]] auto send(const std::vector<uint8_t>& buf, const int flags = 0) const
+        template <typename data_t>
+        [[nodiscard]] auto send(const std::vector<data_t>& buf, const int flags = 0) const
         -> send_query requires (connection_state_v == e_connected)
         { return send_query{_fd, buf.data(), buf.size(), flags}; }
+
+        template <typename data_t, size_t len_v>
+        [[nodiscard]] auto send(const std::array<data_t, len_v>& buf, const int flags = 0) const
+        -> send_query requires (connection_state_v == e_connected)
+        { return send_query{_fd, buf.data(), len_v * (sizeof(data_t) / sizeof(uint8_t)), flags}; }
+
+        template <typename data_t, size_t len_v>
+        [[nodiscard]] auto send(const std::span<data_t, len_v>& buf, const int flags = 0) const
+        -> send_query requires (connection_state_v == e_connected)
+        { return send_query{_fd, buf.data(), buf.size_bytes(), flags}; }
 
         /**
          * @warning This member operation causes @b consumption and will turn entire object into the invalid state
@@ -170,8 +181,39 @@ namespace ace::futures {
                 const sockaddr *addr, const socklen_t addrlen) const
         -> sendto_query { return sendto_query{_fd, buf, len, flags, addr, addrlen}; }
 
+        [[nodiscard]] auto sendto(const std::string_view buf, const int flags,
+                const sockaddr *addr, const socklen_t addrlen) const
+        -> sendto_query{ return sendto_query{_fd, buf.data(), buf.size(), flags, addr, addrlen}; }
+
+        template <typename data_t>
+        [[nodiscard]] auto sendto(const std::vector<data_t>& buf, const int flags,
+                const sockaddr *addr, const socklen_t addrlen) const
+        -> sendto_query { return sendto_query{_fd, buf.data(), buf.size(), flags, addr, addrlen}; }
+
+        template <typename data_t, size_t len_v>
+        [[nodiscard]] auto sendto(const std::array<data_t, len_v>& buf, const int flags,
+                const sockaddr *addr, const socklen_t addrlen) const
+        -> sendto_query { return sendto_query{_fd, buf.data(), len_v * (sizeof(data_t) / sizeof(uint8_t)), flags, addr, addrlen}; }
+
+        template <typename data_t, size_t len_v>
+        [[nodiscard]] auto sendto(const std::span<data_t, len_v>& buf, const int flags,
+                const sockaddr *addr, const socklen_t addrlen) const
+        -> sendto_query { return sendto_query{_fd, buf.data(), buf.size_bytes(), flags, addr, addrlen}; }
+
         [[nodiscard]] auto recv(void *buf, const size_t len, const int flags = 0) const
         -> recv_query { return recv_query{_fd, buf, len, flags}; }
+
+        template <typename data_t>
+        [[nodiscard]] auto recv(std::vector<data_t>& buf, const int flags = 0) const
+        -> recv_query { return recv_query{_fd, buf.data(), buf.capacity() * (sizeof(data_t) / sizeof(uint8_t)), flags}; }
+
+        template <typename data_t, size_t len_v>
+        [[nodiscard]] auto recv(std::array<data_t, len_v>& buf, const int flags = 0) const
+        -> recv_query { return recv_query{_fd, buf.data(), len_v * (sizeof(data_t) / sizeof(uint8_t)), flags}; }
+
+        template <typename data_t, size_t len_v>
+        [[nodiscard]] auto recv(std::span<data_t, len_v>& buf, const int flags = 0) const
+        -> recv_query { return recv_query{_fd, buf.data(), buf.size_bytes(), flags}; }
 
     };
 

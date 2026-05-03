@@ -331,11 +331,10 @@ inline ace::task socket_listener() {
         co_return;
     }
 
-    char buff[128];
+    std::array<uint8_t, 128> buff{};
     for (int i =0; i < 5; ++i) {
-        memset(buff, 0, 128);
-        if (co_await connection.recv(buff, 128) > 0)
-            co_await ace::console::async::println("Server received: '{}'", buff);
+        if (co_await connection.recv(buff) > 0)
+            co_await ace::console::async::println("Server received: '{}'", std::string(buff.begin(), buff.end()));
     }
 
     co_return;

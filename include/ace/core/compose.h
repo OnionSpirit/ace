@@ -24,8 +24,8 @@ namespace ace::core {
             , _r_future(r_future) {};
 
         static consteval auto define_return_type() {
-            typedef decltype(l_future_t{}.await_resume()) l_future_ret_t;
-            typedef decltype(r_future_t{}.await_resume()) r_future_ret_t;
+            typedef decltype(std::declval<l_future_t>().await_resume()) l_future_ret_t;
+            typedef decltype(std::declval<r_future_t>().await_resume()) r_future_ret_t;
             if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
                 return;
             else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
@@ -82,8 +82,8 @@ namespace ace::core {
             , _r_future(r_future) {};
 
         static consteval auto define_return_type() {
-            typedef decltype(l_future_t{}.await_resume()) l_future_ret_t;
-            typedef decltype(r_future_t{}.await_resume()) r_future_ret_t;
+            typedef decltype(std::declval<l_future_t>().await_resume()) l_future_ret_t;
+            typedef decltype(std::declval<r_future_t>().await_resume()) r_future_ret_t;
             if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
                 return;
             else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
@@ -107,7 +107,7 @@ namespace ace::core {
         template <size_t result_id, typename future_t>
         task observer(future_t& future, std::optional<async_handle>& opposite_observer) {
 
-            typedef decltype(future_t{}.await_resume()) future_ret_t;
+            typedef decltype(std::declval<future_t>().await_resume()) future_ret_t;
 
             if constexpr (not std::same_as<void, future_ret_t> and not std::same_as<return_t, future_ret_t>)
                 std::get<result_id>(_result) = co_await future;

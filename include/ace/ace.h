@@ -40,6 +40,7 @@
 #include "ace/core/modules/console.h"
 #include "ace/core/compose.h"
 #include "ace/futures/spawn.h"
+#include "ace/futures/post.h"
 #include "ace/futures/reattach.h"
 #include "futures/get_runner.h"
 #include "futures/roaming.h"
@@ -47,6 +48,7 @@
 namespace ace {
 
     using spawn          = futures::spawn;
+    using post           = futures::post;
     using roaming        = futures::roaming;
     using get_runner     = futures::get_runner;
     using reattach       = futures::reattach;

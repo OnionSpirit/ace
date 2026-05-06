@@ -492,9 +492,9 @@ namespace ace {
     using task = async<>;
 
     // NOTE: Wrapper to spawn and manage coroutines in runner pool
-    template <typename async_return_t>
-    task async_wrap(async<async_return_t>&& some_async) {
-        co_await some_async;
+    template <typename context_return_t, typename context_rule_t>
+    task task_wrap(core::context<context_return_t, context_rule_t>&& some_context) {
+        co_await some_context;
         co_return;
     }
 
@@ -509,10 +509,6 @@ namespace ace {
 }
 
 // Говно нахуй не нужное, но
-// bridge - обобщенный канал для отслеживания состояний запущеных в параллель асинхронных компонент, и отправки управляющих сигналов
 // raider - интерфейсный заместитель таски для множественного ожидания, предзахватывает ресурс future объектов, чтобы его можно было быстро вернуть в объект при отмене
-// *detach - spawn вызов, но для future, с бриджом сигнализации или консьюмером, который поглотит результат future, удобно для мелких операций на которых не хочется останавливаться, работает через запуск рейдера
-
-// Добавить defer stack и insure stack
 
 #endif // ACE_ASYNC_H

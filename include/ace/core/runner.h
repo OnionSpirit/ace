@@ -301,6 +301,11 @@ namespace ace::core {
         // NOTE: Pulling next task and prefetching it
         if (not _pool.empty()) [[likely]] {
             _nextup = _pool.pop_node();
+            // tools::prefetch<tools::e_temporal>(&_nextup.value()->_data);
+            // tools::prefetch<tools::e_temporal>(&_nextup.value()->_data._coroutine);
+            // const void* extra_cacheline = static_cast<uint8_t*>(_nextup.value()->_data._coroutine.address()) + 64;
+            // tools::prefetch<tools::e_temporal>(_nextup.value()->_data._coroutine.address());
+            // tools::prefetch<tools::e_temporal>(extra_cacheline);
             tools::prefetch<tools::e_l1_cache>(_nextup.value()->_data._coroutine.address());
         }
 

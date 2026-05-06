@@ -29,17 +29,6 @@ namespace ace::core::tools {
         __builtin_prefetch(memptr, 0, locality_v);
 #endif
     }
-
-    template <typename type_t>
-    concept is_prefetchable = requires(type_t t) {
-        { t.prefetch() } -> std::same_as<void>;
-    };
-
-    template <is_prefetchable prefetchable_t>
-    struct prefetch_mixin {
-        void* _prefetch_target = nullptr;
-        void prefetch() { static_cast<prefetchable_t*>(_prefetch_target)->prefetch(); }
-    };
 }
 
 #endif //ACE_PREFETCH_H

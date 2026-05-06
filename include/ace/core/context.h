@@ -207,8 +207,6 @@ namespace ace::core {
         }
 
         void prefetch() {
-            if (_coroutine.promise()._runner_conductor)
-                _coroutine.promise()._runner_conductor.prefetch();
             const control_block* frame = control_block::get_block_from_address(_coroutine.address());
             const std::size_t frame_size = frame->_frame_size;
             for (int i = 0; i <= frame_size / ACE_CACHE_LINE_SIZE; ++i) {

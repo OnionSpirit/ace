@@ -137,9 +137,6 @@ namespace ace::core::traits {
     template <typename conductor_handle_t, std::size_t slot_memsize_v = ACE_CONDUCTOR_MEM_SIZE>
     struct conductor_slot {
 
-        template <typename T>
-        static void prefetch_templ(void* ptr) { static_cast<T*>(ptr)->prefetch(); }
-
         /**
          * @brief Copy-assign a concrete conductor into this slot.
          * @details Uses placement-new; previous conductor is NOT destroyed
@@ -155,7 +152,6 @@ namespace ace::core::traits {
         conductor_slot& operator =(const conductor_t& conductor) {
             static_assert(sizeof(conductor_t) <= slot_memsize_v,
             "[conductor_carry]: conductor size can't be larger than passed slot memsize");
-            if constexpr (tools::is_prefetchable<conductor_t>) _prefetcher = prefetch_templ<conductor_t>;
             _conductor = new (_area) conductor_t(std::forward<const conductor_t&>(conductor));
             return *this;
         }
@@ -175,7 +171,6 @@ namespace ace::core::traits {
             static_assert(sizeof(conductor_t) <= slot_memsize_v,
             "[conductor_carry]: conductor size can't be larger than passed slot memsize");
             release();
-            if constexpr (tools::is_prefetchable<conductor_t>) _prefetcher = prefetch_templ<conductor_t>;
             _conductor = new (_area) conductor_t(std::forward<conductor_t&&>(conductor));
             return *this;
         }
@@ -223,14 +218,6 @@ namespace ace::core::traits {
                 _conductor = nullptr;
         }
 
-        /**
-         * @brief Prefetches memory of underlying conductor
-         */
-        void prefetch() const {
-            if (_prefetcher)
-                _prefetcher(_conductor);
-        }
-
         /// @brief Access the held conductor.  Returns @c nullptr if empty.
         [[nodiscard]] conductor_handle_t* get() const { return _conductor; }
 
@@ -243,7 +230,6 @@ namespace ace::core::traits {
         ~conductor_slot() { release(); };
 
         conductor_handle_t* _conductor {nullptr};                        ///< Pointer into @c _area (discriminant).
-        void(*_prefetcher)(void*) {nullptr};                             ///< Pointer to conductor prefetch method
         alignas(ACE_BUS_SIZE) uint8_t _area [slot_memsize_v] {};         ///< In-place storage for the conductor object.
     };
 

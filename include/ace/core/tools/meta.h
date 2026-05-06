@@ -21,9 +21,9 @@
 
 #ifndef ACE_CONDUCTOR_MEM_SIZE
 /// @brief Maximum byte size for a concrete conductor stored in a @c conductor_slot.
-/// @details Derived so that a @c conductor_slot including its pointer and prefetch callback fits within
+/// @details Derived so that a @c conductor_slot including its pointer fits within
 /// one cache line.
-#define ACE_CONDUCTOR_MEM_SIZE std::hardware_constructive_interference_size - ( 2 * ACE_BUS_SIZE )
+#define ACE_CONDUCTOR_MEM_SIZE std::hardware_constructive_interference_size - ACE_BUS_SIZE
 #endif
 
 /// @brief CPU cache line size in bytes.

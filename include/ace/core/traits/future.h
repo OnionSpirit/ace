@@ -13,9 +13,6 @@
 #include <concepts>
 #include <memory>
 
-#include "ace/core/tools/meta.h"
-#include "ace/core/tools/prefetch.h"
-
 namespace ace::core::traits {
 
     /**
@@ -62,18 +59,6 @@ namespace ace::core::traits {
          * @details Default destructor
          */
         ~future_traits() override = default;
-
-        /**
-         * @details Prefetches memory of the derived future object
-         */
-        void prefetch() {
-            const char* mem_ptr = reinterpret_cast<char*>(this);
-            constexpr std::size_t mem_size = sizeof(derivedT);
-            for (int i = 0; i <= mem_size / ACE_CACHE_LINE_SIZE; ++i) {
-                const void* cacheline_ptr = mem_ptr + (i * ACE_CACHE_LINE_SIZE);
-                core::tools::prefetch<tools::e_temporal>(cacheline_ptr);
-            }
-        }
     };
 
     #define IMPORT_FUTURE_ENV(future_t)                                \

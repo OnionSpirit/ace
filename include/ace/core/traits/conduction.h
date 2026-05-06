@@ -191,8 +191,11 @@ namespace ace::core::traits {
         requires requires { carry_t::_conductor; carry_t::_area; }
         conductor_slot& operator <<(carry_t& carry) noexcept {
             if (carry._conductor) {
-                _conductor = carry._conductor;
-                carry._conductor = nullptr;
+                // TODO: Need to figureout why prev version causes sig fault
+                memcpy(_area, carry._area, slot_memsize_v);
+                _conductor = reinterpret_cast<conductor_handle_t *>(_area);
+                // _conductor = carry._conductor;
+                // carry._conductor = nullptr;
             }
             return *this;
         }

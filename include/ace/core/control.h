@@ -49,7 +49,7 @@ namespace ace::core {
      * block itself @b or a promise address; @c get_block_from_address converts
      * the latter to the former.
      */
-    struct alignas(32) control_block {
+    struct control_block {
 
         uint64_t _weak_refcount {1};                                      ///< Number of watchers (handles). Initial value: 1 (the block itself).
         uint64_t _strong_refcount {1};                                    ///< Number of owners (always the coroutine frame). Initial value: 1.

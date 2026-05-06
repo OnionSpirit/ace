@@ -444,11 +444,11 @@ inline ace::task imposter(ace::futures::channel_dyn<int>& ch) {
     auto first = co_await ace::spawn(spawn_post(1, ch));
     auto second = co_await ace::spawn(spawn_post(2, ch));
     auto third = co_await ace::post(spawn_post(3, ch));
-    co_await first;
-    co_await second;
-    co_await third;
+    // co_await first;
+    // co_await second;
+    // co_await third;
     // TODO: Something wrong with and
-    // ace::console::println("spawn spawn post - finished {}", co_await (first and second and third));
+    ace::console::println("spawn spawn post - finished {}", co_await (first and second and third) );
     ace::console::println("Placing {} to channel", 4);
     ch << 4;
     co_return;

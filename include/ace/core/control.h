@@ -49,12 +49,12 @@ namespace ace::core {
      * block itself @b or a promise address; @c get_block_from_address converts
      * the latter to the former.
      */
-    struct control_block {
+    struct alignas(32) control_block {
 
         uint64_t _weak_refcount {1};                                      ///< Number of watchers (handles). Initial value: 1 (the block itself).
         uint64_t _strong_refcount {1};                                    ///< Number of owners (always the coroutine frame). Initial value: 1.
         traits::control_conductor_handle* _control_conductor { nullptr }; ///< Optional conductor for external join/cancel; set by @c setup_control_block().
-        alignas(ACE_BUS_SIZE) bool _exists {true};                        ///< @c false once the coroutine has finished (@c disown() was called).
+        std::size_t _frame_size {1};                                      ///< Coroutine frame size, including control block. Non-zero value means stack is exist, 0 otherwise
 
         control_block() = default;
 
@@ -193,7 +193,7 @@ namespace ace::core {
          */
         [[nodiscard]] bool done() const {
             if (is_idle()) [[unlikely]] return false;
-            return not _block->_exists;
+            return _block->_frame_size == 0;
         }
 
         /**
@@ -222,10 +222,10 @@ namespace ace::core {
     inline bool control_block::disown(void* v_block) {
         if (v_block == nullptr) [[unlikely]] return false;
         const auto block = static_cast<control_block*>(v_block);
-        if (not block->_exists) [[unlikely]] goto end;
+        if (block->_frame_size == 0) [[unlikely]] goto end;
         --block->_strong_refcount;
         --block->_weak_refcount;
-        block->_exists = false;
+        block->_frame_size = 0;
         end: return is_untracked(block);
     }
 
@@ -248,7 +248,7 @@ namespace ace::core {
 
     // NOTE: Gets control block of passed promise address, and checks ownership status
     inline bool control_block::is_disowned(void* address) {
-        return not get_block_from_address(address)->_exists;
+        return get_block_from_address(address)->_frame_size == 0;
     }
 
     // NOTE: Gets control block pointer from the raw promise address

@@ -39,6 +39,7 @@
 #include "ace/core/traits/future.h"
 #include "ace/core/traits/promise.h"
 #include "ace/core/tools/meta.h"
+#include "ace/core/tools/prefetch.h"
 #include "ace/core/control.h"
 #include "ace/core/traits/conduction.h"
 
@@ -203,6 +204,17 @@ namespace ace::core {
             if (_coroutine)
                 return _coroutine.promise().setup_trace();
             return std::unexpected("context is already dead.");
+        }
+
+        void prefetch() {
+            if (_coroutine.promise()._runner_conductor)
+                _coroutine.promise()._runner_conductor.prefetch();
+            const control_block* frame = control_block::get_block_from_address(_coroutine.address());
+            const std::size_t frame_size = frame->_frame_size;
+            for (int i = 0; i <= frame_size / ACE_CACHE_LINE_SIZE; ++i) {
+                const void* cacheline_ptr = frame + (2 * i);
+                tools::prefetch<tools::e_temporal>(cacheline_ptr);
+            }
         }
 
         class context_conductor : public traits::control_conductor_handle {

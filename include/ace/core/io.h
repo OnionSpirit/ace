@@ -2,6 +2,8 @@
 #define ACE_IO_H
 
 
+#include <climits>
+
 #include "ace/core/modules/kernelic.h"
 
 namespace ace::core {

@@ -303,6 +303,7 @@ namespace ace::core::traits {
             const auto ptr = static_cast<uint8_t*>(::operator new(mem_size + control_block_size));
             void* mem_ptr = ptr + control_block_size;
             new (ptr) control_block();
+            static_cast<control_block*>(mem_ptr)->_frame_size = mem_size + control_block_size;
             return mem_ptr;
         }
 
@@ -329,9 +330,9 @@ namespace ace::core::traits {
             return _trace_id.value();
         }
 
-        future_handler_ptr_t        _busy_future { nullptr };  ///< Pointer to the currently active busy future, or @c nullptr.
-        control_block*              _block  { nullptr };       ///< Pointer to the intrusive control block (set on first @c observe()).
-        std::optional<std::size_t>  _trace_id;                 ///< Optional debugging trace ID.
+        future_handler_ptr_t        _busy_future  { nullptr };  ///< Pointer to the currently active busy future, or @c nullptr.
+        control_block*              _block        { nullptr };  ///< Pointer to the intrusive control block (set on first @c observe()).
+        std::optional<std::size_t>  _trace_id;                  ///< Optional debugging trace ID.
     };
 
 #define DECLARE_PROMISE_TRAITS(derived_t, return_type_t) typedef ace::core::traits::promise_traits<derived_t, return_type_t> promise_traits_t;

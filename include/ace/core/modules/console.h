@@ -1,7 +1,6 @@
 #ifndef ACE_CONSOLE_H
 #define ACE_CONSOLE_H
 
-#include <fstream>
 #include <ace/core/context.h>
 #include <ace/core/io.h>
 #include <ace/futures/get_runner.h>

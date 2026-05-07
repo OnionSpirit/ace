@@ -182,33 +182,39 @@ namespace ace::futures {
 
         [[nodiscard]] auto sendto(const void *buf, const size_t len, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
-        -> sendto_query { return sendto_query{_fd, buf, len, flags, addr, addrlen}; }
+        -> sendto_query requires (connection_state_v == e_indirect)
+        { return sendto_query{_fd, buf, len, flags, addr, addrlen}; }
 
         [[nodiscard]] auto sendto(const std::string_view buf, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
-        -> sendto_query{ return sendto_query{_fd, buf.data(), buf.size(), flags, addr, addrlen}; }
+        -> sendto_query requires (connection_state_v == e_indirect)
+        { return sendto_query{_fd, buf.data(), buf.size(), flags, addr, addrlen}; }
 
         template <typename data_t>
         requires std::is_pod_v<data_t>
         [[nodiscard]] auto sendto(const std::vector<data_t>& buf, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
-        -> sendto_query { return sendto_query{_fd, buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)), flags, addr, addrlen}; }
+        -> sendto_query requires (connection_state_v == e_indirect)
+        { return sendto_query{_fd, buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)), flags, addr, addrlen}; }
 
         [[nodiscard]] auto sendto(const std::string& buf, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
-        -> sendto_query { return sendto_query{_fd, buf.data(), buf.size(), flags, addr, addrlen}; }
+        -> sendto_query requires (connection_state_v == e_indirect)
+        { return sendto_query{_fd, buf.data(), buf.size(), flags, addr, addrlen}; }
 
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         [[nodiscard]] auto sendto(const std::array<data_t, len_v>& buf, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
-        -> sendto_query { return sendto_query{_fd, buf.data(), len_v * (sizeof(data_t) / sizeof(char)), flags, addr, addrlen}; }
+        -> sendto_query requires (connection_state_v == e_indirect)
+        { return sendto_query{_fd, buf.data(), len_v * (sizeof(data_t) / sizeof(char)), flags, addr, addrlen}; }
 
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         [[nodiscard]] auto sendto(const std::span<data_t, len_v>& buf, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
-        -> sendto_query { return sendto_query{_fd, buf.data(), buf.size_bytes(), flags, addr, addrlen}; }
+        -> sendto_query requires (connection_state_v == e_indirect)
+        { return sendto_query{_fd, buf.data(), buf.size_bytes(), flags, addr, addrlen}; }
 
         [[nodiscard]] auto recv(void *buf, const size_t len, const int flags = 0) const
         -> recv_query { return recv_query{_fd, buf, len, flags}; }

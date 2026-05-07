@@ -31,25 +31,29 @@ namespace ace::core {
             else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
                 return std::optional<r_future_ret_t>{};
             else if constexpr (std::same_as<void, r_future_ret_t> and not std::same_as<void, l_future_ret_t>)
-                return std::optional<r_future_ret_t>{};
+                return std::optional<l_future_ret_t>{};
+            else if constexpr (std::same_as<l_future_ret_t, r_future_ret_t>)
+                return std::array<std::optional<l_future_ret_t>, 2>{};
             else return std::variant<l_future_ret_t, r_future_ret_t>{};
         }
 
         typedef decltype(define_return_type()) return_t;
 
-        task _waiter;
+        std::optional<task> _waiter;
         l_future_t& _l_future;
         r_future_t& _r_future;
         std::optional<async_handle> _l_future_observer;
         std::optional<async_handle> _r_future_observer;
         std::conditional_t<std::same_as<return_t, void>, int, return_t> _result;
 
-        template <typename future_t>
+        template <size_t result_id, typename future_t>
         task observer(future_t& future, std::optional<async_handle>& opposite_observer) {
 
-            typedef decltype(future_t{}.await_resume()) future_ret_t;
+            typedef decltype(std::declval<future_t>().await_resume()) future_ret_t;
 
-            if constexpr (not std::same_as<void, future_ret_t>)
+            if constexpr (not std::same_as<void, future_ret_t> and not std::same_as<return_t, future_ret_t>)
+                std::get<result_id>(_result) = co_await future;
+            else if constexpr (not std::same_as<void, future_ret_t> and std::same_as<return_t, future_ret_t>)
                 _result = co_await future;
             else
                 co_await future;
@@ -57,7 +61,8 @@ namespace ace::core {
             if (opposite_observer)
                 opposite_observer->cancel();
 
-            runner::reattach(std::move(_waiter));
+            if (_waiter)
+                runner::reattach(std::move(_waiter.value()));
         };
 
         bool await_suspend(auto);
@@ -116,10 +121,12 @@ namespace ace::core {
             else
                 co_await future;
 
-            if (opposite_observer)
-                co_await opposite_observer->join();
+            // NOTE: Only second observer joins and reattaches
+            if constexpr (result_id == 1)
+                if (not opposite_observer.value().done())
+                    co_await opposite_observer->join();
 
-            if constexpr (result_id == 0)
+            if constexpr (result_id == 1)
                 runner::reattach(std::move(_waiter));
         };
 
@@ -176,15 +183,16 @@ struct ACE_OR_AWAIT_FUTURE_SPACE or_await_conductor final : conductor_handler_t 
 ACE_COMPOSE_AWAIT_FUTURE_META
 ACE_OR_AWAIT_FUTURE_MEMBER(bool)
 await_suspend(auto external_coro) {
+    auto* runner_ptr = pool_to_runner(external_coro.promise()._runner_pool);
     // NOTE: Creating observers for each futures
-    task _l_observer = observer(_l_future, _r_future_observer);
-    task _r_observer = observer(_r_future, _l_future_observer);
+    task _l_observer = observer<0>(_l_future, _r_future_observer);
+    task _r_observer = observer<1>(_r_future, _l_future_observer);
     // NOTE: Creating Handlers for observation tasks
     _l_future_observer = async_handle {_l_observer.observe()};
     _r_future_observer = async_handle {_r_observer.observe()};
     // NOTE: Scheduling observers
-    schedule(std::move(_l_observer), reinterpret_cast<runner*>(external_coro.promise()._runner_pool));
-    schedule(std::move(_r_observer), reinterpret_cast<runner*>(external_coro.promise()._runner_pool));
+    schedule(std::move(_l_observer), runner_ptr);
+    schedule(std::move(_r_observer), runner_ptr);
     // NOTE: Setting conductor for external waiter
     external_coro.promise()._runner_conductor = or_await_conductor {this};
     return true;
@@ -215,6 +223,7 @@ struct ACE_AND_AWAIT_FUTURE_SPACE and_await_conductor final : conductor_handler_
 ACE_COMPOSE_AWAIT_FUTURE_META
 ACE_AND_AWAIT_FUTURE_MEMBER(bool)
 await_suspend(auto external_coro) {
+    auto* runner_ptr = pool_to_runner(external_coro.promise()._runner_pool);
     // NOTE: Creating observers for each futures
     task _l_observer = observer<0>(_l_future, _r_future_observer);
     task _r_observer = observer<1>(_r_future, _l_future_observer);
@@ -222,8 +231,8 @@ await_suspend(auto external_coro) {
     _l_future_observer = async_handle {_l_observer.observe()};
     _r_future_observer = async_handle {_r_observer.observe()};
     // NOTE: Scheduling observers
-    schedule(std::move(_l_observer), reinterpret_cast<runner*>(external_coro.promise()._runner_pool));
-    schedule(std::move(_r_observer), reinterpret_cast<runner*>(external_coro.promise()._runner_pool));
+    schedule(std::move(_l_observer), runner_ptr);
+    schedule(std::move(_r_observer), runner_ptr);
     // NOTE: Setting conductor for external waiter
     external_coro.promise()._runner_conductor = and_await_conductor {this};
     return true;

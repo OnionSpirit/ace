@@ -136,12 +136,12 @@ namespace ace::futures {
         template <typename data_t>
         [[nodiscard]] auto send(const std::vector<data_t>& buf, const int flags = 0) const
         -> send_query requires (connection_state_v == e_connected)
-        { return send_query{_fd, buf.data(), buf.size(), flags}; }
+        { return send_query{_fd, buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)), flags}; }
 
         template <typename data_t, size_t len_v>
         [[nodiscard]] auto send(const std::array<data_t, len_v>& buf, const int flags = 0) const
         -> send_query requires (connection_state_v == e_connected)
-        { return send_query{_fd, buf.data(), len_v * (sizeof(data_t) / sizeof(uint8_t)), flags}; }
+        { return send_query{_fd, buf.data(), len_v * (sizeof(data_t) / sizeof(char)), flags}; }
 
         template <typename data_t, size_t len_v>
         [[nodiscard]] auto send(const std::span<data_t, len_v>& buf, const int flags = 0) const
@@ -188,11 +188,11 @@ namespace ace::futures {
         template <typename data_t>
         [[nodiscard]] auto sendto(const std::vector<data_t>& buf, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
-        -> sendto_query { return sendto_query{_fd, buf.data(), buf.capacity() * (sizeof(data_t) / sizeof(char)), flags, addr, addrlen}; }
+        -> sendto_query { return sendto_query{_fd, buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)), flags, addr, addrlen}; }
 
         [[nodiscard]] auto sendto(const std::string& buf, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
-        -> sendto_query { return sendto_query{_fd, buf.data(), buf.capacity(), flags, addr, addrlen}; }
+        -> sendto_query { return sendto_query{_fd, buf.data(), buf.size(), flags, addr, addrlen}; }
 
         template <typename data_t, size_t len_v>
         [[nodiscard]] auto sendto(const std::array<data_t, len_v>& buf, const int flags,

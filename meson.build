@@ -59,6 +59,7 @@ if tests_enabled
     elif compiler == 'clang'
         compile_args = [
             '-std=c++23',
+            '-flto',
 #            '-fexperimental-library',
 #            '-Wno-invalid-offsetof'
         ]

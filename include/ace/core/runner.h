@@ -34,7 +34,6 @@ namespace ace::core {
         ACE_CACHE_LINE(0)
 
         mutable runner_pool_t        _pool{}; ///< Pool of the assigned tasks
-        std::optional<pool_node_ptr> _nextup{}; ///< Nextup task for running
 
         ACE_CACHE_LINE(1)
 
@@ -140,7 +139,7 @@ namespace ace::core {
          * @return @c true if runner has only vortex tasks, @c false otherwise
          */
         bool is_polling() const noexcept {
-            return _pool.empty() and not _nextup and not _vortex_pool.empty();
+            return _pool.empty() and not _vortex_pool.empty();
         };
 
         /**
@@ -181,18 +180,10 @@ namespace ace::core {
             if (new_task._coroutine.promise()._polling) {
                 _vortex_pool.push_front(std::forward<task>(task_wrap(
                     std::forward<context<context_return_t, context_rule_t> >(new_task))));
-                return;
-            }
-            if (_nextup)
-                _pool.push_node_front(_nextup.value());
-            if (pool_node_ptr data_ptr; _pool._mempool.capture(data_ptr)) {
-                data_ptr->_data = std::forward<task>(task_wrap(
-                    std::forward<context<context_return_t, context_rule_t> >(new_task)));
-                _nextup = std::forward<pool_node_ptr>(data_ptr);
-                _nextup.value()->_data.prefetch();
             } else {
                 _pool.push_front(std::forward<task>(task_wrap(
                     std::forward<context<context_return_t, context_rule_t> >(new_task))));
+                _pool.inspect_head()->_data.prefetch();
             }
         }
 
@@ -201,7 +192,7 @@ namespace ace::core {
          * @return @b true if empty, @b false otherwise
          */
         [[nodiscard]] bool empty() const noexcept {
-            return _pool.empty() and _vortex_pool.empty() and _interthread_pool.empty() and not _nextup;
+            return _pool.empty() and _vortex_pool.empty() and _interthread_pool.empty();
         };
     };
 
@@ -218,16 +209,10 @@ namespace ace::core {
         new_task._coroutine.promise()._runner_pool = &_pool;
         if (new_task._coroutine.promise()._polling) {
             _vortex_pool.push_front(std::forward<task>(new_task));
-            return;
-        }
-        if (_nextup)
-            _pool.push_node_front(_nextup.value());
-        if (pool_node_ptr data_ptr; _pool._mempool.capture(data_ptr)) {
-            data_ptr->_data = std::move(new_task);
-            _nextup = std::forward<pool_node_ptr>(data_ptr);
-            _nextup.value()->_data.prefetch();
-        } else
+        } else {
             _pool.push_front(std::forward<task>(new_task));
+            _pool.inspect_head()->_data.prefetch();
+        }
     }
 
     inline auto pool_to_runner(runner_pool_t *pool) noexcept {
@@ -236,8 +221,6 @@ namespace ace::core {
 
     inline runner::runner(runner &&t) noexcept {
         this->_pool = std::move(t._pool);
-        this->_nextup = t._nextup;
-        t._nextup = std::nullopt;
         this->_quants = std::move(t._quants);
         this->_interthread_pool = std::move(t._interthread_pool);
         this->_tasks_amount = t._tasks_amount;
@@ -246,8 +229,6 @@ namespace ace::core {
 
     inline runner& runner::operator=(runner &&t) noexcept {
         this->_pool = std::move(t._pool);
-        this->_nextup = t._nextup;
-        t._nextup = std::nullopt;
         this->_quants = std::move(t._quants);
         this->_interthread_pool = std::move(t._interthread_pool);
         this->_tasks_amount = t._tasks_amount;
@@ -322,30 +303,18 @@ namespace ace::core {
     inline bool runner::yank() noexcept {
 
         promise_touch_result touch_result = e_executed;
-        pool_node_ptr task_node;
+        pool_node_ptr task_node = _pool.pop_node();
 
-        // NOTE: Taking nextup node if it is exists
-        if (_nextup) [[likely]] {
-            task_node = _nextup.value();
-            _nextup.reset();
+        // NOTE: Pulling from interthread pool if task is empty
+        if (not task_node) [[unlikely]] {
+            if (const auto interthread_node = _interthread_pool.pop_node())
+                task_node = cast_node(interthread_node);
+            else return false;
         }
-        // NOTE: Pulling task from a pool if there is not nextup task
-        else if (not _pool.empty()) [[unlikely]] {
-            task_node = _pool.pop_node();
-        }
-        // NOTE: Fetching task from the interthread queue if pool is empty
-        else if (const auto interthread_node = _interthread_pool.pop_node(); interthread_node) {
-            const auto placing_node = cast_node(interthread_node);
-            task_node = placing_node;
-        } else return false;
 
-        // NOTE: Pulling next task and prefetching it
-        if (not _pool.empty()) [[likely]] {
-            _nextup = _pool.pop_node();
-            _nextup.value()->_data.prefetch();
-        } else if (not _interthread_pool.empty()) {
-            _nextup = cast_node(_interthread_pool.pop_node());
-            _nextup.value()->_data.prefetch();
+        // NOTE: Prefetching next task frame
+        if (const auto head = _pool.inspect_head()) [[likely]] {
+            head->_data.prefetch();
         }
 
         // NOTE: Proceeding context
@@ -386,12 +355,10 @@ namespace ace::core {
     inline bool runner::yank_vortex() noexcept {
 
         promise_touch_result touch_result = e_executed;
-        pool_node_ptr vortex_node;
+        pool_node_ptr vortex_node = _vortex_pool.pop_node();
 
-        // NOTE: Pulling task from a pool if there is not nextup task
-        if (not _vortex_pool.empty()) [[unlikely]] {
-            vortex_node = _vortex_pool.pop_node();
-        } else return false;
+        // NOTE: If node is empty breaking
+        if (not vortex_node) [[unlikely]] return false;
 
         // NOTE: Proceeding context
         vortex_node->_data.awake(&touch_result);

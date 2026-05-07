@@ -206,7 +206,7 @@ namespace ace::core {
             return std::unexpected("context is already dead.");
         }
 
-        void prefetch() {
+        void prefetch() const {
             const control_block* frame = control_block::get_block_from_address(_coroutine.address());
             const std::size_t frame_size = frame->_frame_size;
             for (int i = 0; i <= frame_size / ACE_CACHE_LINE_SIZE; ++i) {

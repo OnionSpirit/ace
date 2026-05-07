@@ -158,28 +158,10 @@ namespace ace::core {
         /**
          * @details Function to attach task to the runner
          * @param new_task Task to be pushed into the runner
-         * @warning NOT THREADSAFE
          * @return void
          */
         template <typename context_return_t, typename context_rule_t>
         void attach(context<context_return_t, context_rule_t> &&new_task) noexcept {
-            ++_tasks_amount;
-            new_task._coroutine.promise()._runner_pool = &_pool;
-            if (new_task._coroutine.promise()._polling)
-                _vortex_pool.push(std::forward<task>(task_wrap(
-                    std::forward<context<context_return_t, context_rule_t> >(new_task))));
-            else
-                _pool.push(std::forward<task>(task_wrap(
-                    std::forward<context<context_return_t, context_rule_t> >(new_task))));
-        }
-
-        /**
-         * @details Function to attach task to the runner
-         * @param new_task Task to be pushed into the runner
-         * @return void
-         */
-        template <typename context_return_t, typename context_rule_t>
-        void attach_threadsafe(context<context_return_t, context_rule_t> &&new_task) noexcept {
             ++_tasks_amount;
             new_task._coroutine.promise()._runner_pool = &_pool;
             _interthread_pool.push(std::forward<task>(task_wrap(
@@ -225,16 +207,6 @@ namespace ace::core {
 
     template<>
     inline void runner::attach<void, differed>(task &&new_task) noexcept {
-        ++_tasks_amount;
-        new_task._coroutine.promise()._runner_pool = &_pool;
-        if (new_task._coroutine.promise()._polling)
-            _vortex_pool.push(std::forward<task>(new_task));
-        else
-            _pool.push(std::forward<task>(new_task));
-    }
-
-    template<>
-    inline void runner::attach_threadsafe<void, differed>(task &&new_task) noexcept {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner_pool = &_pool;
         _interthread_pool.push(std::forward<task>(new_task));
@@ -370,6 +342,9 @@ namespace ace::core {
         // NOTE: Pulling next task and prefetching it
         if (not _pool.empty()) [[likely]] {
             _nextup = _pool.pop_node();
+            _nextup.value()->_data.prefetch();
+        } else if (not _interthread_pool.empty()) {
+            _nextup = cast_node(_interthread_pool.pop_node());
             _nextup.value()->_data.prefetch();
         }
 

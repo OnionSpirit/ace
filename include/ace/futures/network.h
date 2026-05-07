@@ -134,16 +134,19 @@ namespace ace::futures {
         { return send_query{_fd, buf.data(), buf.size(), flags}; }
 
         template <typename data_t>
+        requires std::is_pod_v<data_t>
         [[nodiscard]] auto send(const std::vector<data_t>& buf, const int flags = 0) const
         -> send_query requires (connection_state_v == e_connected)
         { return send_query{_fd, buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)), flags}; }
 
         template <typename data_t, size_t len_v>
+        requires std::is_pod_v<data_t>
         [[nodiscard]] auto send(const std::array<data_t, len_v>& buf, const int flags = 0) const
         -> send_query requires (connection_state_v == e_connected)
         { return send_query{_fd, buf.data(), len_v * (sizeof(data_t) / sizeof(char)), flags}; }
 
         template <typename data_t, size_t len_v>
+        requires std::is_pod_v<data_t>
         [[nodiscard]] auto send(const std::span<data_t, len_v>& buf, const int flags = 0) const
         -> send_query requires (connection_state_v == e_connected)
         { return send_query{_fd, buf.data(), buf.size_bytes(), flags}; }
@@ -186,6 +189,7 @@ namespace ace::futures {
         -> sendto_query{ return sendto_query{_fd, buf.data(), buf.size(), flags, addr, addrlen}; }
 
         template <typename data_t>
+        requires std::is_pod_v<data_t>
         [[nodiscard]] auto sendto(const std::vector<data_t>& buf, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
         -> sendto_query { return sendto_query{_fd, buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)), flags, addr, addrlen}; }
@@ -195,11 +199,13 @@ namespace ace::futures {
         -> sendto_query { return sendto_query{_fd, buf.data(), buf.size(), flags, addr, addrlen}; }
 
         template <typename data_t, size_t len_v>
+        requires std::is_pod_v<data_t>
         [[nodiscard]] auto sendto(const std::array<data_t, len_v>& buf, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
         -> sendto_query { return sendto_query{_fd, buf.data(), len_v * (sizeof(data_t) / sizeof(char)), flags, addr, addrlen}; }
 
         template <typename data_t, size_t len_v>
+        requires std::is_pod_v<data_t>
         [[nodiscard]] auto sendto(const std::span<data_t, len_v>& buf, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
         -> sendto_query { return sendto_query{_fd, buf.data(), buf.size_bytes(), flags, addr, addrlen}; }
@@ -208,6 +214,7 @@ namespace ace::futures {
         -> recv_query { return recv_query{_fd, buf, len, flags}; }
 
         template <typename data_t>
+        requires std::is_pod_v<data_t>
         [[nodiscard]] auto recv(std::vector<data_t>& buf, const int flags = 0) const
         -> recv_query { return recv_query{_fd, buf.data(), buf.capacity() * (sizeof(data_t) / sizeof(char)), flags}; }
 
@@ -215,12 +222,13 @@ namespace ace::futures {
         -> recv_query { return recv_query{_fd, buf.data(), buf.capacity(), flags}; }
 
         template <typename data_t>
+        requires std::is_pod_v<data_t>
         [[nodiscard]] auto recv_vec(const int flags = 0) const
         -> promise<std::expected<std::vector<data_t>, int>> {
             static constexpr int buff_len = 128;
             static constexpr int buff_len_bytes = buff_len * (sizeof(data_t) / sizeof(char));
 
-            std::list<std::array<data_t, buff_len>> acc;
+            std::deque<std::array<data_t, buff_len>> acc;
             int total = 0;
 
             auto& buff = acc.emplace_back();
@@ -252,7 +260,7 @@ namespace ace::futures {
         -> promise<std::expected<std::string, int>> {
             static constexpr int buff_len = 128;
 
-            std::list<std::array<char, buff_len>> acc {};
+            std::deque<std::array<char, buff_len>> acc {};
             int total = 0;
 
             auto& buff = acc.emplace_back();
@@ -279,10 +287,12 @@ namespace ace::futures {
         }
 
         template <typename data_t, size_t len_v>
+        requires std::is_pod_v<data_t>
         [[nodiscard]] auto recv(std::array<data_t, len_v>& buf, const int flags = 0) const
         -> recv_query { return recv_query{_fd, buf.data(), len_v * (sizeof(data_t) / sizeof(char)), flags}; }
 
         template <typename data_t, size_t len_v>
+        requires std::is_pod_v<data_t>
         [[nodiscard]] auto recv(std::span<data_t, len_v>& buf, const int flags = 0) const
         -> recv_query { return recv_query{_fd, buf.data(), buf.size_bytes(), flags}; }
 

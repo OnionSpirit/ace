@@ -368,9 +368,10 @@ inline ace::task tcp_echo_client() {
     co_await ace::console::async::println("[ CLIENT ] - Connected to server...");
 
     for (int i =1; i < 6; ++i) {
-        const std::string input = co_await ace::console::async::input();
-        if (co_await connection.send(input))
-            co_await ace::console::async::println("[ CLIENT SENT ] : {}", input);
+        if (const auto input = co_await ace::console::async::input(); not input)
+            co_await ace::console::async::println("[ CLIENT ERROR ] : {}", strerror(input.error()));
+        else if (co_await connection.send(input.value()))
+            co_await ace::console::async::println("[ CLIENT SENT ] : {}", input.value());
     }
 
     co_return;
@@ -413,7 +414,7 @@ inline ace::task tcp_echo_server() {
     std::array<char, 128> buff {};
     for (int i =0; i < 5; ++i) {
         if (co_await connection.recv(buff) > 0)
-            co_await ace::console::async::println("[ SERVER RECEIVED ] : {}", std::string_view(buff.data()));
+            co_await ace::console::async::println("[ SERVER RECEIVED ] : {}", buff.data());
     }
 
     co_return;

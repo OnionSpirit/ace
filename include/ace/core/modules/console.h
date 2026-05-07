@@ -1,6 +1,7 @@
 #ifndef ACE_CONSOLE_H
 #define ACE_CONSOLE_H
 
+#include <list>
 #include <ace/core/context.h>
 #include <ace/core/io.h>
 #include <ace/futures/get_runner.h>
@@ -121,17 +122,32 @@ namespace ace::core::modules {
 
         struct async {
 
-            [[nodiscard]] static promise<std::string> input() {
-                std::stringstream ss;
-                char buff[buff_len] = {};
-                int bytes_read = co_await read_query(STDIN_FILENO, buff, buff_len);
-                ss << buff;
+            [[nodiscard]] static promise<std::expected<std::string, int>> input() {
+
+                std::deque<std::array<char, buff_len>> acc {};
+                int total = 0;
+
+                auto& buff = acc.emplace_back();
+                int bytes_read = co_await read_query(STDIN_FILENO, buff.data(), buff_len);
+                if (bytes_read < 0) co_return std::unexpected(-bytes_read);
+                total += bytes_read;
+
                 while (bytes_read == buff_len) {
-                    bzero(buff, buff_len);
-                    bytes_read = co_await read_query(STDIN_FILENO, buff, buff_len);
-                    ss << buff;
+                    buff = acc.emplace_back();
+                    bytes_read = co_await read_query(STDIN_FILENO, buff.data(), buff_len);
+                    if (bytes_read < 0) co_return std::unexpected(-bytes_read);
+                    total += bytes_read;
                 }
-                co_return ss.str();
+
+                std::string res {};
+                // NOTE: + null term char slot
+                res.reserve(total + 1);
+                for (auto& buf : acc) {
+                    const int write_bytes { (total > buff_len) ? buff_len : total };
+                    res.append(buf.data(), write_bytes);
+                    total -= write_bytes;
+                }
+                co_return res;
             }
 
             template <class... Args>

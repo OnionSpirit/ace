@@ -35,11 +35,11 @@
 #include <iostream>
 
 #include <nukes/dynamic/regular_queue.h>
+#include <nukes/details/prefetch.h>
 
 #include "ace/core/traits/future.h"
 #include "ace/core/traits/promise.h"
 #include "ace/core/tools/meta.h"
-#include "ace/core/tools/prefetch.h"
 #include "ace/core/control.h"
 #include "ace/core/traits/conduction.h"
 
@@ -211,7 +211,7 @@ namespace ace::core {
             const std::size_t frame_size = frame->_frame_size;
             for (int i = 0; i <= frame_size / ACE_CACHE_LINE_SIZE; ++i) {
                 const void* cacheline_ptr = frame + (2 * i);
-                tools::prefetch<tools::e_temporal>(cacheline_ptr);
+                nukes::details::prefetch(cacheline_ptr);
             }
         }
 

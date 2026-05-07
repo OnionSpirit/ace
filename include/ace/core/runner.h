@@ -8,9 +8,9 @@
 #include <queue>
 #include <chrono>
 #include <nukes/dynamic/mpsc_queue.h>
+#include <nukes/details/prefetch.h>
 
 #include "ace/core/tools/moving_average.h"
-#include "ace/core/tools/prefetch.h"
 #include "ace/core/tools/meta.h"
 #include "ace/core/context.h"
 
@@ -183,7 +183,6 @@ namespace ace::core {
             } else {
                 _pool.push_front(std::forward<task>(task_wrap(
                     std::forward<context<context_return_t, context_rule_t> >(new_task))));
-                _pool.inspect_head()->_data.prefetch();
             }
         }
 
@@ -211,7 +210,6 @@ namespace ace::core {
             _vortex_pool.push_front(std::forward<task>(new_task));
         } else {
             _pool.push_front(std::forward<task>(new_task));
-            _pool.inspect_head()->_data.prefetch();
         }
     }
 

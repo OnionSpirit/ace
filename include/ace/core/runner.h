@@ -196,12 +196,22 @@ namespace ace::core {
         void attach_front(context<context_return_t, context_rule_t> &&new_task) noexcept {
             ++_tasks_amount;
             new_task._coroutine.promise()._runner_pool = &_pool;
-            if (new_task._coroutine.promise()._polling)
+            if (new_task._coroutine.promise()._polling) {
                 _vortex_pool.push_front(std::forward<task>(task_wrap(
                     std::forward<context<context_return_t, context_rule_t> >(new_task))));
-            else
+                return;
+            }
+            if (_nextup)
+                _pool.push_node_front(_nextup.value());
+            if (pool_node_ptr data_ptr; _pool._mempool.capture(data_ptr)) {
+                data_ptr->_data = std::forward<task>(task_wrap(
+                    std::forward<context<context_return_t, context_rule_t> >(new_task)));
+                _nextup = std::forward<pool_node_ptr>(data_ptr);
+                _nextup.value()->_data.prefetch();
+            } else {
                 _pool.push_front(std::forward<task>(task_wrap(
                     std::forward<context<context_return_t, context_rule_t> >(new_task))));
+            }
         }
 
         /**
@@ -234,9 +244,17 @@ namespace ace::core {
     inline void runner::attach_front<void, differed>(task &&new_task) noexcept {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner_pool = &_pool;
-        if (new_task._coroutine.promise()._polling)
+        if (new_task._coroutine.promise()._polling) {
             _vortex_pool.push_front(std::forward<task>(new_task));
-        else
+            return;
+        }
+        if (_nextup)
+            _pool.push_node_front(_nextup.value());
+        if (pool_node_ptr data_ptr; _pool._mempool.capture(data_ptr)) {
+            data_ptr->_data = std::move(new_task);
+            _nextup = std::forward<pool_node_ptr>(data_ptr);
+            _nextup.value()->_data.prefetch();
+        } else
             _pool.push_front(std::forward<task>(new_task));
     }
 

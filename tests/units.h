@@ -12,7 +12,6 @@
 #include <ace/futures/timeout.h>
 #include <ace/futures/cutex.h>
 #include <ace/futures/network.h>
-#include <ace/ace.h>
 
 struct once_suspend : ace::core::traits::busy_future_traits<once_suspend> {
 
@@ -433,7 +432,7 @@ inline ace::task timer_and_timer() {
 }
 
 inline ace::task spawn_post(int idx, ace::futures::channel_dyn<int>& ch) {
-    ace::console::println("Placing {} to channel", idx);
+    co_await ace::console::async::println("Placing {} to channel", idx);
     ch << idx;
     co_return;
 }
@@ -444,7 +443,7 @@ inline ace::task imposter(ace::futures::channel_dyn<int>& ch) {
     auto third = co_await ace::post(spawn_post(3, ch));
     // ace::console::println("spawn spawn post - finished {}", co_await (first and second and third) );
     co_await (first and second and third);
-    ace::console::println("Placing {} to channel", 4);
+    co_await ace::console::async::println("Placing {} to channel", 4);
     ch << 4;
     co_return;
 }

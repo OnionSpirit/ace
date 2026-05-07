@@ -12,7 +12,7 @@
 namespace ace::core {
 
     template <typename l_future_t, typename r_future_t>
-    struct or_await final : traits::future_traits<or_await<l_future_t, r_future_t>> {
+    struct ACE_AWAIT_NODISCARD or_await final : traits::future_traits<or_await<l_future_t, r_future_t>> {
 
         IMPORT_FUTURE_ENV(or_await);
 
@@ -27,7 +27,7 @@ namespace ace::core {
             typedef decltype(std::declval<l_future_t>().await_resume()) l_future_ret_t;
             typedef decltype(std::declval<r_future_t>().await_resume()) r_future_ret_t;
             if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
-                return;
+                return int();
             else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
                 return std::optional<r_future_ret_t>{};
             else if constexpr (std::same_as<void, r_future_ret_t> and not std::same_as<void, l_future_ret_t>)
@@ -44,7 +44,7 @@ namespace ace::core {
         r_future_t& _r_future;
         std::optional<async_handle> _l_future_observer;
         std::optional<async_handle> _r_future_observer;
-        std::conditional_t<std::same_as<return_t, void>, int, return_t> _result;
+        return_t _result;
 
         template <size_t result_id, typename future_t>
         task observer(future_t& future, std::optional<async_handle>& opposite_observer) {
@@ -63,19 +63,19 @@ namespace ace::core {
 
             if (_waiter)
                 runner::reattach(std::move(_waiter.value()));
+
+            // NOTE: Setting finished operand ID if both operands are void awaitable
+            if constexpr (std::same_as<int, return_t>)
+                _result = result_id;
         };
 
         bool await_suspend(auto);
 
-        return_t await_resume() {
-            if constexpr (std::same_as<return_t, void>)
-                return;
-            else return _result;
-        };
+        return_t await_resume() { return _result; };
     };
 
     template <typename l_future_t, typename r_future_t>
-    struct and_await final : traits::future_traits<and_await<l_future_t, r_future_t>> {
+    struct ACE_AWAIT_NODISCARD and_await final : traits::future_traits<and_await<l_future_t, r_future_t>> {
 
         IMPORT_FUTURE_ENV(and_await);
 
@@ -190,9 +190,11 @@ await_suspend(auto external_coro) {
     // NOTE: Creating Handlers for observation tasks
     _l_future_observer = async_handle {_l_observer.observe()};
     _r_future_observer = async_handle {_r_observer.observe()};
-    // NOTE: Scheduling observers
-    schedule(std::move(_l_observer), runner_ptr);
-    schedule(std::move(_r_observer), runner_ptr);
+    // NOTE: Posting observers
+    _l_observer._coroutine.promise()._roaming = external_coro.promise()._roaming = false;
+    runner_ptr->attach_front(std::forward<task>(_l_observer));
+    _r_observer._coroutine.promise()._roaming = external_coro.promise()._roaming = false;
+    runner_ptr->attach_front(std::forward<task>(_r_observer));
     // NOTE: Setting conductor for external waiter
     external_coro.promise()._runner_conductor = or_await_conductor {this};
     return true;
@@ -230,9 +232,11 @@ await_suspend(auto external_coro) {
     // NOTE: Creating Handlers for observation tasks
     _l_future_observer = async_handle {_l_observer.observe()};
     _r_future_observer = async_handle {_r_observer.observe()};
-    // NOTE: Scheduling observers
-    schedule(std::move(_l_observer), runner_ptr);
-    schedule(std::move(_r_observer), runner_ptr);
+    // NOTE: Posting observers
+    _l_observer._coroutine.promise()._roaming = external_coro.promise()._roaming = false;
+    runner_ptr->attach_front(std::forward<task>(_l_observer));
+    _r_observer._coroutine.promise()._roaming = external_coro.promise()._roaming = false;
+    runner_ptr->attach_front(std::forward<task>(_r_observer));
     // NOTE: Setting conductor for external waiter
     external_coro.promise()._runner_conductor = and_await_conductor {this};
     return true;

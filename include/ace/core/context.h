@@ -211,7 +211,7 @@ namespace ace::core {
             const std::size_t frame_size = frame->_frame_size;
             for (int i = 0; i <= frame_size / ACE_CACHE_LINE_SIZE; ++i) {
                 const void* cacheline_ptr = frame + (2 * i);
-                nukes::details::prefetch(cacheline_ptr);
+                nukes::details::prefetch<nukes::details::e_temporal>(cacheline_ptr);
             }
         }
 

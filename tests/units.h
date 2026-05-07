@@ -298,7 +298,7 @@ inline ace::task socket_abuser() {
 
     for (int i =1; i < 6; ++i) {
         std::string msg = "Echo message " + std::to_string(i);
-        if (co_await connection.send(msg.c_str(), msg.size()) == msg.size())
+        if (co_await connection.send(msg))
             co_await ace::console::async::println("Client sent: '{}'", msg);
     }
 
@@ -331,10 +331,10 @@ inline ace::task socket_listener() {
         co_return;
     }
 
-    std::array<uint8_t, 128> buff{};
+    std::array<char, 128> buff{};
     for (int i =0; i < 5; ++i) {
         if (co_await connection.recv(buff) > 0)
-            co_await ace::console::async::println("Server received: '{}'", std::string(buff.begin(), buff.end()));
+            co_await ace::console::async::println("Server received: '{}'", std::string_view(buff.data()));
     }
 
     co_return;
@@ -410,13 +410,10 @@ inline ace::task tcp_echo_server() {
 
     co_await ace::console::async::println("[ SERVER ] - Client connected...");
 
-    static constexpr int READ_BUFF_LEN = 128;
-
-    char buff[READ_BUFF_LEN];
+    std::array<char, 128> buff {};
     for (int i =0; i < 5; ++i) {
-        memset(buff, 0, READ_BUFF_LEN);
-        if (co_await connection.recv(buff, READ_BUFF_LEN) > 0)
-            co_await ace::console::async::println("[ SERVER RECEIVED ] : {}", buff);
+        if (co_await connection.recv(buff) > 0)
+            co_await ace::console::async::println("[ SERVER RECEIVED ] : {}", std::string_view(buff.data()));
     }
 
     co_return;

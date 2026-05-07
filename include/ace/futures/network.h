@@ -188,12 +188,16 @@ namespace ace::futures {
         template <typename data_t>
         [[nodiscard]] auto sendto(const std::vector<data_t>& buf, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
-        -> sendto_query { return sendto_query{_fd, buf.data(), buf.size(), flags, addr, addrlen}; }
+        -> sendto_query { return sendto_query{_fd, buf.data(), buf.capacity() * (sizeof(data_t) / sizeof(char)), flags, addr, addrlen}; }
+
+        [[nodiscard]] auto sendto(const std::string& buf, const int flags,
+                const sockaddr *addr, const socklen_t addrlen) const
+        -> sendto_query { return sendto_query{_fd, buf.data(), buf.capacity(), flags, addr, addrlen}; }
 
         template <typename data_t, size_t len_v>
         [[nodiscard]] auto sendto(const std::array<data_t, len_v>& buf, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
-        -> sendto_query { return sendto_query{_fd, buf.data(), len_v * (sizeof(data_t) / sizeof(uint8_t)), flags, addr, addrlen}; }
+        -> sendto_query { return sendto_query{_fd, buf.data(), len_v * (sizeof(data_t) / sizeof(char)), flags, addr, addrlen}; }
 
         template <typename data_t, size_t len_v>
         [[nodiscard]] auto sendto(const std::span<data_t, len_v>& buf, const int flags,
@@ -205,11 +209,14 @@ namespace ace::futures {
 
         template <typename data_t>
         [[nodiscard]] auto recv(std::vector<data_t>& buf, const int flags = 0) const
-        -> recv_query { return recv_query{_fd, buf.data(), buf.capacity() * (sizeof(data_t) / sizeof(uint8_t)), flags}; }
+        -> recv_query { return recv_query{_fd, buf.data(), buf.capacity() * (sizeof(data_t) / sizeof(char)), flags}; }
+
+        [[nodiscard]] auto recv(std::string& buf, const int flags = 0) const
+        -> recv_query { return recv_query{_fd, buf.data(), buf.capacity(), flags}; }
 
         template <typename data_t, size_t len_v>
         [[nodiscard]] auto recv(std::array<data_t, len_v>& buf, const int flags = 0) const
-        -> recv_query { return recv_query{_fd, buf.data(), len_v * (sizeof(data_t) / sizeof(uint8_t)), flags}; }
+        -> recv_query { return recv_query{_fd, buf.data(), len_v * (sizeof(data_t) / sizeof(char)), flags}; }
 
         template <typename data_t, size_t len_v>
         [[nodiscard]] auto recv(std::span<data_t, len_v>& buf, const int flags = 0) const

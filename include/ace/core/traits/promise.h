@@ -313,9 +313,8 @@ namespace ace::core::traits {
          * @param mem_ptr  Pointer to the promise area.
          */
         void operator delete(void* mem_ptr) noexcept {
-            void* base_ptr = control_block::get_block_from_address(mem_ptr);
             // NOTE: Trying to disown, and if it's untracked do delete
-            if (control_block::disown(base_ptr))
+            if (void* base_ptr = control_block::get_block_from_address(mem_ptr); control_block::disown(base_ptr))
                 delete static_cast<control_block*>(base_ptr);
         }
 

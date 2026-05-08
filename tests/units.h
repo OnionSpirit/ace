@@ -457,4 +457,29 @@ inline ace::task imposter(ace::futures::channel_dyn<int>& ch) {
     ch << 5;
     co_return;
 }
+
+inline ace::promise<int> pusher(int idx, ace::futures::channel_dyn<int>& ch) {
+    ch << idx;
+    co_return idx;
+}
+
+inline ace::promise<> printer(int idx) {
+    co_await ace::console::async::println("Placing {} to channel", idx);
+}
+
+inline ace::task graph_starter(ace::futures::channel_dyn<int>& ch) {
+    // NOTE: Starting parallel pipes
+    co_await (
+        pusher(1, ch) | printer
+                                         and
+        pusher(2, ch) | printer
+                                         and
+        pusher(3, ch) | printer
+                                         and
+        pusher(4, ch) | printer
+                                         and
+        pusher(5, ch) | printer
+    );
+}
+
 #endif // UNITS_H

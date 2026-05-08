@@ -218,7 +218,16 @@ namespace ace::core {
         explicit and_await_composed(future_ts&... futures)
             : _futures(futures...) {};
 
-        typedef std::tuple<meta::replace_type<meta::resume_type<future_ts>>...> return_t;
+        static consteval auto define_return_type() {
+            typedef std::tuple<meta::replace_type<meta::resume_type<future_ts>>...> temp_ret_t;
+            typedef meta::unique_tuple_t<temp_ret_t> ret_tuple_t;
+            if constexpr (std::same_as<std::tuple<std::monostate>, ret_tuple_t>)
+                return std::monostate{};
+            else
+                return temp_ret_t{};
+        }
+
+        typedef decltype(define_return_type()) return_t;
 
         task _waiter;
         std::tuple<future_ts&...> _futures;
@@ -254,7 +263,26 @@ namespace ace::core {
                 return;
             else return _result;
         };
+
+        void await_resume() requires std::same_as<std::monostate, return_t> { }
+
+        return_t await_resume() requires (not std::same_as<std::monostate, return_t>) {
+            return _result;
+        };
     };
+
+    template<meta::is_future sender_t, typename async_return, is_promise_rule async_promise_rule_t =differed>
+    requires (not std::same_as<meta::resume_type<sender_t>, void>)
+    async<async_return, async_promise_rule_t> receiver(sender_t&& sender, async<async_return, async_promise_rule_t>(responder)(meta::resume_type<sender_t>)) {
+        co_await responder(co_await sender);
+    }
+
+    template<meta::is_future sender_t, typename async_return, is_promise_rule async_promise_rule_t =differed>
+    requires std::same_as<meta::resume_type<sender_t>, void>
+    async<async_return, async_promise_rule_t> receiver(sender_t&& sender, async<async_return, async_promise_rule_t>(responder)()) {
+        co_await sender;
+        co_await responder();
+    }
 
 } // end namespace ace::core
 
@@ -650,6 +678,18 @@ operator or(ace::core::or_await_composed<composed_future_ts...>& composed_future
     return std::make_from_tuple<ace::core::or_await_composed<composed_future_ts..., r_future_t>>(
         std::tuple_cat(composed_future._futures, std::tie(r_future))
     );
+}
+
+template<ace::core::meta::is_future sender_t, typename async_return, ace::core::is_promise_rule async_promise_rule_t =ace::core::differed>
+requires (not std::same_as<ace::core::meta::resume_type<sender_t>, void>)
+ace::core::async<async_return, async_promise_rule_t> operator | (sender_t&& sender, ace::core::async<async_return, async_promise_rule_t>(responder)(ace::core::meta::resume_type<sender_t>) ) {
+    return std::move(receiver(std::forward<decltype(sender)>(sender), responder));
+}
+
+template<ace::core::meta::is_future sender_t, typename async_return, ace::core::is_promise_rule async_promise_rule_t =ace::core::differed>
+requires std::same_as<ace::core::meta::resume_type<sender_t>, void>
+ace::core::async<async_return, async_promise_rule_t> operator | (sender_t&& sender, ace::core::async<async_return, async_promise_rule_t>(responder)() ) {
+    return std::move(receiver(std::forward<decltype(sender)>(sender), responder));
 }
 
 #undef ACE_COMPOSE_MEMBERS_ASSERT

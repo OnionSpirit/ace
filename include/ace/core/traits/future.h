@@ -206,8 +206,14 @@ namespace ace::core::meta {
      * @tparam futureT   Type to check.
      */
     template <typename futureT>
-    concept is_future = requires { typename futureT::future_traits_t; }
-    and std::derived_from<futureT, typename futureT::future_traits_t>
+    concept is_future = (
+        requires { typename futureT::future_traits_t; }
+     or requires { typename futureT::busy_future_traits_t; }
+    )
+    and (
+        std::derived_from<futureT, typename futureT::future_traits_t>
+     or std::derived_from<futureT, typename futureT::busy_future_traits_t>
+    )
     and requires (futureT awaitable_t) {
         { awaitable_t.await_ready() } -> std::same_as<bool>;
         awaitable_t.await_resume();

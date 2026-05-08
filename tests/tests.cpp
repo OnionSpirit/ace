@@ -257,6 +257,24 @@ TEST(commands, check_spawn_post) {
     ASSERT_EQ(res[4], 5);
 }
 
+TEST(commands, check_graph) {
+    ace::futures::channel_dyn<int> channel_ {};
+    ace::schedule(graph_starter(channel_));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    // NOTE: Collecting waited time sequence
+    std::vector<int> res{};
+    ace::schedule(channel_fetcher(channel_, res));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    ASSERT_EQ(res.size(), 5);
+    ASSERT_EQ(res[0], 1);
+    ASSERT_EQ(res[1], 2);
+    ASSERT_EQ(res[2], 3);
+    ASSERT_EQ(res[3], 4);
+    ASSERT_EQ(res[4], 5);
+}
+
 TEST(commands, check_spawn_and_join) {
     ace::futures::channel_dyn<ace::core::runner*> channel_ {};
     ace::schedule(join_spawner(channel_));

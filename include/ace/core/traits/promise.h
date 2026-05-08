@@ -239,7 +239,7 @@ namespace ace::core::traits {
          * @return          The same lvalue reference.
          */
         template <typename futureT>
-        requires tools::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
+        requires tools::dispatch::is_future_accurate<std::remove_reference_t<futureT>, derived_t>
         futureT& await_transform(futureT& future) {
             _status = e_executed;
             _busy_future = nullptr;
@@ -253,7 +253,7 @@ namespace ace::core::traits {
          * @return          An rvalue reference to the future.
          */
         template <typename futureT>
-        requires tools::dispatch::is_future<std::remove_reference_t<futureT>, derived_t>
+        requires tools::dispatch::is_future_accurate<std::remove_reference_t<futureT>, derived_t>
         futureT&& await_transform(futureT&& future) {
             _status = e_executed;
             _busy_future = nullptr;
@@ -269,7 +269,7 @@ namespace ace::core::traits {
          * @return          The same lvalue reference.
          */
         template <typename futureT>
-        requires tools::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
+        requires tools::dispatch::is_busy_future_accurate<std::remove_reference_t<futureT>, derived_t>
         futureT& await_transform(futureT& future) {
             _status = e_executed;
             _busy_future = &future;
@@ -283,7 +283,7 @@ namespace ace::core::traits {
          * @return          An rvalue reference to the future.
          */
         template <typename futureT>
-        requires tools::dispatch::is_busy_future<std::remove_reference_t<futureT>, derived_t>
+        requires tools::dispatch::is_busy_future_accurate<std::remove_reference_t<futureT>, derived_t>
         futureT&& await_transform(futureT&& future) {
             _status = e_executed;
             _busy_future = &future;

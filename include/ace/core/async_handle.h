@@ -97,7 +97,7 @@ namespace ace::core {
      * @note @c async_handle is @b not default-constructible.  It must be
      * obtained via @c co_await ace::spawn(...).
      */
-    class ACE_AWAIT_NODISCARD async_handle final : public join_handler {
+    class ACE_AWAIT_NODISCARD async_handle final : protected join_handler {
 
     public:
 

@@ -43,10 +43,9 @@ namespace ace::core::tools::dispatch {
      */
     template <typename awaitableT, typename promiseT>
     concept is_awaitable =
-        requires (awaitableT awaitable_t, std::coroutine_handle<promiseT> promise_t) {
-        { awaitable_t.await_ready() } -> std::same_as<bool>;
-        awaitable_t.await_resume();
-        // awaitable_t.detach(promise_t);
+        requires (awaitableT awaitable_t) {
+            { awaitable_t.await_ready() } -> std::same_as<bool>;
+              awaitable_t.await_resume();
         }
     and (
          requires (awaitableT awaitable_t, std::coroutine_handle<promiseT> promise_t) {
@@ -73,7 +72,7 @@ namespace ace::core::tools::dispatch {
      * @tparam promiseT  Promise type of the enclosing coroutine.
      */
     template <typename futureT, typename promiseT>
-    concept is_future =
+    concept is_future_accurate =
         requires { typename futureT::future_traits_t; }
     and std::derived_from<futureT, typename futureT::future_traits_t>
     and is_awaitable<futureT, promiseT>;
@@ -96,7 +95,7 @@ namespace ace::core::tools::dispatch {
      * @tparam promiseT  Promise type of the enclosing coroutine.
      */
     template <typename futureT, typename promiseT>
-    concept is_busy_future =
+    concept is_busy_future_accurate =
         requires { typename futureT::busy_future_traits_t; }
     and std::derived_from<futureT, typename futureT::busy_future_traits_t>
     and is_awaitable<futureT, promiseT>;
@@ -110,7 +109,28 @@ namespace ace::core::tools::dispatch {
      * @tparam promiseT  Promise type of the enclosing coroutine.
      */
     template <typename futureT, typename promiseT>
-    concept is_any_future = is_busy_future<futureT, promiseT> or is_future<futureT, promiseT>;
+    concept is_any_future_accurate = is_busy_future_accurate<futureT, promiseT> or is_future_accurate<futureT, promiseT>;
+
+    /**
+     * @brief ACE future concept (conductor-based suspension).
+     *
+     * @details A type satisfies @c is_future if it:
+     *  1. Exposes a nested @c future_traits_t alias.
+     *  2. Is derived from @c future_traits_t (i.e., from
+     *     @c ace::futures::future_traits<Derived>).
+     *
+     * When @c promise_traits::await_transform() detects this concept, it clears
+     * @c _busy_future so the runner uses the conductor for forwarding.
+     *
+     * @tparam futureT   Type to check.
+     */
+    template <typename futureT>
+    concept is_future = requires { typename futureT::future_traits_t; }
+    and std::derived_from<futureT, typename futureT::future_traits_t>
+    and requires (futureT awaitable_t) {
+        { awaitable_t.await_ready() } -> std::same_as<bool>;
+          awaitable_t.await_resume();
+    };
 
 }
 #endif //DISPATCH_H

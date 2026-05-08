@@ -24,17 +24,23 @@ namespace ace::core {
             , _r_future(r_future) {};
 
         static consteval auto define_return_type() {
-            typedef decltype(std::declval<l_future_t>().await_resume()) l_future_ret_t;
-            typedef decltype(std::declval<r_future_t>().await_resume()) r_future_ret_t;
-            if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
-                return int();
-            else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
-                return std::optional<r_future_ret_t>{};
-            else if constexpr (std::same_as<void, r_future_ret_t> and not std::same_as<void, l_future_ret_t>)
-                return std::optional<l_future_ret_t>{};
-            else if constexpr (std::same_as<l_future_ret_t, r_future_ret_t>)
-                return std::array<std::optional<l_future_ret_t>, 2>{};
-            else return std::variant<l_future_ret_t, r_future_ret_t>{};
+            using namespace ace::core::tools::dispatch;
+            static_assert (is_future<l_future_t>, "Left operand shall be future, and await interfaces shall be accessed");
+            static_assert (is_future<r_future_t>, "Right operand shall be future, and await interfaces shall be accessed");
+            // NOTE: To shrink error output
+            if constexpr (is_future<l_future_t> and is_future<r_future_t>) {
+                typedef decltype(std::declval<l_future_t>().await_resume()) l_future_ret_t;
+                typedef decltype(std::declval<r_future_t>().await_resume()) r_future_ret_t;
+                if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
+                    return int();
+                else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
+                    return std::optional<r_future_ret_t>{};
+                else if constexpr (std::same_as<void, r_future_ret_t> and not std::same_as<void, l_future_ret_t>)
+                    return std::optional<l_future_ret_t>{};
+                else if constexpr (std::same_as<l_future_ret_t, r_future_ret_t>)
+                    return std::array<std::optional<l_future_ret_t>, 2>{};
+                else return std::variant<l_future_ret_t, r_future_ret_t>{};
+            }
         }
 
         typedef decltype(define_return_type()) return_t;
@@ -87,17 +93,23 @@ namespace ace::core {
             , _r_future(r_future) {};
 
         static consteval auto define_return_type() {
-            typedef decltype(std::declval<l_future_t>().await_resume()) l_future_ret_t;
-            typedef decltype(std::declval<r_future_t>().await_resume()) r_future_ret_t;
-            if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
-                return;
-            else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
-                return r_future_ret_t{};
-            else if constexpr (not std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
-                return l_future_ret_t{};
-            else if constexpr (std::same_as<l_future_ret_t, r_future_ret_t>)
-                return std::array<l_future_ret_t, 2>{};
-            else return std::tuple<l_future_ret_t, r_future_ret_t>{};
+            using namespace ace::core::tools::dispatch;
+            static_assert (is_future<l_future_t>, "Left operand shall be future, and await interfaces shall be accessed");
+            static_assert (is_future<r_future_t>, "Right operand shall be future, and await interfaces shall be accessed");
+            // NOTE: To shrink error output
+            if constexpr (is_future<l_future_t> and is_future<r_future_t>) {
+                typedef decltype(std::declval<l_future_t>().await_resume()) l_future_ret_t;
+                typedef decltype(std::declval<r_future_t>().await_resume()) r_future_ret_t;
+                if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
+                    return;
+                else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
+                    return r_future_ret_t{};
+                else if constexpr (not std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
+                    return l_future_ret_t{};
+                else if constexpr (std::same_as<l_future_ret_t, r_future_ret_t>)
+                    return std::array<l_future_ret_t, 2>{};
+                else return std::tuple<l_future_ret_t, r_future_ret_t>{};
+            }
         }
 
         typedef decltype(define_return_type()) return_t;

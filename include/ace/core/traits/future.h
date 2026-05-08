@@ -224,6 +224,41 @@ namespace ace::core::meta {
     template <typename inspect_t, typename expected_t = void, typename replace_with_t = std::monostate>
     using replace_type = std::conditional_t<std::same_as<inspect_t, expected_t>, replace_with_t, inspect_t>;
 
+    namespace details {
+        template <typename T, typename... Ts>
+       struct unique_impl { using type = T; };
+
+        template <template<class...> class Tuple, typename... Ts, typename U, typename... Us>
+        struct unique_impl<Tuple<Ts...>, U, Us...>
+            : std::conditional_t<(std::is_same_v<U, Ts> || ...),
+                                 unique_impl<Tuple<Ts...>, Us...>,
+                                 unique_impl<Tuple<Ts..., U>, Us...>> {};
+
+        template <class Tuple>
+        struct unique_tuple;
+
+        template <template<class...> class Tuple, typename... Ts>
+        struct unique_tuple<Tuple<Ts...>> : unique_impl<Tuple<>, Ts...> {};
+    }
+
+    template <class Tuple>
+    using unique_tuple_t = details::unique_tuple<Tuple>::type;
+
+    namespace details {
+        // Helper to convert tuple to variant
+        template <typename Tuple>
+        struct tuple_to_variant;
+
+        template <typename... Ts>
+        struct tuple_to_variant<std::tuple<Ts...>> {
+            using type = std::variant<Ts...>;
+        };
+    }
+
+    // Convenient alias
+    template <typename Tuple>
+    using tuple_to_variant_t = details::tuple_to_variant<Tuple>::type;
+
 
 }
 

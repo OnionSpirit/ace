@@ -24,23 +24,17 @@ namespace ace::core {
             , _r_future(r_future) {};
 
         static consteval auto define_return_type() {
-            using namespace ace::core::meta;
-            static_assert (is_future<l_future_t>, "Left operand shall be future, and await interfaces shall be accessed");
-            static_assert (is_future<r_future_t>, "Right operand shall be future, and await interfaces shall be accessed");
-            // NOTE: To shrink error output
-            if constexpr (is_future<l_future_t> and is_future<r_future_t>) {
-                typedef resume_type<l_future_t> l_future_ret_t;
-                typedef resume_type<r_future_t> r_future_ret_t;
-                if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
-                    return int();
-                else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
-                    return std::optional<r_future_ret_t>{};
-                else if constexpr (std::same_as<void, r_future_ret_t> and not std::same_as<void, l_future_ret_t>)
-                    return std::optional<l_future_ret_t>{};
-                else if constexpr (std::same_as<l_future_ret_t, r_future_ret_t>)
-                    return std::array<std::optional<l_future_ret_t>, 2>{};
-                else return std::variant<l_future_ret_t, r_future_ret_t>{};
-            }
+            typedef meta::resume_type<l_future_t> l_future_ret_t;
+            typedef meta::resume_type<r_future_t> r_future_ret_t;
+            if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
+                return int();
+            else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
+                return std::optional<r_future_ret_t>{};
+            else if constexpr (std::same_as<void, r_future_ret_t> and not std::same_as<void, l_future_ret_t>)
+                return std::optional<l_future_ret_t>{};
+            else if constexpr (std::same_as<l_future_ret_t, r_future_ret_t>)
+                return std::array<std::optional<l_future_ret_t>, 2>{};
+            else return std::variant<l_future_ret_t, r_future_ret_t>{};
         }
 
         typedef decltype(define_return_type()) return_t;
@@ -93,23 +87,17 @@ namespace ace::core {
             , _r_future(r_future) {};
 
         static consteval auto define_return_type() {
-            using namespace ace::core::meta;
-            static_assert (is_future<l_future_t>, "Left operand shall be future, and await interfaces shall be accessed");
-            static_assert (is_future<r_future_t>, "Right operand shall be future, and await interfaces shall be accessed");
-            // NOTE: To shrink error output
-            if constexpr (is_future<l_future_t> and is_future<r_future_t>) {
-                typedef resume_type<l_future_t> l_future_ret_t;
-                typedef resume_type<r_future_t> r_future_ret_t;
-                if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
-                    return;
-                else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
-                    return r_future_ret_t{};
-                else if constexpr (not std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
-                    return l_future_ret_t{};
-                else if constexpr (std::same_as<l_future_ret_t, r_future_ret_t>)
-                    return std::array<l_future_ret_t, 2>{};
-                else return std::tuple<l_future_ret_t, r_future_ret_t>{};
-            }
+            typedef meta::resume_type<l_future_t> l_future_ret_t;
+            typedef meta::resume_type<r_future_t> r_future_ret_t;
+            if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
+                return;
+            else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
+                return r_future_ret_t{};
+            else if constexpr (not std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
+                return l_future_ret_t{};
+            else if constexpr (std::same_as<l_future_ret_t, r_future_ret_t>)
+                return std::array<l_future_ret_t, 2>{};
+            else return std::tuple<l_future_ret_t, r_future_ret_t>{};
         }
 
         typedef decltype(define_return_type()) return_t;
@@ -152,6 +140,71 @@ namespace ace::core {
     };
 
     template <meta::is_future ... future_ts>
+    struct ACE_AWAIT_NODISCARD or_await_composed final : traits::future_traits<or_await_composed<future_ts...>> {
+
+        IMPORT_FUTURE_ENV(or_await_composed);
+
+        struct or_await_composed_conductor;
+        friend or_await_composed_conductor;
+
+        static constexpr int futures_amount = sizeof...(future_ts);
+        static constexpr int top_observer_idx = futures_amount - 1;
+
+        explicit or_await_composed(future_ts&... futures)
+            : _futures(futures...) {};
+
+        static consteval auto define_return_type() {
+            typedef std::tuple<meta::replace_type<meta::resume_type<future_ts>, void, std::monostate>...> temp_ret_t;
+            typedef meta::unique_tuple_t<temp_ret_t> ret_tuple_t;
+            if constexpr (std::same_as<std::tuple<std::monostate>, ret_tuple_t>)
+                return int();
+            else if constexpr (std::tuple_size_v<ret_tuple_t> == 1)
+                return std::get<0>(ret_tuple_t());
+            else
+                return meta::tuple_to_variant_t<ret_tuple_t>{};
+        }
+
+        typedef decltype(define_return_type()) return_t;
+
+        task _waiter;
+        std::tuple<future_ts&...> _futures;
+        std::array<std::optional<async_handle>, sizeof...(future_ts)> _observers;
+        return_t _result;
+
+        template <size_t observer_idx, typename future_t>
+        task observer(future_t& future) {
+
+            typedef meta::resume_type<future_t> future_ret_t;
+
+            if constexpr (not std::same_as<void, future_ret_t>)
+                _result = co_await future;
+            else
+                co_await future;
+
+            // NOTE: Only last observer joins and reattaches
+            for (int i = 0; i < futures_amount; ++i) {
+                if (i not_eq observer_idx and _observers[i])
+                    _observers[i]->cancel();
+            }
+
+            if (_waiter)
+                runner::reattach(std::move(_waiter));
+
+            // NOTE: Setting finished operand ID if both operands are void awaitable
+            if constexpr (std::same_as<int, return_t>)
+                _result = observer_idx;
+        };
+
+        bool await_suspend(auto);
+
+        return_t await_resume() {
+            if constexpr (std::same_as<return_t, void>)
+                return;
+            else return _result;
+        };
+    };
+
+    template <meta::is_future ... future_ts>
     struct ACE_AWAIT_NODISCARD and_await_composed final : traits::future_traits<and_await_composed<future_ts...>> {
 
         IMPORT_FUTURE_ENV(and_await_composed);
@@ -166,13 +219,11 @@ namespace ace::core {
             : _futures(futures...) {};
 
         typedef std::tuple<meta::replace_type<meta::resume_type<future_ts>>...> return_t;
-        // TODO for composed or
-        // typedef std::tuple<meta::replace_type<meta::resume_type<future_ts>, void, bool>...> return_t;
 
         task _waiter;
         std::tuple<future_ts&...> _futures;
         std::array<std::optional<async_handle>, sizeof...(future_ts)> _observers;
-        std::conditional_t<std::same_as<return_t, void>, int, return_t> _result;
+        return_t _result;
 
         template <size_t observer_idx, typename future_t>
         task observer(future_t& future) {
@@ -342,7 +393,7 @@ struct ACE_AND_AWAIT_COMPOSED_FUTURE_SPACE and_await_composed_conductor final : 
     }
 
     void cancel() override {
-        for (auto& opposite_observer : _and_await_composed->_observers | std::views::take(top_observer_idx) ) {
+        for (auto& opposite_observer : _and_await_composed->_observers) {
             opposite_observer->cancel();
         }
     }
@@ -372,6 +423,49 @@ await_suspend(auto external_coro) {
     return true;
 }
 
+ACE_COMPOSE_AWAIT_COMPOSED_FUTURE_META
+struct ACE_OR_AWAIT_COMPOSED_FUTURE_SPACE or_await_composed_conductor final : conductor_handler_t {
+
+    or_await_composed_conductor() = delete;
+
+    explicit or_await_composed_conductor(or_await_composed* or_await_composed_)
+        : _or_await_composed(or_await_composed_) {};
+
+    void forward(task&& ctx) override {
+        _or_await_composed->_waiter = std::move(ctx);
+    }
+
+    void cancel() override {
+        for (auto& opposite_observer : _or_await_composed->_observers) {
+            opposite_observer->cancel();
+        }
+    }
+
+    ~or_await_composed_conductor() override = default;
+
+    or_await_composed* _or_await_composed;
+};
+
+
+ACE_OR_AWAIT_COMPOSED_FUTURE_MEMBER(bool)
+await_suspend(auto external_coro) {
+    auto* runner_ptr = pool_to_runner(external_coro.promise()._runner_pool);
+    // NOTE: Creating observers for each futures
+    [&] <std::size_t ... index> (std::index_sequence<index...>) {
+        (...,[&]{
+            task observer_inst = observer<index>(std::get<index>(_futures));
+            // NOTE: Creating Handlers for observation tasks
+            _observers[index] = async_handle {observer_inst.observe()};
+            // NOTE: Posting observer
+            observer_inst._coroutine.promise()._roaming = external_coro.promise()._roaming = false;
+            runner_ptr->attach_front(std::forward<task>(observer_inst));
+        }());
+    }(std::make_index_sequence<sizeof...(future_ts)>{});
+    // NOTE: Setting conductor for external waiter
+    external_coro.promise()._runner_conductor = or_await_composed_conductor{this};
+    return true;
+}
+
 #undef ACE_COMPOSE_AWAIT_FUTURE_META
 #undef ACE_AND_AWAIT_FUTURE_MEMBER
 #undef ACE_AND_AWAIT_FUTURE_SPACE
@@ -385,100 +479,179 @@ await_suspend(auto external_coro) {
 
 //==============================- OPERATOR DEFINITIONS -=========================
 
-template <typename l_future_t, typename r_future_t>
-ace::core::or_await<l_future_t, r_future_t> operator or(l_future_t&& l_future, r_future_t&& r_future) {
+#define ACE_COMPOSE_MEMBERS_ASSERT                                                                                 \
+    using namespace ace::core::meta;                                                                                 \
+    static_assert (is_future<l_future_t>, "Left operand shall be future, and await interfaces shall be accessed");   \
+    static_assert (is_future<r_future_t>, "Right operand shall be future, and await interfaces shall be accessed");  \
+    if constexpr (is_future<l_future_t> and is_future<r_future_t>)                                                   \
+
+template <typename l_future_t, typename r_future_t> auto
+operator or(l_future_t&& l_future, r_future_t&& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return ace::core::or_await{l_future, r_future};
 }
 
-template <typename l_future_t, typename r_future_t>
-ace::core::or_await<l_future_t, r_future_t> operator or(l_future_t& l_future, r_future_t&& r_future) {
+template <typename l_future_t, typename r_future_t> auto
+operator or(l_future_t& l_future, r_future_t&& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return ace::core::or_await{l_future, r_future};
 }
 
-template <typename l_future_t, typename r_future_t>
-ace::core::or_await<l_future_t, r_future_t> operator or(l_future_t&& l_future, r_future_t& r_future) {
+template <typename l_future_t, typename r_future_t> auto
+operator or(l_future_t&& l_future, r_future_t& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return ace::core::or_await{l_future, r_future};
 }
 
-template <typename l_future_t, typename r_future_t>
-ace::core::or_await<l_future_t, r_future_t> operator or(l_future_t& l_future, r_future_t& r_future) {
+template <typename l_future_t, typename r_future_t> auto
+operator or(l_future_t& l_future, r_future_t& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return ace::core::or_await{l_future, r_future};
 }
 
-template <typename l_future_t, typename r_future_t>
-ace::core::and_await<l_future_t, r_future_t> operator and(l_future_t&& l_future, r_future_t&& r_future) {
+template <typename l_future_t, typename r_future_t> auto
+operator and(l_future_t&& l_future, r_future_t&& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return ace::core::and_await{l_future, r_future};
 }
 
-template <typename l_future_t, typename r_future_t>
-ace::core::and_await<l_future_t, r_future_t> operator and(l_future_t& l_future, r_future_t&& r_future) {
+template <typename l_future_t, typename r_future_t> auto
+operator and(l_future_t& l_future, r_future_t&& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return ace::core::and_await{l_future, r_future};
 }
 
-template <typename l_future_t, typename r_future_t>
-ace::core::and_await<l_future_t, r_future_t> operator and(l_future_t&& l_future, r_future_t& r_future) {
+template <typename l_future_t, typename r_future_t> auto
+operator and(l_future_t&& l_future, r_future_t& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return ace::core::and_await{l_future, r_future};
 }
 
-template <typename l_future_t, typename r_future_t>
-ace::core::and_await<l_future_t, r_future_t> operator and(l_future_t& l_future, r_future_t& r_future) {
+template <typename l_future_t, typename r_future_t> auto
+operator and(l_future_t& l_future, r_future_t& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return ace::core::and_await{l_future, r_future};
 }
 
-template <typename composed_l_future_t, typename composed_r_future_t, typename r_future_t>
-ace::core::and_await_composed<composed_l_future_t, composed_r_future_t, r_future_t>
+#undef ACE_COMPOSE_MEMBERS_ASSERT
+
+#define ACE_COMPOSE_MEMBERS_ASSERT                                                                                   \
+    using namespace ace::core::meta;                                                                                 \
+    static_assert (is_future<r_future_t>, "Right operand shall be future, and await interfaces shall be accessed");  \
+    if constexpr (is_future<r_future_t>)                                                                             \
+
+template <typename composed_l_future_t, typename composed_r_future_t, typename r_future_t> auto
 operator and(ace::core::and_await<composed_l_future_t, composed_r_future_t>&& composed_future, r_future_t&& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return ace::core::and_await_composed{composed_future._l_future, composed_future._r_future, r_future};
 }
 
-template <typename composed_l_future_t, typename composed_r_future_t, typename r_future_t>
-ace::core::and_await_composed<composed_l_future_t, composed_r_future_t, r_future_t>
+template <typename composed_l_future_t, typename composed_r_future_t, typename r_future_t> auto
 operator and(ace::core::and_await<composed_l_future_t, composed_r_future_t>&& composed_future, r_future_t& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return ace::core::and_await_composed{composed_future._l_future, composed_future._r_future, r_future};
 }
 
-template <typename composed_l_future_t, typename composed_r_future_t, typename r_future_t>
-ace::core::and_await_composed<composed_l_future_t, composed_r_future_t, r_future_t>
+template <typename composed_l_future_t, typename composed_r_future_t, typename r_future_t> auto
 operator and(ace::core::and_await<composed_l_future_t, composed_r_future_t>& composed_future, r_future_t&& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return ace::core::and_await_composed{composed_future._l_future, composed_future._r_future, r_future};
 }
 
-template <typename composed_l_future_t, typename composed_r_future_t, typename r_future_t>
-ace::core::and_await_composed<composed_l_future_t, composed_r_future_t, r_future_t>
+template <typename composed_l_future_t, typename composed_r_future_t, typename r_future_t> auto
 operator and(ace::core::and_await<composed_l_future_t, composed_r_future_t>& composed_future, r_future_t& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return ace::core::and_await_composed{composed_future._l_future, composed_future._r_future, r_future};
 }
 
-template <typename ... composed_future_ts, typename r_future_t>
-ace::core::and_await_composed<composed_future_ts..., r_future_t>
+template <typename ... composed_future_ts, typename r_future_t> auto
 operator and(ace::core::and_await_composed<composed_future_ts...>&& composed_future, r_future_t&& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return std::make_from_tuple<ace::core::and_await_composed<composed_future_ts..., r_future_t>>(
         std::tuple_cat(composed_future._futures, std::tie(r_future))
     );
 }
 
-template <typename ... composed_future_ts, typename r_future_t>
-ace::core::and_await_composed<composed_future_ts..., r_future_t>
+template <typename ... composed_future_ts, typename r_future_t> auto
 operator and(ace::core::and_await_composed<composed_future_ts...>&& composed_future, r_future_t& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return std::make_from_tuple<ace::core::and_await_composed<composed_future_ts..., r_future_t>>(
         std::tuple_cat(composed_future._futures, std::tie(r_future))
     );
 }
 
-template <typename ... composed_future_ts, typename r_future_t>
-ace::core::and_await_composed<composed_future_ts..., r_future_t>
+template <typename ... composed_future_ts, typename r_future_t> auto
 operator and(ace::core::and_await_composed<composed_future_ts...>& composed_future, r_future_t&& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return std::make_from_tuple<ace::core::and_await_composed<composed_future_ts..., r_future_t>>(
         std::tuple_cat(composed_future._futures, std::tie(r_future))
     );
 }
 
-template <typename ... composed_future_ts, typename r_future_t>
-ace::core::and_await_composed<composed_future_ts..., r_future_t>
+template <typename ... composed_future_ts, typename r_future_t> auto
 operator and(ace::core::and_await_composed<composed_future_ts...>& composed_future, r_future_t& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
     return std::make_from_tuple<ace::core::and_await_composed<composed_future_ts..., r_future_t>>(
         std::tuple_cat(composed_future._futures, std::tie(r_future))
     );
 }
+
+template <typename composed_l_future_t, typename composed_r_future_t, typename r_future_t> auto
+operator or(ace::core::or_await<composed_l_future_t, composed_r_future_t>&& composed_future, r_future_t&& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
+    return ace::core::or_await_composed{composed_future._l_future, composed_future._r_future, r_future};
+}
+
+template <typename composed_l_future_t, typename composed_r_future_t, typename r_future_t> auto
+operator or(ace::core::or_await<composed_l_future_t, composed_r_future_t>&& composed_future, r_future_t& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
+    return ace::core::or_await_composed{composed_future._l_future, composed_future._r_future, r_future};
+}
+
+template <typename composed_l_future_t, typename composed_r_future_t, typename r_future_t> auto
+operator or(ace::core::or_await<composed_l_future_t, composed_r_future_t>& composed_future, r_future_t&& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
+    return ace::core::or_await_composed{composed_future._l_future, composed_future._r_future, r_future};
+}
+
+template <typename composed_l_future_t, typename composed_r_future_t, typename r_future_t> auto
+operator or(ace::core::or_await<composed_l_future_t, composed_r_future_t>& composed_future, r_future_t& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
+    return ace::core::or_await_composed{composed_future._l_future, composed_future._r_future, r_future};
+}
+
+template <typename ... composed_future_ts, typename r_future_t> auto
+operator or(ace::core::or_await_composed<composed_future_ts...>&& composed_future, r_future_t&& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
+    return std::make_from_tuple<ace::core::or_await_composed<composed_future_ts..., r_future_t>>(
+        std::tuple_cat(composed_future._futures, std::tie(r_future))
+    );
+}
+
+template <typename ... composed_future_ts, typename r_future_t> auto
+operator or(ace::core::or_await_composed<composed_future_ts...>&& composed_future, r_future_t& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
+    return std::make_from_tuple<ace::core::or_await_composed<composed_future_ts..., r_future_t>>(
+        std::tuple_cat(composed_future._futures, std::tie(r_future))
+    );
+}
+
+template <typename ... composed_future_ts, typename r_future_t> auto
+operator or(ace::core::or_await_composed<composed_future_ts...>& composed_future, r_future_t&& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
+    return std::make_from_tuple<ace::core::or_await_composed<composed_future_ts..., r_future_t>>(
+        std::tuple_cat(composed_future._futures, std::tie(r_future))
+    );
+}
+
+template <typename ... composed_future_ts, typename r_future_t> auto
+operator or(ace::core::or_await_composed<composed_future_ts...>& composed_future, r_future_t& r_future) {
+    ACE_COMPOSE_MEMBERS_ASSERT
+    return std::make_from_tuple<ace::core::or_await_composed<composed_future_ts..., r_future_t>>(
+        std::tuple_cat(composed_future._futures, std::tie(r_future))
+    );
+}
+
+#undef ACE_COMPOSE_MEMBERS_ASSERT
 
 #endif //ACE_CORE_COMPOSE_H

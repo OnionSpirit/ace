@@ -156,8 +156,8 @@ namespace ace::core {
 
         IMPORT_FUTURE_ENV(and_await_composed);
 
-        struct and_await_conductor;
-        friend and_await_conductor;
+        struct and_await_composed_conductor;
+        friend and_await_composed_conductor;
 
         static constexpr int futures_amount = sizeof...(future_ts);
         static constexpr int top_observer_idx = futures_amount - 1;
@@ -216,13 +216,33 @@ namespace ace::core {
     ace::core::or_await<l_future_t, r_future_t>::
 
 #define ACE_OR_AWAIT_FUTURE_MEMBER(return_t) \
+    ACE_COMPOSE_AWAIT_FUTURE_META            \
     return_t ACE_OR_AWAIT_FUTURE_SPACE
 
 #define ACE_AND_AWAIT_FUTURE_SPACE \
     ace::core::and_await<l_future_t, r_future_t>::
 
 #define ACE_AND_AWAIT_FUTURE_MEMBER(return_t) \
+    ACE_COMPOSE_AWAIT_FUTURE_META             \
     return_t ACE_AND_AWAIT_FUTURE_SPACE
+
+#define ACE_COMPOSE_AWAIT_COMPOSED_FUTURE_META \
+    template <ace::core::meta::is_future ... future_ts>
+
+#define ACE_AND_AWAIT_COMPOSED_FUTURE_SPACE \
+    ace::core::and_await_composed<future_ts...>::
+
+#define ACE_AND_AWAIT_COMPOSED_FUTURE_MEMBER(return_t) \
+    ACE_COMPOSE_AWAIT_COMPOSED_FUTURE_META             \
+    return_t ACE_AND_AWAIT_COMPOSED_FUTURE_SPACE
+
+#define ACE_OR_AWAIT_COMPOSED_FUTURE_SPACE \
+    ace::core::or_await_composed<future_ts...>::
+
+#define ACE_OR_AWAIT_COMPOSED_FUTURE_MEMBER(return_t)  \
+    ACE_COMPOSE_AWAIT_COMPOSED_FUTURE_META             \
+    return_t ACE_OR_AWAIT_COMPOSED_FUTURE_SPACE
+
 
 ACE_COMPOSE_AWAIT_FUTURE_META
 struct ACE_OR_AWAIT_FUTURE_SPACE or_await_conductor final : conductor_handler_t {
@@ -246,7 +266,7 @@ struct ACE_OR_AWAIT_FUTURE_SPACE or_await_conductor final : conductor_handler_t 
     or_await* _or_await;
 };
 
-ACE_COMPOSE_AWAIT_FUTURE_META
+
 ACE_OR_AWAIT_FUTURE_MEMBER(bool)
 await_suspend(auto external_coro) {
     auto* runner_ptr = pool_to_runner(external_coro.promise()._runner_pool);
@@ -265,6 +285,7 @@ await_suspend(auto external_coro) {
     external_coro.promise()._runner_conductor = or_await_conductor {this};
     return true;
 }
+
 
 ACE_COMPOSE_AWAIT_FUTURE_META
 struct ACE_AND_AWAIT_FUTURE_SPACE and_await_conductor final : conductor_handler_t {
@@ -288,7 +309,7 @@ struct ACE_AND_AWAIT_FUTURE_SPACE and_await_conductor final : conductor_handler_
     and_await* _and_await;
 };
 
-ACE_COMPOSE_AWAIT_FUTURE_META
+
 ACE_AND_AWAIT_FUTURE_MEMBER(bool)
 await_suspend(auto external_coro) {
     auto* runner_ptr = pool_to_runner(external_coro.promise()._runner_pool);
@@ -308,11 +329,59 @@ await_suspend(auto external_coro) {
     return true;
 }
 
+ACE_COMPOSE_AWAIT_COMPOSED_FUTURE_META
+struct ACE_AND_AWAIT_COMPOSED_FUTURE_SPACE and_await_composed_conductor final : conductor_handler_t {
+
+    and_await_composed_conductor() = delete;
+
+    explicit and_await_composed_conductor(and_await_composed* and_await_composed_)
+        : _and_await_composed(and_await_composed_) {};
+
+    void forward(task&& ctx) override {
+        _and_await_composed->_waiter = std::move(ctx);
+    }
+
+    void cancel() override {
+        for (auto& opposite_observer : _and_await_composed->_observers | std::views::take(top_observer_idx) ) {
+            opposite_observer->cancel();
+        }
+    }
+
+    ~and_await_composed_conductor() override = default;
+
+    and_await_composed* _and_await_composed;
+};
+
+
+ACE_AND_AWAIT_COMPOSED_FUTURE_MEMBER(bool)
+await_suspend(auto external_coro) {
+    auto* runner_ptr = pool_to_runner(external_coro.promise()._runner_pool);
+    // NOTE: Creating observers for each futures
+    [&] <std::size_t ... index> (std::index_sequence<index...>) {
+        (...,[&]{
+            task observer_inst = observer<index>(std::get<index>(_futures));
+            // NOTE: Creating Handlers for observation tasks
+            _observers[index] = async_handle {observer_inst.observe()};
+            // NOTE: Posting observer
+            observer_inst._coroutine.promise()._roaming = external_coro.promise()._roaming = false;
+            runner_ptr->attach_front(std::forward<task>(observer_inst));
+        }());
+    }(std::make_index_sequence<sizeof...(future_ts)>{});
+    // NOTE: Setting conductor for external waiter
+    external_coro.promise()._runner_conductor = and_await_composed_conductor{this};
+    return true;
+}
+
 #undef ACE_COMPOSE_AWAIT_FUTURE_META
 #undef ACE_AND_AWAIT_FUTURE_MEMBER
 #undef ACE_AND_AWAIT_FUTURE_SPACE
 #undef ACE_OR_AWAIT_FUTURE_MEMBER
 #undef ACE_OR_AWAIT_FUTURE_SPACE
+#undef ACE_COMPOSE_AWAIT_COMPOSED_FUTURE_META
+#undef ACE_AND_AWAIT_COMPOSED_FUTURE_MEMBER
+#undef ACE_AND_AWAIT_COMPOSED_FUTURE_SPACE
+#undef ACE_OR_AWAIT_COMPOSED_FUTURE_MEMBER
+#undef ACE_OR_AWAIT_COMPOSED_FUTURE_SPACE
 
 //==============================- OPERATOR DEFINITIONS -=========================
 

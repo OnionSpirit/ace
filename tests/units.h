@@ -439,16 +439,19 @@ inline ace::task spawn_post(int idx, ace::futures::channel_dyn<int>& ch) {
 
 inline ace::task imposter(ace::futures::channel_dyn<int>& ch) {
     // NOTE: Spawns parallel and joins all
-    // co_await (
-    //         (co_await ace::spawn(spawn_post(1, ch))).join()
-    //     and (co_await ace::spawn(spawn_post(2, ch))).join()
-    //     and (co_await ace::post (spawn_post(3, ch))).join()
-    // );
-    auto first = co_await ace::spawn(spawn_post(1, ch));
-    auto second = co_await ace::spawn(spawn_post(2, ch));
-    auto third = co_await ace::post(spawn_post(3, ch));
-    co_await (first.join() and second.join() and third.join());
-    // ace::console::println("spawn spawn post - finished {}", co_await (first and second and third) );
+    // NOTE: Testing both type of syntax depending on stdlibc++ version (newone has more formatters)
+    #if defined(__clang__) && __clang_major__ >= 22
+        co_await ace::console::async::println("spawn, spawn, post - finished {}", co_await (
+                (co_await ace::spawn(spawn_post(1, ch))).join()
+            and (co_await ace::spawn(spawn_post(2, ch))).join()
+            and (co_await ace::post (spawn_post(3, ch))).join()
+        ));
+    #else
+        auto first = co_await ace::spawn(spawn_post(1, ch));
+        auto second = co_await ace::spawn(spawn_post(2, ch));
+        auto third = co_await ace::post(spawn_post(3, ch));
+        co_await (first.join() and second.join() and third.join());
+    #endif
     co_await ace::console::async::println("Placing {} to channel", 4);
     ch << 4;
     co_return;

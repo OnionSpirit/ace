@@ -10,7 +10,7 @@
 #include <list>
 
 #include "ace/core/traits/vortex.h"
-#include "ace/core/context.h"
+#include "ace/core/async.h"
 #include "ace/core/tools/queue.h"
 
 namespace ace::core {
@@ -46,7 +46,7 @@ namespace ace::core {
 namespace ace::core::modules {
 
     /**
-     * @brief Type of stored context record. Contains context and it's awaiting duration
+     * @brief Type of stored async record. Contains async and it's awaiting duration
      */
     struct clock_record {
         duration_t _duration {};
@@ -169,7 +169,7 @@ namespace ace::core::modules {
             {};
 
         /**
-         * @brief Injects context to the dial. Slot will be selected by duration
+         * @brief Injects async to the dial. Slot will be selected by duration
          * @param [in] ctx Context to await
          * @param [in] dur Duration of awaiting
          * @return Injected node ptr
@@ -361,8 +361,8 @@ namespace ace::core::modules {
         };
 
         /**
-         * @brief Subscribes context to dial by passed current duration
-         * @param [in] ctx context to subscribe
+         * @brief Subscribes async to dial by passed current duration
+         * @param [in] ctx async to subscribe
          * @param [in] dur subscription duration
          * @return Injected node ptr
          */

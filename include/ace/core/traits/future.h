@@ -46,7 +46,7 @@ namespace ace::core::traits {
         /**
          * @details Allows
          * use created object with @b co_await
-         * @b operator inside context code,
+         * @b operator inside async code,
          * and makes derived class @b awaitable
          */
         auto&& operator co_await() {
@@ -78,7 +78,7 @@ namespace ace::core::traits {
         /**
          * @details Allows
          * use created object with @b co_await
-         * @b operator inside context code,
+         * @b operator inside async code,
          * and makes derived class @b awaitable
          */
         derived_busy_future_t& operator co_await() requires (std::copy_constructible<derived_busy_future_t>) {
@@ -88,7 +88,7 @@ namespace ace::core::traits {
         /**
          * @details Allows
          * use created object with @b co_await
-         * @b operator inside context code,
+         * @b operator inside async code,
          * and makes derived class @b awaitable
          */
         derived_busy_future_t&& operator co_await() requires (not std::copy_constructible<derived_busy_future_t>) {

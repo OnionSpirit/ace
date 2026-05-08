@@ -1,16 +1,16 @@
 /**
- * @file context.h
- * @brief Core coroutine context type (@c ace::coroutines::context<T, Rule>)
+ * @file async.h
+ * @brief Core coroutine async type (@c ace::coroutines::async<T, Rule>)
  *        and the public @c ace::async<T> / @c ace::promise<T> aliases.
  *
  * @details This file defines the central type of the ACE framework.
- * @c context<returnT, promise_rule_t> is a C++20 coroutine type that:
+ * @c async<returnT, promise_rule_t> is a C++20 coroutine type that:
  *
- *  - Inherits from @c busy_future_traits<context> so that it can be directly
+ *  - Inherits from @c busy_future_traits<async> so that it can be directly
  *    @c co_await-ed from another coroutine (nested coroutines).
  *  - Owns its @c std::coroutine_handle and destroys it on destruction.
  *  - Carries a @c runner_conductor_slot_t that futures use to redirect the
- *    context into their own waiting structures (conductor pattern).
+ *    async into their own waiting structures (conductor pattern).
  *  - Can expose a @c control_block_handle via @c observe() for external
  *    join / cancel operations.
  *
@@ -18,10 +18,10 @@
  *
  * @code{.cpp}
  * // Lazy coroutine — suspends at creation (initial_suspend = suspend_always)
- * template<typename T = void> using ace::async   = context<T, differed>;
+ * template<typename T = void> using ace::async   = async<T, differed>;
  *
  * // Eager coroutine — runs immediately (initial_suspend = suspend_never)
- * template<typename T = void> using ace::promise = context<T, permanent>;
+ * template<typename T = void> using ace::promise = async<T, permanent>;
  * @endcode
  *
  * @see ace::async, ace::promise, ace::coroutines::promise_traits,
@@ -50,14 +50,14 @@
 namespace ace::core {
 
     /**
-     * @brief Core coroutine context type.
+     * @brief Core coroutine async type.
      *
-     * @details @c context<returnT, promise_rule_t> represents a single
+     * @details @c async<returnT, promise_rule_t> represents a single
      * coroutine instance.  It is move-only (copy is deleted) and owns the
      * underlying @c std::coroutine_handle.
      *
      * The type itself satisfies the @c busy_future_traits concept so that one
-     * context can be directly @c co_await-ed inside another, enabling nested
+     * async can be directly @c co_await-ed inside another, enabling nested
      * coroutines.
      *
      * @tparam returnT        Value type returned by @c co_return.
@@ -69,52 +69,52 @@ namespace ace::core {
      * @see ace::async, ace::promise
      */
     template<typename returnT =void, is_promise_rule promise_rule_t =differed>
-    struct ACE_AWAIT_NODISCARD context : traits::busy_future_traits<context<returnT, promise_rule_t>> {
+    struct ACE_AWAIT_NODISCARD async : traits::busy_future_traits<async<returnT, promise_rule_t>> {
 
-        IMPORT_BUSY_FUTURE_ENV(context)
+        IMPORT_BUSY_FUTURE_ENV(async)
 
         struct promise_type;
 
         typedef std::coroutine_handle<promise_type> coroutine_t;             ///< Type of the underlying coroutine handle.
-        typedef nukes::dynamic::reg_queue<context<>> runner_pool_t;          ///< Queue type used as the runner's task pool.
-        typedef traits::runner_conductor_handle<context<>> runner_conductor; ///< Abstract conductor interface for this context type.
+        typedef nukes::dynamic::reg_queue<async<>> runner_pool_t;          ///< Queue type used as the runner's task pool.
+        typedef traits::runner_conductor_handle<async<>> runner_conductor; ///< Abstract conductor interface for this async type.
 
         /// @brief In-place storage slot for a conductor object.
         typedef traits::conductor_slot<runner_conductor> runner_conductor_slot_t;
 
         coroutine_t _coroutine; ///< Underlying coroutine handle.  Null after move.
 
-        context() = default;
+        async() = default;
 
         /**
          * @brief Move constructor.  Transfers ownership of the coroutine handle.
-         * @param ctx  Source context.  Its @c _coroutine is set to null.
+         * @param ctx  Source async.  Its @c _coroutine is set to null.
          */
-        context(context && ctx) noexcept {
+        async(async && ctx) noexcept {
             _coroutine = std::forward<coroutine_t>(ctx._coroutine);
             ctx._coroutine = nullptr;
         };
 
         /**
          * @brief Move assignment.  Transfers ownership of the coroutine handle.
-         * @param ctx  Source context.  Its @c _coroutine is set to null.
+         * @param ctx  Source async.  Its @c _coroutine is set to null.
          * @return Reference to @c *this.
          */
-        context &operator=(context && ctx)  noexcept {
+        async &operator=(async && ctx)  noexcept {
             _coroutine = std::forward<coroutine_t>(ctx._coroutine);
             ctx._coroutine = nullptr;
             return *this;
         };
 
-        context(const context &) = delete;             ///< Contexts are move-only.
-        context &operator=(const context &) = delete;  ///< Contexts are move-only.
+        async(const async &) = delete;             ///< Contexts are move-only.
+        async &operator=(const async &) = delete;  ///< Contexts are move-only.
 
         /**
          * @brief Construct from a raw coroutine handle.
          * @details Used internally by @c promise_type::get_return_object().
          * @param handler  Coroutine handle to take ownership of.
          */
-        explicit context(coroutine_t &&handler) : _coroutine{handler} {};
+        explicit async(coroutine_t &&handler) : _coroutine{handler} {};
 
         /**
          * @brief Check whether the coroutine is exist.
@@ -135,7 +135,7 @@ namespace ace::core {
          * @brief Destructor.  Wakes all registered waiters then destroys the
          *        coroutine frame.
          */
-        ~context() override {
+        ~async() override {
             if (_coroutine) {
                 release_waiters();
                 _coroutine.destroy();
@@ -144,7 +144,7 @@ namespace ace::core {
 
         /**
          * @brief Release the currently-held future and clear the busy-future pointer.
-         * @details Called by the runner before resuming a context that was
+         * @details Called by the runner before resuming a async that was
          * previously forwarded by a conductor.
          */
         void release_future() {
@@ -153,10 +153,10 @@ namespace ace::core {
         }
 
         /**
-         * @brief Check whether the context is ready to be resumed by the runner.
+         * @brief Check whether the async is ready to be resumed by the runner.
          * @details Returns @c true if no busy future is pending, or if the
          * pending busy future has become ready (@c await_ready() returns @c true).
-         * @return @c true if the runner may resume this context.
+         * @return @c true if the runner may resume this async.
          */
         bool is_resumable() {
                 return (not _coroutine.promise()._busy_future or _coroutine.promise()._busy_future->await_ready())
@@ -167,10 +167,10 @@ namespace ace::core {
          * @brief Create a @c control_block_handle that allows external
          *        join / cancel operations on this coroutine.
          * @details Lazily initializes the control block and the internal
-         * @c context_conductor.  Safe to call multiple times; subsequent calls
+         * @c async_conductor.  Safe to call multiple times; subsequent calls
          * return handles that share the same underlying block.
          * @return A new @c control_block_handle with an incremented weak ref-count.
-         * @note The context must not have been moved away before calling @c observe().
+         * @note The async must not have been moved away before calling @c observe().
          */
         control_block_handle observe() {
             // NOTE: Setting up promise block by coroutine
@@ -179,13 +179,13 @@ namespace ace::core {
         }
 
         /**
-         * @brief Wake all coroutines that are waiting for this context to finish.
-         * @details Drains the @c _waiters queue and re-attaches each context to
+         * @brief Wake all coroutines that are waiting for this async to finish.
+         * @details Drains the @c _waiters queue and re-attaches each async to
          * its own runner pool.  Called automatically from the destructor.
          */
         void release_waiters() {
             if (_coroutine.promise()._waiters) {
-                context<> waiter;
+                async<> waiter;
                 while (_coroutine.promise()._waiters->pop(waiter)) {
                     waiter.release_future();
                     waiter._coroutine.promise()._runner_pool->push(std::move(waiter));
@@ -194,8 +194,8 @@ namespace ace::core {
         }
 
         /**
-         * @brief Allocate a debug trace ID for this context.
-         * @details The trace ID is unique for the lifetime of the context and
+         * @brief Allocate a debug trace ID for this async.
+         * @details The trace ID is unique for the lifetime of the async and
          * can be used to correlate log entries across asynchronous boundaries.
          * @return The allocated trace ID on success, or an error string if the
          *         coroutine handle is null.
@@ -203,7 +203,7 @@ namespace ace::core {
         std::expected<std::size_t, std::string_view> track() {
             if (_coroutine)
                 return _coroutine.promise().setup_trace();
-            return std::unexpected("context is already dead.");
+            return std::unexpected("async is already dead.");
         }
 
         void prefetch() const {
@@ -215,15 +215,15 @@ namespace ace::core {
             }
         }
 
-        class context_conductor : public traits::control_conductor_handle {
+        class async_conductor : public traits::control_conductor_handle {
 
             void* _address { nullptr };
 
         public:
 
-            context_conductor() = default;
+            async_conductor() = default;
 
-            explicit context_conductor(const coroutine_t& coroutine)
+            explicit async_conductor(const coroutine_t& coroutine)
                 : _address(coroutine.address()) {}
 
             void cancel() noexcept override {
@@ -239,17 +239,17 @@ namespace ace::core {
             bool forward(void* undefined_waiter) noexcept override {
                 if (not _address or not undefined_waiter) [[unlikely]] return false;
                 auto handle = coroutine_t::from_address(_address);
-                auto* waiter = static_cast<context<>*>(undefined_waiter);
+                auto* waiter = static_cast<async<>*>(undefined_waiter);
                 handle.promise()._waiters = std::make_shared<runner_pool_t>();
-                handle.promise()._waiters->push(std::forward<context<>>(*waiter));
+                handle.promise()._waiters->push(std::forward<async<>>(*waiter));
                 return true;
             }
 
-            ~context_conductor() override = default;
+            ~async_conductor() override = default;
         };
 
         /**
-         * @brief C++20 promise type for @c context<returnT, promise_rule_t>.
+         * @brief C++20 promise type for @c async<returnT, promise_rule_t>.
          *
          * @details Inherits return-value machinery and @c await_transform
          * overloads from @c promise_traits<returnT>.  The concrete fields held
@@ -259,8 +259,8 @@ namespace ace::core {
          *  |---|---|---|
          *  | @c _runner_conductor | @c runner_conductor_slot_t | In-place storage for the active conductor. |
          *  | @c _runner_pool | @c runner_pool_t* | Pointer to the owning runner's task queue. |
-         *  | @c _waiters | @c shared_ptr<runner_pool_t> | Queue of contexts waiting for this one to finish. |
-         *  | @c _self_conductor | @c optional<context_conductor> | Conductor installed into the control block. |
+         *  | @c _waiters | @c shared_ptr<runner_pool_t> | Queue of asyncs waiting for this one to finish. |
+         *  | @c _self_conductor | @c optional<async_conductor> | Conductor installed into the control block. |
          *  | @c _roaming | @c bool | When @c true the balancer may migrate the task to another runner. |
          *  | @c _polling | @c bool | When @c true the runner holds it in low priority task pool. |
          */
@@ -285,7 +285,7 @@ namespace ace::core {
              * @brief C++20 protocol — final suspension point.
              * @details Decrements the strong reference count of the control
              * block (if any) before suspending.  The coroutine frame is not
-             * destroyed here; the runner or owning @c context destructor does
+             * destroyed here; the runner or owning @c async destructor does
              * that.
              * @return @c std::suspend_always — coroutine frame is kept alive
              *         until explicitly destroyed.
@@ -317,22 +317,22 @@ namespace ace::core {
 
             /**
              * @brief C++20 protocol — construct the return object.
-             * @return A @c context that wraps the coroutine handle for this
+             * @return A @c async that wraps the coroutine handle for this
              *         promise.
              */
-            auto get_return_object() noexcept { return context{coroutine_t::from_promise(*this)}; }
+            auto get_return_object() noexcept { return async{coroutine_t::from_promise(*this)}; }
 
             /**
              * @brief C++20 protocol — fallback when allocation fails.
-             * @return A default-constructed (null) @c context.
+             * @return A default-constructed (null) @c async.
              */
-            static auto get_return_object_on_allocation_failure() { return context(nullptr); }
+            static auto get_return_object_on_allocation_failure() { return async(nullptr); }
 
             /**
              * @brief Lazily initialise the control block for external observation.
              *
              * @details Retrieves the @c control_block prefix allocated before
-             * this promise, constructs a @c context_conductor, and links them so
+             * this promise, constructs a @c async_conductor, and links them so
              * that @c control_block_handle::cancel() / @c forward() work.
              *
              * Only available for lazy (@c differed) coroutines because eager
@@ -348,13 +348,13 @@ namespace ace::core {
                 // NOTE: Getting control block address
                 _block = control_block::get_block_from_address(self.address());
                 // NOTE: Initiating promise conductor
-                _self_conductor = context_conductor(self);
+                _self_conductor = async_conductor(self);
                 // NOTE: Passing reference of the inited conductor to the control block
                 _block->_control_conductor = &_self_conductor.value();
             }
 
             /**
-             * @brief Construct a @c context_conductor and return a pointer to it.
+             * @brief Construct a @c async_conductor and return a pointer to it.
              * @details Used when a control conductor is needed without attaching
              * it to the control block immediately.
              * @tparam promise_t  Promise type of the coroutine handle.
@@ -365,7 +365,7 @@ namespace ace::core {
             template <typename promise_t>
             traits::control_conductor_handle* get_promise_conductor(const std::coroutine_handle<promise_t>& self) {
                 // NOTE: Initiating promise conductor
-                _self_conductor = context_conductor(self);
+                _self_conductor = async_conductor(self);
                 return &_self_conductor.value();
             }
 
@@ -376,7 +376,7 @@ namespace ace::core {
             std::shared_ptr<runner_pool_t> _waiters;
             // NOTE: Conductor to manage promise on suspended state.
             // NOTE: Context owns only one promise. Extra slot object is unnecessary
-            std::optional<context_conductor> _self_conductor;
+            std::optional<async_conductor> _self_conductor;
             bool _roaming { false };
             bool _polling { false };
         };
@@ -415,7 +415,7 @@ namespace ace::core {
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
             if (not _coroutine.promise()._runner_pool)
                 _coroutine.promise()._runner_pool = outer.promise()._runner_pool;
-            // NOTE: Extra call of await_ready fore differed context because it was skipped by idle runner pool ptr
+            // NOTE: Extra call of await_ready fore differed async because it was skipped by idle runner pool ptr
             if (_coroutine.promise()._status == e_inited)
                 if (await_ready()) return false;
             // NOTE: No extra checks needed, because function would be called once before suspending.
@@ -461,7 +461,7 @@ namespace ace::core {
                 and _coroutine.promise()._status not_eq e_detached
                 and is_resumable()
             };
-            // NOTE: Releasing future and resume context
+            // NOTE: Releasing future and resume async
             if (is_ready) {
                 release_future();
                 _coroutine.resume();
@@ -480,25 +480,25 @@ namespace ace::core {
 
 namespace ace {
 
-    // NOTE: Type alias for greedy coroutines
-    template<typename returnT =void>
-    using promise = core::context<returnT, core::permanent>;
+    // NOTE: Type alias for any type of coroutines (default: lazy)
+    template<typename returnT =void, core::is_promise_rule promise_rule_t = core::differed>
+    using async = core::async<returnT, promise_rule_t>;
 
-    // NOTE: Type alias for lazy coroutines
+    // NOTE: Type alias for eager coroutines
     template<typename returnT =void>
-    using async = core::context<returnT>;
+    using promise = async<returnT, core::permanent>;
 
     // NOTE: Type alias for runner task coroutines
     using task = async<>;
 
     // NOTE: Wrapper to spawn and manage coroutines in runner pool
-    template <typename context_return_t, typename context_rule_t>
-    task task_wrap(core::context<context_return_t, context_rule_t>&& some_context) {
+    template <typename async_return_t, core::is_promise_rule async_rule_t>
+    task task_wrap(core::async<async_return_t, async_rule_t>&& some_context) {
         co_await some_context;
         co_return;
     }
 
-    // NOTE: Type of a pool for runner [Relates 'context' and 'runner']
+    // NOTE: Type of a pool for runner [Relates 'async' and 'runner']
     typedef task::runner_pool_t runner_pool_t;
 
     // NOTE: Type of a conductor handler for runner and future objects [Relates 'future' and 'runner']

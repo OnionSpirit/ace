@@ -25,14 +25,14 @@ namespace ace::core::tools {
         }
     };
 
-    class context_id_allocator : public id_allocator {
+    class async_id_allocator : public id_allocator {
 
-        context_id_allocator() = default;
+        async_id_allocator() = default;
 
     public:
 
-        static context_id_allocator& get_instance() {
-            static context_id_allocator instance;
+        static async_id_allocator& get_instance() {
+            static async_id_allocator instance;
             return instance;
         }
 

@@ -18,7 +18,7 @@
  *    intrusive @c operator new / @c operator delete for control-block
  *    prefix allocation, and optional tracing support.
  *
- * @see ace::coroutines::context, ace::coroutines::control_block
+ * @see ace::coroutines::async, ace::coroutines::control_block
  */
 #ifndef ACE_PROMISE_H
 #define ACE_PROMISE_H
@@ -203,7 +203,7 @@ namespace ace::core::traits {
          */
         ~promise_traits() {
             if (_trace_id) [[unlikely]]
-                tools::context_id_allocator::get_instance().id_free(_trace_id.value());
+                tools::async_id_allocator::get_instance().id_free(_trace_id.value());
         };
 
         /**
@@ -325,7 +325,7 @@ namespace ace::core::traits {
          * @return The allocated trace ID.
          */
         std::size_t setup_trace() {
-            _trace_id = tools::context_id_allocator::get_instance().id_alloc();
+            _trace_id = tools::async_id_allocator::get_instance().id_alloc();
             return _trace_id.value();
         }
 

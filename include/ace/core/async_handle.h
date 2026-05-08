@@ -27,7 +27,7 @@
 #define ACE_FUTURE_ASYNC_HANDLE_H
 
 #include "ace/core/traits/future.h"
-#include "ace/core/context.h"
+#include "ace/core/async.h"
 
 namespace ace::core {
 
@@ -73,7 +73,7 @@ namespace ace::core {
         /**
          * @brief C++20 awaitable protocol — register as a waiter.
          * @details Installs a @c join_handler_conductor that will forward this
-         * context into the target's waiters queue when the target finishes.
+         * async into the target's waiters queue when the target finishes.
          * @tparam promise_u  Promise type of the outer (waiting) coroutine.
          * @param outer       Handle to the outer coroutine.
          * @return Always @c true — always suspends if @c await_ready() returned @c false.

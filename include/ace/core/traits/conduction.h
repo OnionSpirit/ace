@@ -10,13 +10,13 @@
  * 1. A coroutine calls @c co_await some_future.
  * 2. The future's @c await_suspend() places a concrete conductor object into
  *    the @c conductor_slot stored in the coroutine's @c promise_type.
- * 3. The runner calls @c context::awake().  After resuming, it checks whether
+ * 3. The runner calls @c async::awake().  After resuming, it checks whether
  *    @c _runner_conductor is set.  If so, it calls
- *    @c conductor->forward(std::move(context)) instead of re-queuing.
- * 4. The conductor (owned by the future) enqueues the context in the future's
+ *    @c conductor->forward(std::move(async)) instead of re-queuing.
+ * 4. The conductor (owned by the future) enqueues the async in the future's
  *    own waiting structure (e.g., a channel waiters queue or a time-wheel slot).
- * 5. When the future becomes ready, it calls @c runner::reattach(context) to
- *    return the context to its original runner.
+ * 5. When the future becomes ready, it calls @c runner::reattach(async) to
+ *    return the async to its original runner.
  *
  * ### Two conductor families
  *
@@ -35,20 +35,20 @@
 namespace ace::core::traits {
 
     /**
-     * @brief Abstract interface for conductors that forward coroutine contexts
+     * @brief Abstract interface for conductors that forward coroutine asyncs
      *        from the runner into a future's waiting structure.
      *
      * @details Derived conductors are created by futures (e.g., @c channel,
      * @c timeout, @c cutex) and stored inside the coroutine's @c conductor_slot.
      * The runner calls @c forward() after detecting the slot is occupied.
      *
-     * @tparam runner_context_t  The coroutine context type being forwarded
+     * @tparam runner_async_t  The coroutine async type being forwarded
      *                           (typically @c ace::task).
      */
-    template <typename runner_context_t>
+    template <typename runner_async_t>
     struct runner_conductor_handle {
 
-        typedef nukes::details::nodes::dyn_reg_node<runner_context_t> node_t;
+        typedef nukes::details::nodes::dyn_reg_node<runner_async_t> node_t;
 
         runner_conductor_handle() noexcept = default;
 
@@ -57,16 +57,16 @@ namespace ace::core::traits {
         runner_conductor_handle(runner_conductor_handle&&) noexcept = default;
 
         /**
-         * @brief Transfer the coroutine context into the future's storage.
-         * @param context The suspended coroutine context to enqueue.
+         * @brief Transfer the coroutine async into the future's storage.
+         * @param async The suspended coroutine async to enqueue.
          */
-        virtual void forward(runner_context_t&& context) {
+        virtual void forward(runner_async_t&& async) {
             throw std::logic_error("runner_conductor_handle::forward() - called but not overridden");
         };
 
         /**
-         * @brief Transfer the coroutine context into the future's storage.
-         * @param node Queue node for the suspended coroutine context to enqueue.
+         * @brief Transfer the coroutine async into the future's storage.
+         * @param node Queue node for the suspended coroutine async to enqueue.
          */
         virtual node_t* forward_node(node_t* node) {
             this->forward(std::move(node->_data));
@@ -75,7 +75,7 @@ namespace ace::core::traits {
 
         /**
          * @brief Cancel the pending operation and wake all associated waiters.
-         * @details The conductor marks the context as @c e_detached; the runner
+         * @details The conductor marks the async as @c e_detached; the runner
          * will drop it on the next @c yank() call.
          */
         virtual void cancel() {};
@@ -88,7 +88,7 @@ namespace ace::core::traits {
      *        external control block (join / cancel from outside the scheduler).
      *
      * @details This conductor is installed into a @c control_block by
-     * @c context::setup_control_block() and accessed through
+     * @c async::setup_control_block() and accessed through
      * @c control_block_handle.  It allows external code to:
      *  - @c forward(waiter) — register a waiter that will be resumed when the
      *    producer coroutine finishes.
@@ -100,7 +100,7 @@ namespace ace::core::traits {
 
         /**
          * @brief Register an external waiter that will be notified on finish.
-         * @param waiter  Pointer to the @c ace::task context to notify.
+         * @param waiter  Pointer to the @c ace::task async to notify.
          * @return @c true if the waiter was successfully registered.
          */
         virtual bool forward(void* waiter) noexcept = 0;

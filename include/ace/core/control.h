@@ -21,7 +21,7 @@
  *
  * @code
  * create coroutine           → control_block { _strong=1, _weak=1, _exists=true }
- * context.observe()          → control_block_handle (watch → _weak=2)
+ * async.observe()          → control_block_handle (watch → _weak=2)
  * coroutine finishes         → disown() (_strong=0, _weak=1, _exists=false)
  * handle destructs / cancel  → unwatch() (_weak=0) → delete block
  * @endcode
@@ -126,7 +126,7 @@ namespace ace::core {
      *
      * @details Provides safe @c cancel(), @c done(), and @c forward() operations
      * from outside the scheduler — for example from @c ace::futures::async_handle
-     * or user code that calls @c context::observe().
+     * or user code that calls @c async::observe().
      *
      * Copies increment the weak reference count; destruction decrements it.
      * When the count reaches zero the control block is freed.
@@ -197,8 +197,8 @@ namespace ace::core {
         }
 
         /**
-         * @brief Register a waiter context to be notified when the coroutine finishes.
-         * @param waiter  Pointer to the @c ace::task context to register.
+         * @brief Register a waiter async to be notified when the coroutine finishes.
+         * @param waiter  Pointer to the @c ace::task async to register.
          * @return @c true if the waiter was accepted by the conductor.
          */
         bool forward(void* waiter) const {

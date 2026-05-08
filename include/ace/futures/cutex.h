@@ -46,7 +46,7 @@
 
 #include <ace/core/traits/future.h>
 #include <ace/core/runner.h>
-#include <ace/core/context.h>
+#include <ace/core/async.h>
 
 
 namespace ace::futures {
@@ -274,7 +274,7 @@ struct ACE_FUTURE_CUTEX_FUTURE_SPACE cutex_conductor : conductor_handler_t {
     }
 
     // NOTE: Tasks is resuming with wiped conductor.
-    // NOTE: Placing into waiters queue is moving operation and also wont affect context handler inner state.
+    // NOTE: Placing into waiters queue is moving operation and also wont affect async handler inner state.
     // NOTE: So we can cancel it by task handler
     // NOTE: If task has handlers it means that task is thread local with canceling task.
     // NOTE: No extra sync needed.

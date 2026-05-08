@@ -12,7 +12,7 @@
 
 #include "ace/core/tools/moving_average.h"
 #include "ace/core/tools/meta.h"
-#include "ace/core/context.h"
+#include "ace/core/async.h"
 
 
 namespace ace::core {
@@ -159,12 +159,12 @@ namespace ace::core {
          * @param new_task Task to be pushed into the runner
          * @return void
          */
-        template <typename context_return_t, typename context_rule_t>
-        void attach(context<context_return_t, context_rule_t> &&new_task) noexcept {
+        template <typename async_return_t, typename async_rule_t>
+        void attach(async<async_return_t, async_rule_t> &&new_task) noexcept {
             ++_tasks_amount;
             new_task._coroutine.promise()._runner_pool = &_pool;
             _interthread_pool.push(std::forward<task>(task_wrap(
-                std::forward<core::context<context_return_t, context_rule_t> >(new_task))));
+                std::forward<core::async<async_return_t, async_rule_t> >(new_task))));
         }
 
         /**
@@ -173,16 +173,16 @@ namespace ace::core {
          * @warning NOT THREADSAFE
          * @return void
          */
-        template <typename context_return_t, typename context_rule_t>
-        void attach_front(context<context_return_t, context_rule_t> &&new_task) noexcept {
+        template <typename async_return_t, typename async_rule_t>
+        void attach_front(async<async_return_t, async_rule_t> &&new_task) noexcept {
             ++_tasks_amount;
             new_task._coroutine.promise()._runner_pool = &_pool;
             if (new_task._coroutine.promise()._polling) {
                 _vortex_pool.push_front(std::forward<task>(task_wrap(
-                    std::forward<context<context_return_t, context_rule_t> >(new_task))));
+                    std::forward<async<async_return_t, async_rule_t> >(new_task))));
             } else {
                 _pool.push_front(std::forward<task>(task_wrap(
-                    std::forward<context<context_return_t, context_rule_t> >(new_task))));
+                    std::forward<async<async_return_t, async_rule_t> >(new_task))));
             }
         }
 
@@ -315,10 +315,10 @@ namespace ace::core {
             head->_data.prefetch();
         }
 
-        // NOTE: Proceeding context
+        // NOTE: Proceeding async
         task_node->_data.awake(&touch_result);
 
-        // NOTE: Checking if context can be resumed
+        // NOTE: Checking if async can be resumed
         const bool is_resumable {
             task_node->_data
             and touch_result not_eq e_failed
@@ -326,7 +326,7 @@ namespace ace::core {
             and touch_result not_eq e_detached
         };
 
-        // NOTE: Checking if the context shall be forwarded via passed conductor
+        // NOTE: Checking if the async shall be forwarded via passed conductor
         const bool is_conducted {
             is_resumable
             and task_node->_data._coroutine.promise()._runner_conductor
@@ -358,10 +358,10 @@ namespace ace::core {
         // NOTE: If node is empty breaking
         if (not vortex_node) [[unlikely]] return false;
 
-        // NOTE: Proceeding context
+        // NOTE: Proceeding async
         vortex_node->_data.awake(&touch_result);
 
-        // NOTE: Checking if context can be resumed
+        // NOTE: Checking if async can be resumed
         const bool is_resumable {
             vortex_node->_data
             and touch_result not_eq e_failed
@@ -369,7 +369,7 @@ namespace ace::core {
             and touch_result not_eq e_detached
         };
 
-        // NOTE: Checking if the context shall be forwarded via passed conductor
+        // NOTE: Checking if the async shall be forwarded via passed conductor
         const bool is_conducted {
             is_resumable
             and vortex_node->_data._coroutine.promise()._runner_conductor

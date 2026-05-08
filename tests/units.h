@@ -439,21 +439,22 @@ inline ace::task spawn_post(int idx, ace::futures::channel_dyn<int>& ch) {
 
 inline ace::task imposter(ace::futures::channel_dyn<int>& ch) {
     // NOTE: Spawns parallel and joins all
-    // NOTE: Testing both type of syntax depending on stdlibc++ version (newone has more formatters)
-    #if defined(__clang__) && __clang_major__ >= 22
-        co_await ace::console::async::println("spawn, spawn, post - finished {}", co_await (
+    auto res = co_await (
                 (co_await ace::spawn(spawn_post(1, ch))).join()
             and (co_await ace::spawn(spawn_post(2, ch))).join()
             and (co_await ace::post (spawn_post(3, ch))).join()
-        ));
-    #else
-        auto first = co_await ace::spawn(spawn_post(1, ch));
-        auto second = co_await ace::spawn(spawn_post(2, ch));
-        auto third = co_await ace::post(spawn_post(3, ch));
-        co_await (first.join() and second.join() and third.join());
+            and (co_await ace::post (spawn_post(4, ch))).join()
+    );
+    // NOTE: Checking composition
+    static_assert(std::same_as<decltype(res), std::tuple<bool, bool, bool, bool>>, "Must be tuple of bools");
+
+    // NOTE: Testing syntax depending on stdlibc++ version (newone has more formatters)
+    #if defined(__clang__) && __clang_major__ >= 22
+        co_await ace::console::async::println("spawn, spawn, post, post - finished {}", res);
     #endif
-    co_await ace::console::async::println("Placing {} to channel", 4);
-    ch << 4;
+
+    co_await ace::console::async::println("Placing {} to channel", 5);
+    ch << 5;
     co_return;
 }
 #endif // UNITS_H

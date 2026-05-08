@@ -449,4 +449,36 @@ operator and(ace::core::and_await<composed_l_future_t, composed_r_future_t>& com
     return ace::core::and_await_composed{composed_future._l_future, composed_future._r_future, r_future};
 }
 
+template <typename ... composed_future_ts, typename r_future_t>
+ace::core::and_await_composed<composed_future_ts..., r_future_t>
+operator and(ace::core::and_await_composed<composed_future_ts...>&& composed_future, r_future_t&& r_future) {
+    return std::make_from_tuple<ace::core::and_await_composed<composed_future_ts..., r_future_t>>(
+        std::tuple_cat(composed_future._futures, std::tie(r_future))
+    );
+}
+
+template <typename ... composed_future_ts, typename r_future_t>
+ace::core::and_await_composed<composed_future_ts..., r_future_t>
+operator and(ace::core::and_await_composed<composed_future_ts...>&& composed_future, r_future_t& r_future) {
+    return std::make_from_tuple<ace::core::and_await_composed<composed_future_ts..., r_future_t>>(
+        std::tuple_cat(composed_future._futures, std::tie(r_future))
+    );
+}
+
+template <typename ... composed_future_ts, typename r_future_t>
+ace::core::and_await_composed<composed_future_ts..., r_future_t>
+operator and(ace::core::and_await_composed<composed_future_ts...>& composed_future, r_future_t&& r_future) {
+    return std::make_from_tuple<ace::core::and_await_composed<composed_future_ts..., r_future_t>>(
+        std::tuple_cat(composed_future._futures, std::tie(r_future))
+    );
+}
+
+template <typename ... composed_future_ts, typename r_future_t>
+ace::core::and_await_composed<composed_future_ts..., r_future_t>
+operator and(ace::core::and_await_composed<composed_future_ts...>& composed_future, r_future_t& r_future) {
+    return std::make_from_tuple<ace::core::and_await_composed<composed_future_ts..., r_future_t>>(
+        std::tuple_cat(composed_future._futures, std::tie(r_future))
+    );
+}
+
 #endif //ACE_CORE_COMPOSE_H

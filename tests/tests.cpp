@@ -249,11 +249,12 @@ TEST(commands, check_spawn_post) {
     ace::schedule(channel_fetcher(channel_, res));
     ace::run();
     ASSERT_TRUE(ace::empty());
-    ASSERT_EQ(res.size(), 4);
-    ASSERT_EQ(res[0], 3);
-    ASSERT_EQ(res[1], 1);
-    ASSERT_EQ(res[2], 2);
-    ASSERT_EQ(res[3], 4);
+    ASSERT_EQ(res.size(), 5);
+    ASSERT_EQ(res[0], 4);
+    ASSERT_EQ(res[1], 3);
+    ASSERT_EQ(res[2], 1);
+    ASSERT_EQ(res[3], 2);
+    ASSERT_EQ(res[4], 5);
 }
 
 TEST(commands, check_spawn_and_join) {

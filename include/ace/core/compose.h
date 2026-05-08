@@ -24,13 +24,13 @@ namespace ace::core {
             , _r_future(r_future) {};
 
         static consteval auto define_return_type() {
-            using namespace ace::core::tools::dispatch;
+            using namespace ace::core::meta;
             static_assert (is_future<l_future_t>, "Left operand shall be future, and await interfaces shall be accessed");
             static_assert (is_future<r_future_t>, "Right operand shall be future, and await interfaces shall be accessed");
             // NOTE: To shrink error output
             if constexpr (is_future<l_future_t> and is_future<r_future_t>) {
-                typedef decltype(std::declval<l_future_t>().await_resume()) l_future_ret_t;
-                typedef decltype(std::declval<r_future_t>().await_resume()) r_future_ret_t;
+                typedef resume_type<l_future_t> l_future_ret_t;
+                typedef resume_type<r_future_t> r_future_ret_t;
                 if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
                     return int();
                 else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
@@ -52,13 +52,13 @@ namespace ace::core {
         std::optional<async_handle> _r_future_observer;
         return_t _result;
 
-        template <size_t result_id, typename future_t>
+        template <size_t observer_idx, typename future_t>
         task observer(future_t& future, std::optional<async_handle>& opposite_observer) {
 
             typedef decltype(std::declval<future_t>().await_resume()) future_ret_t;
 
             if constexpr (not std::same_as<void, future_ret_t> and not std::same_as<return_t, future_ret_t>)
-                std::get<result_id>(_result) = co_await future;
+                std::get<observer_idx>(_result) = co_await future;
             else if constexpr (not std::same_as<void, future_ret_t> and std::same_as<return_t, future_ret_t>)
                 _result = co_await future;
             else
@@ -72,7 +72,7 @@ namespace ace::core {
 
             // NOTE: Setting finished operand ID if both operands are void awaitable
             if constexpr (std::same_as<int, return_t>)
-                _result = result_id;
+                _result = observer_idx;
         };
 
         bool await_suspend(auto);
@@ -93,13 +93,13 @@ namespace ace::core {
             , _r_future(r_future) {};
 
         static consteval auto define_return_type() {
-            using namespace ace::core::tools::dispatch;
+            using namespace ace::core::meta;
             static_assert (is_future<l_future_t>, "Left operand shall be future, and await interfaces shall be accessed");
             static_assert (is_future<r_future_t>, "Right operand shall be future, and await interfaces shall be accessed");
             // NOTE: To shrink error output
             if constexpr (is_future<l_future_t> and is_future<r_future_t>) {
-                typedef decltype(std::declval<l_future_t>().await_resume()) l_future_ret_t;
-                typedef decltype(std::declval<r_future_t>().await_resume()) r_future_ret_t;
+                typedef resume_type<l_future_t> l_future_ret_t;
+                typedef resume_type<r_future_t> r_future_ret_t;
                 if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
                     return;
                 else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
@@ -121,24 +121,78 @@ namespace ace::core {
         std::optional<async_handle> _r_future_observer;
         std::conditional_t<std::same_as<return_t, void>, int, return_t> _result;
 
-        template <size_t result_id, typename future_t>
+        template <size_t observer_idx, typename future_t>
         task observer(future_t& future, std::optional<async_handle>& opposite_observer) {
 
-            typedef decltype(std::declval<future_t>().await_resume()) future_ret_t;
+            typedef meta::resume_type<future_t> future_ret_t;
 
             if constexpr (not std::same_as<void, future_ret_t> and not std::same_as<return_t, future_ret_t>)
-                std::get<result_id>(_result) = co_await future;
+                std::get<observer_idx>(_result) = co_await future;
             else if constexpr (not std::same_as<void, future_ret_t> and std::same_as<return_t, future_ret_t>)
                 _result = co_await future;
             else
                 co_await future;
 
             // NOTE: Only second observer joins and reattaches
-            if constexpr (result_id == 1)
+            if constexpr (observer_idx == 1)
                 if (not opposite_observer.value().done())
                     co_await opposite_observer->join();
 
-            if constexpr (result_id == 1)
+            if constexpr (observer_idx == 1)
+                runner::reattach(std::move(_waiter));
+        };
+
+        bool await_suspend(auto);
+
+        return_t await_resume() {
+            if constexpr (std::same_as<return_t, void>)
+                return;
+            else return _result;
+        };
+    };
+
+    template <meta::is_future ... future_ts>
+    struct ACE_AWAIT_NODISCARD and_await_composed final : traits::future_traits<and_await_composed<future_ts...>> {
+
+        IMPORT_FUTURE_ENV(and_await_composed);
+
+        struct and_await_conductor;
+        friend and_await_conductor;
+
+        static constexpr int futures_amount = sizeof...(future_ts);
+        static constexpr int top_observer_idx = futures_amount - 1;
+
+        explicit and_await_composed(future_ts&... futures)
+            : _futures(futures...) {};
+
+        typedef std::tuple<meta::replace_type<meta::resume_type<future_ts>>...> return_t;
+        // TODO for composed or
+        // typedef std::tuple<meta::replace_type<meta::resume_type<future_ts>, void, bool>...> return_t;
+
+        task _waiter;
+        std::tuple<future_ts&...> _futures;
+        std::array<std::optional<async_handle>, sizeof...(future_ts)> _observers;
+        std::conditional_t<std::same_as<return_t, void>, int, return_t> _result;
+
+        template <size_t observer_idx, typename future_t>
+        task observer(future_t& future) {
+
+            typedef meta::resume_type<future_t> future_ret_t;
+
+            if constexpr (not std::same_as<void, future_ret_t>)
+                std::get<observer_idx>(_result) = co_await future;
+            else
+                co_await future;
+
+            // NOTE: Only last observer joins and reattaches
+            if constexpr (observer_idx == (sizeof...(future_ts) - 1)) {
+                for (auto& opposite_observer : _observers | std::views::take(top_observer_idx) ) {
+                    if (not opposite_observer.value().done())
+                        co_await opposite_observer->join();
+                }
+            }
+
+            if constexpr (observer_idx == top_observer_idx)
                 runner::reattach(std::move(_waiter));
         };
 

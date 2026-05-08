@@ -30,8 +30,7 @@
 
 #include "ace/core/traits/future.h"
 #include "ace/core/control.h"
-#include "ace/core/tools/meta.h"
-#include "ace/core/tools/dispatch.h"
+#include "ace/core/tools/macro.h"
 #include "ace/core/tools/id_alloc.h"
 
 namespace ace::core {
@@ -239,7 +238,7 @@ namespace ace::core::traits {
          * @return          The same lvalue reference.
          */
         template <typename futureT>
-        requires tools::dispatch::is_future_accurate<std::remove_reference_t<futureT>, derived_t>
+        requires meta::is_future_accurate<std::remove_reference_t<futureT>, derived_t>
         futureT& await_transform(futureT& future) {
             _status = e_executed;
             _busy_future = nullptr;
@@ -253,7 +252,7 @@ namespace ace::core::traits {
          * @return          An rvalue reference to the future.
          */
         template <typename futureT>
-        requires tools::dispatch::is_future_accurate<std::remove_reference_t<futureT>, derived_t>
+        requires meta::is_future_accurate<std::remove_reference_t<futureT>, derived_t>
         futureT&& await_transform(futureT&& future) {
             _status = e_executed;
             _busy_future = nullptr;
@@ -269,7 +268,7 @@ namespace ace::core::traits {
          * @return          The same lvalue reference.
          */
         template <typename futureT>
-        requires tools::dispatch::is_busy_future_accurate<std::remove_reference_t<futureT>, derived_t>
+        requires meta::is_busy_future_accurate<std::remove_reference_t<futureT>, derived_t>
         futureT& await_transform(futureT& future) {
             _status = e_executed;
             _busy_future = &future;
@@ -283,7 +282,7 @@ namespace ace::core::traits {
          * @return          An rvalue reference to the future.
          */
         template <typename futureT>
-        requires tools::dispatch::is_busy_future_accurate<std::remove_reference_t<futureT>, derived_t>
+        requires meta::is_busy_future_accurate<std::remove_reference_t<futureT>, derived_t>
         futureT&& await_transform(futureT&& future) {
             _status = e_executed;
             _busy_future = &future;

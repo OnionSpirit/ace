@@ -90,7 +90,7 @@ namespace ace::core {
             typedef meta::resume_type<l_future_t> l_future_ret_t;
             typedef meta::resume_type<r_future_t> r_future_ret_t;
             if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
-                return;
+                return std::monostate{};
             else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
                 return r_future_ret_t{};
             else if constexpr (not std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
@@ -107,7 +107,7 @@ namespace ace::core {
         r_future_t& _r_future;
         std::optional<async_handle> _l_future_observer;
         std::optional<async_handle> _r_future_observer;
-        std::conditional_t<std::same_as<return_t, void>, int, return_t> _result;
+        return_t _result;
 
         template <size_t observer_idx, typename future_t>
         task observer(future_t& future, std::optional<async_handle>& opposite_observer) {
@@ -132,10 +132,10 @@ namespace ace::core {
 
         bool await_suspend(auto);
 
-        return_t await_resume() {
-            if constexpr (std::same_as<return_t, void>)
-                return;
-            else return _result;
+        void await_resume() requires std::same_as<std::monostate, return_t> { }
+
+        return_t await_resume() requires (not std::same_as<std::monostate, return_t>) {
+            return _result;
         };
     };
 

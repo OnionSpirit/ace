@@ -441,8 +441,8 @@ inline ace::task imposter(ace::futures::channel_dyn<int>& ch) {
     // NOTE: Spawns parallel and joins all
     auto res = co_await (
                 (co_await ace::spawn(spawn_post(1, ch))).join()
-            and (co_await ace::spawn(spawn_post(2, ch))).join()
             and (co_await ace::post (spawn_post(3, ch))).join()
+            and (co_await ace::spawn(spawn_post(2, ch))).join()
             and (co_await ace::post (spawn_post(4, ch))).join()
     );
     // NOTE: Checking composition
@@ -450,7 +450,7 @@ inline ace::task imposter(ace::futures::channel_dyn<int>& ch) {
 
     // NOTE: Testing syntax depending on stdlibc++ version (newone has more formatters)
     #if defined(__clang__) && __clang_major__ >= 22
-        co_await ace::console::async::println("spawn, spawn, post, post - finished {}", res);
+        co_await ace::console::async::println("spawn, post, spawn, post - finished {}", res);
     #endif
 
     co_await ace::console::async::println("Placing {} to channel", 5);

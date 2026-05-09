@@ -28,12 +28,12 @@ namespace ace::core {
             typedef meta::resume_type<r_future_t> r_future_ret_t;
             if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
                 return int();
+            // Begin: syntax sugar
             else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
                 return std::optional<r_future_ret_t>{};
             else if constexpr (std::same_as<void, r_future_ret_t> and not std::same_as<void, l_future_ret_t>)
                 return std::optional<l_future_ret_t>{};
-            else if constexpr (std::same_as<l_future_ret_t, r_future_ret_t>)
-                return std::array<std::optional<l_future_ret_t>, 2>{};
+            // End: syntax sugar
             else return std::variant<l_future_ret_t, r_future_ret_t>{};
         }
 
@@ -90,13 +90,13 @@ namespace ace::core {
             typedef meta::resume_type<l_future_t> l_future_ret_t;
             typedef meta::resume_type<r_future_t> r_future_ret_t;
             if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
-                return std::monostate{};
+                return std::monostate{}; /// 'await_resume()' will return void at this option
+            // Begin: syntax sugar
             else if constexpr (std::same_as<void, l_future_ret_t> and not std::same_as<void, r_future_ret_t>)
                 return r_future_ret_t{};
             else if constexpr (not std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
                 return l_future_ret_t{};
-            else if constexpr (std::same_as<l_future_ret_t, r_future_ret_t>)
-                return std::array<l_future_ret_t, 2>{};
+            // End: syntax sugar
             else return std::tuple<l_future_ret_t, r_future_ret_t>{};
         }
 
@@ -158,10 +158,8 @@ namespace ace::core {
             typedef meta::unique_tuple_t<temp_ret_t> ret_tuple_t;
             if constexpr (std::same_as<std::tuple<std::monostate>, ret_tuple_t>)
                 return int();
-            else if constexpr (std::tuple_size_v<ret_tuple_t> == 1)
-                return std::get<0>(ret_tuple_t());
             else
-                return meta::tuple_to_variant_t<ret_tuple_t>{};
+                return meta::tuple_to_variant_t<temp_ret_t>{};
         }
 
         typedef decltype(define_return_type()) return_t;

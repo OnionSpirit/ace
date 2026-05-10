@@ -46,6 +46,8 @@ typedef struct {} ACE_EMPTY_TYPE;
 
 #define ACE_AWAIT_NODISCARD [[nodiscard(ACE_AWAIT_MISSING_MSG)]]
 
+#define ACE_INCOMPATIBLE_COMPOSE_ERROR "Receiver's (Right Operand) input does not compatible with Sender's (Left Operand) return type"
+
 // #if defined(__GNUC__) || defined(__clang__)
 //     // For GCC/Clang: -Wunused-result is the specific warning for [[nodiscard]]
 //     #define ACE_AWAIT_NODISCARD                          \

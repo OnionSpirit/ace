@@ -195,11 +195,7 @@ namespace ace::core {
 
         bool await_suspend(auto);
 
-        return_t await_resume() {
-            if constexpr (std::same_as<return_t, void>)
-                return;
-            else return _result;
-        };
+        return_t await_resume() { return _result; };
     };
 
     template <meta::is_future ... future_ts>
@@ -256,17 +252,11 @@ namespace ace::core {
 
         bool await_suspend(auto);
 
-        return_t await_resume() {
-            if constexpr (std::same_as<return_t, void>)
-                return;
+        auto await_resume() {
+            if constexpr (std::same_as<return_t, std::monostate>) return;
             else return _result;
         };
 
-        void await_resume() requires std::same_as<std::monostate, return_t> { }
-
-        return_t await_resume() requires (not std::same_as<std::monostate, return_t>) {
-            return _result;
-        };
     };
 
     template<meta::is_future sender_t, typename async_return, is_promise_rule async_promise_rule_t =differed>

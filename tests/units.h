@@ -471,19 +471,24 @@ inline ace::promise<> printer_promise(const int idx) {
     co_await ace::console::async::println("Placing {} to channel", idx);
 }
 
-inline ace::task graph_starter(ace::futures::channel_dyn<int>& ch) {
+inline void congrats() {
+    ace::console::println("Pipe finished");
+}
+
+inline ace::task composed_output(ace::futures::channel_dyn<int>& ch) {
     // NOTE: Starting parallel pipes
     co_await (
-        pusher(1, ch) >> printer
-                                         and
-        pusher(2, ch) >> printer_promise
-                                         and
-        pusher(3, ch) >> printer
-                                         and
-        pusher(4, ch) >> printer_promise
-                                         and
-        pusher(5, ch) >> printer
+            pusher(1, ch) >> printer >> congrats
+        and
+            pusher(2, ch) >> printer_promise >> congrats
+        and
+            pusher(3, ch) >> printer >> congrats
+        and
+            pusher(4, ch) >> printer_promise >> congrats
+        and
+            pusher(5, ch) >> printer >> congrats
     );
+
 }
 
 #endif // UNITS_H

@@ -260,54 +260,59 @@ namespace ace::core {
     };
 
 
-// ===========================================- OUTPUT TRANSMITTERS -===================================================
+// =============================================- OUTPUT COMPOSERS -====================================================
 
     template <
         meta::is_future sender_t,
         typename async_return, typename async_input,
-    is_promise_rule async_promise_rule_t =differed
-    > requires (
-        not std::same_as<meta::resume_type<sender_t>, void>
-        and std::same_as<std::decay_t<async_input>, meta::resume_type<sender_t>>
-    ) async<async_return, permanent>
-    receiver(sender_t&& sender, async<async_return, async_promise_rule_t>(responder)(async_input)) {
+        is_promise_rule async_promise_rule_t =differed
+    > requires (not std::same_as<meta::resume_type<sender_t>, void>)
+    //
+    promise<async_return>
+    compose(sender_t&& sender, async<async_return, async_promise_rule_t>(responder)(async_input)) {
         typedef meta::resume_type<sender_t> sender_resume_t;
+        static_assert(std::same_as<std::decay_t<async_input>, sender_resume_t>,
+            "Receiver (Right Operand) does not compatible with Sender's (Left Operand) return type");
         co_return co_await responder(std::forward<sender_resume_t>(co_await (sender)));
     }
+
 
     template <
         meta::is_future sender_t,
         typename async_return,
-    is_promise_rule async_promise_rule_t =differed
-    > requires (
-        std::same_as<meta::resume_type<sender_t>, void>
-    ) async<async_return, permanent>
-    receiver(sender_t&& sender, async<async_return, async_promise_rule_t>(responder)()) {
+        is_promise_rule async_promise_rule_t =differed
+    > requires std::same_as<meta::resume_type<sender_t>, void>
+    //
+    promise<async_return>
+    compose(sender_t&& sender, async<async_return, async_promise_rule_t>(responder)()) {
         co_await sender;
-        co_await responder();
+        co_return co_await responder();
     }
+
 
     template <
         meta::is_future sender_t,
         typename foo_return, typename foo_input
-    > requires (
-        not std::same_as<meta::resume_type<sender_t>, void>
-        and std::same_as<std::decay_t<foo_input>, meta::resume_type<sender_t>>
-    ) async<foo_return, permanent>
-    receiver(sender_t&& sender, foo_return(responder)(foo_input)) {
+    > requires (not std::same_as<meta::resume_type<sender_t>, void>)
+    //
+    promise<foo_return>
+    compose(sender_t&& sender, foo_return(responder)(foo_input)) {
         typedef meta::resume_type<sender_t> sender_resume_t;
+        static_assert(std::same_as<std::decay_t<foo_input>, sender_resume_t>,
+            "Receiver (Right Operand) does not compatible with Sender's (Left Operand) return type");
         co_return responder(std::forward<sender_resume_t>(co_await (sender)));
     }
+
 
     template <
         meta::is_future sender_t,
         typename foo_return
-    > requires (
-        std::same_as<meta::resume_type<sender_t>, void>
-    ) async<foo_return, permanent>
-    receiver(sender_t&& sender, foo_return(responder)()) {
+    > requires std::same_as<meta::resume_type<sender_t>, void>
+    //
+    promise<foo_return>
+    compose(sender_t&& sender, foo_return(responder)()) {
         co_await sender;
-        responder();
+        co_return responder();
     }
 
 } // end namespace ace::core
@@ -706,55 +711,51 @@ operator or(ace::core::or_await_composed<composed_future_ts...>& composed_future
     );
 }
 
-// ===========================================- OUTPUT TRANSMITTERS -===================================================
-
-
-// ============================================- ASYNC TRANSMITTERS -===================================================
+// ========================================- OUTPUT COMPOSE CREATORS -==================================================
 
 template <
     ace::core::meta::is_future sender_t,
     typename async_return, typename async_input,
     ace::core::is_promise_rule async_promise_rule_t =ace::core::differed
-> requires (
-    not std::same_as<ace::core::meta::resume_type<sender_t>, void>
-    and std::same_as<std::decay_t<async_input>, ace::core::meta::resume_type<sender_t>>
-) ace::core::async<async_return, ace::core::permanent>
-operator >> (sender_t&& sender, ace::core::async<async_return, async_promise_rule_t>(responder)(async_input) ) {
-    return std::move(receiver(std::forward<sender_t>(sender), responder));
+> requires (not std::same_as<ace::core::meta::resume_type<sender_t>, void>)
+//
+ace::promise<async_return>
+operator >> (sender_t&& sender, ace::core::async<async_return, async_promise_rule_t>(responder)(async_input)) {
+    return std::move(compose(std::forward<sender_t>(sender), responder));
 }
+
 
 template <
     ace::core::meta::is_future sender_t,
     typename async_return,
     ace::core::is_promise_rule async_promise_rule_t =ace::core::differed
-> requires (
-    std::same_as<ace::core::meta::resume_type<sender_t>, void>
-) ace::core::async<async_return, ace::core::permanent>
-operator >> (sender_t&& sender, ace::core::async<async_return, async_promise_rule_t>(responder)() ) {
-    return std::move(receiver(std::forward<sender_t>(sender), responder));
+> requires std::same_as<ace::core::meta::resume_type<sender_t>, void>
+//
+ace::promise<async_return>
+operator >> (sender_t&& sender, ace::core::async<async_return, async_promise_rule_t>(responder)()) {
+    return std::move(compose(std::forward<sender_t>(sender), responder));
 }
 
-// =========================================- CALLBACK TRANSMITTERS -===================================================
 
 template <
     ace::core::meta::is_future sender_t,
     typename foo_return, typename foo_input
-> requires (
-    not std::same_as<ace::core::meta::resume_type<sender_t>, void>
-    and std::same_as<std::decay_t<foo_input>, ace::core::meta::resume_type<sender_t>>
-) ace::core::async<foo_return, ace::core::permanent>
-operator >> (sender_t&& sender, foo_return(responder)(foo_input) ) {
-    return std::move(receiver(std::forward<sender_t>(sender), responder));
+> requires (not std::same_as<ace::core::meta::resume_type<sender_t>, void>)
+//
+ace::promise<foo_return>
+operator >> (sender_t&& sender, foo_return(responder)(foo_input)) {
+    return std::move(compose(std::forward<sender_t>(sender), responder));
 }
+
 
 template <
     ace::core::meta::is_future sender_t,
     typename foo_return
-> requires (
-    std::same_as<ace::core::meta::resume_type<sender_t>, void>
-) ace::core::async<foo_return, ace::core::permanent>
-operator >> (sender_t&& sender, foo_return(responder)() ) {
-    return std::move(receiver(std::forward<sender_t>(sender), responder));
+> requires std::same_as<ace::core::meta::resume_type<sender_t>, void>
+//
+ace::promise<foo_return>
+operator >> (sender_t&& sender, foo_return(responder)()) {
+    return std::move(compose(std::forward<sender_t>(sender), responder));
 }
 
 #undef ACE_COMPOSE_MEMBERS_ASSERT

@@ -257,9 +257,9 @@ TEST(commands, check_spawn_post) {
     ASSERT_EQ(res[4], 5);
 }
 
-TEST(commands, check_graph) {
+TEST(commands, check_composed_output) {
     ace::futures::channel_dyn<int> channel_ {};
-    ace::schedule(graph_starter(channel_));
+    ace::schedule(composed_output(channel_));
     ace::run();
     ASSERT_TRUE(ace::empty());
     // NOTE: Collecting waited time sequence

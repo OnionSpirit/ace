@@ -1,7 +1,7 @@
-#ifndef ACE_VISUAL_SELECTORS_ANY_H
-#define ACE_VISUAL_SELECTORS_ANY_H
+#ifndef ACE_VISUAL_CONNECTORS_ANY_H
+#define ACE_VISUAL_CONNECTORS_ANY_H
 
-namespace ace::visual::selectors {
+namespace ace::visual::connectors {
 
     // NOTE: Marks graph to await any branch without canceling others on the single branch completion.
     // NOTE: Results of the other branches will be dropped
@@ -9,4 +9,4 @@ namespace ace::visual::selectors {
 
 }
 
-#endif //ACE_VISUAL_SELECTORS_ANY_H
+#endif //ACE_VISUAL_CONNECTORS_ANY_H

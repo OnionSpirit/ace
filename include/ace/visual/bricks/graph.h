@@ -8,7 +8,7 @@
 #include "ace/core/traits/future.h"
 #include "ace/core/async.h"
 
-#include "pipe.h"
+#include "ace/visual/details/pipe.h"
 
 namespace ace::visual {
 
@@ -41,7 +41,7 @@ namespace ace::visual {
 
         bool await_suspend(auto);
 
-        pipe await_resume();
+        details::pipe<> await_resume();
     };
 
     // template<core::meta::is_future sender_t, typename async_return, core::is_promise_rule async_promise_rule_t =core::differed>

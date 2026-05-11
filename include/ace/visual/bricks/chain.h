@@ -1,7 +1,8 @@
 #ifndef ACE_VISUAL_CHAIN_H
 #define ACE_VISUAL_CHAIN_H
 
-#include "pipe.h"
+#include "ace/visual/details/pipe.h"
+#include "ace/visual/details/actor.h"
 
 namespace ace::visual {
 
@@ -20,18 +21,18 @@ namespace ace::visual {
     template <chain_status status_v, typename input_t, typename ... receiver_ts>
     struct chain_base {
 
-        pipeline_state _completion_status { pipeline_state::e_idle };
-        pipe<input_t> _initial_sender;
+        details::pipeline_state _completion_status {details::pipeline_state::e_idle };
+        details::pipe<input_t> _initial_sender;
         std::tuple<receiver_ts...> _pipeline {};
 
         chain_base() = default;
 
         explicit chain_base(input_t&& input) {
-            auto p = pipe<input_t>(std::forward<input_t>(input));
-            _initial_sender = std::forward<pipe<input_t>>(p);
+            auto p = details::pipe<input_t>(std::forward<input_t>(input));
+            _initial_sender = std::forward<details::pipe<input_t>>(p);
         }
 
-        chain_base(std::tuple<receiver_ts...>&& receivers, pipe<input_t>&& initial_sender) {
+        chain_base(std::tuple<receiver_ts...>&& receivers, details::pipe<input_t>&& initial_sender) {
             _pipeline = std::move(receivers);
             _initial_sender = std::move(initial_sender);
         }
@@ -55,8 +56,8 @@ namespace ace::visual {
         >
         auto operator | (async<receiver_return_t, receiver_rule_t>(&&r)(receiver_input_ts...)) {
             typedef decltype(define_output_type()) output_t;
-            typedef nexus_receiver<output_t, receiver_return_t, receiver_rule_t, receiver_input_ts...> extra_receiver_t;
-            auto recv = std::move(receiver<output_t>(std::move(r)));
+            typedef details::nexus_actor<output_t, receiver_return_t, receiver_rule_t, receiver_input_ts...> extra_receiver_t;
+            auto recv = std::move(actor<output_t>(std::move(r)));
             if constexpr (std::is_void_v<typename extra_receiver_t::raw_output_t>) {
                 return chain_base<chain_status::e_complete, input_t, receiver_ts..., extra_receiver_t> {
                     std::tuple_cat(std::move(_pipeline), std::move(std::tie(recv))), std::move(_initial_sender)
@@ -81,13 +82,17 @@ namespace ace::visual {
         }
     };
 
+}
+
+namespace visual {
+
     /**
      * @brief Header object. Declares interfaces of the pipeline beginning
      * @tparam status_v Chain status
      */
-    template <chain_status status_v = chain_status::e_incomplete>
+    template <ace::visual::chain_status status_v = ace::visual::chain_status::e_incomplete>
     auto chain() {
-        return chain_base<status_v, void>();
+        return ace::visual::chain_base<status_v, void>();
     }
 
     /**
@@ -95,9 +100,9 @@ namespace ace::visual {
      * @tparam status_v Chain status
      * @tparam input_t Initial capture variables
      */
-    template <typename input_t, chain_status status_v = chain_status::e_incomplete>
+    template <typename input_t, ace::visual::chain_status status_v = ace::visual::chain_status::e_incomplete>
     auto chain(input_t&& in) {
-        return chain_base<status_v, input_t>(std::forward<input_t>(in));
+        return ace::visual::chain_base<status_v, input_t>(std::forward<input_t>(in));
     }
 
     /**
@@ -105,9 +110,9 @@ namespace ace::visual {
      * @tparam status_v Chain status
      * @tparam input_ts Initial capture variables
      */
-    template <chain_status status_v = chain_status::e_incomplete, typename ... input_ts>
+    template <ace::visual::chain_status status_v = ace::visual::chain_status::e_incomplete, typename ... input_ts>
     auto chain(input_ts&& ... in) {
-        return chain_base<status_v, std::tuple<input_ts...>>(std::forward<std::tuple<input_ts...>>(std::tie(in...)));
+        return ace::visual::chain_base<status_v, std::tuple<input_ts...>>(std::forward<std::tuple<input_ts...>>(std::tie(in...)));
     }
 
 }

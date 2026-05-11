@@ -1,6 +1,7 @@
 #ifndef ACE_VISUAL_CHAIN_H
 #define ACE_VISUAL_CHAIN_H
 
+#include "graph.h"
 #include "ace/visual/details/pipe.h"
 #include "ace/visual/details/actor.h"
 
@@ -21,6 +22,7 @@ namespace ace::visual {
     template <chain_status status_v, typename input_t, typename ... receiver_ts>
     struct chain_base {
 
+        static constexpr chain_status status = status_v;
         details::pipeline_state _completion_status {details::pipeline_state::e_idle };
         details::pipe<input_t> _initial_sender;
         std::tuple<receiver_ts...> _pipeline {};
@@ -74,17 +76,23 @@ namespace ace::visual {
         static promise<bool> describe_status(details::pipeline_state status) {
             switch (status) {
                 case details::pipeline_state::e_broken : {
+                    // NOTE: Starting checkpoints expected
                     co_return false;
                 }
                 case details::pipeline_state::e_complete: {
+                    // NOTE: Starting defers expected
                     co_return false;
                 }
-                case details::pipeline_state::e_idle:
-                    break;
-                case details::pipeline_state::e_in_progress:
-                    break;
+                case details::pipeline_state::e_idle: {
+                    // NOTE: Starting defers expected
+                    // NOTE: Starting checkpoints expected
+                    co_return false;
+                }
+                case details::pipeline_state::e_in_progress: {
+                    co_return true;
+                }
+                default: throw std::logic_error("Received unknown pipeline token");
             }
-            co_return true;
         }
 
         task start() {
@@ -113,9 +121,12 @@ namespace ace::visual {
                      }
 
                      _completion_status = std::get<index>(_pipeline)._pipe._state;
+                     auto result = co_await describe_status(_completion_status);
+                     if (result and index == sizeof...(receiver_ts) -1)
+                         _completion_status = details::pipeline_state::e_complete;
                      // TODO: Debug log
                      co_await console::async::println("Chain current state: {}", _completion_status);
-                     co_return co_await describe_status(_completion_status);
+                     co_return result;
                 }());
             }(std::make_index_sequence<sizeof...(receiver_ts)>{});
             co_return;

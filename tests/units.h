@@ -500,7 +500,7 @@ inline visual::nexus<int> nexus_announcer(const int& idx, std::string_view str) 
 
 inline visual::nexus<> nexus_printer(const int& idx) {
     co_await ace::console::async::println("Doing something with {}", idx);
-    co_return visual::pipe();
+    co_return visual::resume();
 }
 
 inline visual::pipe<> nexus_breaker() {
@@ -510,11 +510,15 @@ inline visual::pipe<> nexus_breaker() {
 
 inline visual::nexus<> nexus_congrats() {
     co_await ace::console::async::println("Pipe finished");
-    co_return visual::pipe();
+    co_return visual::resume();
 }
 
 inline ace::task chaining() {
-    auto pipeline = visual::chain(1, std::string_view{"hello"}) | nexus_announcer | nexus_printer | nexus_breaker | nexus_congrats;
+    auto pipeline = visual::chain(1, std::string_view{"hello"})
+        | nexus_announcer
+        | nexus_printer
+        | nexus_breaker
+        | nexus_congrats;
     co_await pipeline.start();
     co_return;
 }

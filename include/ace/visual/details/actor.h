@@ -101,9 +101,6 @@ namespace ace::visual::details {
             } else {
                 _pipe = co_await _nexus(std::move(sender_pipe._output));
             }
-            // TODO: Temp solution
-            if (_pipe._state == pipeline_state::e_idle)
-                _pipe._state = sender_pipe._state;
             co_return;
         }
     };
@@ -198,9 +195,6 @@ namespace ace::visual::details {
             } else {
                 _pipe = _callback(std::move(sender_pipe._output));
             }
-            // TODO: Temp solution
-            if (_pipe._state == pipeline_state::e_idle)
-                _pipe._state = sender_pipe._state;
         }
     };
 

@@ -442,7 +442,7 @@ TEST(core, do_and_await_test) {
 }
 
 TEST(visual, do_test_branch) {
-    ace::schedule(branch_pipeline());
+    ace::schedule(chaining());
     ace::run();
     ASSERT_TRUE(ace::empty());
 }

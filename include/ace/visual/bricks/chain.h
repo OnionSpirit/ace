@@ -71,11 +71,28 @@ namespace ace::visual {
 
         task start() {
             co_await [&] <std::size_t ... index> (std::index_sequence<index...>) -> task {
-                 (..., co_await [&] -> task {
-                     if constexpr (index == 0)
+                 (... and co_await [&] -> promise<bool> {
+                     if constexpr (index == 0) {
+                         _initial_sender._state = details::pipeline_state::e_in_progress;
                          co_await std::get<index>(_pipeline).start(std::move(_initial_sender));
-                     else
+                     } else
                          co_await std::get<index>(_pipeline).start(std::move(std::get<index - 1>(_pipeline)._pipe));
+                     _completion_status = std::get<index>(_pipeline)._pipe._state;
+                     // TODO: Debug log
+                     co_await console::async::println("Chain current state: {}", _completion_status);
+                     switch (_completion_status) {
+                         case details::pipeline_state::e_broken : {
+                             co_return false;
+                         }
+                         case details::pipeline_state::e_complete: {
+                             co_return false;
+                         }
+                         case details::pipeline_state::e_idle:
+                             break;
+                         case details::pipeline_state::e_in_progress:
+                             break;
+                     }
+                     co_return true;
                 }());
             }(std::make_index_sequence<sizeof...(receiver_ts)>{});
             co_return;

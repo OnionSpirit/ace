@@ -89,18 +89,21 @@ namespace ace::visual::details {
         static_assert(assert_compatibility(input_pipe_t()), ACE_INCOMPATIBLE_COMPOSE_ERROR);
 
         explicit nexus_actor(async_nexus_t&& r) : _nexus(r){};
-        async_nexus_t _nexus;
 
-        std::conditional_t<std::same_as<nexus_return_t, void>, std::monostate, nexus_return_t> _pipe {};
+        async_nexus_t _nexus;
+        nexus_return_t _pipe {};
 
         promise<> start(input_pipe_t&& sender_pipe) {
             if constexpr (std::same_as<sender_output_t, void>) {
-                co_await _nexus();
+                _pipe = co_await _nexus();
             } else if constexpr (core::meta::is_tuple_v<sender_output_t>) {
                 _pipe = co_await std::apply(_nexus, std::move(sender_pipe._output));
             } else {
                 _pipe = co_await _nexus(std::move(sender_pipe._output));
             }
+            // TODO: Temp solution
+            if (_pipe._state == pipeline_state::e_idle)
+                _pipe._state = sender_pipe._state;
             co_return;
         }
     };

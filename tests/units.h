@@ -14,7 +14,6 @@
 #include <ace/futures/network.h>
 
 #include "ace/visual/visual.h"
-#include "ace/visual/connectors/all.h"
 
 struct once_suspend : ace::core::traits::busy_future_traits<once_suspend> {
 
@@ -496,7 +495,7 @@ inline ace::task composed_output(ace::futures::channel_dyn<int>& ch) {
 
 inline visual::nexus<int> nexus_announcer(const int& idx, std::string_view str) {
     co_await ace::console::async::println("Propagating {} and saying: {}", idx, str);
-    co_return visual::pipe(idx);
+    co_return idx;
 }
 
 inline visual::nexus<> nexus_printer(const int& idx) {
@@ -504,13 +503,18 @@ inline visual::nexus<> nexus_printer(const int& idx) {
     co_return visual::pipe();
 }
 
+inline visual::nexus<> nexus_breaker() {
+    co_await ace::console::async::println("Breaking chain");
+    co_return visual::cancel();
+}
+
 inline visual::nexus<> nexus_congrats() {
     co_await ace::console::async::println("Pipe finished");
     co_return visual::pipe();
 }
 
-inline ace::task branch_pipeline() {
-    auto pipeline = visual::chain(1, std::string_view{"hello"}) | nexus_announcer | nexus_printer | nexus_congrats;
+inline ace::task chaining() {
+    auto pipeline = visual::chain(1, std::string_view{"hello"}) | nexus_announcer | nexus_printer | nexus_breaker | nexus_congrats;
     co_await pipeline.start();
     co_return;
 }

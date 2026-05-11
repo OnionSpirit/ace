@@ -440,3 +440,9 @@ TEST(core, do_and_await_test) {
     const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
     EXPECT_GE(ms_time, 100);
 }
+
+TEST(visual, do_test_branch) {
+    ace::schedule(branch_pipeline());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+}

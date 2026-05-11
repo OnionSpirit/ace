@@ -13,6 +13,9 @@
 #include <ace/futures/cutex.h>
 #include <ace/futures/network.h>
 
+#include "ace/visual/branch.h"
+#include "ace/visual/selectors/all.h"
+
 struct once_suspend : ace::core::traits::busy_future_traits<once_suspend> {
 
     IMPORT_BUSY_FUTURE_ENV(once_suspend)
@@ -491,4 +494,14 @@ inline ace::task composed_output(ace::futures::channel_dyn<int>& ch) {
 
 }
 
+inline ace::promise<ace::visual::pipe<>> pipe_congrats() {
+    ace::console::println("Pipe finished");
+    co_return ace::visual::pipe();
+}
+
+inline ace::task branch_pipeline() {
+    auto a = ace::visual::branch() | pipe_congrats | pipe_congrats;
+    co_await a.start();
+    co_return;
+}
 #endif // UNITS_H

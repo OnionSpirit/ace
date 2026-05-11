@@ -26,8 +26,12 @@ namespace ace::visual {
 
         branch_base() = default;
 
+        explicit branch_base(input_t&& input) {
+            auto p = pipe<input_t>(std::forward<input_t>(input));
+            _initial_sender = std::forward<pipe<input_t>>(p);
+        }
+
         branch_base(std::tuple<receiver_ts...>&& receivers, pipe<input_t>&& initial_sender) {
-            // NOTE: Creating observers for each futures
             _pipeline = std::move(receivers);
             _initial_sender = std::move(initial_sender);
         }
@@ -37,10 +41,10 @@ namespace ace::visual {
                 using tail_receiver_t = core::meta::at_pack<sizeof...(receiver_ts) - 1, receiver_ts...>;
                 using output_t = tail_receiver_t::raw_output_t;
                 if constexpr (not std::is_void_v<output_t>) {
-                    return std::declval<output_t>();
+                    return std::decay_t<output_t>{};
                 } else return;
             } else if constexpr (not std::same_as<input_t, void>)
-                return std::declval<input_t>();
+                return std::decay_t<input_t>{};
             else return;
         }
 
@@ -80,12 +84,30 @@ namespace ace::visual {
     /**
      * @brief Header object. Declares interfaces of the pipeline beginning
      * @tparam status_v Branch status
-     * @tparam capture Initial capture variables
-     * @tparam receiver_ts Contained pipes
      */
-    template <branch_status status_v = branch_status::e_incomplete, typename capture = void>
+    template <branch_status status_v = branch_status::e_incomplete>
     auto branch() {
-        return branch_base<status_v, capture>();
+        return branch_base<status_v, void>();
+    }
+
+    /**
+     * @brief Header object. Declares interfaces of the pipeline beginning
+     * @tparam status_v Branch status
+     * @tparam input_t Initial capture variables
+     */
+    template <typename input_t, branch_status status_v = branch_status::e_incomplete>
+    auto branch(input_t&& in) {
+        return branch_base<status_v, input_t>(std::forward<input_t>(in));
+    }
+
+    /**
+     * @brief Header object. Declares interfaces of the pipeline beginning
+     * @tparam status_v Branch status
+     * @tparam input_t Initial capture variables
+     */
+    template <branch_status status_v = branch_status::e_incomplete, typename ... input_ts>
+    auto branch(input_ts&& ... in) {
+        return branch_base<status_v, std::tuple<input_ts...>>(std::forward<std::tuple<input_ts...>>(std::tie(in...)));
     }
 
 }

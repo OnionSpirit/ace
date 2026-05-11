@@ -494,14 +494,24 @@ inline ace::task composed_output(ace::futures::channel_dyn<int>& ch) {
 
 }
 
-inline ace::promise<ace::visual::pipe<>> pipe_congrats() {
-    ace::console::println("Pipe finished");
+inline ace::promise<ace::visual::pipe<int>> nexus_announcer(const int& idx, std::string_view str) {
+    co_await ace::console::async::println("Propagating {} and saying: {}", idx, str);
+    co_return ace::visual::pipe(idx);
+}
+
+inline ace::promise<ace::visual::pipe<>> nexus_printer(const int& idx) {
+    co_await ace::console::async::println("Doing something with {}", idx);
+    co_return ace::visual::pipe();
+}
+
+inline ace::promise<ace::visual::pipe<>> nexus_congrats() {
+    co_await ace::console::async::println("Pipe finished");
     co_return ace::visual::pipe();
 }
 
 inline ace::task branch_pipeline() {
-    auto a = ace::visual::branch() | pipe_congrats | pipe_congrats;
-    co_await a.start();
+    auto pipeline = ace::visual::branch(1, std::string_view{"hello"}) | nexus_announcer | nexus_printer | nexus_congrats;
+    co_await pipeline.start();
     co_return;
 }
 #endif // UNITS_H

@@ -22,6 +22,12 @@ namespace ace::visual {
 
         pipeline_state _state = pipeline_state::e_idle;
 
+        pipe() = default;
+
+        explicit pipe(const output_t& out) { _output = out; }
+
+        explicit pipe(output_t&& out) { _output = std::forward<output_t>(out); }
+
         output_t _output;
 
         pipe interrupt() { _state = pipeline_state::e_broken; return this; }
@@ -34,6 +40,8 @@ namespace ace::visual {
     struct pipe<void> {
 
         pipeline_state _state = pipeline_state::e_idle;
+
+        pipe() = default;
 
         static pipe interrupt() { pipe p{}; p._state = pipeline_state::e_broken; return p;}
 
@@ -104,9 +112,9 @@ namespace ace::visual {
             if constexpr (std::same_as<sender_output_t, void>) {
                 co_await _receiver();
             } else if constexpr (core::meta::is_tuple_v<sender_output_t>) {
-                _pipe = co_await std::make_from_tuple<async_receiver_t>(std::forward<sender_output_t>(sender_pipe._output));
+                _pipe = co_await std::apply(_receiver, std::move(sender_pipe._output));
             } else {
-                _pipe = co_await _receiver(sender_pipe._output);
+                _pipe = co_await _receiver(std::move(sender_pipe._output));
             }
             co_return;
         }

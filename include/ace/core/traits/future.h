@@ -270,7 +270,7 @@ namespace ace::core::meta {
     template <typename ...T> struct is_tuple_t<std::tuple<T...>>: std::true_type::type {};
 
     template <typename type>
-    bool is_tuple_v = is_tuple_t<type>::value;
+    inline constexpr bool is_tuple_v = is_tuple_t<type>::value;
 
     template <std::size_t index, typename ... pack_ts>
     using at_pack = std::decay_t<decltype(std::get<index>(std::declval<std::tuple<pack_ts...>>()))>;

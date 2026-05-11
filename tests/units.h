@@ -13,7 +13,7 @@
 #include <ace/futures/cutex.h>
 #include <ace/futures/network.h>
 
-#include "ace/visual/branch.h"
+#include "ace/visual/chain.h"
 #include "ace/visual/selectors/all.h"
 
 struct once_suspend : ace::core::traits::busy_future_traits<once_suspend> {
@@ -510,7 +510,7 @@ inline ace::promise<ace::visual::pipe<>> nexus_congrats() {
 }
 
 inline ace::task branch_pipeline() {
-    auto pipeline = ace::visual::branch(1, std::string_view{"hello"}) | nexus_announcer | nexus_printer | nexus_congrats;
+    auto pipeline = ace::visual::chain(1, std::string_view{"hello"}) | nexus_announcer | nexus_printer | nexus_congrats;
     co_await pipeline.start();
     co_return;
 }

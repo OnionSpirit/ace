@@ -1,37 +1,37 @@
-#ifndef ACE_VISUAL_BRANCH_H
-#define ACE_VISUAL_BRANCH_H
+#ifndef ACE_VISUAL_CHAIN_H
+#define ACE_VISUAL_CHAIN_H
 
 #include "pipe.h"
 
 namespace ace::visual {
 
-    enum class branch_status {
-        e_complete,         ///< Branch returns void after completion
-        e_incomplete        ///< Branch does not returns void after completion
+    enum class chain_status {
+        e_complete,         ///< Chain returns void after completion
+        e_incomplete        ///< Chain does not returns void after completion
     };
 
-    // NOTE: Defines graph branch
+    // NOTE: Defines graph chain
     /**
      * @brief Header object. Declares interfaces of the pipeline beginning
-     * @tparam status_v Branch status
+     * @tparam status_v Chain status
      * @tparam input_t Initial capture variables
      * @tparam receiver_ts Contained pipes
      */
-    template <branch_status status_v, typename input_t, typename ... receiver_ts>
-    struct branch_base {
+    template <chain_status status_v, typename input_t, typename ... receiver_ts>
+    struct chain_base {
 
         pipeline_state _completion_status { pipeline_state::e_idle };
         pipe<input_t> _initial_sender;
         std::tuple<receiver_ts...> _pipeline {};
 
-        branch_base() = default;
+        chain_base() = default;
 
-        explicit branch_base(input_t&& input) {
+        explicit chain_base(input_t&& input) {
             auto p = pipe<input_t>(std::forward<input_t>(input));
             _initial_sender = std::forward<pipe<input_t>>(p);
         }
 
-        branch_base(std::tuple<receiver_ts...>&& receivers, pipe<input_t>&& initial_sender) {
+        chain_base(std::tuple<receiver_ts...>&& receivers, pipe<input_t>&& initial_sender) {
             _pipeline = std::move(receivers);
             _initial_sender = std::move(initial_sender);
         }
@@ -55,14 +55,14 @@ namespace ace::visual {
         >
         auto operator | (async<receiver_return_t, receiver_rule_t>(&&r)(receiver_input_ts...)) {
             typedef decltype(define_output_type()) output_t;
-            typedef receiver_base<output_t, receiver_return_t, receiver_rule_t, receiver_input_ts...> extra_receiver_t;
+            typedef nexus_receiver<output_t, receiver_return_t, receiver_rule_t, receiver_input_ts...> extra_receiver_t;
             auto recv = std::move(receiver<output_t>(std::move(r)));
             if constexpr (std::is_void_v<typename extra_receiver_t::raw_output_t>) {
-                return branch_base<branch_status::e_complete, input_t, receiver_ts..., extra_receiver_t> {
+                return chain_base<chain_status::e_complete, input_t, receiver_ts..., extra_receiver_t> {
                     std::tuple_cat(std::move(_pipeline), std::move(std::tie(recv))), std::move(_initial_sender)
                 };
             } else {
-                return branch_base<branch_status::e_incomplete, input_t, receiver_ts..., extra_receiver_t> {
+                return chain_base<chain_status::e_incomplete, input_t, receiver_ts..., extra_receiver_t> {
                     std::tuple_cat(std::move(_pipeline), std::move(std::tie(recv))), std::move(_initial_sender)
                 };
             }
@@ -83,33 +83,33 @@ namespace ace::visual {
 
     /**
      * @brief Header object. Declares interfaces of the pipeline beginning
-     * @tparam status_v Branch status
+     * @tparam status_v Chain status
      */
-    template <branch_status status_v = branch_status::e_incomplete>
-    auto branch() {
-        return branch_base<status_v, void>();
+    template <chain_status status_v = chain_status::e_incomplete>
+    auto chain() {
+        return chain_base<status_v, void>();
     }
 
     /**
      * @brief Header object. Declares interfaces of the pipeline beginning
-     * @tparam status_v Branch status
+     * @tparam status_v Chain status
      * @tparam input_t Initial capture variables
      */
-    template <typename input_t, branch_status status_v = branch_status::e_incomplete>
-    auto branch(input_t&& in) {
-        return branch_base<status_v, input_t>(std::forward<input_t>(in));
+    template <typename input_t, chain_status status_v = chain_status::e_incomplete>
+    auto chain(input_t&& in) {
+        return chain_base<status_v, input_t>(std::forward<input_t>(in));
     }
 
     /**
      * @brief Header object. Declares interfaces of the pipeline beginning
-     * @tparam status_v Branch status
-     * @tparam input_t Initial capture variables
+     * @tparam status_v Chain status
+     * @tparam input_ts Initial capture variables
      */
-    template <branch_status status_v = branch_status::e_incomplete, typename ... input_ts>
-    auto branch(input_ts&& ... in) {
-        return branch_base<status_v, std::tuple<input_ts...>>(std::forward<std::tuple<input_ts...>>(std::tie(in...)));
+    template <chain_status status_v = chain_status::e_incomplete, typename ... input_ts>
+    auto chain(input_ts&& ... in) {
+        return chain_base<status_v, std::tuple<input_ts...>>(std::forward<std::tuple<input_ts...>>(std::tie(in...)));
     }
 
 }
 
-#endif //ACE_VISUAL_BRANCH_H
+#endif //ACE_VISUAL_CHAIN_H

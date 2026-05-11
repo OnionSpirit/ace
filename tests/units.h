@@ -503,9 +503,9 @@ inline visual::nexus<> nexus_printer(const int& idx) {
     co_return visual::pipe();
 }
 
-inline visual::nexus<> nexus_breaker() {
-    co_await ace::console::async::println("Breaking chain");
-    co_return visual::cancel();
+inline visual::pipe<> nexus_breaker() {
+    ace::console::println("Breaking chain");
+    return visual::cancel();
 }
 
 inline visual::nexus<> nexus_congrats() {

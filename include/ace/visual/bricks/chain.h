@@ -49,50 +49,73 @@ namespace ace::visual {
             else return;
         }
 
-        template <
-            typename                    receiver_return_t ,
-            core::is_promise_rule       receiver_rule_t   ,
-            typename                ... receiver_input_ts
-        >
-        auto operator | (async<receiver_return_t, receiver_rule_t>(&&r)(receiver_input_ts...)) {
+        auto operator | (auto &&r) {
+            // TODO: Need to add extra assertion for actor type
             typedef decltype(define_output_type()) output_t;
-            typedef details::nexus_actor<output_t, receiver_return_t, receiver_rule_t, receiver_input_ts...> extra_receiver_t;
-            auto recv = std::move(actor<output_t>(std::move(r)));
-            if constexpr (std::is_void_v<typename extra_receiver_t::raw_output_t>) {
-                return chain_base<chain_status::e_complete, input_t, receiver_ts..., extra_receiver_t> {
-                    std::tuple_cat(std::move(_pipeline), std::move(std::tie(recv))), std::move(_initial_sender)
+            auto recv = std::move(actor<output_t>(std::forward<decltype(r)>(r)));
+            typedef decltype(recv) extra_actor_t;
+            if constexpr (std::is_void_v<typename extra_actor_t::raw_output_t>) {
+                return chain_base<chain_status::e_complete, input_t, receiver_ts..., extra_actor_t> {
+                    std::tuple_cat(
+                        std::forward<std::tuple<receiver_ts...>>(_pipeline),
+                        std::forward<std::tuple<extra_actor_t&>>(std::tie(recv)))
+                    , std::forward<details::pipe<input_t>>(_initial_sender)
                 };
             } else {
-                return chain_base<chain_status::e_incomplete, input_t, receiver_ts..., extra_receiver_t> {
-                    std::tuple_cat(std::move(_pipeline), std::move(std::tie(recv))), std::move(_initial_sender)
+                return chain_base<chain_status::e_incomplete, input_t, receiver_ts..., extra_actor_t> {
+                    std::tuple_cat(
+                        std::forward<std::tuple<receiver_ts...>>(_pipeline),
+                        std::forward<std::tuple<extra_actor_t&>>(std::tie(recv)))
+                    , std::forward<details::pipe<input_t>>(_initial_sender)
                 };
             }
+        }
+
+        static promise<bool> describe_status(details::pipeline_state status) {
+            switch (status) {
+                case details::pipeline_state::e_broken : {
+                    co_return false;
+                }
+                case details::pipeline_state::e_complete: {
+                    co_return false;
+                }
+                case details::pipeline_state::e_idle:
+                    break;
+                case details::pipeline_state::e_in_progress:
+                    break;
+            }
+            co_return true;
         }
 
         task start() {
             co_await [&] <std::size_t ... index> (std::index_sequence<index...>) -> task {
                  (... and co_await [&] -> promise<bool> {
+                     // NOTE: At the beginning of chain
                      if constexpr (index == 0) {
-                         _initial_sender._state = details::pipeline_state::e_in_progress;
-                         co_await std::get<index>(_pipeline).start(std::move(_initial_sender));
-                     } else
-                         co_await std::get<index>(_pipeline).start(std::move(std::get<index - 1>(_pipeline)._pipe));
+                         typedef decltype(std::get<index>(_pipeline).start(std::move(_initial_sender))) actor_t;
+                         _completion_status = _initial_sender._state = details::pipeline_state::e_in_progress;
+
+                         // NOTE: Coroutine / Routine selection
+                         if constexpr (core::meta::is_awaitable<actor_t, task::promise_type>)
+                            co_await std::get<index>(_pipeline).start(std::move(_initial_sender));
+                         else
+                             std::get<index>(_pipeline).start(std::move(_initial_sender));
+
+                     // NOTE: For other members
+                     } else {
+                         typedef decltype(std::get<index>(_pipeline).start(std::move(std::get<index - 1>(_pipeline)._pipe))) actor_t;
+
+                         // NOTE: Coroutine / Routine selection
+                         if constexpr (core::meta::is_awaitable<actor_t, task::promise_type>)
+                            co_await std::get<index>(_pipeline).start(std::move(std::get<index - 1>(_pipeline)._pipe));
+                         else
+                             std::get<index>(_pipeline).start(std::move(std::get<index - 1>(_pipeline)._pipe));
+                     }
+
                      _completion_status = std::get<index>(_pipeline)._pipe._state;
                      // TODO: Debug log
                      co_await console::async::println("Chain current state: {}", _completion_status);
-                     switch (_completion_status) {
-                         case details::pipeline_state::e_broken : {
-                             co_return false;
-                         }
-                         case details::pipeline_state::e_complete: {
-                             co_return false;
-                         }
-                         case details::pipeline_state::e_idle:
-                             break;
-                         case details::pipeline_state::e_in_progress:
-                             break;
-                     }
-                     co_return true;
+                     co_return co_await describe_status(_completion_status);
                 }());
             }(std::make_index_sequence<sizeof...(receiver_ts)>{});
             co_return;

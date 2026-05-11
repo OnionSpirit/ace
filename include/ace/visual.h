@@ -1,9 +1,9 @@
 #ifndef ACE_VISUAL_H
 #define ACE_VISUAL_H
 
-#include "details/pipe.h"
-#include "bricks/chain.h"
-#include "bricks/graph.h"
+#include "visual/details/pipe.h"
+#include "visual/bricks/chain.h"
+#include "visual/bricks/graph.h"
 
 namespace visual {
 

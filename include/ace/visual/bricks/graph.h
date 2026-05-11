@@ -9,6 +9,7 @@
 #include "ace/core/async.h"
 
 #include "ace/visual/details/pipe.h"
+#include "chain.h"
 
 namespace ace::visual {
 
@@ -21,54 +22,64 @@ namespace ace::visual {
     template <
         graph_state completion_v = e_incomplete,
         typename merge_mode_t = void,
-        core::meta::is_future ... pipeline_ts
+        typename ... pipeline_ts
     >
-    struct ACE_AWAIT_NODISCARD graph final : core::traits::future_traits<graph<completion_v, merge_mode_t, pipeline_ts...>> {
-
-        IMPORT_FUTURE_ENV(graph);
-
-        struct graph_conductor;
-        friend graph_conductor;
+    struct ACE_AWAIT_NODISCARD graph_base final {
 
         static constexpr int pipelines_amount = sizeof...(pipeline_ts);
         static constexpr int top_pipeline_idx = pipelines_amount - 1;
 
-        explicit graph(pipeline_ts&... futures)
-            : _pipelines(futures...) {};
+        graph_base() = default;
 
-        task _waiter;
-        std::tuple<pipeline_ts&...> _pipelines;
+        explicit graph_base(std::tuple<pipeline_ts...>&& pipelines)
+            : _pipelines(std::forward<std::tuple<pipeline_ts...>>(pipelines)) {};
 
-        bool await_suspend(auto);
+        std::tuple<pipeline_ts...> _pipelines;
 
-        details::pipe<> await_resume();
+        auto operator () (auto &&pipeline) {
+            typedef std::decay_t<decltype(pipeline)> pipeline_t;
+            if constexpr (sizeof...(pipeline_ts) > 0) {
+                if constexpr (pipeline_t::status == chain_status::e_complete) {
+                    return graph_base<e_complete, merge_mode_t, pipeline_ts..., pipeline_t> {
+                        std::forward<std::tuple<pipeline_ts..., pipeline_t>>( std::tuple_cat(
+                            std::forward<std::tuple<pipeline_ts...>>(_pipelines),
+                            std::forward<std::tuple<pipeline_t>>(std::tie(pipeline))))
+                    };
+                } else {
+                    return graph_base<e_incomplete, merge_mode_t, pipeline_ts..., pipeline_t> {
+                        std::forward<std::tuple<pipeline_ts..., pipeline_t>>( std::tuple_cat(
+                            std::forward<std::tuple<pipeline_ts...>>(_pipelines),
+                            std::forward<std::tuple<pipeline_t>>(std::tie(pipeline))))
+                    };
+                }
+            } else {
+                if constexpr (pipeline_t::status == chain_status::e_complete)
+                    return graph_base<e_complete, merge_mode_t, pipeline_t> {
+                            std::forward<std::tuple<pipeline_t>>(std::tie(pipeline))
+                    };
+                else
+                    return graph_base<e_incomplete, merge_mode_t, pipeline_t> {
+                        std::forward<std::tuple<pipeline_t>>(std::tie(pipeline))
+                    };
+            }
+        }
+
+        task start() {
+            co_await [&] <std::size_t ... index> (std::index_sequence<index...>) -> task {
+                (..., co_await [&] -> task {
+                    co_await post(std::get<index>(_pipelines).start());
+                }());
+            }(std::make_index_sequence<sizeof...(pipeline_ts)>{});
+            co_return;
+        }
     };
 
-    // template<core::meta::is_future sender_t, typename async_return, core::is_promise_rule async_promise_rule_t =core::differed>
-    // requires (not std::same_as<core::meta::resume_type<sender_t>, void>)
-    // async<async_return, async_promise_rule_t> receiver(sender_t&& sender, async<async_return, async_promise_rule_t>(responder)(core::meta::resume_type<sender_t>)) {
-    //     co_await responder(co_await sender);
-    // }
-    //
-    // template<core::meta::is_future sender_t, typename async_return, core::is_promise_rule async_promise_rule_t =core::differed>
-    // requires std::same_as<core::meta::resume_type<sender_t>, void>
-    // async<async_return, async_promise_rule_t> receiver(sender_t&& sender, async<async_return, async_promise_rule_t>(responder)()) {
-    //     co_await sender;
-    //     co_await responder();
-    // }
-    //
-    //
-    // template<ace::core::meta::is_future sender_t, typename async_return, ace::core::is_promise_rule async_promise_rule_t =ace::core::differed>
-    // requires (not std::same_as<ace::core::meta::resume_type<sender_t>, void>)
-    // ace::core::async<async_return, async_promise_rule_t> operator | (sender_t&& sender, ace::core::async<async_return, async_promise_rule_t>(responder)(ace::core::meta::resume_type<sender_t>) ) {
-    //     return std::move(receiver(std::forward<decltype(sender)>(sender), responder));
-    // }
-    //
-    // template<ace::core::meta::is_future sender_t, typename async_return, ace::core::is_promise_rule async_promise_rule_t =ace::core::differed>
-    // requires std::same_as<ace::core::meta::resume_type<sender_t>, void>
-    // ace::core::async<async_return, async_promise_rule_t> operator | (sender_t&& sender, ace::core::async<async_return, async_promise_rule_t>(responder)() ) {
-    //     return std::move(receiver(std::forward<decltype(sender)>(sender), responder));
-    // }
+}
+
+namespace visual {
+
+    inline auto graph() { return ace::visual::graph_base{}; }
+
 }
 
 #endif //ACE_VISUAL_GRAPH_H

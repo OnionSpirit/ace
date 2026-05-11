@@ -17,10 +17,7 @@ namespace ace::visual::details {
         core::is_promise_rule       nexus_rule_t     ,
         typename                ... nexus_input_ts
     >
-    struct ACE_AWAIT_NODISCARD nexus_actor final
-        : core::traits::future_traits<nexus_actor<sender_output_t, nexus_return_t, nexus_rule_t, nexus_input_ts...>> {
-
-        IMPORT_FUTURE_ENV(nexus_actor);
+    struct ACE_AWAIT_NODISCARD nexus_actor final {
 
         template <typename raw_output>
         static consteval raw_output get_raw_output(pipe<raw_output>) {
@@ -111,10 +108,7 @@ namespace ace::visual::details {
         typename     callback_return_t   ,
         typename ... callback_input_ts
     >
-    struct ACE_AWAIT_NODISCARD callback_actor final
-        : core::traits::future_traits<callback_actor<sender_output_t, callback_return_t, callback_input_ts...>> {
-
-        IMPORT_FUTURE_ENV(callback_actor);
+    struct ACE_AWAIT_NODISCARD callback_actor {
 
         template <typename raw_output>
         static consteval raw_output get_raw_output(pipe<raw_output>) {

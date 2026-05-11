@@ -13,7 +13,7 @@
 #include <ace/futures/cutex.h>
 #include <ace/futures/network.h>
 
-#include "ace/visual/visual.h"
+#include <ace/visual.h>
 
 struct once_suspend : ace::core::traits::busy_future_traits<once_suspend> {
 
@@ -520,6 +520,15 @@ inline ace::task chaining() {
         | nexus_breaker
         | nexus_congrats;
     co_await pipeline.start();
+    co_return;
+}
+inline ace::task graphing() {
+    auto graph = visual::graph()
+        (visual::chain(1, std::string_view{"hello one"})
+            | nexus_announcer | nexus_printer | nexus_breaker | nexus_congrats )
+        (visual::chain(2, std::string_view{"hello two"})
+            | nexus_announcer | nexus_printer | nexus_congrats );
+    co_await graph.start();
     co_return;
 }
 #endif // UNITS_H

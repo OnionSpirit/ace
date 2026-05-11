@@ -441,8 +441,14 @@ TEST(core, do_and_await_test) {
     EXPECT_GE(ms_time, 100);
 }
 
-TEST(visual, do_test_branch) {
+TEST(visual, do_test_chain) {
     ace::schedule(chaining());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+}
+
+TEST(visual, do_test_graph) {
+    ace::schedule(graphing());
     ace::run();
     ASSERT_TRUE(ace::empty());
 }

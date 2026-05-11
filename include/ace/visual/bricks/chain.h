@@ -1,7 +1,6 @@
 #ifndef ACE_VISUAL_CHAIN_H
 #define ACE_VISUAL_CHAIN_H
 
-#include "graph.h"
 #include "ace/visual/details/pipe.h"
 #include "ace/visual/details/actor.h"
 
@@ -96,7 +95,7 @@ namespace ace::visual {
         }
 
         task start() {
-            co_await [&] <std::size_t ... index> (std::index_sequence<index...>) -> task {
+            co_await [&] <std::size_t ... index> (std::index_sequence<index...>) -> promise<bool> {
                  (... and co_await [&] -> promise<bool> {
                      // NOTE: At the beginning of chain
                      if constexpr (index == 0) {

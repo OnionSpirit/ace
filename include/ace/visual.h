@@ -2,22 +2,22 @@
 #define ACE_VISUAL_H
 
 #include "visual/details/pipe.h"
-#include "visual/bricks/chain.h"
-#include "visual/bricks/graph.h"
+#include "visual/units/chain.h"
+#include "visual/units/graph.h"
 
-namespace visual {
+namespace ace {
 
     template <typename type = void>
-    using pipe = ace::visual::details::pipe<type>;
+    using pipe = visual::details::pipe<type>;
 
-    using cancel = ace::visual::details::cancel;
+    using cancel = visual::details::cancel;
 
-    using resume = ace::visual::details::resume;
+    using resume = visual::details::resume;
 
-    using finish = ace::visual::details::finish;
+    using finish = visual::details::finish;
 
     template <typename return_type = void>
-    using nexus = ace::async<pipe<return_type>, ace::core::permanent>;
+    using nexus = async<pipe<return_type>, core::permanent>;
 
 }
 

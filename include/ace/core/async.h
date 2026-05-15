@@ -159,8 +159,8 @@ namespace ace::core {
          * @return @c true if the runner may resume this async.
          */
         bool is_resumable() {
-                return (not _coroutine.promise()._busy_future or _coroutine.promise()._busy_future->await_ready())
-                        and _coroutine.promise()._runner_pool;
+            return (not _coroutine.promise()._busy_future or _coroutine.promise()._busy_future->await_ready())
+                    and _coroutine.promise()._runner_pool;
         }
 
         /**

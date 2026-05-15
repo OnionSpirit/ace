@@ -3,7 +3,8 @@
 
 #include "ace/visual/details/pipe.h"
 #include "ace/visual/details/actor.h"
-#include "brick.h"
+
+#include "unit.h"
 
 namespace ace::visual {
 
@@ -15,22 +16,22 @@ namespace ace::visual {
      * @tparam receiver_ts Contained pipes
      */
     template <completion_state completion_v, typename input_t, typename ... receiver_ts>
-    struct chain_base : brick_traits<completion_v> {
+    struct chain_unit : unit_traits<completion_v> {
 
         details::pipeline_state _completion_status {details::pipeline_state::e_idle };
         details::pipe<input_t> _initial_sender;
         std::tuple<receiver_ts...> _pipeline {};
 
-        chain_base() = default;
+        chain_unit() = default;
 
-        ~chain_base() override = default;
+        ~chain_unit() override = default;
 
-        explicit chain_base(input_t&& input) {
+        explicit chain_unit(input_t&& input) {
             auto p = details::pipe<input_t>(std::forward<input_t>(input));
             _initial_sender = std::forward<details::pipe<input_t>>(p);
         }
 
-        chain_base(std::tuple<receiver_ts...>&& receivers, details::pipe<input_t>&& initial_sender) {
+        chain_unit(std::tuple<receiver_ts...>&& receivers, details::pipe<input_t>&& initial_sender) {
             _pipeline = std::move(receivers);
             _initial_sender = std::move(initial_sender);
         }
@@ -53,14 +54,14 @@ namespace ace::visual {
             auto recv = std::move(actor<output_t>(std::forward<decltype(r)>(r)));
             typedef decltype(recv) extra_actor_t;
             if constexpr (std::is_void_v<typename extra_actor_t::raw_output_t>) {
-                return chain_base<e_complete, input_t, receiver_ts..., extra_actor_t> {
+                return chain_unit<e_complete, input_t, receiver_ts..., extra_actor_t> {
                     std::tuple_cat(
                         std::forward<std::tuple<receiver_ts...>>(_pipeline),
                         std::forward<std::tuple<extra_actor_t&>>(std::tie(recv)))
                     , std::forward<details::pipe<input_t>>(_initial_sender)
                 };
             } else {
-                return chain_base<e_incomplete, input_t, receiver_ts..., extra_actor_t> {
+                return chain_unit<e_incomplete, input_t, receiver_ts..., extra_actor_t> {
                     std::tuple_cat(
                         std::forward<std::tuple<receiver_ts...>>(_pipeline),
                         std::forward<std::tuple<extra_actor_t&>>(std::tie(recv)))
@@ -131,15 +132,15 @@ namespace ace::visual {
 
 }
 
-namespace visual {
+namespace ace {
 
     /**
      * @brief Header object. Declares interfaces of the pipeline beginning
      * @tparam status_v Chain status
      */
-    template <ace::visual::completion_state status_v = ace::visual::completion_state::e_incomplete>
+    template <visual::completion_state status_v = visual::completion_state::e_incomplete>
     auto chain() {
-        return ace::visual::chain_base<status_v, void>();
+        return visual::chain_unit<status_v, void>();
     }
 
     /**
@@ -147,9 +148,9 @@ namespace visual {
      * @tparam status_v Chain status
      * @tparam input_t Initial capture variables
      */
-    template <typename input_t, ace::visual::completion_state status_v = ace::visual::completion_state::e_incomplete>
+    template <typename input_t, visual::completion_state status_v = visual::completion_state::e_incomplete>
     auto chain(input_t&& in) {
-        return ace::visual::chain_base<status_v, input_t>(std::forward<input_t>(in));
+        return visual::chain_unit<status_v, input_t>(std::forward<input_t>(in));
     }
 
     /**
@@ -157,9 +158,9 @@ namespace visual {
      * @tparam status_v Chain status
      * @tparam input_ts Initial capture variables
      */
-    template <ace::visual::details::completion_state status_v = ace::visual::details::completion_state::e_incomplete, typename ... input_ts>
+    template <visual::completion_state status_v = visual::completion_state::e_incomplete, typename ... input_ts>
     auto chain(input_ts&& ... in) {
-        return ace::visual::chain_base<status_v, std::tuple<input_ts...>>(std::forward<std::tuple<input_ts...>>(std::tie(in...)));
+        return visual::chain_unit<status_v, std::tuple<input_ts...>>(std::forward<std::tuple<input_ts...>>(std::tie(in...)));
     }
 
 }

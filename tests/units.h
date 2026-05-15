@@ -493,28 +493,28 @@ inline ace::task composed_output(ace::futures::channel_dyn<int>& ch) {
 
 }
 
-inline visual::nexus<int> nexus_announcer(const int& idx, std::string_view str) {
+inline ace::nexus<int> nexus_announcer(const int& idx, std::string_view str) {
     co_await ace::console::async::println("Propagating {} and saying: {}", idx, str);
     co_return idx;
 }
 
-inline visual::nexus<> nexus_printer(const int& idx) {
+inline ace::nexus<> nexus_printer(const int& idx) {
     co_await ace::console::async::println("Doing something with {}", idx);
-    co_return visual::resume();
+    co_return ace::resume();
 }
 
-inline visual::pipe<> nexus_breaker() {
+inline ace::pipe<> nexus_breaker() {
     ace::console::println("Breaking chain");
-    return visual::cancel();
+    return ace::cancel();
 }
 
-inline visual::nexus<> nexus_congrats() {
+inline ace::nexus<> nexus_congrats() {
     co_await ace::console::async::println("Pipe finished");
-    co_return visual::resume();
+    co_return ace::resume();
 }
 
 inline ace::task chaining() {
-    auto pipeline = visual::chain(1, std::string_view{"hello"})
+    auto pipeline = ace::chain(1, std::string_view{"hello"})
         | nexus_announcer
         | nexus_printer
         | nexus_breaker
@@ -523,11 +523,14 @@ inline ace::task chaining() {
     co_return;
 }
 inline ace::task graphing() {
-    auto graph = visual::graph()
-        (visual::chain(1, std::string_view{"hello one"})
-            | nexus_announcer | nexus_printer | nexus_breaker | nexus_congrats )
-        (visual::chain(2, std::string_view{"hello two"})
-            | nexus_announcer | nexus_printer | nexus_congrats );
+    auto graph = ace::graph()
+        (ace::chain(1, std::string_view{"hello one"})
+            | nexus_announcer | nexus_printer | nexus_breaker | nexus_congrats
+        )
+        (ace::chain(2, std::string_view{"hello two"})
+            | nexus_announcer | nexus_printer | nexus_congrats
+        );
+
     co_await graph.start();
     co_return;
 }

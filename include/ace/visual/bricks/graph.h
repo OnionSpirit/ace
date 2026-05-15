@@ -22,33 +22,34 @@ namespace ace::visual {
     template <
         graph_state completion_v = e_incomplete,
         typename connection_mode_t = void,
-        typename ... pipeline_ts
+        typename ... brick_ts
     >
-    struct ACE_AWAIT_NODISCARD graph_base final {
+    struct ACE_AWAIT_NODISCARD graph_base final : details::brick_handler {
 
-        static constexpr int pipelines_amount = sizeof...(pipeline_ts);
+        static constexpr graph_state state_v = completion_v;
+        static constexpr int pipelines_amount = sizeof...(brick_ts);
         static constexpr int top_pipeline_idx = pipelines_amount - 1;
 
         graph_base() = default;
 
-        explicit graph_base(std::tuple<pipeline_ts...>&& pipelines)
-            : _pipelines(std::forward<std::tuple<pipeline_ts...>>(pipelines)) {};
+        explicit graph_base(std::tuple<brick_ts...>&& pipelines)
+            : _pipelines(std::forward<std::tuple<brick_ts...>>(pipelines)) {};
 
-        std::tuple<pipeline_ts...> _pipelines;
+        std::tuple<brick_ts...> _pipelines;
 
         auto operator () (auto &&pipeline) {
             typedef std::decay_t<decltype(pipeline)> pipeline_t;
-            if constexpr (sizeof...(pipeline_ts) > 0) {
+            if constexpr (sizeof...(brick_ts) > 0) {
                 if constexpr (pipeline_t::status == chain_status::e_complete) {
-                    return graph_base<e_complete, connection_mode_t, pipeline_ts..., pipeline_t> {
-                        std::forward<std::tuple<pipeline_ts..., pipeline_t>>( std::tuple_cat(
-                            std::forward<std::tuple<pipeline_ts...>>(_pipelines),
+                    return graph_base<e_complete, connection_mode_t, brick_ts..., pipeline_t> {
+                        std::forward<std::tuple<brick_ts..., pipeline_t>>( std::tuple_cat(
+                            std::forward<std::tuple<brick_ts...>>(_pipelines),
                             std::forward<std::tuple<pipeline_t>>(std::tie(pipeline))))
                     };
                 } else {
-                    return graph_base<e_incomplete, connection_mode_t, pipeline_ts..., pipeline_t> {
-                        std::forward<std::tuple<pipeline_ts..., pipeline_t>>( std::tuple_cat(
-                            std::forward<std::tuple<pipeline_ts...>>(_pipelines),
+                    return graph_base<e_incomplete, connection_mode_t, brick_ts..., pipeline_t> {
+                        std::forward<std::tuple<brick_ts..., pipeline_t>>( std::tuple_cat(
+                            std::forward<std::tuple<brick_ts...>>(_pipelines),
                             std::forward<std::tuple<pipeline_t>>(std::tie(pipeline))))
                     };
                 }
@@ -64,12 +65,12 @@ namespace ace::visual {
             }
         }
 
-        task start() {
+        task start() override {
             co_await [&] <std::size_t ... index> (std::index_sequence<index...>) -> task {
                 (..., co_await [&] -> task {
                     co_await post(std::get<index>(_pipelines).start());
                 }());
-            }(std::make_index_sequence<sizeof...(pipeline_ts)>{});
+            }(std::make_index_sequence<sizeof...(brick_ts)>{});
             co_return;
         }
     };

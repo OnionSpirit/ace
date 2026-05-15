@@ -3,26 +3,20 @@
 
 #include "ace/visual/details/pipe.h"
 #include "ace/visual/details/actor.h"
-#include "ace/visual/details/brick.h"
+#include "brick.h"
 
 namespace ace::visual {
-
-    enum class chain_status {
-        e_complete,         ///< Chain returns void after completion
-        e_incomplete        ///< Chain does not returns void after completion
-    };
 
     // NOTE: Defines graph chain
     /**
      * @brief Header object. Declares interfaces of the pipeline beginning
-     * @tparam status_v Chain status
+     * @tparam completion_v Chain status
      * @tparam input_t Initial capture variables
      * @tparam receiver_ts Contained pipes
      */
-    template <chain_status status_v, typename input_t, typename ... receiver_ts>
-    struct chain_base : details::brick_handler {
+    template <completion_state completion_v, typename input_t, typename ... receiver_ts>
+    struct chain_base : brick_traits<completion_v> {
 
-        static constexpr chain_status status = status_v;
         details::pipeline_state _completion_status {details::pipeline_state::e_idle };
         details::pipe<input_t> _initial_sender;
         std::tuple<receiver_ts...> _pipeline {};
@@ -59,14 +53,14 @@ namespace ace::visual {
             auto recv = std::move(actor<output_t>(std::forward<decltype(r)>(r)));
             typedef decltype(recv) extra_actor_t;
             if constexpr (std::is_void_v<typename extra_actor_t::raw_output_t>) {
-                return chain_base<chain_status::e_complete, input_t, receiver_ts..., extra_actor_t> {
+                return chain_base<e_complete, input_t, receiver_ts..., extra_actor_t> {
                     std::tuple_cat(
                         std::forward<std::tuple<receiver_ts...>>(_pipeline),
                         std::forward<std::tuple<extra_actor_t&>>(std::tie(recv)))
                     , std::forward<details::pipe<input_t>>(_initial_sender)
                 };
             } else {
-                return chain_base<chain_status::e_incomplete, input_t, receiver_ts..., extra_actor_t> {
+                return chain_base<e_incomplete, input_t, receiver_ts..., extra_actor_t> {
                     std::tuple_cat(
                         std::forward<std::tuple<receiver_ts...>>(_pipeline),
                         std::forward<std::tuple<extra_actor_t&>>(std::tie(recv)))
@@ -143,7 +137,7 @@ namespace visual {
      * @brief Header object. Declares interfaces of the pipeline beginning
      * @tparam status_v Chain status
      */
-    template <ace::visual::chain_status status_v = ace::visual::chain_status::e_incomplete>
+    template <ace::visual::completion_state status_v = ace::visual::completion_state::e_incomplete>
     auto chain() {
         return ace::visual::chain_base<status_v, void>();
     }
@@ -153,7 +147,7 @@ namespace visual {
      * @tparam status_v Chain status
      * @tparam input_t Initial capture variables
      */
-    template <typename input_t, ace::visual::chain_status status_v = ace::visual::chain_status::e_incomplete>
+    template <typename input_t, ace::visual::completion_state status_v = ace::visual::completion_state::e_incomplete>
     auto chain(input_t&& in) {
         return ace::visual::chain_base<status_v, input_t>(std::forward<input_t>(in));
     }
@@ -163,7 +157,7 @@ namespace visual {
      * @tparam status_v Chain status
      * @tparam input_ts Initial capture variables
      */
-    template <ace::visual::chain_status status_v = ace::visual::chain_status::e_incomplete, typename ... input_ts>
+    template <ace::visual::details::completion_state status_v = ace::visual::details::completion_state::e_incomplete, typename ... input_ts>
     auto chain(input_ts&& ... in) {
         return ace::visual::chain_base<status_v, std::tuple<input_ts...>>(std::forward<std::tuple<input_ts...>>(std::tie(in...)));
     }

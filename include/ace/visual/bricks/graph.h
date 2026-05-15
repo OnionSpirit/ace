@@ -21,7 +21,7 @@ namespace ace::visual {
     // NOTE: Connect few branch into a single awaitable unit.
     template <
         graph_state completion_v = e_incomplete,
-        typename merge_mode_t = void,
+        typename connection_mode_t = void,
         typename ... pipeline_ts
     >
     struct ACE_AWAIT_NODISCARD graph_base final {
@@ -40,13 +40,13 @@ namespace ace::visual {
             typedef std::decay_t<decltype(pipeline)> pipeline_t;
             if constexpr (sizeof...(pipeline_ts) > 0) {
                 if constexpr (pipeline_t::status == chain_status::e_complete) {
-                    return graph_base<e_complete, merge_mode_t, pipeline_ts..., pipeline_t> {
+                    return graph_base<e_complete, connection_mode_t, pipeline_ts..., pipeline_t> {
                         std::forward<std::tuple<pipeline_ts..., pipeline_t>>( std::tuple_cat(
                             std::forward<std::tuple<pipeline_ts...>>(_pipelines),
                             std::forward<std::tuple<pipeline_t>>(std::tie(pipeline))))
                     };
                 } else {
-                    return graph_base<e_incomplete, merge_mode_t, pipeline_ts..., pipeline_t> {
+                    return graph_base<e_incomplete, connection_mode_t, pipeline_ts..., pipeline_t> {
                         std::forward<std::tuple<pipeline_ts..., pipeline_t>>( std::tuple_cat(
                             std::forward<std::tuple<pipeline_ts...>>(_pipelines),
                             std::forward<std::tuple<pipeline_t>>(std::tie(pipeline))))
@@ -54,11 +54,11 @@ namespace ace::visual {
                 }
             } else {
                 if constexpr (pipeline_t::status == chain_status::e_complete)
-                    return graph_base<e_complete, merge_mode_t, pipeline_t> {
+                    return graph_base<e_complete, connection_mode_t, pipeline_t> {
                             std::forward<std::tuple<pipeline_t>>(std::tie(pipeline))
                     };
                 else
-                    return graph_base<e_incomplete, merge_mode_t, pipeline_t> {
+                    return graph_base<e_incomplete, connection_mode_t, pipeline_t> {
                         std::forward<std::tuple<pipeline_t>>(std::tie(pipeline))
                     };
             }

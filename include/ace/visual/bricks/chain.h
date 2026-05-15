@@ -3,6 +3,7 @@
 
 #include "ace/visual/details/pipe.h"
 #include "ace/visual/details/actor.h"
+#include "ace/visual/details/brick.h"
 
 namespace ace::visual {
 
@@ -19,7 +20,7 @@ namespace ace::visual {
      * @tparam receiver_ts Contained pipes
      */
     template <chain_status status_v, typename input_t, typename ... receiver_ts>
-    struct chain_base {
+    struct chain_base : details::brick_handler {
 
         static constexpr chain_status status = status_v;
         details::pipeline_state _completion_status {details::pipeline_state::e_idle };
@@ -27,6 +28,8 @@ namespace ace::visual {
         std::tuple<receiver_ts...> _pipeline {};
 
         chain_base() = default;
+
+        ~chain_base() override = default;
 
         explicit chain_base(input_t&& input) {
             auto p = details::pipe<input_t>(std::forward<input_t>(input));
@@ -94,7 +97,7 @@ namespace ace::visual {
             }
         }
 
-        task start() {
+        task start() override {
             co_await [&] <std::size_t ... index> (std::index_sequence<index...>) -> promise<bool> {
                  (... and co_await [&] -> promise<bool> {
                      // NOTE: At the beginning of chain

@@ -239,7 +239,7 @@ namespace ace::core {
                 co_await future;
 
             // NOTE: Only last observer joins and reattaches
-            if constexpr (observer_idx == (sizeof...(future_ts) - 1)) {
+            if constexpr (observer_idx == top_observer_idx) {
                 for (auto& opposite_observer : _observers | std::views::take(top_observer_idx) ) {
                     if (not opposite_observer.value().done())
                         co_await opposite_observer->join();

@@ -5,6 +5,8 @@
 #include "visual/units/chain.h"
 #include "visual/units/graph.h"
 
+#include "visual/connectors/some.h"
+
 namespace ace {
 
     template <typename type = void>
@@ -18,6 +20,8 @@ namespace ace {
 
     template <typename return_type = void>
     using nexus = async<pipe<return_type>, core::permanent>;
+
+    using some = visual::connectors::some;
 
 }
 

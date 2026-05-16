@@ -114,6 +114,9 @@ namespace ace::visual::details {
         static pipe resume() { pipe p{}; p._state = pipeline_state::e_complete; return p;}
     };
 
+    template <typename lhs_t, typename rhs_t>
+    concept is_compatible = std::same_as<std::decay_t<lhs_t>, std::decay_t<rhs_t>>
+        or std::constructible_from<rhs_t, lhs_t>;
 }
 
 #endif //ACE_VISUAL_DETAILS_PIPE_H

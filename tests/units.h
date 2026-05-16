@@ -523,7 +523,7 @@ inline ace::task chaining() {
     co_return;
 }
 inline ace::task graphing() {
-    auto graph = ace::graph(ace::some())
+    auto graph = ace::graph<ace::some>()
         (ace::chain(1, std::string_view{"hello one"})
             | nexus_announcer | nexus_printer | nexus_breaker | nexus_congrats
         )

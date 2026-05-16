@@ -48,10 +48,10 @@ namespace ace::visual::details {
                 if constexpr (sizeof...(nexus_input_ts) == sizeof...(sender_output_ts)) {
                     typedef std::tuple<std::decay_t<sender_output_ts>...> sender_decay_tuple_t;
                     typedef std::tuple<std::decay_t<nexus_input_ts>...> nexus_decay_tuple_t;
-                    static_assert(std::same_as<sender_decay_tuple_t, nexus_decay_tuple_t>,
+                    static_assert(is_compatible<sender_decay_tuple_t, nexus_decay_tuple_t>,
                         "<Right Operand> param set has the same size as <Left Operand> param set, "
                         "but contained types are not compatible");
-                    if constexpr (std::same_as<sender_decay_tuple_t, nexus_decay_tuple_t>)
+                    if constexpr (is_compatible<sender_decay_tuple_t, nexus_decay_tuple_t>)
                         return true;
                 }
             }
@@ -64,10 +64,9 @@ namespace ace::visual::details {
                 "<Right Operand> requests few params, but <Left Operand> passes one");
             if constexpr (sizeof...(nexus_input_ts) == 1) {
                 typedef core::meta::at_pack<0, nexus_input_ts...> nexus_input_t;
-                static_assert(std::same_as<std::decay_t<sender_output_t>, std::decay_t<nexus_input_t>>
-                           or std::constructible_from<nexus_input_t, sender_output_t>,
+                static_assert(is_compatible<sender_output_t, nexus_input_t>,
                     "<Right Operand> input param is not compatible <Left Operand> output type");
-                if constexpr (std::same_as<std::decay_t<sender_output_t>, std::decay_t<nexus_input_t>>)
+                if constexpr (is_compatible<sender_output_t, nexus_input_t>)
                     return true;
             }
             return false;
@@ -139,10 +138,10 @@ namespace ace::visual::details {
                 if constexpr (sizeof...(callback_input_ts) == sizeof...(sender_output_ts)) {
                     typedef std::tuple<std::decay_t<sender_output_ts>...> sender_decay_tuple_t;
                     typedef std::tuple<std::decay_t<callback_input_ts>...> callback_input_t;
-                    static_assert(std::same_as<sender_decay_tuple_t, callback_input_t>,
+                    static_assert(is_compatible<sender_decay_tuple_t, callback_input_t>,
                         "<Right Operand> param set has the same size as <Left Operand> param set, "
                         "but contained types are not compatible");
-                    if constexpr (std::same_as<sender_decay_tuple_t, callback_input_t>)
+                    if constexpr (is_compatible<sender_decay_tuple_t, callback_input_t>)
                         return true;
                 }
             }

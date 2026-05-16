@@ -28,7 +28,8 @@ namespace ace::visual {
 
         explicit chain_unit(input_t&& input) {
             auto p = details::pipe<input_t>(std::forward<input_t>(input));
-            _initial_sender = std::forward<details::pipe<input_t>>(p);
+            // _initial_sender = std::forward<details::pipe<input_t>>(p);
+            _initial_sender = std::move(p);
         }
 
         chain_unit(std::tuple<receiver_ts...>&& receivers, details::pipe<input_t>&& initial_sender) {

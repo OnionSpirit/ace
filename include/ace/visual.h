@@ -6,6 +6,7 @@
 #include "visual/units/graph.h"
 
 #include "visual/connectors/some.h"
+#include "visual/connectors/any.h"
 
 namespace ace {
 
@@ -22,6 +23,8 @@ namespace ace {
     using nexus = async<pipe<return_type>, core::permanent>;
 
     using some = visual::connectors::some;
+
+    using any = visual::connectors::any;
 
 }
 

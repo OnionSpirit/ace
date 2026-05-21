@@ -41,7 +41,7 @@ namespace ace::futures {
      * as a result of processing its member @c connect(...)
      * or the result of @c io_listener.accept(...) via @c co_await
      */
-    template <int domain_v = -1, transport_entity_state connection_state_v = e_indirect>
+    template <int domain_v, transport_entity_state connection_state_v = e_indirect>
     struct io_transport_entity : io_net_entity<io_transport_entity<domain_v, connection_state_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_transport_entity)
@@ -304,7 +304,7 @@ namespace ace::futures {
 
     };
 
-    template <typename entity_t, int domain_v = -1>
+    template <typename entity_t, int domain_v>
     struct connect_query : core::io_query<connect_query<entity_t, domain_v>> {
 
         IMPORT_IO_QUERY_ENV(connect_query)
@@ -341,7 +341,7 @@ namespace ace::futures {
      * Turns out from the @c io_stream_mode_entity as a result of processing its member @c listen()
      * via @c co_await
      */
-    template <int domain_v = -1>
+    template <int domain_v>
     struct io_listener_entity : io_net_entity<io_listener_entity<domain_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_listener_entity);
@@ -415,7 +415,7 @@ namespace ace::futures {
      * Turns out from the @c io_mapping_entity only for the @b SOCK_STREAM socket type
      * as a result of processing its member @c bind(...) via @c co_await
      */
-    template <int domain_v = -1, int type_v = -1>
+    template <int domain_v, int type_v>
     struct io_stream_mode_entity : io_net_entity<io_stream_mode_entity<domain_v, type_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_stream_mode_entity)
@@ -495,7 +495,7 @@ namespace ace::futures {
      *
      * Turns out from @c io_socket_entity as a result of processing it via @c co_await
      */
-    template <int domain_v = -1, int type_v = -1>
+    template <int domain_v, int type_v>
     struct io_mapping_entity : io_net_entity<io_mapping_entity<domain_v, type_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_mapping_entity)
@@ -612,7 +612,7 @@ namespace ace::futures {
      * @tparam type_v Communication semantics
      * @tparam protocol_v Particular socket protol
      */
-    template <int domain_v = -1, int type_v = -1, int protocol_v = -1>
+    template <int domain_v, int type_v, int protocol_v>
     struct io_socket : core::io_query<io_socket<domain_v, type_v, protocol_v>> {
 
         IMPORT_IO_QUERY_ENV(io_socket)
@@ -637,50 +637,17 @@ namespace ace::futures {
         const int _flags;
     };
 
-
-    template <>
-    struct io_socket<-1, -1, -1> : core::io_query<io_socket<>> {
-
-        IMPORT_IO_QUERY_ENV(io_socket)
-
-        /**
-         * @param [in] domain communication domain
-         * @param [in] type communication semantics
-         * @param [in] protocol particular socket protol
-         * @param [in] flags currently unused
-         */
-        explicit io_socket(const int domain, const int type, const int protocol, const int flags = 0)
-            // NOTE: There is no socket but need supress defaulted '-1' errcode
-            : io_query_t(0)
-            , _domain(domain)
-            , _type(type)
-            , _protocol(protocol)
-            , _flags(flags) {}
-
-        bool setup_query(kernel_observer* kwp) const {
-            core::modules::kernel_controller::socket(kwp, _domain, _type, _protocol, _flags);
-            return true;
-        }
-
-        [[nodiscard]] io_mapping_entity<> await_resume() const { return io_mapping_entity{_res}; }
-
-        const int _domain;
-        const int _type;
-        const int _protocol;
-        const int _flags;
-    };
-
     typedef io_listener_entity<2> io_listener;
 
-    typedef io_transport_entity<2, e_indirect> io_net;
+    typedef io_transport_entity<2, e_indirect> io_net_interface;
     typedef io_transport_entity<2, e_connected> io_connection;
 
     using io_socket_raw      = io_socket<AF_INET , SOCK_RAW   , IPPROTO_RAW>;
-    using io_socket_raw_dual = io_socket<AF_INET6, SOCK_RAW   , IPPROTO_RAW>;
+    using io_socket_raw_v6   = io_socket<AF_INET6, SOCK_RAW   , IPPROTO_RAW>;
     using io_socket_tcp      = io_socket<AF_INET , SOCK_STREAM, IPPROTO_TCP>;
-    using io_socket_tcp_dual = io_socket<AF_INET6, SOCK_STREAM, IPPROTO_TCP>;
+    using io_socket_tcp_v6   = io_socket<AF_INET6, SOCK_STREAM, IPPROTO_TCP>;
     using io_socket_udp      = io_socket<AF_INET , SOCK_DGRAM , IPPROTO_UDP>;
-    using io_socket_udp_dual = io_socket<AF_INET6, SOCK_DGRAM , IPPROTO_UDP>;
+    using io_socket_udp_v6   = io_socket<AF_INET6, SOCK_DGRAM , IPPROTO_UDP>;
 
 } // end namespace ace::futures
 

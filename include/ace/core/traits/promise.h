@@ -190,7 +190,7 @@ namespace ace::core::traits {
     template <typename derived_t, typename return_t>
     struct promise_traits : promise_return_traits<promise_traits<derived_t, return_t>, return_t> {
 
-        typedef traits::future_handle* future_handler_ptr_t; ///< Pointer type for the currently awaited busy future.
+        typedef future_handle* future_handler_ptr_t; ///< Pointer type for the currently awaited busy future.
 
         typedef promise_return_traits<promise_traits, return_t> promise_return_traits_t;
         using promise_return_traits_t::_status;

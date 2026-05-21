@@ -6,6 +6,10 @@
 #include <ace/core/io.h>
 #include <ace/futures/get_runner.h>
 
+// NOTE: It is needed to use external fmt lib with older standards which does not support std::format
+#ifndef __FMT__
+#define __FMT__ std
+#endif
 
 namespace ace::core::modules {
 
@@ -54,20 +58,20 @@ namespace ace::core::modules {
             print_query() = delete;
 
             template <typename ... Args>
-            explicit print_query(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args)
+            explicit print_query(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args)
                 : io_query_t(file->_fileno) {
                 if constexpr (new_line)
-                    _buff = std::format(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
+                    _buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
                 else
-                    _buff = std::format(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+                    _buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
             }
 
-            explicit print_query(const std::FILE* file, const std::string_view&& str)
+            explicit print_query(const std::FILE* file, const __FMT__::string_view&& str)
                 : io_query_t(file->_fileno) {
                 if constexpr (new_line)
-                    _buff = std::string(std::forward<const std::string_view>(str)) + '\n';
+                    _buff = std::string(std::forward<const __FMT__::string_view>(str)) + '\n';
                 else
-                    _buff = std::string(std::forward<const std::string_view>(str));
+                    _buff = std::string(std::forward<const __FMT__::string_view>(str));
             }
 
             bool setup_query(kernel_observer* kwp) {
@@ -87,31 +91,31 @@ namespace ace::core::modules {
         };
 
         template <class... Args>
-        static void print_busy(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args) {
+        static void print_busy(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
             std::string buff;
-            buff = std::format(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
             if (write(file->_fileno, buff.data(), buff.size()) < 0)
                 throw std::runtime_error(std::string("print failed: ") + strerror(errno));
         }
 
         template <class... Args>
-        static void println_busy(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args) {
+        static void println_busy(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
             std::string buff;
-            buff = std::format(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
+            buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
             if (write(file->_fileno, buff.data(), buff.size()) < 0)
                 throw std::runtime_error(std::string("print failed: ") + strerror(errno));
         }
 
-        static void print_busy(const std::FILE* file, const std::string_view&& str) {
+        static void print_busy(const std::FILE* file, const __FMT__::string_view&& str) {
             std::string buff;
-            buff = std::string(std::forward<const std::string_view>(str));
+            buff = std::string(std::forward<const __FMT__::string_view>(str));
             if (write(file->_fileno, buff.data(), buff.size()) < 0)
                 throw std::runtime_error(std::string("print failed: ") + strerror(errno));
         }
 
-        static void println_busy(const std::FILE* file, const std::string_view&& str) {
+        static void println_busy(const std::FILE* file, const __FMT__::string_view&& str) {
             std::string buff;
-            buff = std::string(std::forward<const std::string_view>(str)) + '\n';
+            buff = std::string(std::forward<const __FMT__::string_view>(str)) + '\n';
             if (write(file->_fileno, buff.data(), buff.size()) < 0)
                 throw std::runtime_error(std::string("print failed: ") + strerror(errno));
         }
@@ -151,23 +155,23 @@ namespace ace::core::modules {
             }
 
             template <class... Args>
-            static auto println(std::format_string<Args...>&& fmt, Args&&... args) {
+            static auto println(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
                 const std::FILE* file = _output.load(std::memory_order_acquire);
-                return println_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+                return println_query(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
             }
 
             template <class... Args>
-            static auto println(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args) {
-                return println_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            static auto println(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
+                return println_query(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
             }
 
-            static auto println(const std::string_view&& str) {
+            static auto println(const __FMT__::string_view&& str) {
                 const std::FILE* file = _output.load(std::memory_order_acquire);
-                return println_query(file, std::forward<const std::string_view>(str));
+                return println_query(file, std::forward<const __FMT__::string_view>(str));
             }
 
-            static auto println(const std::FILE* file, const std::string_view&& str) {
-                return println_query(file, std::forward<const std::string_view>(str));
+            static auto println(const std::FILE* file, const __FMT__::string_view&& str) {
+                return println_query(file, std::forward<const __FMT__::string_view>(str));
             }
 
             static auto println() {
@@ -180,23 +184,23 @@ namespace ace::core::modules {
             }
 
             template <class... Args>
-            static auto print(std::format_string<Args...>&& fmt, Args&&... args) {
+            static auto print(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
                 const std::FILE* file = _output.load(std::memory_order_acquire);
-                return print_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+                return print_query(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
             }
 
             template <class... Args>
-            static auto print(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args) {
-                return print_query(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            static auto print(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
+                return print_query(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
             }
 
-            static auto print(const std::string_view&& str) {
+            static auto print(const __FMT__::string_view&& str) {
                 const std::FILE* file = _output.load(std::memory_order_acquire);
-                return print_query(file, std::forward<const std::string_view>(str));
+                return print_query(file, std::forward<const __FMT__::string_view>(str));
             }
 
-            static auto print(const std::FILE* file, const std::string_view&& str) {
-                return print_query(file, std::forward<const std::string_view>(str));
+            static auto print(const std::FILE* file, const __FMT__::string_view&& str) {
+                return print_query(file, std::forward<const __FMT__::string_view>(str));
             }
         };
 
@@ -207,23 +211,23 @@ namespace ace::core::modules {
         }
 
         template <class... Args>
-        static auto println(std::format_string<Args...>&& fmt, Args&&... args) {
+        static auto println(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
             const std::FILE* file = _output.load(std::memory_order_acquire);
-            return println_busy(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            return println_busy(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
         template <class... Args>
-        static auto println(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args) {
-            return println_busy(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+        static auto println(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
+            return println_busy(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
-        static auto println(const std::string_view&& str) {
+        static auto println(const __FMT__::string_view&& str) {
             const std::FILE* file = _output.load(std::memory_order_acquire);
-            return println_busy(file, std::forward<const std::string_view>(str));
+            return println_busy(file, std::forward<const __FMT__::string_view>(str));
         }
 
-        static auto println(const std::FILE* file, const std::string_view&& str) {
-            return println_busy(file, std::forward<const std::string_view>(str));
+        static auto println(const std::FILE* file, const __FMT__::string_view&& str) {
+            return println_busy(file, std::forward<const __FMT__::string_view>(str));
         }
 
         static auto println() {
@@ -236,23 +240,23 @@ namespace ace::core::modules {
         }
 
         template <class... Args>
-        static auto print(std::format_string<Args...>&& fmt, Args&&... args) {
+        static auto print(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
             const std::FILE* file = _output.load(std::memory_order_acquire);
-            return print_busy(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            return print_busy(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
         template <class... Args>
-        static auto print(const std::FILE* file, std::format_string<Args...>&& fmt, Args&&... args) {
-            return print_busy(file, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+        static auto print(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
+            return print_busy(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
-        static auto print(const std::string_view&& str) {
+        static auto print(const __FMT__::string_view&& str) {
             const std::FILE* file = _output.load(std::memory_order_acquire);
-            return print_busy(file, std::forward<const std::string_view>(str));
+            return print_busy(file, std::forward<const __FMT__::string_view>(str));
         }
 
-        static auto print(const std::FILE* file, const std::string_view&& str) {
-            return print_busy(file, std::forward<const std::string_view>(str));
+        static auto print(const std::FILE* file, const __FMT__::string_view&& str) {
+            return print_busy(file, std::forward<const __FMT__::string_view>(str));
         }
 
     };

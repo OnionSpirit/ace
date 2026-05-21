@@ -239,7 +239,7 @@ namespace ace::core {
                 co_await future;
 
             // NOTE: Only last observer joins and reattaches
-            if constexpr (observer_idx == (sizeof...(future_ts) - 1)) {
+            if constexpr (observer_idx == top_observer_idx) {
                 for (auto& opposite_observer : _observers | std::views::take(top_observer_idx) ) {
                     if (not opposite_observer.value().done())
                         co_await opposite_observer->join();
@@ -271,8 +271,7 @@ namespace ace::core {
     promise<async_return>
     compose(sender_t&& sender, async<async_return, async_promise_rule_t>(responder)(async_input)) {
         typedef meta::resume_type<sender_t> sender_resume_t;
-        static_assert(std::same_as<std::decay_t<async_input>, sender_resume_t>,
-            "Receiver (Right Operand) does not compatible with Sender's (Left Operand) return type");
+        static_assert(std::same_as<std::decay_t<async_input>, sender_resume_t>, ACE_INCOMPATIBLE_COMPOSE_ERROR);
         co_return co_await responder(std::forward<sender_resume_t>(co_await (sender)));
     }
 
@@ -298,8 +297,7 @@ namespace ace::core {
     promise<foo_return>
     compose(sender_t&& sender, foo_return(responder)(foo_input)) {
         typedef meta::resume_type<sender_t> sender_resume_t;
-        static_assert(std::same_as<std::decay_t<foo_input>, sender_resume_t>,
-            "Receiver (Right Operand) does not compatible with Sender's (Left Operand) return type");
+        static_assert(std::same_as<std::decay_t<foo_input>, sender_resume_t>, ACE_INCOMPATIBLE_COMPOSE_ERROR);
         co_return responder(std::forward<sender_resume_t>(co_await (sender)));
     }
 

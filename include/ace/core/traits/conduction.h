@@ -61,7 +61,7 @@ namespace ace::core::traits {
          * @param async The suspended coroutine async to enqueue.
          */
         virtual void forward(runner_async_t&& async) {
-            throw std::logic_error("runner_conductor_handle::forward() - called but not overridden");
+            throw std::logic_error("runner_conductor_handle::forward(...) - called but not overridden");
         };
 
         /**

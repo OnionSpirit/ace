@@ -37,13 +37,13 @@ inline ace::promise<bool> simple_context_test() {
     once_suspend tests_future;
 
     co_await tests_future;
-    ace::console::println("One suspend complete");
+    ace::console::async::println("One suspend complete");
     co_return true;
 }
 
 inline ace::task nested_context_suspender() {
     co_await simple_context_test();
-    ace::console::println("Nested call complete");
+    ace::console::async::println("Nested call complete");
     co_return;
 }
 
@@ -54,17 +54,17 @@ struct channel_abuser {
         co_await tests_future;
         std::string msg = "Ping";
         _channel.push(msg);
-        co_await ace::console::async::println("Channel send complete");
+        ace::console::async::println("Channel send complete");
         const auto received = co_await _channel.pull();
-        co_await ace::console::async::println("Channel received answer. DATA: {}", received);
+        ace::console::async::println("Channel received answer. DATA: {}", received);
         co_return;
     }
 
     ace::task channel_receiver() {
         const auto received = co_await _channel.pull();
-        co_await ace::console::async::println("Channel receive complete. DATA: {}", received);
+        ace::console::async::println("Channel receive complete. DATA: {}", received);
         _channel << "Pong";
-        co_await ace::console::async::println("Channel send answer");
+        ace::console::async::println("Channel send answer");
         co_return;
     }
 
@@ -83,9 +83,9 @@ ace::task timer_waiter(std::chrono::duration<Rep, Period> wait_time, ace::future
 
 template<typename Rep, typename Period>
 ace::task timer_waiter_valued(std::chrono::duration<Rep, Period> wait_time, ace::futures::channel_dyn<int>& ch) {
-    co_await ace::console::async::println("Timeout launched for: {}", wait_time);
+    ace::console::async::println("Timeout launched for: {}", wait_time);
     co_await ace::futures::timeout(wait_time);
-    co_await ace::console::async::println("Timeout released after: {}", wait_time);
+    ace::console::async::println("Timeout released after: {}", wait_time);
     ch << wait_time.count();
     co_return;
 }
@@ -100,9 +100,9 @@ inline auto fancy(ace::core::timepoint_t tp) {
 }
 
 inline ace::task expire_waiter_valued(ace::core::timepoint_t wait_time, ace::futures::channel_dyn<ace::core::timepoint_t>& ch) {
-    co_await ace::console::async::println("Expires at: {}", fancy(wait_time));
+    ace::console::async::println("Expires at: {}", fancy(wait_time));
     co_await ace::futures::expire(wait_time);
-    co_await ace::console::async::println("Expired at: {}", fancy(wait_time));
+    ace::console::async::println("Expired at: {}", fancy(wait_time));
     ch << wait_time;
     co_return;
 }
@@ -118,7 +118,7 @@ ace::task channel_fetcher(ace::futures::channel_dyn<channel_t>& ch, std::vector<
 inline ace::task to_spawn(ace::futures::channel_dyn<ace::core::runner*>& output) {
     auto curr_runner = co_await ace::get_runner();
     co_await ace::futures::timeout(100ms);
-    co_await ace::console::async::println("'spawned' runned out");
+    ace::console::async::println("'spawned' runned out");
     output << curr_runner;
     co_return;
 }
@@ -128,19 +128,19 @@ inline ace::task spawner(ace::futures::channel_dyn<ace::core::runner*>& output) 
     output << curr_runner;
     const auto handle = co_await ace::spawn(to_spawn(output));
     while (not handle.done()) {
-        co_await ace::console::async::println("'spawned' not done");
+        ace::console::async::println("'spawned' not done");
         co_await ace::futures::timeout(10ms);
     }
-    co_await ace::console::async::println("'spawned' done!!!");
+    ace::console::async::println("'spawned' done!!!");
 }
 
 inline ace::task join_spawner(ace::futures::channel_dyn<ace::core::runner*>& output) {
     auto curr_runner = co_await ace::get_runner();
     output << curr_runner;
     auto handle = co_await ace::spawn(to_spawn(output));
-    co_await ace::console::async::println("'spawned' is spawned");
-    if (co_await handle.join()) ace::console::println("'spawned' done!!!");
-    else co_await ace::console::async::println("'spawned' broken!!!");
+    ace::console::async::println("'spawned' is spawned");
+    if (co_await handle.join()) ace::console::async::println("'spawned' done!!!");
+    else ace::console::async::println("'spawned' broken!!!");
 }
 
 struct lifetime_watchdog {
@@ -148,52 +148,52 @@ struct lifetime_watchdog {
     std::string _name;
 
     explicit lifetime_watchdog(const std::string_view name) : _name(name) {
-        ace::console::println("{} constructed", _name);
+        ace::console::async::println("{} constructed", _name);
     };
 
-    ~lifetime_watchdog() { ace::console::println("{} destroyed", _name); }
+    ~lifetime_watchdog() { ace::console::async::println("{} destroyed", _name); }
 };
 
 inline ace::promise<> to_spawn_nested(ace::futures::channel_dyn<ace::core::runner*>& output) {
     const auto _check = std::make_unique<lifetime_watchdog>("'parallel-nested'");
-    co_await ace::console::async::print("'parallel-nested' started\n");
+    ace::console::async::print("'parallel-nested' started\n");
     co_await ace::futures::timeout(1000ms);
     output << co_await ace::get_runner();
-    co_await ace::console::async::println("{} finished", _check->_name);
+    ace::console::async::println("{} finished", _check->_name);
     co_return;
 }
 
 inline ace::task to_spawn_cancel(ace::futures::channel_dyn<ace::core::runner*>& output) {
     const auto _check = std::make_unique<lifetime_watchdog>("'parallel'");
-    co_await ace::console::async::print("'parallel' started\n");
+    ace::console::async::print("'parallel' started\n");
     co_await to_spawn_nested(output);
     co_await ace::futures::timeout(1000ms);
     output << co_await ace::get_runner();
-    co_await ace::console::async::println("{} finished", _check->_name);
+    ace::console::async::println("{} finished", _check->_name);
     co_return;
 }
 
 inline ace::task spawner_cancel(ace::futures::channel_dyn<ace::core::runner*>& output) {
-    co_await ace::console::async::println("'spawner' started");
+    ace::console::async::println("'spawner' started");
     auto handle = co_await ace::spawn(to_spawn_cancel(output));
     co_await ace::futures::timeout(100ms);
-    co_await ace::console::async::println("'spawner' awake, canceling...");
+    ace::console::async::println("'spawner' awake, canceling...");
     handle.cancel();
     output << co_await ace::get_runner();
-    co_await ace::console::async::println("'spawner' finished");
+    ace::console::async::println("'spawner' finished");
 }
 
 inline ace::task spawner_join_canceled(ace::futures::channel_dyn<ace::core::runner*>& output) {
-    co_await ace::console::async::println("'spawner' started");
+    ace::console::async::println("'spawner' started");
     auto handle = co_await ace::spawn(to_spawn_cancel(output));
     co_await ace::futures::timeout(100ms);
-    co_await ace::console::async::println("'spawner' awake, canceling...");
+    ace::console::async::println("'spawner' awake, canceling...");
     handle.cancel();
     if (not co_await handle.join())
-        co_await ace::console::async::println("'parallel' canceled. Joining is 'false'");
-    else co_await ace::console::async::println("'parallel' joined as alive. Failure");
+        ace::console::async::println("'parallel' canceled. Joining is 'false'");
+    else ace::console::async::println("'parallel' joined as alive. Failure");
     output << co_await ace::get_runner();
-    co_await ace::console::async::println("'spawner' finished");
+    ace::console::async::println("'spawner' finished");
 }
 
 inline ace::task racer(const int& max, std::string& shared_counter, ace::cutex& cut) {
@@ -204,7 +204,7 @@ inline ace::task racer(const int& max, std::string& shared_counter, ace::cutex& 
         crx.sync();
     }
     co_await crx.capture();
-    co_await ace::console::async::println("'racer' finished");
+    ace::console::async::println("'racer' finished");
 }
 
 template<typename Rep, typename Period>
@@ -215,64 +215,64 @@ ace::task sleeper(std::chrono::duration<Rep, Period> wait_time) {
 
 
 inline ace::task cutex_parallel(ace::futures::channel_dyn<ace::core::runner*>& output, ace::cutex& cut) {
-    co_await ace::console::async::println("'cutex_parallel' started");
+    ace::console::async::println("'cutex_parallel' started");
     const auto _check = std::make_unique<lifetime_watchdog>("'cutex_parallel'");
     ace::guard crx(cut);
     co_await crx.capture();
     co_await ace::futures::timeout(50ms);
     output << co_await ace::get_runner();
-    co_await ace::console::async::println("{} finished", _check->_name);
+    ace::console::async::println("{} finished", _check->_name);
 }
 
 inline ace::task cutex_carry(ace::futures::channel_dyn<ace::core::runner*>& output, ace::cutex& cut) {
-    co_await ace::console::async::println("'cutex_carry' started");
+    ace::console::async::println("'cutex_carry' started");
     const auto _check = std::make_unique<lifetime_watchdog>("'cutex_carry'");
     ace::guard crx(cut);
     co_await crx.capture();
-    co_await ace::console::async::println("'cutex_carry' captured cutex");
+    ace::console::async::println("'cutex_carry' captured cutex");
     co_await ace::futures::timeout(100ms);
     output << co_await ace::get_runner();
-    co_await ace::console::async::println("{} finished", _check->_name);
+    ace::console::async::println("{} finished", _check->_name);
 }
 
 inline ace::task cutex_checker(ace::futures::channel_dyn<ace::core::runner*>& output, ace::cutex& cut) {
     ace::guard crx(cut);
     co_await crx.capture();
-    co_await ace::console::async::println("'cutex_checker' captured cutex");
+    ace::console::async::println("'cutex_checker' captured cutex");
     output << co_await ace::get_runner();
-    co_await ace::console::async::println("'cutex_checker' finished");
+    ace::console::async::println("'cutex_checker' finished");
 }
 
 inline ace::task cutex_spawner(ace::futures::channel_dyn<ace::core::runner*>& output, ace::cutex& cut) {
-    co_await ace::console::async::println("'cutex_spawner' started");
+    ace::console::async::println("'cutex_spawner' started");
     co_await ace::futures::timeout(10ms);
     auto handle = co_await ace::spawn(cutex_carry(output, cut));
     co_await ace::futures::timeout(75ms);
-    co_await ace::console::async::println("'cutex_spawner' awake, canceling...");
+    ace::console::async::println("'cutex_spawner' awake, canceling...");
     handle.cancel();
     co_await ace::futures::timeout(10ms);
     if (not co_await handle.join())
-        co_await ace::console::async::println("'cutex_carry' canceled. Joining is 'false'");
+        ace::console::async::println("'cutex_carry' canceled. Joining is 'false'");
     else
-        co_await ace::console::async::println("'cutex_carry' joined as alive. Failure");
+        ace::console::async::println("'cutex_carry' joined as alive. Failure");
     output << co_await ace::get_runner();
-    co_await ace::console::async::println("'cutex_spawner' finished");
+    ace::console::async::println("'cutex_spawner' finished");
 }
 
 inline ace::task cutex_spawner_permanent(ace::futures::channel_dyn<ace::core::runner*>& output, ace::cutex& cut) {
-    co_await ace::console::async::println("'cutex_spawner_permanent' started");
+    ace::console::async::println("'cutex_spawner_permanent' started");
     co_await ace::futures::timeout(10ms);
     auto handle = co_await ace::spawn(cutex_carry(output, cut));
     co_await ace::futures::timeout(25ms);
-    co_await ace::console::async::println("'cutex_spawner_permanent' awake, canceling...");
+    ace::console::async::println("'cutex_spawner_permanent' awake, canceling...");
     handle.cancel();
     co_await ace::futures::timeout(10ms);
     if (not co_await handle.join())
-        co_await ace::console::async::println("'cutex_carry' canceled. Joining is 'false'");
+        ace::console::async::println("'cutex_carry' canceled. Joining is 'false'");
     else
-        co_await ace::console::async::println("'cutex_carry' joined as alive. Failure");
+        ace::console::async::println("'cutex_carry' joined as alive. Failure");
     output << co_await ace::get_runner();;
-    co_await ace::console::async::println("'cutex_spawner_permanent' finished");
+    ace::console::async::println("'cutex_spawner_permanent' finished");
 }
 
 inline ace::task socket_abuser() {
@@ -298,7 +298,7 @@ inline ace::task socket_abuser() {
     for (int i =1; i < 6; ++i) {
         std::string msg = "Echo message " + std::to_string(i);
         if (co_await connection.send(msg))
-            co_await ace::console::async::println("Client sent: '{}'", msg);
+            ace::console::async::println("Client sent: '{}'", msg);
     }
 
     co_return;
@@ -332,8 +332,8 @@ inline ace::task socket_listener() {
 
     for (int i =0; i < 5; ++i) {
         if (auto result = co_await connection.recv_str())
-            co_await ace::console::async::println("Server received: '{}'", result.value());
-        else co_await ace::console::async::println("Server failed: '{}'", strerror(result.error()));
+            ace::console::async::println("Server received: '{}'", result.value());
+        else ace::console::async::println("Server failed: '{}'", strerror(result.error()));
     }
 
     co_return;
@@ -344,33 +344,33 @@ inline ace::task tcp_echo_client() {
 
     auto bind_entry = co_await ace::futures::io_socket_tcp();
     if (not bind_entry) {
-        co_await ace::console::async::println("[ CLIENT ERROR ] - {}", bind_entry.error());
+        ace::console::async::println("[ CLIENT ERROR ] - {}", bind_entry.error());
         co_return;
     }
 
-    co_await ace::console::async::println("[ CLIENT ] - Socket created...");
+    ace::console::async::println("[ CLIENT ] - Socket created...");
 
     auto selection_entry = co_await bind_entry.bind("127.0.0.1", 8001);
     if (not selection_entry) {
-        co_await ace::console::async::println("[ CLIENT ERROR ] - {}", selection_entry.error());
+        ace::console::async::println("[ CLIENT ERROR ] - {}", selection_entry.error());
         co_return;
     }
 
-    co_await ace::console::async::println("[ CLIENT ] - Socket bint...");
+    ace::console::async::println("[ CLIENT ] - Socket bint...");
 
     const auto connection = co_await selection_entry.connect("127.0.0.1", 8000);
     if (not connection) {
-        co_await ace::console::async::println("[ CLIENT ERROR ] - {}", connection.error());
+        ace::console::async::println("[ CLIENT ERROR ] - {}", connection.error());
         co_return;
     }
 
-    co_await ace::console::async::println("[ CLIENT ] - Connected to server...");
+    ace::console::async::println("[ CLIENT ] - Connected to server...");
 
     for (int i =1; i < 6; ++i) {
         if (const auto input = co_await ace::console::async::input(); not input)
-            co_await ace::console::async::println("[ CLIENT ERROR ] : {}", strerror(input.error()));
+            ace::console::async::println("[ CLIENT ERROR ] : {}", strerror(input.error()));
         else if (co_await connection.send(input.value()))
-            co_await ace::console::async::println("[ CLIENT SENT ] : {}", input.value());
+            ace::console::async::println("[ CLIENT SENT ] : {}", input.value());
     }
 
     co_return;
@@ -380,40 +380,40 @@ inline ace::task tcp_echo_server() {
 
     auto bind_entry = co_await ace::futures::io_socket_tcp();
     if (not bind_entry) {
-        co_await ace::console::async::println("[ SERVER ERROR ] - {}", bind_entry.error());
+        ace::console::async::println("[ SERVER ERROR ] - {}", bind_entry.error());
         co_return;
     }
 
-    co_await ace::console::async::println("[ SERVER ] - Socket created...");
+    ace::console::async::println("[ SERVER ] - Socket created...");
 
     auto selection_entry = co_await bind_entry.bind("127.0.0.1", 8000);
     if (not selection_entry) {
-        co_await ace::console::async::println("[ SERVER ERROR ] - {}", selection_entry.error());
+        ace::console::async::println("[ SERVER ERROR ] - {}", selection_entry.error());
         co_return;
     }
 
-    co_await ace::console::async::println("[ SERVER ] - Socket bint...");
+    ace::console::async::println("[ SERVER ] - Socket bint...");
 
     auto listener = co_await selection_entry.listen();
     if (not listener) {
-        co_await ace::console::async::println("[ SERVER ERROR ] - {}", listener.error());
+        ace::console::async::println("[ SERVER ERROR ] - {}", listener.error());
         co_return;
     }
 
-    co_await ace::console::async::println("[ SERVER ] - Pending connections...");
+    ace::console::async::println("[ SERVER ] - Pending connections...");
 
     const auto connection = co_await listener.accept("127.0.0.1", 8001);
     if (not connection) {
-        co_await ace::console::async::println("[ SERVER ERROR ] - {}", connection.error());
+        ace::console::async::println("[ SERVER ERROR ] - {}", connection.error());
         co_return;
     }
 
-    co_await ace::console::async::println("[ SERVER ] - Client connected...");
+    ace::console::async::println("[ SERVER ] - Client connected...");
 
     std::array<char, 128> buff {};
     for (int i =0; i < 5; ++i) {
         if (co_await connection.recv(buff) > 0)
-            co_await ace::console::async::println("[ SERVER RECEIVED ] : {}", buff.data());
+            ace::console::async::println("[ SERVER RECEIVED ] : {}", buff.data());
     }
 
     co_return;
@@ -432,7 +432,7 @@ inline ace::task timer_and_timer() {
 }
 
 inline ace::task spawn_post(int idx, ace::futures::channel_dyn<int>& ch) {
-    co_await ace::console::async::println("Placing {} to channel", idx);
+    ace::console::async::println("Placing {} to channel", idx);
     ch << idx;
     co_return;
 }
@@ -450,10 +450,10 @@ inline ace::task imposter(ace::futures::channel_dyn<int>& ch) {
 
     // NOTE: Testing syntax depending on stdlibc++ version (newone has more formatters)
     #if defined(__clang__) && __clang_major__ >= 22
-        co_await ace::console::async::println("spawn, post, spawn, post - finished {}", res);
+        ace::console::async::println("spawn, post, spawn, post - finished {}", res);
     #endif
 
-    co_await ace::console::async::println("Placing {} to channel", 5);
+    ace::console::async::println("Placing {} to channel", 5);
     ch << 5;
     co_return;
 }
@@ -464,15 +464,16 @@ inline ace::promise<int> pusher(int idx, ace::futures::channel_dyn<int>& ch) {
 }
 
 inline void printer(const int& idx) {
-    ace::console::println("Placing {} to channel", idx);
+    ace::console::async::println("Placing {} to channel", idx);
 }
 
 inline ace::promise<> printer_promise(const int idx) {
-    co_await ace::console::async::println("Placing {} to channel", idx);
+    ace::console::async::println("Placing {} to channel", idx);
+    co_return;
 }
 
 inline void congrats() {
-    ace::console::println("Pipe finished");
+    ace::console::async::println("Pipe finished");
 }
 
 inline ace::task composed_output(ace::futures::channel_dyn<int>& ch) {

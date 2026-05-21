@@ -26,8 +26,6 @@ namespace ace::core::modules {
 
         console() = default;
 
-    protected:
-
         struct lazy_print_observer : kernel_observer {
 
             std::vector<uint8_t> _buffer{};

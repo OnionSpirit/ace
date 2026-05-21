@@ -55,6 +55,7 @@ struct channel_abuser {
         std::string msg = "Ping";
         _channel.push(msg);
         ace::console::busy::println("Channel send complete");
+        co_await ace::suspend();
         const auto received = co_await _channel.pull();
         ace::console::busy::println("Channel received answer. DATA: {}", received);
         co_return;

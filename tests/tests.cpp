@@ -52,6 +52,7 @@ TEST(futures, do_dynamic_channel_on_runner_test) {
     ace::run();
     ASSERT_TRUE(ace::empty());
     ASSERT_TRUE(abuser._channel.empty());
+    ASSERT_TRUE(abuser._channel._waiters.empty());
 }
 
 TEST(futures, do_timer_on_runner_test) {

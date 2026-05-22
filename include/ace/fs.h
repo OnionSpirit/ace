@@ -189,53 +189,33 @@ namespace ace::fs {
     };
 
 
-    template <typename impl_t>
     class file {
 
         file() = default;
 
-        template <class... Args>
+        template <typename impl_t = impl::lazy, class... Args>
         auto writeln(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
             return impl_t::writeln_impl(_desc, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
-        template <class... Args>
-        auto writeln(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
-            return impl_t::writeln_impl(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
-        }
-
+        template <typename impl_t = impl::lazy>
         auto writeln(const __FMT__::string_view&& str) {
             return impl_t::writeln_impl(_desc, std::forward<const __FMT__::string_view>(str));
         }
 
-        auto writeln(const std::FILE* file, const __FMT__::string_view&& str) {
-            return impl_t::writeln_impl(file, std::forward<const __FMT__::string_view>(str));
-        }
-
+        template <typename impl_t = impl::lazy>
         auto writeln() {
             return impl_t::writeln_impl(_desc, "");
         }
 
-        auto writeln(const std::FILE* file) {
-            return impl_t::writeln_impl(file, "");
-        }
-
-        template <class... Args>
+        template <typename impl_t = impl::lazy, class... Args>
         auto write(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
             return impl_t::write_impl(_desc, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
-        template <class... Args>
-        auto write(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
-            return impl_t::write_impl(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
-        }
-
+        template <typename impl_t = impl::lazy>
         auto write(const __FMT__::string_view&& str) {
             return impl_t::write_impl(_desc, std::forward<const __FMT__::string_view>(str));
-        }
-
-        auto write(const std::FILE* file, const __FMT__::string_view&& str) {
-            return impl_t::write_impl(file, std::forward<const __FMT__::string_view>(str));
         }
 
         std::FILE* _desc = stdout;

@@ -1,6 +1,7 @@
 #include <ranges>
 #include <gtest/gtest.h>
 #include "environment.h"
+#include <filesystem>
 
 TEST(context, do_co_await_test) {
     auto r = simple_context_test();
@@ -440,4 +441,10 @@ TEST(core, do_and_await_test) {
 
     const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
     EXPECT_GE(ms_time, 100);
+}
+
+TEST(core, do_fs_tests) {
+
+    std::filesystem::path();
+
 }

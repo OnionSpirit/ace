@@ -11,7 +11,7 @@
 #define __FMT__ std
 #endif
 
-namespace ace::core::modules {
+namespace ace {
 
     /**
      * @warning Don't take it serious. For the most part this is a dumb joke.
@@ -26,7 +26,7 @@ namespace ace::core::modules {
 
         console() = default;
 
-        struct lazy_print_observer : kernel_observer {
+        struct lazy_print_observer : core::services::kernel_observer {
 
             std::vector<uint8_t> _buffer{};
 
@@ -57,7 +57,7 @@ namespace ace::core::modules {
                     throw std::runtime_error(std::string("print failed: ") + strerror(errno));
             observer_ptr->_runner_identity = nullptr;
             observer_ptr->_buffer.assign(buff.begin(), buff.end());
-            if (not kernel_controller::write(observer_ptr, file->_fileno,
+            if (not core::services::kernel_controller::write(observer_ptr, file->_fileno,
                 observer_ptr->_buffer.data(), observer_ptr->_buffer.size(), 0))
                 throw std::runtime_error("print failed");
         }
@@ -71,7 +71,7 @@ namespace ace::core::modules {
                     throw std::runtime_error(std::string("print failed: ") + strerror(errno));
             observer_ptr->_runner_identity = nullptr;
             observer_ptr->_buffer.assign(buff.begin(), buff.end());
-            if (not kernel_controller::write(observer_ptr, file->_fileno,
+            if (not core::services::kernel_controller::write(observer_ptr, file->_fileno,
                 observer_ptr->_buffer.data(), observer_ptr->_buffer.size(), 0))
                 throw std::runtime_error("print failed");
         }
@@ -84,7 +84,7 @@ namespace ace::core::modules {
                     throw std::runtime_error(std::string("print failed: ") + strerror(errno));
             observer_ptr->_runner_identity = nullptr;
             observer_ptr->_buffer.assign(buff.begin(), buff.end());
-            if (not kernel_controller::write(observer_ptr, file->_fileno,
+            if (not core::services::kernel_controller::write(observer_ptr, file->_fileno,
                 observer_ptr->_buffer.data(), observer_ptr->_buffer.size(), 0))
                 throw std::runtime_error("print failed");
         }
@@ -97,7 +97,7 @@ namespace ace::core::modules {
                     throw std::runtime_error(std::string("print failed: ") + strerror(errno));
             observer_ptr->_runner_identity = nullptr;
             observer_ptr->_buffer.assign(buff.begin(), buff.end());
-            if (not kernel_controller::write(observer_ptr, file->_fileno,
+            if (not core::services::kernel_controller::write(observer_ptr, file->_fileno,
                 observer_ptr->_buffer.data(), observer_ptr->_buffer.size(), 0))
                 throw std::runtime_error("print failed");
         }
@@ -110,13 +110,13 @@ namespace ace::core::modules {
             int total = 0;
 
             auto& buff = acc.emplace_back();
-            int bytes_read = co_await read_query(STDIN_FILENO, buff.data(), buff_len);
+            int bytes_read = co_await core::read_query(STDIN_FILENO, buff.data(), buff_len);
             if (bytes_read < 0) co_return std::unexpected(-bytes_read);
             total += bytes_read;
 
             while (bytes_read == buff_len) {
                 buff = acc.emplace_back();
-                bytes_read = co_await read_query(STDIN_FILENO, buff.data(), buff_len);
+                bytes_read = co_await core::read_query(STDIN_FILENO, buff.data(), buff_len);
                 if (bytes_read < 0) co_return std::unexpected(-bytes_read);
                 total += bytes_read;
             }
@@ -285,7 +285,7 @@ namespace ace::core::modules {
             attach() = default;
 
             template <bool new_line = false>
-            struct ACE_AWAIT_NODISCARD print_impl : io_query<print_impl<new_line>> {
+            struct ACE_AWAIT_NODISCARD print_impl : core::io_query<print_impl<new_line>> {
 
                 IMPORT_IO_QUERY_ENV(print_impl);
 
@@ -308,14 +308,14 @@ namespace ace::core::modules {
                         _buff = std::string(std::forward<const __FMT__::string_view>(str));
                 }
 
-                bool setup_query(kernel_observer* kwp) {
+                bool setup_query(core::services::kernel_observer* kwp) {
                     lazy_print_observer* observer_ptr;
                     if (not _observers_pool.capture(observer_ptr))
-                        return kernel_controller::write(kwp, _fd, _buff.data(), _buff.size(), 0);
+                        return core::services::kernel_controller::write(kwp, _fd, _buff.data(), _buff.size(), 0);
                     io_query_t::_is_silent = true;
                     observer_ptr->_runner_identity = this->_runner_identity;
                     observer_ptr->_buffer.assign(_buff.begin(), _buff.end());
-                    return kernel_controller::write(observer_ptr, _fd,
+                    return core::services::kernel_controller::write(observer_ptr, _fd,
                         observer_ptr->_buffer.data(), observer_ptr->_buffer.size(), 0);
                 }
 

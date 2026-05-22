@@ -1,17 +1,17 @@
 /**
  * @file vortex.h
- * @brief CRTP base for background polling services ("vortices").
+ * @brief CRTP base for background polling services ("vortex").
  *
  * @details A @b vortex is a lightweight background service that runs as a
  * coroutine inside the dispatcher.  It calls its @c ping() method on every
- * scheduler iteration and suspends when it has no work to do.
+ * iteration and suspends when it has no work to do.
  *
  * ### Lifecycle
  *
  * 1. The first call to @c touch(runner_pool) spawns the vortex coroutine into
- *    the dispatcher on the given runner (or the default runner).
- * 2. On every dispatcher iteration the vortex coroutine resumes and calls
- *    @c ping().  If @c ping() returns @c false, the vortex suspends and marks
+ *    the dispatcher on the given runner (or dispatcher will select runner).
+ * 2. On 16th dispatcher iteration the vortex coroutine resumes and calls
+ *    @c ping(). If @c ping() returns @c false, the vortex suspends and marks
  *    itself as detached.
  * 3. The next call to @c touch() re-spawns the vortex if it was detached.
  *

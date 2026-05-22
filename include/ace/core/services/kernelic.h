@@ -8,7 +8,7 @@
 #include "ace/core/traits/vortex.h"
 #include "ace/core/tools/queue.h"
 
-namespace ace::core::modules {
+namespace ace::core::services {
 
     /**
      * @brief Proxy entity with activation method to use it as uring user_data
@@ -186,13 +186,13 @@ namespace ace::core::modules {
 }
 
 #define ACE_CORE_KERNEL_CONTROLLER_SPACE \
-ace::core::modules::kernel_controller::
+ace::core::services::kernel_controller::
 
 #define ACE_CORE_KERNEL_CONTROLLER_MEMBER(returnT) \
 inline returnT ACE_CORE_KERNEL_CONTROLLER_SPACE
 
 #define ACE_CORE_KERNEL_ENTITY_SPACE \
-ace::core::modules::kernel_controller::kernel_entity::
+ace::core::services::kernel_controller::kernel_entity::
 
 #define ACE_CORE_KERNEL_ENTITY_MEMBER(returnT) \
 inline returnT ACE_CORE_KERNEL_ENTITY_SPACE

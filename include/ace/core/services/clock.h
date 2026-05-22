@@ -43,7 +43,7 @@ namespace ace::core {
 
 }
 
-namespace ace::core::modules {
+namespace ace::core::services {
 
     /**
      * @brief Type of stored async record. Contains async and it's awaiting duration

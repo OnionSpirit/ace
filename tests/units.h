@@ -11,7 +11,9 @@
 #include <ace/futures/channel.h>
 #include <ace/futures/timeout.h>
 #include <ace/futures/cutex.h>
-#include <ace/futures/network.h>
+#include <ace/console.h>
+#include <ace/net.h>
+#include <ace/fs.h>
 
 struct once_suspend : ace::core::traits::busy_future_traits<once_suspend> {
 
@@ -75,9 +77,9 @@ struct channel_abuser {
 
 template<typename Rep, typename Period>
 ace::task timer_waiter(std::chrono::duration<Rep, Period> wait_time, ace::futures::channel_dyn<long>& ch) {
-    const auto start = ace::core::modules::clock::current_time();
+    const auto start = ace::core::services::clock::current_time();
     co_await ace::futures::timeout(wait_time);
-    const auto end = ace::core::modules::clock::current_time();
+    const auto end = ace::core::services::clock::current_time();
     ch << (end - start).count();
     co_return;
 }
@@ -278,7 +280,7 @@ inline ace::task cutex_spawner_permanent(ace::futures::channel_dyn<ace::core::ru
 
 inline ace::task socket_abuser() {
 
-    auto bind_entry = co_await ace::futures::io_socket_tcp();
+    auto bind_entry = co_await ace::net::io_socket_tcp();
     if (not bind_entry) {
         std::cerr << bind_entry.error() << std::endl;
         co_return;
@@ -307,7 +309,7 @@ inline ace::task socket_abuser() {
 
 inline ace::task socket_listener() {
 
-    auto bind_entry = co_await ace::futures::io_socket_tcp();
+    auto bind_entry = co_await ace::net::io_socket_tcp();
     if (not bind_entry) {
         std::cerr << bind_entry.error() << std::endl;
         co_return;
@@ -343,7 +345,7 @@ inline ace::task socket_listener() {
 
 inline ace::task tcp_echo_client() {
 
-    auto bind_entry = co_await ace::futures::io_socket_tcp();
+    auto bind_entry = co_await ace::net::io_socket_tcp();
     if (not bind_entry) {
         ace::console::println("[ CLIENT ERROR ] - {}", bind_entry.error());
         co_return;
@@ -379,7 +381,7 @@ inline ace::task tcp_echo_client() {
 
 inline ace::task tcp_echo_server() {
 
-    auto bind_entry = co_await ace::futures::io_socket_tcp();
+    auto bind_entry = co_await ace::net::io_socket_tcp();
     if (not bind_entry) {
         ace::console::println("[ SERVER ERROR ] - {}", bind_entry.error());
         co_return;

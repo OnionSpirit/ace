@@ -96,7 +96,7 @@ TEST(futures, do_timer_on_runner_test) {
 TEST(futures, do_expire_on_runner_test) {
     ace::futures::channel_dyn<ace::core::timepoint_t> _channel {};
 
-    const auto now = ace::core::modules::clock::current_time();
+    const auto now = ace::core::services::clock::current_time();
     // NOTE: Spawning waiters with different duration and waited time count return
     ace::schedule(expire_waiter_valued(now + 501ms, _channel));
     ace::schedule(expire_waiter_valued(now + 500ms, _channel));

@@ -37,7 +37,6 @@
 
 #include "ace/core/async.h"
 #include "ace/core/dispatcher.h"
-#include "ace/core/modules/console.h"
 #include "ace/core/compose.h"
 #include "ace/futures/spawn.h"
 #include "ace/futures/post.h"
@@ -52,7 +51,6 @@ namespace ace {
     using roaming        = futures::roaming;
     using get_runner     = futures::get_runner;
     using reattach       = futures::reattach;
-    using console        = core::modules::console;
 
 }
 

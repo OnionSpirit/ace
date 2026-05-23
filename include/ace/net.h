@@ -25,7 +25,7 @@ namespace ace::net {
     [[maybe_unused]] static auto& peer_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<1>(p); }
 
     template <int domain_v>
-    static inline constexpr bool is_inet_domain = domain_v == AF_INET or domain_v == AF_INET6;
+    static inline constexpr bool is_inet_domain = domain_v == AF_INET or domain_v == AF_INET6 or domain_v == PF_INET or domain_v == PF_INET6;
 
     template <int type_v>
     static inline constexpr bool is_stream_type = type_v == SOCK_STREAM;

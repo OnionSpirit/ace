@@ -280,9 +280,9 @@ namespace ace {
          * @brief The operations are attached to a current worker(runner) for processing. Useless for single thread app
          * @warning @c co_await operator required
          */
-        class attach {
+        class pinned {
 
-            attach() = default;
+            pinned() = default;
 
             template <bool new_line = false>
             struct ACE_AWAIT_NODISCARD print_impl : core::io_query<print_impl<new_line>> {
@@ -331,50 +331,50 @@ namespace ace {
             template <class... Args>
             static auto println(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
                 const std::FILE* file = _output.load(std::memory_order_acquire);
-                return attach::println_impl(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+                return pinned::println_impl(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
             }
 
             template <class... Args>
             static auto println(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
-                return attach::println_impl(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+                return pinned::println_impl(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
             }
 
             static auto println(const __FMT__::string_view&& str) {
                 const std::FILE* file = _output.load(std::memory_order_acquire);
-                return attach::println_impl(file, std::forward<const __FMT__::string_view>(str));
+                return pinned::println_impl(file, std::forward<const __FMT__::string_view>(str));
             }
 
             static auto println(const std::FILE* file, const __FMT__::string_view&& str) {
-                return attach::println_impl(file, std::forward<const __FMT__::string_view>(str));
+                return pinned::println_impl(file, std::forward<const __FMT__::string_view>(str));
             }
 
             static auto println() {
                 const std::FILE* file = _output.load(std::memory_order_acquire);
-                return attach::println_impl(file, "");
+                return pinned::println_impl(file, "");
             }
 
             static auto println(const std::FILE* file) {
-                return attach::println_impl(file, "");
+                return pinned::println_impl(file, "");
             }
 
             template <class... Args>
             static auto print(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
                 const std::FILE* file = _output.load(std::memory_order_acquire);
-                return attach::print_impl(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+                return pinned::print_impl(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
             }
 
             template <class... Args>
             static auto print(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
-                return attach::print_impl(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+                return pinned::print_impl(file, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
             }
 
             static auto print(const __FMT__::string_view&& str) {
                 const std::FILE* file = _output.load(std::memory_order_acquire);
-                return attach::print_impl(file, std::forward<const __FMT__::string_view>(str));
+                return pinned::print_impl(file, std::forward<const __FMT__::string_view>(str));
             }
 
             static auto print(const std::FILE* file, const __FMT__::string_view&& str) {
-                return attach::print_impl(file, std::forward<const __FMT__::string_view>(str));
+                return pinned::print_impl(file, std::forward<const __FMT__::string_view>(str));
             }
         };
 

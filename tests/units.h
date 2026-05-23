@@ -207,7 +207,7 @@ inline ace::task racer(const int& max, std::string& shared_counter, ace::cutex& 
         crx.sync();
     }
     co_await crx.capture();
-    co_await ace::console::attach::println("'racer' finished");
+    co_await ace::console::pinned::println("'racer' finished");
 }
 
 template<typename Rep, typename Period>
@@ -495,4 +495,12 @@ inline ace::task composed_output(ace::futures::channel_dyn<int>& ch) {
 
 }
 
+
+inline ace::task fs_testing() {
+
+    auto f = ace::fs::file("flexing.txt");
+    auto f_link = co_await f.open();
+
+    f_link.writeln("testing flex {}", 1);
+}
 #endif // UNITS_H

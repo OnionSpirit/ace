@@ -444,7 +444,7 @@ TEST(core, do_and_await_test) {
 }
 
 TEST(core, do_fs_tests) {
-
-    std::filesystem::path();
-
+    ace::schedule(fs_testing());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
 }

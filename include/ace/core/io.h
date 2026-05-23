@@ -285,7 +285,38 @@ namespace ace::core {
     typedef ace::core::io_entity<class, __VA_ARGS__> io_entity_t;                           \
                                                                                             \
     class(const int fd, const bool is_closed, std::tuple<__VA_ARGS__> params)               \
-        : io_entity_t(fd, is_closed, params) { };                                           \
+        : io_entity_t(fd, is_closed, std::forward<std::tuple<__VA_ARGS__>>(params)) { };    \
+                                                                                            \
+protected:                                                                                  \
+                                                                                            \
+    using io_entity_t::_fd;                                                                 \
+    using io_entity_t::_is_closed;                                                          \
+    using io_entity_t::_params;                                                             \
+                                                                                            \
+public:                                                                                     \
+                                                                                            \
+    class(class&& io) noexcept                                                              \
+        : io_entity_t(static_cast<io_entity_t>(std::move(io))) { }                          \
+                                                                                            \
+    class& operator = (class&& io) noexcept {                                               \
+        _fd = io._fd;                                                                       \
+        _is_closed = io._is_closed;                                                         \
+        _params = std::move(io._params);                                                    \
+        io._fd = -1;                                                                        \
+        io._is_closed = true;                                                               \
+        return *this;                                                                       \
+    }                                                                                       \
+                                                                                            \
+    IMPORT_ERROR_HANDLING                                                                   \
+                                                                                            \
+    ~class() override = default;
+
+#define IMPORT_RAW_IO_ENTITY_ENV(class)                                                     \
+                                                                                            \
+    typedef ace::core::io_entity<class> io_entity_t;                                        \
+                                                                                            \
+    class(const int fd, const bool is_closed, std::tuple<> params)                          \
+        : io_entity_t(fd, is_closed, std::forward<std::tuple<>>(params)) { };               \
                                                                                             \
 protected:                                                                                  \
                                                                                             \

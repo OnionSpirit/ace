@@ -93,6 +93,8 @@ namespace ace::core {
 
         static thread_local std::chrono::time_point<std::chrono::steady_clock> local_ts;
 
+        static thread_local runner* local_runner_ptr;
+
         static void fetch_time() { local_ts = std::chrono::steady_clock::now(); }
 
         /**
@@ -164,8 +166,10 @@ namespace ace::core {
         void worker_tf(const std::stop_token &stoken, const int worker_id) {
             _workers_states[worker_id]._worker_id = worker_id;
             _workers_states[worker_id]._pending = false;
+            local_runner_ptr = &_runners[worker_id];
             while (not stoken.stop_requested())
                 worker_round(worker_id);
+            local_runner_ptr = nullptr;
         }
 
         void fetch_config() noexcept { _dispatcher_config = s_dispatcher_config; }
@@ -186,6 +190,13 @@ namespace ace::core {
         }
 
     public:
+
+        /**
+         * @brief Gets current thread runner
+         * @warning Returns nullptr if dispatcher is not used for running tasks
+         * @return This thread runner ptr
+         */
+        static runner* get_local_runner() { return local_runner_ptr; }
 
         static sig_pipe_t &get_sig_pipe() noexcept {
             return get_instance()._sig_pipe;
@@ -218,6 +229,8 @@ namespace ace::core {
 
 thread_local std::chrono::time_point<std::chrono::steady_clock> ace::core::dispatcher::local_ts
         = std::chrono::steady_clock::now();
+
+thread_local ace::core::runner* ace::core::dispatcher::local_runner_ptr = nullptr;
 
 namespace ace {
 

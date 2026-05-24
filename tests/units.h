@@ -39,13 +39,13 @@ inline ace::promise<bool> simple_context_test() {
     once_suspend tests_future;
 
     co_await tests_future;
-    ace::console::busy::println("One suspend complete");
+    ace::console::println("One suspend complete");
     co_return true;
 }
 
 inline ace::task nested_context_suspender() {
     co_await simple_context_test();
-    ace::console::busy::println("Nested call complete");
+    ace::console::println("Nested call complete");
     co_return;
 }
 
@@ -56,18 +56,18 @@ struct channel_abuser {
         co_await tests_future;
         std::string msg = "Ping";
         _channel.push(msg);
-        ace::console::busy::println("Channel send complete");
+        ace::console::println("Channel send complete");
         co_await ace::suspend();
         const auto received = co_await _channel.pull();
-        ace::console::busy::println("Channel received answer. DATA: {}", received);
+        ace::console::println("Channel received answer. DATA: {}", received);
         co_return;
     }
 
     ace::task channel_receiver() {
         const auto received = co_await _channel.pull();
-        ace::console::busy::println("Channel receive complete. DATA: {}", received);
+        ace::console::println("Channel receive complete. DATA: {}", received);
         _channel << "Pong";
-        ace::console::busy::println("Channel send answer");
+        ace::console::println("Channel send answer");
         co_return;
     }
 
@@ -207,7 +207,7 @@ inline ace::task racer(const int& max, std::string& shared_counter, ace::cutex& 
         crx.sync();
     }
     co_await crx.capture();
-    co_await ace::console::pinned::println("'racer' finished");
+    ace::console::println("'racer' finished");
 }
 
 template<typename Rep, typename Period>

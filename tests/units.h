@@ -13,7 +13,6 @@
 #include <ace/futures/cutex.h>
 #include <ace/console.h>
 #include <ace/net.h>
-#include <ace/fs.h>
 
 struct once_suspend : ace::core::traits::busy_future_traits<once_suspend> {
 

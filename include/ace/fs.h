@@ -15,182 +15,72 @@
 
 namespace ace::fs {
 
-    struct impl {
+    struct writer {
 
-        struct lazy_write_observer : core::services::kernel_observer {
+        struct command : core::services::kernel_observer {
 
             std::vector<uint8_t> _buffer{};
 
-            void on_result(const int res) override {
-                _observers_pool.raw_sync(this);
-            }
+            void on_result(const int res) override try {
+                if (res < 0) throw std::runtime_error(std::string("print failed: ") + strerror(-res));
+                _command_pool.raw_sync(this);
+            } catch (std::exception& e) { std::cerr << e.what() << std::endl; }
 
-            ~lazy_write_observer() override = default;
+            ~command() override = default;
         };
 
         static constexpr int buff_len = 256;
 
-        static thread_local nukes::dynamic::reg_freelist<lazy_write_observer> _observers_pool;
-
-        class lazy {
-
-            lazy() = default;
-
-        public:
-
-            template <class... Args>
-            static void write_impl(const int file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
-                const std::string buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
-                lazy_write_observer* observer_ptr;
-                if (not _observers_pool.capture(observer_ptr))
-                    if (write(file, buff.data(), buff.size()) < 0)
-                        throw std::runtime_error(std::string("write failed: ") + strerror(errno));
-                observer_ptr->_runner_identity = nullptr;
-                observer_ptr->_buffer.assign(buff.begin(), buff.end());
-                if (not core::services::kernel_controller::write(observer_ptr, file,
-                    observer_ptr->_buffer.data(), observer_ptr->_buffer.size(), 0))
-                    throw std::runtime_error("write failed");
-            }
-
-            template <class... Args>
-            static void writeln_impl(const int file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
-                const std::string buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
-                lazy_write_observer* observer_ptr;
-                if (not _observers_pool.capture(observer_ptr))
-                    if (write(file, buff.data(), buff.size()) < 0)
-                        throw std::runtime_error(std::string("write failed: ") + strerror(errno));
-                observer_ptr->_runner_identity = nullptr;
-                observer_ptr->_buffer.assign(buff.begin(), buff.end());
-                if (not core::services::kernel_controller::write(observer_ptr, file,
-                    observer_ptr->_buffer.data(), observer_ptr->_buffer.size(), 0))
-                    throw std::runtime_error("write failed");
-            }
-
-            static void write_impl(const int file, const __FMT__::string_view&& str) {
-                const std::string buff = std::string(std::forward<const __FMT__::string_view>(str));
-                lazy_write_observer* observer_ptr;
-                if (not _observers_pool.capture(observer_ptr))
-                    if (write(file, buff.data(), buff.size()) < 0)
-                        throw std::runtime_error(std::string("write failed: ") + strerror(errno));
-                observer_ptr->_runner_identity = nullptr;
-                observer_ptr->_buffer.assign(buff.begin(), buff.end());
-                if (not core::services::kernel_controller::write(observer_ptr, file,
-                    observer_ptr->_buffer.data(), observer_ptr->_buffer.size(), 0))
-                    throw std::runtime_error("write failed");
-            }
-
-            static void writeln_impl(const int file, const __FMT__::string_view&& str) {
-                const std::string buff = std::string(std::forward<const __FMT__::string_view>(str)) + '\n';
-                lazy_write_observer* observer_ptr;
-                if (not _observers_pool.capture(observer_ptr))
-                    if (write(file, buff.data(), buff.size()) < 0)
-                        throw std::runtime_error(std::string("write failed: ") + strerror(errno));
-                observer_ptr->_runner_identity = nullptr;
-                observer_ptr->_buffer.assign(buff.begin(), buff.end());
-                if (not core::services::kernel_controller::write(observer_ptr, file,
-                    observer_ptr->_buffer.data(), observer_ptr->_buffer.size(), 0))
-                    throw std::runtime_error("write failed");
-            }
-        };
+        static thread_local nukes::dynamic::reg_freelist<command> _command_pool;
 
         /**
-         * The operations are powered by standard io functions
+         * @brief Choosing way of writing
+         * @param [in] file file to write to
+         * @param [in] buff data to write
          */
-        class busy {
-
-            busy() = default;
-
-        public:
-
-            template <class... Args>
-            static void write_impl(const int file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
-                std::string buff;
-                buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+        static void write_dispatch(const int file, const __FMT__::string_view buff) try {
+            // NOTE: Trying to get thread local runner from the dispatcher
+            auto* runner_identity = reinterpret_cast<runner_pool_t*>(core::dispatcher::get_local_runner());
+            // NOTE: If can not get slot or identity not found -> using busy behavior
+            if (command* cmd; not _command_pool.capture(cmd) or not runner_identity) [[unlikely]] {
                 if (write(file, buff.data(), buff.size()) < 0)
-                    throw std::runtime_error(std::string("write failed: ") + strerror(errno));
+                    throw std::runtime_error(std::string("print failed: ") + strerror(errno));
             }
-
-            template <class... Args>
-            static void writeln_impl(const int file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
-                std::string buff;
-                buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
-                if (write(file, buff.data(), buff.size()) < 0)
-                    throw std::runtime_error(std::string("write failed: ") + strerror(errno));
+            // NOTE: Pushing data to slot, and setting identity for kernelic
+            else [[likely]] {
+                cmd->_runner_identity = runner_identity;
+                cmd->_buffer.assign(buff.begin(), buff.end());
+                if (not core::services::kernel_controller::write(cmd, file,
+                    cmd->_buffer.data(), cmd->_buffer.size(), 0))
+                    throw std::runtime_error("print failed: Ring buffering failed");
             }
+        } catch (std::exception& e) { std::cerr << e.what() << std::endl; }
 
-            static void write_impl(const int file, const __FMT__::string_view&& str) {
-                std::string buff;
-                buff = std::string(std::forward<const __FMT__::string_view>(str));
-                if (write(file, buff.data(), buff.size()) < 0)
-                    throw std::runtime_error(std::string("write failed: ") + strerror(errno));
-            }
+        template <class... Args>
+        static void write_impl(const int file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
+            const std::string buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            write_dispatch(file, buff);
+        }
 
-            static void writeln_impl(const int file, const __FMT__::string_view&& str) {
-                std::string buff;
-                buff = std::string(std::forward<const __FMT__::string_view>(str)) + '\n';
-                if (write(file, buff.data(), buff.size()) < 0)
-                    throw std::runtime_error(std::string("write failed: ") + strerror(errno));
-            }
+        template <class... Args>
+        static void writeln_impl(const int file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
+            const std::string buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
+            write_dispatch(file, buff);
+        }
 
-        };
+        static void write_impl(const int file, const __FMT__::string_view&& str) {
+            const std::string buff = std::string(std::forward<const __FMT__::string_view>(str));
+            write_dispatch(file, buff);
+        }
 
-        /**
-         * @brief The operations are attached to a current worker(runner) for processing. Useless for single thread app
-         * @warning @c co_await operator required
-         */
-        class pinned {
-
-            pinned() = default;
-
-        public:
-
-            template <bool new_line = false>
-            struct ACE_AWAIT_NODISCARD write_impl : core::io_query<write_impl<new_line>> {
-
-                IMPORT_IO_QUERY_ENV(write_impl);
-
-                write_impl() = delete;
-
-                template <typename ... Args>
-                explicit write_impl(const int file, __FMT__::format_string<Args...>&& fmt, Args&&... args)
-                    : io_query_t(file) {
-                    if constexpr (new_line)
-                        _buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
-                    else
-                        _buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
-                }
-
-                explicit write_impl(const int file, const __FMT__::string_view&& str)
-                    : io_query_t(file) {
-                    if constexpr (new_line)
-                        _buff = std::string(std::forward<const __FMT__::string_view>(str)) + '\n';
-                    else
-                        _buff = std::string(std::forward<const __FMT__::string_view>(str));
-                }
-
-                bool setup_query(core::services::kernel_observer* kwp) {
-                    lazy_write_observer* observer_ptr;
-                    if (not _observers_pool.capture(observer_ptr))
-                        return core::services::kernel_controller::write(kwp, _fd, _buff.data(), _buff.size(), 0);
-                    io_query_t::_is_silent = true;
-                    observer_ptr->_runner_identity = this->_runner_identity;
-                    observer_ptr->_buffer.assign(_buff.begin(), _buff.end());
-                    return core::services::kernel_controller::write(observer_ptr, _fd,
-                        observer_ptr->_buffer.data(), observer_ptr->_buffer.size(), 0);
-                }
-
-                void await_resume() const { }
-
-                std::string _buff;
-            };
-
-            typedef write_impl<true> writeln_impl;
-
-        };
+        static void writeln_impl(const int file, const __FMT__::string_view&& str) {
+            const std::string buff = std::string(std::forward<const __FMT__::string_view>(str)) + '\n';
+            write_dispatch(file, buff);
+        }
 
     };
 
-    thread_local nukes::dynamic::reg_freelist<impl::lazy_write_observer> impl::_observers_pool {};
+    thread_local nukes::dynamic::reg_freelist<writer::command> writer::_command_pool {};
 
     struct file_link : core::io_entity<file_link> {
 
@@ -200,20 +90,20 @@ namespace ace::fs {
 
         template <class... Args>
         auto writeln(__FMT__::format_string<Args...>&& fmt, Args&&... args)
-        { return impl::lazy::writeln_impl(_fd, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...); }
+        { return writer::writeln_impl(_fd, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...); }
 
-        auto writeln(__FMT__::string_view&& str)
-        { return impl::lazy::writeln_impl(_fd, std::forward<const __FMT__::string_view>(str)); }
+        auto writeln(__FMT__::string_view&& str) const
+        { return writer::writeln_impl(_fd, std::forward<const __FMT__::string_view>(str)); }
 
-        auto writeln()
-        { return impl::lazy::writeln_impl(_fd, ""); }
+        auto writeln() const
+        { return writer::writeln_impl(_fd, ""); }
 
         template <class... Args>
         auto write(__FMT__::format_string<Args...>&& fmt, Args&&... args)
-        { return impl::lazy::write_impl(_fd, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...); }
+        { return writer::write_impl(_fd, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...); }
 
-        auto write(const __FMT__::string_view&& str)
-        { return impl::lazy::write_impl(_fd, std::forward<const __FMT__::string_view>(str)); }
+        auto write(const __FMT__::string_view&& str) const
+        { return writer::write_impl(_fd, std::forward<const __FMT__::string_view>(str)); }
 
     };
 

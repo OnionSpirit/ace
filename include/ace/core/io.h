@@ -3,8 +3,14 @@
 
 
 #include <climits>
+#include <utility>
 
 #include "ace/core/services/kernelic.h"
+
+// NOTE: It is needed to use external fmt lib with older standards which does not support std::format
+#ifndef __FMT__
+#define __FMT__ std
+#endif
 
 namespace ace::core {
 
@@ -167,8 +173,33 @@ namespace ace::core {
     };
 
     /**
+     * @brief RAII io fd guard
+     */
+    struct io_guard final {
+        io_guard() = delete;
+        explicit io_guard(const int& fd, const bool& closed)
+            : _fd(fd)
+            , _closed(closed) {}
+
+        const int& _fd;
+        const bool& _closed;
+
+        static task pending_close(const int fd) noexcept {
+            if (const int res = co_await close_query{fd}; res < 0)
+                std::cerr << strerror(res) << std::endl;
+        }
+
+        ~io_guard() noexcept {
+            if (_fd > 0 and not _closed)
+                schedule(pending_close(_fd));
+        }
+    };
+
+    /**
      * @brief Handler for a file descriptor with RAII guard behavior.
      * The io_entity derived types shall represent FD state by providing allowed async operations depending on FD state.
+     * @tparam entity_t Derived entity type
+     * @tparam Params Data to propagate through transformation
      */
     template <typename entity_t, typename ... Params>
     struct io_entity {
@@ -183,7 +214,7 @@ namespace ace::core {
             , _params(params) { };
 
         template<typename entry_t>
-        static entity_t consume(entry_t& io) noexcept {
+        static entity_t transform(entry_t& io) noexcept {
             auto [fd, is_closed, params] = std::move(io.extract());
             if (fd < 0) is_closed = true;
             return entity_t {fd, is_closed, params};
@@ -243,28 +274,170 @@ namespace ace::core {
 
     private:
 
-        /**
-         * @brief RAII io guard
-         */
-        struct io_guard final {
-            io_guard() = delete;
-            explicit io_guard(const int& fd, const bool& closed)
-                : _fd(fd)
-                , _closed(closed) {}
+        io_guard _guard {_fd, _is_closed};
+    };
 
-            const int& _fd;
-            const bool& _closed;
+    /**
+     * @brief Encapsulated set of global entities for link processing
+     */
+    struct io_link_common {
 
-            static task pending_close(const int fd) noexcept {
-                if (const int res = co_await close_query{fd}; res < 0)
-                    std::cerr << strerror(res) << std::endl;
+        struct command : core::services::kernel_observer {
+
+            std::vector<uint8_t> _buffer{};
+
+            void on_result(const int res) override {
+                if (res < 0 and fail_cb_handler)
+                    fail_cb_handler(res);
+                _command_pool.raw_sync(this);
             }
 
-            ~io_guard() noexcept {
-                if (_fd > 0 and not _closed)
-                    schedule(pending_close(_fd));
-            }
+            ~command() override = default;
         };
+
+        static void basic_fail_handler(const int res) {
+            throw std::runtime_error(std::string("Write failed: ") + strerror(-res));
+        }
+
+        static void(*fail_cb_handler)(int);
+
+        static thread_local nukes::dynamic::reg_freelist<command> _command_pool;
+    };
+
+    thread_local nukes::dynamic::reg_freelist<io_link_common::command> io_link_common::_command_pool {};
+
+    inline void(*io_link_common::fail_cb_handler)(int) = basic_fail_handler;
+
+    class any_params {
+
+        void* _data = nullptr;
+        void(*_deleter)(void*) = nullptr;
+        // void*(*_measure)() = nullptr;
+
+        template <typename target_t>
+        static void deleter_impl(void* mem) {
+            delete static_cast<target_t*>(mem);
+        }
+
+        // template <typename target_t>
+        // auto take() {
+        //     reinterpret_cast<>
+        // }
+
+    public:
+
+        any_params() = default;
+
+        any_params(const any_params&) = default;
+
+        any_params(any_params&&) = default;
+
+        any_params& operator=(const any_params&) = default;
+
+        any_params& operator=(any_params&&) = default;
+
+        template <typename ... args_t>
+        any_params(std::tuple<args_t...> params) noexcept {
+            typedef std::tuple<args_t...> params_t;
+            void* mem = malloc(sizeof(params_t));
+            _data = new (mem) params_t{std::forward<params_t>(params)};
+            _deleter = deleter_impl<params_t>;
+        }
+
+        void release() noexcept {
+            _data = nullptr;
+            _deleter = nullptr;
+        }
+
+        ~any_params() {
+            if (_data != nullptr and _deleter != nullptr)
+                _deleter(_data);
+        }
+    };
+
+    /**
+     * @brief Common interface for io abstractions
+     */
+    struct io_link {
+
+        io_link()
+            : _fd(-1)
+            , _is_closed(true)
+            , _params() {}
+
+        io_link(const int fd, const bool is_closed, any_params params)
+            : _fd(fd)
+            , _is_closed(is_closed)
+            , _params(std::move(params)) { };
+
+        io_link(const int fd)
+            : _fd(fd)
+            , _is_closed(false) { };
+
+        template<typename io_link_t, typename entry_t>
+        static io_link_t transform(entry_t& io) noexcept {
+            auto [fd, is_closed, params] = std::move(io.extract());
+            if (fd < 0) is_closed = true;
+            return io_link_t {fd, is_closed, params};
+        }
+
+        io_link(io_link&& io) noexcept {
+            _fd = io._fd;
+            _is_closed = io._is_closed;
+            _params = std::move(io._params);
+            io._fd = -1;
+            io._is_closed = true;
+        }
+
+        io_link& operator=(io_link&& io) noexcept {
+            _fd = io._fd;
+            _is_closed = io._is_closed;
+            _params = std::move(io._params);
+            io._fd = -1;
+            io._is_closed = true;
+            return *this;
+        }
+
+        virtual ~io_link() = default;
+
+        static constexpr int buff_len = 256;
+
+        /**
+         * @brief Choosing way of writing
+         * @param [in] file file to write to
+         * @param [in] buff data to write
+         */
+        virtual void output_action(__FMT__::string_view buff) = 0;
+
+        template <class... Args>
+        void write(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
+            const std::string buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            output_action(buff);
+        }
+
+        template <class... Args>
+        void writeln(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
+            const std::string buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
+            output_action(buff);
+        }
+
+        void write(const __FMT__::string_view&& str) {
+            const std::string buff = std::string(std::forward<const __FMT__::string_view>(str));
+            output_action(buff);
+        }
+
+        void writeln(const __FMT__::string_view&& str) {
+            const std::string buff = std::string(std::forward<const __FMT__::string_view>(str)) + '\n';
+            output_action(buff);
+        }
+
+    protected:
+
+        int         _fd;        ///< Socket file descriptor
+        bool        _is_closed; ///< Socket closed flag
+        any_params  _params;    ///< FD related params
+
+    private:
 
         io_guard _guard {_fd, _is_closed};
     };
@@ -342,6 +515,47 @@ public:                                                                         
     IMPORT_ERROR_HANDLING                                                                   \
                                                                                             \
     ~class() override = default;
+
+#define IMPORT_IO_LINK_ENV(class)                                                           \
+                                                                                            \
+    typedef ace::core::io_link io_link_t;                                                   \
+    typedef ace::core::any_params any_params_t;                                             \
+                                                                                            \
+    class(const int fd, const bool is_closed, any_params_t params)                          \
+        : io_link_t(fd, is_closed, std::forward<any_params_t>(params)) { };                 \
+                                                                                            \
+    class(const int fd)                                                                     \
+        : io_link_t(fd) { };                                                                \
+                                                                                            \
+protected:                                                                                  \
+                                                                                            \
+    using io_link_t::_fd;                                                                   \
+    using io_link_t::_is_closed;                                                            \
+    using io_link_t::_params;                                                               \
+                                                                                            \
+public:                                                                                     \
+                                                                                            \
+    class(class&& io) noexcept {                                                            \
+        _fd = io._fd;                                                                       \
+        _is_closed = io._is_closed;                                                         \
+        _params = std::move(io._params);                                                    \
+        io._fd = -1;                                                                        \
+        io._is_closed = true;                                                               \
+    }                                                                                       \
+                                                                                            \
+    class& operator = (class&& io) noexcept {                                               \
+        _fd = io._fd;                                                                       \
+        _is_closed = io._is_closed;                                                         \
+        _params = std::move(io._params);                                                    \
+        io._fd = -1;                                                                        \
+        io._is_closed = true;                                                               \
+        return *this;                                                                       \
+    }                                                                                       \
+                                                                                            \
+    IMPORT_ERROR_HANDLING                                                                   \
+                                                                                            \
+    ~class() override = default;
+
 
 }
 

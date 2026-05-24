@@ -26,23 +26,24 @@ namespace ace {
 
         console() = default;
 
-        static std::atomic<std::FILE*> _output;
+        // TODO: Make io_router and upgrade this field to it
+        static fs::file_link _output;
 
     public:
 
         [[nodiscard]] static promise<std::expected<std::string, int>> input() {
 
-            std::deque<std::array<char, fs::writer::buff_len>> acc {};
+            std::deque<std::array<char, core::io_link::buff_len>> acc {};
             int total = 0;
 
             auto& buff = acc.emplace_back();
-            int bytes_read = co_await core::read_query(STDIN_FILENO, buff.data(), fs::writer::buff_len);
+            int bytes_read = co_await core::read_query(STDIN_FILENO, buff.data(), core::io_link::buff_len);
             if (bytes_read < 0) co_return std::unexpected(-bytes_read);
             total += bytes_read;
 
-            while (bytes_read == fs::writer::buff_len) {
+            while (bytes_read == core::io_link::buff_len) {
                 buff = acc.emplace_back();
-                bytes_read = co_await core::read_query(STDIN_FILENO, buff.data(), fs::writer::buff_len);
+                bytes_read = co_await core::read_query(STDIN_FILENO, buff.data(), core::io_link::buff_len);
                 if (bytes_read < 0) co_return std::unexpected(-bytes_read);
                 total += bytes_read;
             }
@@ -51,7 +52,7 @@ namespace ace {
             // NOTE: + null term char slot
             res.reserve(total + 1);
             for (auto& buf : acc) {
-                const int write_bytes { (total > fs::writer::buff_len) ? fs::writer::buff_len : total };
+                const int write_bytes { (total > core::io_link::buff_len) ? core::io_link::buff_len : total };
                 res.append(buf.data(), write_bytes);
                 total -= write_bytes;
             }
@@ -60,56 +61,29 @@ namespace ace {
 
         template <class... Args>
         static void println(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
-            const std::FILE* file = _output.load(std::memory_order_acquire);
-            fs::writer::writeln_impl(file->_fileno, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
-        }
-
-        template <class... Args>
-        static void println(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
-            fs::writer::writeln_impl(file->_fileno, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            _output.writeln(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
         static void println(const __FMT__::string_view&& str) {
-            const std::FILE* file = _output.load(std::memory_order_acquire);
-            fs::writer::writeln_impl(file->_fileno, std::forward<const __FMT__::string_view>(str));
-        }
-
-        static void println(const std::FILE* file, const __FMT__::string_view&& str) {
-            fs::writer::writeln_impl(file->_fileno, std::forward<const __FMT__::string_view>(str));
+            _output.writeln(std::forward<const __FMT__::string_view>(str));
         }
 
         static void println() {
-            const std::FILE* file = _output.load(std::memory_order_acquire);
-            fs::writer::writeln_impl(file->_fileno, "");
-        }
-
-        static void println(const std::FILE* file) {
-            fs::writer::writeln_impl(file->_fileno, "");
+            _output.writeln("");
         }
 
         template <class... Args>
         static void print(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
-            const std::FILE* file = _output.load(std::memory_order_acquire);
-            fs::writer::write_impl(file->_fileno, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
-        }
-
-        template <class... Args>
-        static void print(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
-            fs::writer::write_impl(file->_fileno, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            _output.write(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
         static void print(const __FMT__::string_view&& str) {
-            const std::FILE* file = _output.load(std::memory_order_acquire);
-            fs::writer::write_impl(file->_fileno, std::forward<const __FMT__::string_view>(str));
-        }
-
-        static void print(const std::FILE* file, const __FMT__::string_view&& str) {
-            fs::writer::write_impl(file->_fileno, std::forward<const __FMT__::string_view>(str));
+            _output.write(std::forward<const __FMT__::string_view>(str));
         }
 
     };
 
-    std::atomic<std::FILE*> console::_output = stdout;
+    fs::file_link console::_output { stdout->_fileno };
 
 }
 

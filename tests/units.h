@@ -498,7 +498,7 @@ inline ace::task composed_output(ace::futures::channel_dyn<int>& ch) {
 inline ace::task fs_testing() {
 
     auto f = ace::fs::file("flexing.txt");
-    if (auto f_link = co_await f.open(O_CREAT | O_WRONLY | O_TRUNC))
-        f_link.writeln("testing flex {}", 1);
+    if (auto f_entity = co_await f.open(O_CREAT | O_WRONLY | O_TRUNC))
+        f_entity.writeln("testing flex {}", 1);
 }
 #endif // UNITS_H

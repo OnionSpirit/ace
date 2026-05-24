@@ -21,13 +21,20 @@ namespace ace::fs {
 
             std::vector<uint8_t> _buffer{};
 
-            void on_result(const int res) override try {
-                if (res < 0) throw std::runtime_error(std::string("print failed: ") + strerror(-res));
+            void on_result(const int res) override {
+                if (res < 0 and fail_cb_handler)
+                    fail_cb_handler(res);
                 _command_pool.raw_sync(this);
-            } catch (std::exception& e) { std::cerr << e.what() << std::endl; }
+            }
 
             ~command() override = default;
         };
+
+        static void basic_fail_handler(const int res) {
+            throw std::runtime_error(std::string("Write failed: ") + strerror(-res));
+        }
+
+        static void(*fail_cb_handler)(int);
 
         static constexpr int buff_len = 256;
 
@@ -38,55 +45,57 @@ namespace ace::fs {
          * @param [in] file file to write to
          * @param [in] buff data to write
          */
-        static void write_dispatch(const int file, const __FMT__::string_view buff) try {
+        static void output_action(const int file, const __FMT__::string_view buff) {
             // NOTE: Trying to get thread local runner from the dispatcher
             auto* runner_identity = reinterpret_cast<runner_pool_t*>(core::dispatcher::get_local_runner());
             // NOTE: If can not get slot or identity not found -> using busy behavior
             if (command* cmd; not _command_pool.capture(cmd) or not runner_identity) [[unlikely]] {
-                if (write(file, buff.data(), buff.size()) < 0)
-                    throw std::runtime_error(std::string("print failed: ") + strerror(errno));
+                if (write(file, buff.data(), buff.size()) < 0 and fail_cb_handler)
+                    fail_cb_handler(errno);
             }
             // NOTE: Pushing data to slot, and setting identity for kernelic
             else [[likely]] {
                 cmd->_runner_identity = runner_identity;
                 cmd->_buffer.assign(buff.begin(), buff.end());
                 if (not core::services::kernel_controller::write(cmd, file,
-                    cmd->_buffer.data(), cmd->_buffer.size(), 0))
-                    throw std::runtime_error("print failed: Ring buffering failed");
+                    cmd->_buffer.data(), cmd->_buffer.size(), 0) and fail_cb_handler)
+                    fail_cb_handler(EAGAIN); // Maybe EIO?
             }
-        } catch (std::exception& e) { std::cerr << e.what() << std::endl; }
+        }
 
         template <class... Args>
         static void write_impl(const int file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
             const std::string buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
-            write_dispatch(file, buff);
+            output_action(file, buff);
         }
 
         template <class... Args>
         static void writeln_impl(const int file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
             const std::string buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
-            write_dispatch(file, buff);
+            output_action(file, buff);
         }
 
         static void write_impl(const int file, const __FMT__::string_view&& str) {
             const std::string buff = std::string(std::forward<const __FMT__::string_view>(str));
-            write_dispatch(file, buff);
+            output_action(file, buff);
         }
 
         static void writeln_impl(const int file, const __FMT__::string_view&& str) {
             const std::string buff = std::string(std::forward<const __FMT__::string_view>(str)) + '\n';
-            write_dispatch(file, buff);
+            output_action(file, buff);
         }
 
     };
 
     thread_local nukes::dynamic::reg_freelist<writer::command> writer::_command_pool {};
 
-    struct file_link : core::io_entity<file_link> {
+    inline void(*writer::fail_cb_handler)(int) = basic_fail_handler;
 
-        IMPORT_RAW_IO_ENTITY_ENV(file_link);
+    struct file_entity : core::io_entity<file_entity> {
 
-        file_link() = default;
+        IMPORT_RAW_IO_ENTITY_ENV(file_entity);
+
+        file_entity() = default;
 
         template <class... Args>
         auto writeln(__FMT__::format_string<Args...>&& fmt, Args&&... args)
@@ -135,7 +144,8 @@ namespace ace::fs {
             }
 
             [[nodiscard]] auto await_resume() const {
-                return file_link::consume(_entity);
+                _entity._fd = _res;
+                return file_entity::consume(_entity);
             }
 
             file& _entity;
@@ -147,17 +157,17 @@ namespace ace::fs {
         ACE_AWAIT_NODISCARD auto open_impl(const int flags, const mode_t mode)
         { return open_query { std::move(*this), _path.c_str(), flags, mode}; }
 
-        ACE_AWAIT_NODISCARD auto open(const int flags = O_CREAT | O_APPEND | O_RDWR, const mode_t mode = S_IRWXO)
+        ACE_AWAIT_NODISCARD auto open(const int flags = O_CREAT | O_APPEND | O_RDWR, const mode_t mode = 0777)
         -> open_query { return open_query { std::move(*this), _path.c_str(), flags, mode }; }
 
         ACE_AWAIT_NODISCARD auto open_rewrite()
-        -> open_query { return open_query { std::move(*this), _path.c_str(), O_CREAT | O_RDWR, S_IRWXO }; }
+        -> open_query { return open_query { std::move(*this), _path.c_str(), O_CREAT | O_RDWR, 0777 }; }
 
         ACE_AWAIT_NODISCARD auto open_rdonly()
-        -> open_query { return open_query { std::move(*this), _path.c_str(), O_CREAT | O_RDONLY, S_IRWXO }; }
+        -> open_query { return open_query { std::move(*this), _path.c_str(), O_CREAT | O_RDONLY, 0777 }; }
 
         ACE_AWAIT_NODISCARD auto open_wronly()
-        -> open_query { return open_query { std::move(*this), _path.c_str(), O_CREAT | O_APPEND | O_WRONLY, S_IRWXO }; }
+        -> open_query { return open_query { std::move(*this), _path.c_str(), O_CREAT | O_APPEND | O_WRONLY, 0777 }; }
 
     };
 

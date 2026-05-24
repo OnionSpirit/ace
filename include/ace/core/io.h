@@ -256,12 +256,13 @@ namespace ace::core {
             const bool& _closed;
 
             static task pending_close(const int fd) noexcept {
-                const int res = co_await close_query{fd};
-                if (res < 0) std::cerr << strerror(res) << std::endl;
+                if (const int res = co_await close_query{fd}; res < 0)
+                    std::cerr << strerror(res) << std::endl;
             }
 
             ~io_guard() noexcept {
-                if (not _closed) schedule(pending_close(_fd));
+                if (_fd > 0 and not _closed)
+                    schedule(pending_close(_fd));
             }
         };
 

@@ -59,52 +59,52 @@ namespace ace {
         }
 
         template <class... Args>
-        static auto println(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
+        static void println(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
             const std::FILE* file = _output.load(std::memory_order_acquire);
-            return fs::writer::writeln_impl(file->_fileno, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            fs::writer::writeln_impl(file->_fileno, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
         template <class... Args>
-        static auto println(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
-            return fs::writer::writeln_impl(file->_fileno, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+        static void println(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
+            fs::writer::writeln_impl(file->_fileno, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
-        static auto println(const __FMT__::string_view&& str) {
+        static void println(const __FMT__::string_view&& str) {
             const std::FILE* file = _output.load(std::memory_order_acquire);
-            return fs::writer::writeln_impl(file->_fileno, std::forward<const __FMT__::string_view>(str));
+            fs::writer::writeln_impl(file->_fileno, std::forward<const __FMT__::string_view>(str));
         }
 
-        static auto println(const std::FILE* file, const __FMT__::string_view&& str) {
-            return fs::writer::writeln_impl(file->_fileno, std::forward<const __FMT__::string_view>(str));
+        static void println(const std::FILE* file, const __FMT__::string_view&& str) {
+            fs::writer::writeln_impl(file->_fileno, std::forward<const __FMT__::string_view>(str));
         }
 
-        static auto println() {
+        static void println() {
             const std::FILE* file = _output.load(std::memory_order_acquire);
-            return fs::writer::writeln_impl(file->_fileno, "");
+            fs::writer::writeln_impl(file->_fileno, "");
         }
 
-        static auto println(const std::FILE* file) {
-            return fs::writer::writeln_impl(file->_fileno, "");
+        static void println(const std::FILE* file) {
+            fs::writer::writeln_impl(file->_fileno, "");
         }
 
         template <class... Args>
-        static auto print(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
+        static void print(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
             const std::FILE* file = _output.load(std::memory_order_acquire);
-            return fs::writer::write_impl(file->_fileno, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            fs::writer::write_impl(file->_fileno, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
         template <class... Args>
-        static auto print(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
-            return fs::writer::write_impl(file->_fileno, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+        static void print(const std::FILE* file, __FMT__::format_string<Args...>&& fmt, Args&&... args) {
+            fs::writer::write_impl(file->_fileno, std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
-        static auto print(const __FMT__::string_view&& str) {
+        static void print(const __FMT__::string_view&& str) {
             const std::FILE* file = _output.load(std::memory_order_acquire);
-            return fs::writer::write_impl(file->_fileno, std::forward<const __FMT__::string_view>(str));
+            fs::writer::write_impl(file->_fileno, std::forward<const __FMT__::string_view>(str));
         }
 
-        static auto print(const std::FILE* file, const __FMT__::string_view&& str) {
-            return fs::writer::write_impl(file->_fileno, std::forward<const __FMT__::string_view>(str));
+        static void print(const std::FILE* file, const __FMT__::string_view&& str) {
+            fs::writer::write_impl(file->_fileno, std::forward<const __FMT__::string_view>(str));
         }
 
     };

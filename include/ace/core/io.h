@@ -196,13 +196,12 @@ namespace ace::core {
     };
 
     template <typename>
-    struct io_transformer { static_assert(false, "'io_transformer' is not provided for requested type"); };
+    struct io_caster { static_assert(false, "'io_caster' is not provided for requested type"); };
 
     /**
      * @brief Handler for a file descriptor with RAII guard behavior.
      * The io_entity derived types shall represent FD state by providing allowed async operations depending on FD state.
      * @tparam entity_t Derived entity type
-     * @tparam Params Data to propagate through transformation
      */
     template <typename entity_t>
     struct io_entity {
@@ -219,7 +218,7 @@ namespace ace::core {
         static entity_t transform(entry_t& io) noexcept {
             auto [fd, is_closed] = std::move(io.extract());
             if (fd < 0) is_closed = true;
-            return io_transformer<entity_t>::transform(fd, is_closed, std::move(io));
+            return io_caster<entity_t>::as_entity(fd, is_closed, std::move(io));
         }
 
         io_entity(io_entity&& io) noexcept {
@@ -265,7 +264,7 @@ namespace ace::core {
 
         virtual ~io_entity() = default;
 
-    // protected:
+    protected:
 
         int  _fd;                      ///< Socket file descriptor
         bool _is_closed;               ///< Socket closed flag
@@ -335,9 +334,10 @@ namespace ace::core {
         any& operator=(any&&) = default;
 
         template <typename data_t>
-        any(data_t data) noexcept {
+        any(data_t&& data) noexcept {
             void* mem = malloc(sizeof(data_t));
-            _data = new (mem) data_t{std::forward<data_t>(data)};
+            *reinterpret_cast<data_t*>(mem) = std::move(data);
+            // _data = std::move(new (mem) data_t{std::move(data)});
             _deleter = deleter_impl<data_t>;
         }
 
@@ -362,6 +362,10 @@ namespace ace::core {
             , _is_closed(true)
             , _data() {}
 
+        io_link(const int fd, const bool is_closed)
+            : _fd(fd)
+            , _is_closed(is_closed) { };
+
         io_link(const int fd, const bool is_closed, any data)
             : _fd(fd)
             , _is_closed(is_closed)
@@ -375,7 +379,7 @@ namespace ace::core {
         static io_link_t transform(entry_t& io) noexcept {
             auto [fd, is_closed] = std::move(io.extract());
             if (fd < 0) is_closed = true;
-            return io_link_t {fd, is_closed, std::move(io)};
+            return io_caster<io_link_t>::as_link(fd, is_closed, std::move(io));
         }
 
         io_link(io_link&& io) noexcept {
@@ -453,10 +457,7 @@ namespace ace::core {
 
 #define IMPORT_IO_ENTITY_ENV(class)                                                         \
                                                                                             \
-    typedef ace::core::io_entity<class> io_entity_t;                                        \
-                                                                                            \
-    class(const int fd, const bool is_closed)                                               \
-        : io_entity_t(fd, is_closed) { };                                                   \
+    using io_entity_t = ace::core::io_entity<class>;                                        \
                                                                                             \
 protected:                                                                                  \
                                                                                             \
@@ -465,31 +466,16 @@ protected:                                                                      
                                                                                             \
 public:                                                                                     \
                                                                                             \
-    class(class&& io) noexcept                                                              \
-        : io_entity_t(static_cast<io_entity_t>(std::move(io))) { }                          \
-                                                                                            \
-    class& operator = (class&& io) noexcept {                                               \
-        _fd = io._fd;                                                                       \
-        _is_closed = io._is_closed;                                                         \
-        io._fd = -1;                                                                        \
-        io._is_closed = true;                                                               \
-        return *this;                                                                       \
-    }                                                                                       \
-                                                                                            \
     IMPORT_ERROR_HANDLING                                                                   \
                                                                                             \
     ~class() override = default;
+
+#define IMPORT_IO_ENTITY_FABRICATION using io_entity_t::io_entity_t;
 
 #define IMPORT_IO_LINK_ENV(class)                                                           \
                                                                                             \
     typedef ace::core::io_link io_link_t;                                                   \
     typedef ace::core::any any_t;                                                           \
-                                                                                            \
-    class(const int fd, const bool is_closed, any_t data)                                   \
-        : io_link_t(fd, is_closed, std::forward<any_t>(data)) { };                          \
-                                                                                            \
-    class(const int fd)                                                                     \
-        : io_link_t(fd) { };                                                                \
                                                                                             \
 protected:                                                                                  \
                                                                                             \
@@ -499,27 +485,11 @@ protected:                                                                      
                                                                                             \
 public:                                                                                     \
                                                                                             \
-    class(class&& io) noexcept {                                                            \
-        _fd = io._fd;                                                                       \
-        _is_closed = io._is_closed;                                                         \
-        _data = std::move(io._data);                                                        \
-        io._fd = -1;                                                                        \
-        io._is_closed = true;                                                               \
-    }                                                                                       \
-                                                                                            \
-    class& operator = (class&& io) noexcept {                                               \
-        _fd = io._fd;                                                                       \
-        _is_closed = io._is_closed;                                                         \
-        _data = std::move(io._data);                                                        \
-        io._fd = -1;                                                                        \
-        io._is_closed = true;                                                               \
-        return *this;                                                                       \
-    }                                                                                       \
-                                                                                            \
     IMPORT_ERROR_HANDLING                                                                   \
                                                                                             \
     ~class() override = default;
 
+#define IMPORT_IO_LINK_FABRICATION using io_link_t::io_link_t;
 
 }
 

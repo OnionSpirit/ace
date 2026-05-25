@@ -7,6 +7,11 @@
 #include <ace/core/io.h>
 
 namespace ace::net {
+
+    /**
+     * @brief Traits class for io net entity definition
+     * @tparam derived_t Derived net entity
+     */
     template <typename derived_t>
     struct io_net_entity : core::io_entity<derived_t> {
 
@@ -15,6 +20,9 @@ namespace ace::net {
 
         io_net_entity() = default;
 
+        io_net_entity(io_net_entity&& io) noexcept
+            : core::io_entity<derived_t>(static_cast<core::io_entity<derived_t>>(std::move(io))) { }
+
         io_net_entity(int fd, bool is_closed, const sockaddr_in self_sin, const sockaddr_in peer_sin) {
             core::io_entity<derived_t>::_fd = fd;
             core::io_entity<derived_t>::_is_closed = is_closed;
@@ -22,7 +30,27 @@ namespace ace::net {
             _peer_sin = peer_sin;
         }
 
+        io_net_entity& operator =(io_net_entity&& io) noexcept {
+            core::io_entity<derived_t>::_fd = io._fd;
+            core::io_entity<derived_t>::_is_closed = io._is_closed;
+            _self_sin = io._self_sin;
+            _peer_sin = io._peer_sin;
+            io._fd = -1;
+            io._is_closed = true;
+            return *this;
+        }
+
     };
+
+// NOTE: Importing names and base typename
+#define IMPORT_IO_NET_ENTITY_ENV(class)                                         \
+    IMPORT_IO_ENTITY_ENV(class)                                                 \
+    using io_net_entity_t = io_net_entity<class>;                               \
+    using io_net_entity_t::_peer_sin;                                           \
+    using io_net_entity_t::_self_sin;
+
+// NOTE: Importing basic constructors
+#define IMPORT_IO_NET_ENTITY_FABRICATION using io_net_entity_t::io_net_entity_t;
 
     template <typename io_net_entity_t>
     concept is_net_entity = requires(io_net_entity_t entity) {
@@ -30,23 +58,23 @@ namespace ace::net {
         entity._peer_sin;
     };
 
+    /**
+     * @brief Base class for net entity casters
+     * @tparam io_net_entity_t Net entity type
+     */
     template <is_net_entity io_net_entity_t>
-    struct io_net_entity_transformer {
+    struct io_net_entity_caster {
 
         template <is_net_entity net_entity_t>
-        static auto transform(int fd, bool is_closed, net_entity_t&& entity) {
+        static auto as_entity(int fd, bool is_closed, net_entity_t&& entity) {
             return io_net_entity_t { fd, is_closed, entity._self_sin, entity._peer_sin };
         }
 
+        // template <is_net_entity net_entity_t>
+        // static auto as_entity(net_entity_t&& entity) {
+        //     return io_net_entity_t { entity._fd, entity._is_closed, entity._self_sin, entity._peer_sin };
+        // }
     };
-
-#define IMPORT_IO_NET_ENTITY_ENV(class)                                         \
-    IMPORT_IO_ENTITY_ENV(class)                                                 \
-    using io_net_entity_t = io_net_entity<class>;                               \
-    using io_net_entity_t::_peer_sin;                                           \
-    using io_net_entity_t::_self_sin;                                           \
-    using io_net_entity_t::io_net_entity_t;
-
 
     template <int domain_v>
     static inline constexpr bool is_inet_domain = domain_v == AF_INET or domain_v == AF_INET6 or domain_v == PF_INET or domain_v == PF_INET6;
@@ -74,6 +102,7 @@ namespace ace::net {
     struct io_transport_entity : io_net_entity<io_transport_entity<domain_v, connection_state_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_transport_entity)
+        IMPORT_IO_NET_ENTITY_FABRICATION
 
         io_transport_entity() = default;
 
@@ -365,10 +394,13 @@ namespace ace::net {
     };
 }
 
+/**
+ * @base @c io_transport_entity caster specialization for fabricating it from another io_net_entities
+ */
 template<int domain_v, ace::net::transport_entity_state connection_state_v>
-struct ace::core::io_transformer<ace::net::io_transport_entity<domain_v, connection_state_v>>
-    : net::io_net_entity_transformer<net::io_transport_entity<domain_v, connection_state_v>> {
-    using net::io_net_entity_transformer<net::io_transport_entity<domain_v, connection_state_v>>::transform;
+struct ace::core::io_caster<ace::net::io_transport_entity<domain_v, connection_state_v>>
+    : net::io_net_entity_caster<net::io_transport_entity<domain_v, connection_state_v>> {
+    using net::io_net_entity_caster<net::io_transport_entity<domain_v, connection_state_v>>::as_entity;
 };
 
 namespace ace::net {
@@ -383,10 +415,11 @@ namespace ace::net {
     struct io_listener_entity : io_net_entity<io_listener_entity<domain_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_listener_entity);
+        IMPORT_IO_NET_ENTITY_FABRICATION
 
         io_listener_entity() = default;
 
-        friend core::io_transformer<io_listener_entity>;
+        friend core::io_caster<io_listener_entity>;
 
         struct accept_query : core::io_query<accept_query> {
 
@@ -410,7 +443,7 @@ namespace ace::net {
             [[nodiscard]] io_transport_entity_t await_resume() const {
                 if (_res > -1) {
                     _entity->_peer_sin = *reinterpret_cast<sockaddr_in*>(_addr);
-                    return core::io_transformer<io_transport_entity_t>::transform(_res, false, std::move(*_entity));
+                    return core::io_caster<io_transport_entity_t>::as_entity(_res, false, std::move(*_entity));
                 }
                 return io_transport_entity_t {};
             }
@@ -450,11 +483,14 @@ namespace ace::net {
 
 }
 
-    template<int domain_v>
-    struct ace::core::io_transformer<ace::net::io_listener_entity<domain_v>>
-        : net::io_net_entity_transformer<net::io_listener_entity<domain_v>> {
-        using net::io_net_entity_transformer<net::io_listener_entity<domain_v>>::transform;
-    };
+/**
+ * @base @c io_listener_entity caster specialization for fabricating it from another io_net_entities
+ */
+template<int domain_v>
+struct ace::core::io_caster<ace::net::io_listener_entity<domain_v>>
+    : net::io_net_entity_caster<net::io_listener_entity<domain_v>> {
+    using net::io_net_entity_caster<net::io_listener_entity<domain_v>>::as_entity;
+};
 
 namespace ace::net {
     /**
@@ -467,6 +503,7 @@ namespace ace::net {
     struct io_stream_mode_entity : io_net_entity<io_stream_mode_entity<domain_v, type_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_stream_mode_entity)
+        IMPORT_IO_NET_ENTITY_FABRICATION
 
         io_stream_mode_entity() : io_entity_t() {};
 
@@ -539,11 +576,14 @@ namespace ace::net {
 
 }
 
-    template<int domain_v, int type_v>
-    struct ace::core::io_transformer<ace::net::io_stream_mode_entity<domain_v, type_v>>
-        : net::io_net_entity_transformer<net::io_stream_mode_entity<domain_v, type_v>> {
-        using net::io_net_entity_transformer<net::io_stream_mode_entity<domain_v, type_v>>::transform;
-    };
+/**
+ * @base @c io_stream_mode_entity caster specialization for fabricating it from another io_net_entities
+ */
+template<int domain_v, int type_v>
+struct ace::core::io_caster<ace::net::io_stream_mode_entity<domain_v, type_v>>
+    : net::io_net_entity_caster<net::io_stream_mode_entity<domain_v, type_v>> {
+    using net::io_net_entity_caster<net::io_stream_mode_entity<domain_v, type_v>>::as_entity;
+};
 
 namespace ace::net {
 
@@ -556,6 +596,7 @@ namespace ace::net {
     struct io_mapping_entity : io_net_entity<io_mapping_entity<domain_v, type_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_mapping_entity)
+        IMPORT_IO_NET_ENTITY_FABRICATION
 
         io_mapping_entity() : io_entity_t() {};
 
@@ -711,11 +752,12 @@ namespace ace::net {
 
 
 // template<int domain_v, int type_v>
-// struct ace::core::io_transformer<ace::net::io_mapping_entity<domain_v, type_v>>
-//     : net::io_net_entity_transformer<net::io_mapping_entity<domain_v, type_v>> {
-//     using net::io_net_entity_transformer<net::io_mapping_entity<domain_v, type_v>>::transform;
+// struct ace::core::io_caster<ace::net::io_mapping_entity<domain_v, type_v>>
+//     : net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>> {
+//     using net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>>::transform;
 // };
 
 
 #undef IMPORT_IO_NET_ENTITY_ENV
+#undef IMPORT_IO_NET_ENTITY_FABRICATION
 #endif //ACE_NET_H

@@ -443,7 +443,7 @@ TEST(core, do_and_await_test) {
     EXPECT_GE(ms_time, 100);
 }
 
-TEST(core, DISABLED_do_fs_tests) {
+TEST(core, do_fs_tests) {
     ace::schedule(fs_testing());
     ace::run();
     ASSERT_TRUE(ace::empty());

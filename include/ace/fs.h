@@ -10,10 +10,10 @@
 
 namespace ace::fs {
 
-
     struct file_link : core::io_link {
 
         IMPORT_IO_LINK_ENV(file_link);
+        IMPORT_IO_LINK_FABRICATION;
 
         void output_action(__FMT__::string_view buff) override {
             // NOTE: Trying to get thread local runner from the dispatcher
@@ -37,6 +37,18 @@ namespace ace::fs {
 
     };
 
+}
+
+template<>
+struct ace::core::io_caster<ace::fs::file_link> {
+
+    template <typename file_io_entity_t>
+    static auto as_link(int fd, bool is_closed, file_io_entity_t&&) {
+        return fs::file_link { fd, is_closed };
+    }
+};
+
+namespace ace::fs {
 
     struct file : core::io_entity<file> {
 
@@ -60,7 +72,7 @@ namespace ace::fs {
                 , _flags(flags)
                 , _mode(mode) {}
 
-            bool setup_query(core::services::kernel_observer* kwp) const noexcept {
+            bool setup_query(kernel_observer* kwp) const noexcept {
                 return core::services::kernel_controller::open(kwp, _path, _flags, _mode);
             }
 

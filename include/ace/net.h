@@ -7,22 +7,46 @@
 #include <ace/core/io.h>
 
 namespace ace::net {
+    template <typename derived_t>
+    struct io_net_entity : core::io_entity<derived_t> {
 
-    enum transport_entity_state {
-        e_indirect = 0,
-        e_connected = 1
+        mutable sockaddr_in _self_sin {};
+        mutable sockaddr_in _peer_sin {};
+
+        io_net_entity() = default;
+
+        io_net_entity(int fd, bool is_closed, const sockaddr_in self_sin, const sockaddr_in peer_sin) {
+            core::io_entity<derived_t>::_fd = fd;
+            core::io_entity<derived_t>::_is_closed = is_closed;
+            _self_sin = self_sin;
+            _peer_sin = peer_sin;
+        }
+
     };
 
-    template <typename entity_t>
-    using io_net_entity = core::io_entity<entity_t, sockaddr_in, sockaddr_in>;
+    template <typename io_net_entity_t>
+    concept is_net_entity = requires(io_net_entity_t entity) {
+        entity._self_sin;
+        entity._peer_sin;
+    };
 
-    #define IMPORT_IO_NET_ENTITY_ENV(class) IMPORT_IO_ENTITY_ENV(class, sockaddr_in, sockaddr_in);
+    template <is_net_entity io_net_entity_t>
+    struct io_net_entity_transformer {
 
-    #define SELF_SIN std::get<0>(_params)
-    #define PEER_SIN std::get<1>(_params)
+        template <is_net_entity net_entity_t>
+        static auto transform(int fd, bool is_closed, net_entity_t&& entity) {
+            return io_net_entity_t { fd, is_closed, entity._self_sin, entity._peer_sin };
+        }
 
-    [[maybe_unused]] static auto& self_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<0>(p); }
-    [[maybe_unused]] static auto& peer_sin_from(std::tuple<sockaddr_in, sockaddr_in> p) { return std::get<1>(p); }
+    };
+
+#define IMPORT_IO_NET_ENTITY_ENV(class)                                         \
+    IMPORT_IO_ENTITY_ENV(class)                                                 \
+    using io_net_entity_t = io_net_entity<class>;                               \
+    using io_net_entity_t::_peer_sin;                                           \
+    using io_net_entity_t::_self_sin;                                           \
+    using io_net_entity_t::io_net_entity_t;
+
 
     template <int domain_v>
     static inline constexpr bool is_inet_domain = domain_v == AF_INET or domain_v == AF_INET6 or domain_v == PF_INET or domain_v == PF_INET6;
@@ -32,6 +56,11 @@ namespace ace::net {
 
     template <typename, int>
     struct connect_query;
+
+    enum transport_entity_state {
+        e_indirect = 0,
+        e_connected = 1
+    };
 
     /**
      * @brief An @c io_entity class to represent connection socket
@@ -163,10 +192,10 @@ namespace ace::net {
          */
         [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
         -> connect_query_t requires (is_inet_domain<domain_v> and connection_state_v == e_indirect) {
-            PEER_SIN.sin_family = domain_v;
-            PEER_SIN.sin_port = htons(port);
-            PEER_SIN.sin_addr.s_addr = htonl(addr);
-            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
+            _peer_sin.sin_family = domain_v;
+            _peer_sin.sin_port = htons(port);
+            _peer_sin.sin_addr.s_addr = htonl(addr);
+            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(sockaddr_in)};
         }
 
         /**
@@ -174,10 +203,10 @@ namespace ace::net {
          */
         [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
         -> connect_query_t requires (is_inet_domain<domain_v> and connection_state_v == e_indirect) {
-            PEER_SIN.sin_family = domain_v;
-            PEER_SIN.sin_port = htons(port);
-            inet_pton(domain_v, addr.data(), &(PEER_SIN.sin_addr));
-            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
+            _peer_sin.sin_family = domain_v;
+            _peer_sin.sin_port = htons(port);
+            inet_pton(domain_v, addr.data(), &(_peer_sin.sin_addr));
+            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(sockaddr_in)};
         }
 
         [[nodiscard]] auto sendto(const void *buf, const size_t len, const int flags,
@@ -334,6 +363,15 @@ namespace ace::net {
         const sockaddr* _addr;
         const socklen_t _addrlen;
     };
+}
+
+template<int domain_v, ace::net::transport_entity_state connection_state_v>
+struct ace::core::io_transformer<ace::net::io_transport_entity<domain_v, connection_state_v>>
+    : net::io_net_entity_transformer<net::io_transport_entity<domain_v, connection_state_v>> {
+    using net::io_net_entity_transformer<net::io_transport_entity<domain_v, connection_state_v>>::transform;
+};
+
+namespace ace::net {
 
     /**
      * @brief An @c io_entity class to represent listen socket
@@ -347,6 +385,8 @@ namespace ace::net {
         IMPORT_IO_NET_ENTITY_ENV(io_listener_entity);
 
         io_listener_entity() = default;
+
+        friend core::io_transformer<io_listener_entity>;
 
         struct accept_query : core::io_query<accept_query> {
 
@@ -369,8 +409,8 @@ namespace ace::net {
 
             [[nodiscard]] io_transport_entity_t await_resume() const {
                 if (_res > -1) {
-                    peer_sin_from(_entity->_params) = *reinterpret_cast<sockaddr_in*>(_addr);
-                    return io_transport_entity_t { _res, false, _entity->_params };
+                    _entity->_peer_sin = *reinterpret_cast<sockaddr_in*>(_addr);
+                    return core::io_transformer<io_transport_entity_t>::transform(_res, false, std::move(*_entity));
                 }
                 return io_transport_entity_t {};
             }
@@ -382,33 +422,41 @@ namespace ace::net {
         };
 
         [[nodiscard]] auto accept()
-        -> accept_query { return accept_query { this, reinterpret_cast<sockaddr*>(&SELF_SIN), &self_sin_size}; }
+        -> accept_query { return accept_query { this, reinterpret_cast<sockaddr*>(&_self_sin), &_self_sin_size}; }
 
         [[nodiscard]] auto accept(sockaddr* addr, const socklen_t* addrlen, const int flags = 0)
         -> accept_query { return accept_query{this, addr, addrlen, flags}; }
 
         [[nodiscard]] auto accept(const in_addr_t addr, const uint16_t port)
         -> accept_query requires is_inet_domain<domain_v> {
-            SELF_SIN.sin_family = domain_v;
-            SELF_SIN.sin_port = htons(port);
-            SELF_SIN.sin_addr.s_addr = htonl(addr);
-            return accept_query { this, reinterpret_cast<sockaddr*>(&SELF_SIN), &self_sin_size};
+            _self_sin.sin_family = domain_v;
+            _self_sin.sin_port = htons(port);
+            _self_sin.sin_addr.s_addr = htonl(addr);
+            return accept_query { this, reinterpret_cast<sockaddr*>(&_self_sin), &_self_sin_size};
         }
 
         [[nodiscard]] auto accept(const std::string_view addr, const uint16_t port)
         -> accept_query requires is_inet_domain<domain_v> {
-            SELF_SIN.sin_family = domain_v;
-            SELF_SIN.sin_port = htons(port);
-            inet_pton(domain_v, addr.data(), &(SELF_SIN.sin_addr));
-            return accept_query { this, reinterpret_cast<sockaddr*>(&SELF_SIN), self_sin_len_ptr};
+            _self_sin.sin_family = domain_v;
+            _self_sin.sin_port = htons(port);
+            inet_pton(domain_v, addr.data(), &(_self_sin.sin_addr));
+            return accept_query { this, reinterpret_cast<sockaddr*>(&_self_sin), _self_sin_len_ptr};
         }
 
-        socklen_t self_sin_size = sizeof(SELF_SIN);
-        socklen_t* self_sin_len_ptr = &self_sin_size;
+        socklen_t _self_sin_size = sizeof(sockaddr_in);
+        socklen_t* _self_sin_len_ptr = &_self_sin_size;
 
     };
 
+}
 
+    template<int domain_v>
+    struct ace::core::io_transformer<ace::net::io_listener_entity<domain_v>>
+        : net::io_net_entity_transformer<net::io_listener_entity<domain_v>> {
+        using net::io_net_entity_transformer<net::io_listener_entity<domain_v>>::transform;
+    };
+
+namespace ace::net {
     /**
      * @brief An @c io_entity class to represent socket mode selection [ @b Listener | @b Connection ]
      *
@@ -470,10 +518,10 @@ namespace ace::net {
          */
         [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
         -> connect_query_t requires is_inet_domain<domain_v> {
-            PEER_SIN.sin_family = domain_v;
-            PEER_SIN.sin_port = htons(port);
-            PEER_SIN.sin_addr.s_addr = htonl(addr);
-            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
+            _peer_sin.sin_family = domain_v;
+            _peer_sin.sin_port = htons(port);
+            _peer_sin.sin_addr.s_addr = htonl(addr);
+            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(sockaddr_in)};
         }
 
         /**
@@ -481,14 +529,23 @@ namespace ace::net {
          */
         [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
         -> connect_query_t requires is_inet_domain<domain_v> {
-            PEER_SIN.sin_family = domain_v;
-            PEER_SIN.sin_port = htons(port);
-            inet_pton(domain_v, addr.data(), &(PEER_SIN.sin_addr));
-            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
+            _peer_sin.sin_family = domain_v;
+            _peer_sin.sin_port = htons(port);
+            inet_pton(domain_v, addr.data(), &(_peer_sin.sin_addr));
+            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(sockaddr_in)};
         }
 
     };
 
+}
+
+    template<int domain_v, int type_v>
+    struct ace::core::io_transformer<ace::net::io_stream_mode_entity<domain_v, type_v>>
+        : net::io_net_entity_transformer<net::io_stream_mode_entity<domain_v, type_v>> {
+        using net::io_net_entity_transformer<net::io_stream_mode_entity<domain_v, type_v>>::transform;
+    };
+
+namespace ace::net {
 
     /**
      * @brief An @c io_entity class to represent waiting for @b binding or @b pending @b connection state
@@ -532,8 +589,8 @@ namespace ace::net {
                     return io_stream_mode_entity_t::transform(_entity);
                 else {
                     if (_res > -1) {
-                        peer_sin_from(_entity->_params) = *reinterpret_cast<sockaddr_in*>(_addr);
-                        return io_transport_entity_t { _res, false, _entity->_params };
+                        _entity._peer_sin = *reinterpret_cast<sockaddr_in*>(_addr);
+                        return io_transport_entity_t { _res, false, std::move(*_entity) };
                     }
                     return io_transport_entity_t {};
                 }
@@ -555,10 +612,10 @@ namespace ace::net {
          */
         [[nodiscard]] auto bind(const in_addr_t addr, const uint16_t port)
         -> bind_query requires is_inet_domain<domain_v> {
-            SELF_SIN.sin_family = domain_v;
-            SELF_SIN.sin_port = htons(port);
-            SELF_SIN.sin_addr.s_addr = htonl(addr);
-            return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&SELF_SIN), sizeof(SELF_SIN)};
+            _self_sin.sin_family = domain_v;
+            _self_sin.sin_port = htons(port);
+            _self_sin.sin_addr.s_addr = htonl(addr);
+            return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&_self_sin), sizeof(sockaddr_in)};
         }
 
         /**
@@ -566,10 +623,10 @@ namespace ace::net {
          */
         [[nodiscard]] auto bind(const std::string_view addr, const uint16_t port)
         -> bind_query requires is_inet_domain<domain_v> {
-            SELF_SIN.sin_family = domain_v;
-            SELF_SIN.sin_port = htons(port);
-            inet_pton(domain_v, addr.data(), &(SELF_SIN.sin_addr));
-            return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&SELF_SIN), sizeof(SELF_SIN)};
+            _self_sin.sin_family = domain_v;
+            _self_sin.sin_port = htons(port);
+            inet_pton(domain_v, addr.data(), &(_self_sin.sin_addr));
+            return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&_self_sin), sizeof(sockaddr_in)};
         }
 
         using connect_query_t = connect_query<io_mapping_entity, domain_v>;
@@ -586,10 +643,10 @@ namespace ace::net {
          */
         [[nodiscard]] auto connect(const in_addr_t addr, const uint16_t port)
         -> connect_query_t requires is_inet_domain<domain_v> {
-            PEER_SIN.sin_family = domain_v;
-            PEER_SIN.sin_port = htons(port);
-            PEER_SIN.sin_addr.s_addr = htonl(addr);
-            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
+            _peer_sin.sin_family = domain_v;
+            _peer_sin.sin_port = htons(port);
+            _peer_sin.sin_addr.s_addr = htonl(addr);
+            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(sockaddr_in)};
         }
 
         /**
@@ -597,10 +654,10 @@ namespace ace::net {
          */
         [[nodiscard]] auto connect(const std::string_view addr, const uint16_t port)
         -> connect_query_t requires is_inet_domain<domain_v> {
-            PEER_SIN.sin_family = domain_v;
-            PEER_SIN.sin_port = htons(port);
-            inet_pton(domain_v, addr.data(), &(PEER_SIN.sin_addr));
-            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&PEER_SIN), sizeof(PEER_SIN)};
+            _peer_sin.sin_family = domain_v;
+            _peer_sin.sin_port = htons(port);
+            inet_pton(domain_v, addr.data(), &(_peer_sin.sin_addr));
+            return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(sockaddr_in)};
         }
 
     };
@@ -649,9 +706,16 @@ namespace ace::net {
     using io_socket_udp      = io_socket<AF_INET , SOCK_DGRAM , IPPROTO_UDP>;
     using io_socket_udp_v6   = io_socket<AF_INET6, SOCK_DGRAM , IPPROTO_UDP>;
 
-} // end namespace ace::futures
+} // end namespace ace::net
 
-#undef SELF_SIN
-#undef PEER_SIN
+
+
+// template<int domain_v, int type_v>
+// struct ace::core::io_transformer<ace::net::io_mapping_entity<domain_v, type_v>>
+//     : net::io_net_entity_transformer<net::io_mapping_entity<domain_v, type_v>> {
+//     using net::io_net_entity_transformer<net::io_mapping_entity<domain_v, type_v>>::transform;
+// };
+
+
 #undef IMPORT_IO_NET_ENTITY_ENV
 #endif //ACE_NET_H

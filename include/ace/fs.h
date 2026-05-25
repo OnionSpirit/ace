@@ -40,7 +40,7 @@ namespace ace::fs {
 
     struct file : core::io_entity<file> {
 
-        IMPORT_RAW_IO_ENTITY_ENV(file);
+        IMPORT_IO_ENTITY_ENV(file);
 
         std::filesystem::path _path;
 

@@ -383,7 +383,7 @@ namespace ace::net {
 
         [[nodiscard]] io_transport_entity_t await_resume() const {
             if (_res > -1) {
-                return io_transport_entity_t::transform(_entity);
+                return io_transport_entity_t::consume(_entity);
             }
             return io_transport_entity_t {};
         }
@@ -525,7 +525,7 @@ namespace ace::net {
             }
 
             [[nodiscard]] io_listener_entity_t await_resume() const {
-                return io_listener_entity_t::transform(_entity);
+                return io_listener_entity_t::consume(_entity);
             }
 
             io_stream_mode_entity& _entity;
@@ -627,7 +627,7 @@ namespace ace::net {
 
             [[nodiscard]] io_stream_mode_entity_t await_resume() {
                 if constexpr (is_stream_type<type_v>)
-                    return io_stream_mode_entity_t::transform(_entity);
+                    return io_stream_mode_entity_t::consume(_entity);
                 else {
                     if (_res > -1) {
                         _entity._peer_sin = *reinterpret_cast<sockaddr_in*>(_addr);
@@ -754,7 +754,7 @@ namespace ace::net {
 // template<int domain_v, int type_v>
 // struct ace::core::io_caster<ace::net::io_mapping_entity<domain_v, type_v>>
 //     : net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>> {
-//     using net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>>::transform;
+//     using net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>>::consume;
 // };
 
 

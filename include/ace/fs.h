@@ -78,7 +78,7 @@ namespace ace::fs {
 
             [[nodiscard]] auto await_resume() const {
                 _entity._fd = _res;
-                return core::io_link::transform<file_link>(_entity);
+                return core::io_link::consume<file_link>(_entity);
             }
 
             file& _entity;

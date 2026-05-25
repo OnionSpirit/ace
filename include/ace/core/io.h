@@ -214,8 +214,9 @@ namespace ace::core {
             : _fd(fd)
             , _is_closed(is_closed) { };
 
+        // NOTE: This method is made to never forget to move ownership
         template<typename entry_t>
-        static entity_t transform(entry_t& io) noexcept {
+        static entity_t consume(entry_t& io) noexcept {
             auto [fd, is_closed] = std::move(io.extract());
             if (fd < 0) is_closed = true;
             return io_caster<entity_t>::as_entity(fd, is_closed, std::move(io));
@@ -375,8 +376,9 @@ namespace ace::core {
             : _fd(fd)
             , _is_closed(false) { };
 
+        // NOTE: This method is made to never forget to move ownership
         template<typename io_link_t, typename entry_t>
-        static io_link_t transform(entry_t& io) noexcept {
+        static io_link_t consume(entry_t& io) noexcept {
             auto [fd, is_closed] = std::move(io.extract());
             if (fd < 0) is_closed = true;
             return io_caster<io_link_t>::as_link(fd, is_closed, std::move(io));

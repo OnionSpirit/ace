@@ -10,7 +10,13 @@
 
 namespace ace::fs {
 
-    struct file_link : core::io_link {
+    struct file_link;
+
+    struct file;
+
+}
+
+    struct ace::fs::file_link : core::io_link {
 
         IMPORT_IO_LINK_ENV(file_link);
         IMPORT_IO_LINK_FABRICATION;
@@ -37,20 +43,7 @@ namespace ace::fs {
 
     };
 
-}
-
-template<>
-struct ace::core::io_caster<ace::fs::file_link> {
-
-    template <typename file_io_entity_t>
-    static auto as_link(int fd, bool is_closed, file_io_entity_t&&) {
-        return fs::file_link { fd, is_closed };
-    }
-};
-
-namespace ace::fs {
-
-    struct file : core::io_entity<file> {
+    struct ace::fs::file : core::io_entity<file> {
 
         IMPORT_IO_ENTITY_ENV(file);
 
@@ -104,8 +97,14 @@ namespace ace::fs {
 
     };
 
-}
+    template<>
+    struct ace::core::io_caster<ace::fs::file_link> {
 
-#undef std
+        template <typename file_io_entity_t>
+        static auto as_link(int fd, bool is_closed, file_io_entity_t&&) {
+            return fs::file_link { fd, is_closed };
+        }
+    };
+
 
 #endif //ACE_FS_H

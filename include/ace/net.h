@@ -8,6 +8,10 @@
 
 namespace ace::net {
 
+
+// ================================- META -================================
+
+
     /**
      * @brief Traits class for io net entity definition
      * @tparam derived_t Derived net entity
@@ -82,13 +86,17 @@ namespace ace::net {
     template <int type_v>
     static inline constexpr bool is_stream_type = type_v == SOCK_STREAM;
 
-    template <typename, int>
-    struct connect_query;
-
     enum transport_entity_state {
         e_indirect = 0,
         e_connected = 1
     };
+
+    template <typename, int>
+    struct connect_query;
+
+
+// ================================- DECLARATIONS -================================
+
 
     /**
      * @brief An @c io_entity class to represent connection socket
@@ -99,7 +107,107 @@ namespace ace::net {
      * or the result of @c io_listener.accept(...) via @c co_await
      */
     template <int domain_v, transport_entity_state connection_state_v = e_indirect>
-    struct io_transport_entity : io_net_entity<io_transport_entity<domain_v, connection_state_v>> {
+    struct io_transport_entity;
+
+    /**
+     * @brief An @c io_entity class to represent listen socket
+     *
+     * Turns out from the @c io_stream_mode_entity as a result of processing its member @c listen()
+     * via @c co_await
+     */
+    template <int domain_v>
+    struct io_listener_entity;
+
+    /**
+     * @brief An @c io_entity class to represent socket mode selection [ @b Listener | @b Connection ]
+     *
+     * Turns out from the @c io_mapping_entity only for the @b SOCK_STREAM socket type
+     * as a result of processing its member @c bind(...) via @c co_await
+     */
+    template <int domain_v, int type_v>
+    struct io_stream_mode_entity;
+
+    /**
+     * @brief An @c io_entity class to represent waiting for @b binding or @b pending @b connection state
+     *
+     * Turns out from @c io_socket_entity as a result of processing it via @c co_await
+     */
+    template <int domain_v, int type_v>
+    struct io_mapping_entity;
+
+    /**
+     * @brief An @b io_entity for socket creation. Also, supports aliasing
+     * @tparam domain_v Communication domain
+     * @tparam type_v Communication semantics
+     * @tparam protocol_v Particular socket protocol
+     */
+    template <int domain_v, int type_v, int protocol_v>
+    struct io_socket;
+
+
+// ================================- ALIASES -================================
+
+
+    typedef io_listener_entity<2> io_listener;
+
+    typedef io_transport_entity<2, e_indirect> io_net_interface;
+    typedef io_transport_entity<2, e_connected> io_connection;
+
+    using io_socket_raw      = io_socket<AF_INET , SOCK_RAW   , IPPROTO_RAW>;
+    using io_socket_raw_v6   = io_socket<AF_INET6, SOCK_RAW   , IPPROTO_RAW>;
+    using io_socket_tcp      = io_socket<AF_INET , SOCK_STREAM, IPPROTO_TCP>;
+    using io_socket_tcp_v6   = io_socket<AF_INET6, SOCK_STREAM, IPPROTO_TCP>;
+    using io_socket_udp      = io_socket<AF_INET , SOCK_DGRAM , IPPROTO_UDP>;
+    using io_socket_udp_v6   = io_socket<AF_INET6, SOCK_DGRAM , IPPROTO_UDP>;
+
+}
+
+
+// ================================- TRANSFORMERS -================================
+
+
+    /**
+     * @base @c io_transport_entity caster specialization for fabricating it from another io_net_entities
+     */
+    template<int domain_v, ace::net::transport_entity_state connection_state_v>
+    struct ace::core::io_caster<ace::net::io_transport_entity<domain_v, connection_state_v>>
+        : net::io_net_entity_caster<net::io_transport_entity<domain_v, connection_state_v>> {
+        using net::io_net_entity_caster<net::io_transport_entity<domain_v, connection_state_v>>::as_entity;
+    };
+
+    /**
+     * @base @c io_listener_entity caster specialization for fabricating it from another io_net_entities
+     */
+    template<int domain_v>
+    struct ace::core::io_caster<ace::net::io_listener_entity<domain_v>>
+        : net::io_net_entity_caster<net::io_listener_entity<domain_v>> {
+        using net::io_net_entity_caster<net::io_listener_entity<domain_v>>::as_entity;
+    };
+
+    /**
+     * @base @c io_stream_mode_entity caster specialization for fabricating it from another io_net_entities
+     */
+    template<int domain_v, int type_v>
+    struct ace::core::io_caster<ace::net::io_stream_mode_entity<domain_v, type_v>>
+        : net::io_net_entity_caster<net::io_stream_mode_entity<domain_v, type_v>> {
+        using net::io_net_entity_caster<net::io_stream_mode_entity<domain_v, type_v>>::as_entity;
+    };
+
+    /**
+     * @base @c io_mapping_entity caster specialization for fabricating it from another io_net_entities
+     */
+    template<int domain_v, int type_v>
+    struct ace::core::io_caster<ace::net::io_mapping_entity<domain_v, type_v>>
+        : net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>> {
+        using net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>>::as_entity;
+    };
+
+
+// ================================- DEFINITIONS -================================
+
+
+    template <int domain_v, ace::net::transport_entity_state connection_state_v>
+    struct ace::net::io_transport_entity : io_net_entity<io_transport_entity<domain_v, connection_state_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_transport_entity)
         IMPORT_IO_NET_ENTITY_FABRICATION
@@ -363,7 +471,7 @@ namespace ace::net {
     };
 
     template <typename entity_t, int domain_v>
-    struct connect_query : core::io_query<connect_query<entity_t, domain_v>> {
+    struct ace::net::connect_query : core::io_query<connect_query<entity_t, domain_v>> {
 
         IMPORT_IO_QUERY_ENV(connect_query)
 
@@ -392,27 +500,10 @@ namespace ace::net {
         const sockaddr* _addr;
         const socklen_t _addrlen;
     };
-}
 
-/**
- * @base @c io_transport_entity caster specialization for fabricating it from another io_net_entities
- */
-template<int domain_v, ace::net::transport_entity_state connection_state_v>
-struct ace::core::io_caster<ace::net::io_transport_entity<domain_v, connection_state_v>>
-    : net::io_net_entity_caster<net::io_transport_entity<domain_v, connection_state_v>> {
-    using net::io_net_entity_caster<net::io_transport_entity<domain_v, connection_state_v>>::as_entity;
-};
 
-namespace ace::net {
-
-    /**
-     * @brief An @c io_entity class to represent listen socket
-     *
-     * Turns out from the @c io_stream_mode_entity as a result of processing its member @c listen()
-     * via @c co_await
-     */
     template <int domain_v>
-    struct io_listener_entity : io_net_entity<io_listener_entity<domain_v>> {
+    struct ace::net::io_listener_entity : io_net_entity<io_listener_entity<domain_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_listener_entity);
         IMPORT_IO_NET_ENTITY_FABRICATION
@@ -481,26 +572,9 @@ namespace ace::net {
 
     };
 
-}
 
-/**
- * @base @c io_listener_entity caster specialization for fabricating it from another io_net_entities
- */
-template<int domain_v>
-struct ace::core::io_caster<ace::net::io_listener_entity<domain_v>>
-    : net::io_net_entity_caster<net::io_listener_entity<domain_v>> {
-    using net::io_net_entity_caster<net::io_listener_entity<domain_v>>::as_entity;
-};
-
-namespace ace::net {
-    /**
-     * @brief An @c io_entity class to represent socket mode selection [ @b Listener | @b Connection ]
-     *
-     * Turns out from the @c io_mapping_entity only for the @b SOCK_STREAM socket type
-     * as a result of processing its member @c bind(...) via @c co_await
-     */
     template <int domain_v, int type_v>
-    struct io_stream_mode_entity : io_net_entity<io_stream_mode_entity<domain_v, type_v>> {
+    struct ace::net::io_stream_mode_entity : io_net_entity<io_stream_mode_entity<domain_v, type_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_stream_mode_entity)
         IMPORT_IO_NET_ENTITY_FABRICATION
@@ -574,26 +648,9 @@ namespace ace::net {
 
     };
 
-}
 
-/**
- * @base @c io_stream_mode_entity caster specialization for fabricating it from another io_net_entities
- */
-template<int domain_v, int type_v>
-struct ace::core::io_caster<ace::net::io_stream_mode_entity<domain_v, type_v>>
-    : net::io_net_entity_caster<net::io_stream_mode_entity<domain_v, type_v>> {
-    using net::io_net_entity_caster<net::io_stream_mode_entity<domain_v, type_v>>::as_entity;
-};
-
-namespace ace::net {
-
-    /**
-     * @brief An @c io_entity class to represent waiting for @b binding or @b pending @b connection state
-     *
-     * Turns out from @c io_socket_entity as a result of processing it via @c co_await
-     */
     template <int domain_v, int type_v>
-    struct io_mapping_entity : io_net_entity<io_mapping_entity<domain_v, type_v>> {
+    struct ace::net::io_mapping_entity : io_net_entity<io_mapping_entity<domain_v, type_v>> {
 
         IMPORT_IO_NET_ENTITY_ENV(io_mapping_entity)
         IMPORT_IO_NET_ENTITY_FABRICATION
@@ -703,15 +760,8 @@ namespace ace::net {
 
     };
 
-
-    /**
-     * @brief An @b io_entity for socket creation. Also, supports aliasing
-     * @tparam domain_v Communication domain
-     * @tparam type_v Communication semantics
-     * @tparam protocol_v Particular socket protol
-     */
     template <int domain_v, int type_v, int protocol_v>
-    struct io_socket : core::io_query<io_socket<domain_v, type_v, protocol_v>> {
+    struct ace::net::io_socket : core::io_query<io_socket<domain_v, type_v, protocol_v>> {
 
         IMPORT_IO_QUERY_ENV(io_socket)
 
@@ -734,28 +784,6 @@ namespace ace::net {
 
         const int _flags;
     };
-
-    typedef io_listener_entity<2> io_listener;
-
-    typedef io_transport_entity<2, e_indirect> io_net_interface;
-    typedef io_transport_entity<2, e_connected> io_connection;
-
-    using io_socket_raw      = io_socket<AF_INET , SOCK_RAW   , IPPROTO_RAW>;
-    using io_socket_raw_v6   = io_socket<AF_INET6, SOCK_RAW   , IPPROTO_RAW>;
-    using io_socket_tcp      = io_socket<AF_INET , SOCK_STREAM, IPPROTO_TCP>;
-    using io_socket_tcp_v6   = io_socket<AF_INET6, SOCK_STREAM, IPPROTO_TCP>;
-    using io_socket_udp      = io_socket<AF_INET , SOCK_DGRAM , IPPROTO_UDP>;
-    using io_socket_udp_v6   = io_socket<AF_INET6, SOCK_DGRAM , IPPROTO_UDP>;
-
-} // end namespace ace::net
-
-
-
-// template<int domain_v, int type_v>
-// struct ace::core::io_caster<ace::net::io_mapping_entity<domain_v, type_v>>
-//     : net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>> {
-//     using net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>>::consume;
-// };
 
 
 #undef IMPORT_IO_NET_ENTITY_ENV

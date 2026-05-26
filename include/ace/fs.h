@@ -21,7 +21,7 @@ namespace ace::fs {
         IMPORT_IO_LINK_ENV(file_link);
         IMPORT_IO_LINK_FABRICATION;
 
-        void output_action(__FMT__::string_view buff) override {
+        void output_action(FMT_SRC::string_view buff) override {
             // NOTE: Trying to get thread local runner from the dispatcher
             auto* runner_identity = reinterpret_cast<runner_pool_t*>(core::dispatcher::get_local_runner());
             // NOTE: If can not get slot or identity not found -> using busy behavior

@@ -7,8 +7,8 @@
 #include <ace/fs.h>
 
 // NOTE: It is needed to use external fmt lib with older standards which does not support std::format
-#ifndef __FMT__
-#define __FMT__ std
+#ifndef FMT_SRC
+#define FMT_SRC std
 #endif
 
 namespace ace {
@@ -60,12 +60,12 @@ namespace ace {
         }
 
         template <class... Args>
-        static void println(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
-            _output.writeln(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+        static void println(FMT_SRC::format_string<Args...>&& fmt, Args&&... args) {
+            _output.writeln(std::forward<FMT_SRC::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
-        static void println(const __FMT__::string_view&& str) {
-            _output.writeln(std::forward<const __FMT__::string_view>(str));
+        static void println(const FMT_SRC::string_view&& str) {
+            _output.writeln(std::forward<const FMT_SRC::string_view>(str));
         }
 
         static void println() {
@@ -73,12 +73,12 @@ namespace ace {
         }
 
         template <class... Args>
-        static void print(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
-            _output.write(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+        static void print(FMT_SRC::format_string<Args...>&& fmt, Args&&... args) {
+            _output.write(std::forward<FMT_SRC::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
-        static void print(const __FMT__::string_view&& str) {
-            _output.write(std::forward<const __FMT__::string_view>(str));
+        static void print(const FMT_SRC::string_view&& str) {
+            _output.write(std::forward<const FMT_SRC::string_view>(str));
         }
 
     };

@@ -8,8 +8,8 @@
 #include "ace/core/services/kernelic.h"
 
 // NOTE: It is needed to use external fmt lib with older standards which does not support std::format
-#ifndef __FMT__
-#define __FMT__ std
+#ifndef FMT_SRC
+#define FMT_SRC std
 #endif
 
 namespace ace::core {
@@ -410,27 +410,27 @@ namespace ace::core {
          * @param [in] file file to write to
          * @param [in] buff data to write
          */
-        virtual void output_action(__FMT__::string_view buff) = 0;
+        virtual void output_action(FMT_SRC::string_view buff) = 0;
 
         template <class... Args>
-        void write(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
-            const std::string buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+        void write(FMT_SRC::format_string<Args...>&& fmt, Args&&... args) {
+            const std::string buff = FMT_SRC::format(std::forward<FMT_SRC::format_string<Args...>>(fmt), std::forward<Args>(args)...);
             output_action(buff);
         }
 
         template <class... Args>
-        void writeln(__FMT__::format_string<Args...>&& fmt, Args&&... args) {
-            const std::string buff = __FMT__::format(std::forward<__FMT__::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
+        void writeln(FMT_SRC::format_string<Args...>&& fmt, Args&&... args) {
+            const std::string buff = FMT_SRC::format(std::forward<FMT_SRC::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
             output_action(buff);
         }
 
-        void write(const __FMT__::string_view&& str) {
-            const std::string buff = std::string(std::forward<const __FMT__::string_view>(str));
+        void write(const FMT_SRC::string_view&& str) {
+            const std::string buff = std::string(std::forward<const FMT_SRC::string_view>(str));
             output_action(buff);
         }
 
-        void writeln(const __FMT__::string_view&& str) {
-            const std::string buff = std::string(std::forward<const __FMT__::string_view>(str)) + '\n';
+        void writeln(const FMT_SRC::string_view&& str) {
+            const std::string buff = std::string(std::forward<const FMT_SRC::string_view>(str)) + '\n';
             output_action(buff);
         }
 

@@ -196,7 +196,18 @@ namespace ace::core {
     };
 
     template <typename>
-    struct io_caster { static_assert(false, "'io_caster' is not provided for requested type"); };
+    struct io_caster {
+
+        // NOTE: Defines how to create current entity from another entity
+        static auto from_entity(const int, const bool, auto&&) {
+            static_assert(false, "Can not cast from another <io_entity>");
+        }
+
+        // NOTE: Defines how to cast current to io_link derived type
+        static auto as_link(const int, const bool, auto&&) {
+            static_assert(false, "Can not cast to <io_link>");
+        }
+    };
 
     /**
      * @brief Handler for a file descriptor with RAII guard behavior.
@@ -219,7 +230,7 @@ namespace ace::core {
         static entity_t consume(entry_t& io) noexcept {
             auto [fd, is_closed] = std::move(io.extract());
             if (fd < 0) is_closed = true;
-            return io_caster<entity_t>::as_entity(fd, is_closed, std::move(io));
+            return io_caster<entity_t>::from_entity(fd, is_closed, std::move(io));
         }
 
         io_entity(io_entity&& io) noexcept {
@@ -377,11 +388,11 @@ namespace ace::core {
             , _is_closed(false) { };
 
         // NOTE: This method is made to never forget to move ownership
-        template<typename io_link_t, typename entry_t>
-        static io_link_t consume(entry_t& io) noexcept {
+        template<typename entity_t>
+        static auto consume(entity_t& io) noexcept {
             auto [fd, is_closed] = std::move(io.extract());
             if (fd < 0) is_closed = true;
-            return io_caster<io_link_t>::as_link(fd, is_closed, std::move(io));
+            return io_caster<entity_t>::as_link(fd, is_closed, std::move(io));
         }
 
         io_link(io_link&& io) noexcept {

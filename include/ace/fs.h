@@ -43,6 +43,14 @@ namespace ace::fs {
 
     };
 
+    template<>
+    struct ace::core::io_caster<ace::fs::file> {
+
+        static auto as_link(int fd, bool is_closed, fs::file&&) {
+            return fs::file_link { fd, is_closed };
+        }
+    };
+
     struct ace::fs::file : core::io_entity<file> {
 
         IMPORT_IO_ENTITY_ENV(file);
@@ -71,7 +79,7 @@ namespace ace::fs {
 
             [[nodiscard]] auto await_resume() const {
                 _entity._fd = _res;
-                return core::io_link::consume<file_link>(_entity);
+                return core::io_link::consume(_entity);
             }
 
             file& _entity;
@@ -96,15 +104,5 @@ namespace ace::fs {
         -> open_query { return open_query { std::move(*this), _path.c_str(), O_CREAT | O_APPEND | O_WRONLY, 0777 }; }
 
     };
-
-    template<>
-    struct ace::core::io_caster<ace::fs::file_link> {
-
-        template <typename file_io_entity_t>
-        static auto as_link(int fd, bool is_closed, file_io_entity_t&&) {
-            return fs::file_link { fd, is_closed };
-        }
-    };
-
 
 #endif //ACE_FS_H

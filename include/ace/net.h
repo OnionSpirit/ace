@@ -70,14 +70,9 @@ namespace ace::net {
     struct io_net_entity_caster {
 
         template <is_net_entity net_entity_t>
-        static auto as_entity(int fd, bool is_closed, net_entity_t&& entity) {
+        static auto from_entity(int fd, bool is_closed, net_entity_t&& entity) {
             return io_net_entity_t { fd, is_closed, entity._self_sin, entity._peer_sin };
         }
-
-        // template <is_net_entity net_entity_t>
-        // static auto as_entity(net_entity_t&& entity) {
-        //     return io_net_entity_t { entity._fd, entity._is_closed, entity._self_sin, entity._peer_sin };
-        // }
     };
 
     template <int domain_v>
@@ -97,6 +92,8 @@ namespace ace::net {
 
 // ================================- DECLARATIONS -================================
 
+
+    struct io_connection_link;
 
     /**
      * @brief An @c io_entity class to represent connection socket
@@ -163,6 +160,34 @@ namespace ace::net {
 }
 
 
+    struct ace::net::io_connection_link : core::io_link {
+
+        IMPORT_IO_LINK_ENV(io_connection_link);
+        IMPORT_IO_LINK_FABRICATION;
+
+        void output_action(FMT_SRC::string_view buff) override {
+            // NOTE: Trying to get thread local runner from the dispatcher
+            auto* runner_identity = reinterpret_cast<runner_pool_t*>(core::dispatcher::get_local_runner());
+            // NOTE: If can not get slot or identity not found -> using busy behavior
+            if (core::io_link_common::command* cmd; not core::io_link_common::_command_pool.capture(cmd) or not runner_identity) [[unlikely]] {
+                if (::send(_fd, buff.data(), buff.size(), 0) < 0 and core::io_link_common::fail_cb_handler)
+                    core::io_link_common::fail_cb_handler(errno);
+            }
+            // NOTE: Pushing data to slot, and setting identity for kernelic
+            else [[likely]] {
+                cmd->_runner_identity = runner_identity;
+                cmd->_buffer.assign(buff.begin(), buff.end());
+                if (not core::services::kernel_controller::send(cmd, _fd,
+                    cmd->_buffer.data(), cmd->_buffer.size(), 0) and core::io_link_common::fail_cb_handler)
+                    core::io_link_common::fail_cb_handler(EAGAIN); // Maybe EIO?
+            }
+        };
+
+        io_connection_link() = default;
+
+    };
+
+
 // ================================- CASTERS -================================
 
 
@@ -172,7 +197,13 @@ namespace ace::net {
     template<int domain_v, ace::net::transport_entity_state connection_state_v>
     struct ace::core::io_caster<ace::net::io_transport_entity<domain_v, connection_state_v>>
         : net::io_net_entity_caster<net::io_transport_entity<domain_v, connection_state_v>> {
-        using net::io_net_entity_caster<net::io_transport_entity<domain_v, connection_state_v>>::as_entity;
+        using net::io_net_entity_caster<net::io_transport_entity<domain_v, connection_state_v>>::from_entity;
+
+        template <net::is_net_entity net_entity_t>
+        static auto as_link(const int fd, const bool is_closed, net_entity_t&& entity)
+        requires (connection_state_v == net::e_connected) {
+            return net::io_connection_link { fd, is_closed, std::forward<net_entity_t>(entity) };
+        }
     };
 
     /**
@@ -181,7 +212,7 @@ namespace ace::net {
     template<int domain_v>
     struct ace::core::io_caster<ace::net::io_listener_entity<domain_v>>
         : net::io_net_entity_caster<net::io_listener_entity<domain_v>> {
-        using net::io_net_entity_caster<net::io_listener_entity<domain_v>>::as_entity;
+        using net::io_net_entity_caster<net::io_listener_entity<domain_v>>::from_entity;
     };
 
     /**
@@ -190,7 +221,7 @@ namespace ace::net {
     template<int domain_v, int type_v>
     struct ace::core::io_caster<ace::net::io_stream_mode_entity<domain_v, type_v>>
         : net::io_net_entity_caster<net::io_stream_mode_entity<domain_v, type_v>> {
-        using net::io_net_entity_caster<net::io_stream_mode_entity<domain_v, type_v>>::as_entity;
+        using net::io_net_entity_caster<net::io_stream_mode_entity<domain_v, type_v>>::from_entity;
     };
 
     /**
@@ -199,7 +230,7 @@ namespace ace::net {
     template<int domain_v, int type_v>
     struct ace::core::io_caster<ace::net::io_mapping_entity<domain_v, type_v>>
         : net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>> {
-        using net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>>::as_entity;
+        using net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>>::from_entity;
     };
 
 
@@ -534,7 +565,7 @@ namespace ace::net {
             [[nodiscard]] io_transport_entity_t await_resume() const {
                 if (_res > -1) {
                     _entity->_peer_sin = *reinterpret_cast<sockaddr_in*>(_addr);
-                    return core::io_caster<io_transport_entity_t>::as_entity(_res, false, std::move(*_entity));
+                    return core::io_caster<io_transport_entity_t>::from_entity(_res, false, std::move(*_entity));
                 }
                 return io_transport_entity_t {};
             }

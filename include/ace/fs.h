@@ -16,6 +16,7 @@ namespace ace::fs {
 
 }
 
+
     struct ace::fs::file_link : core::io_link {
 
         IMPORT_IO_LINK_ENV(file_link);
@@ -43,6 +44,7 @@ namespace ace::fs {
 
     };
 
+
     template<>
     struct ace::core::io_caster<ace::fs::file> {
 
@@ -50,6 +52,7 @@ namespace ace::fs {
             return fs::file_link { fd, is_closed };
         }
     };
+
 
     struct ace::fs::file : core::io_entity<file> {
 

@@ -42,6 +42,9 @@ namespace ace::core {
 
     struct close_query;
 
+    /**
+     * @brief RAII io fd guard
+     */
     struct io_guard;
 
     template <typename>
@@ -128,6 +131,51 @@ public:                                                                         
 
 #define IMPORT_IO_LINK_FABRICATION using io_link_t::io_link_t;
 
+#define IMPORT_IO_QUERY_ENV(class)                    \
+    typedef ace::core::io_query<class> io_query_t;    \
+    using io_query_t::_fd;                            \
+    using io_query_t::_res;                           \
+    ~class() override = default;
+
+
+    struct ace::core::io_hanged {
+
+        struct command : services::kernel_observer {
+
+            std::vector<uint8_t> _buffer {};
+            // std::span<char> _user_data {};
+
+            void on_result(const int res) override {
+                if (res < 0 and fail_cb_handler)
+                    // fail_cb_handler(res, _user_data);
+                        fail_cb_handler(res);
+                _command_pool.raw_sync(this);
+            }
+
+            ~command() override = default;
+        };
+
+        // static void basic_fail_handler(const int res, const std::span<char>& user_data) {
+        //     throw std::runtime_error(FMT_SRC::format("io operation failed: {}\nuser data: {}", strerror(-res), user_data));
+        // }
+
+        static void basic_fail_handler(const int res) {
+            throw std::runtime_error(FMT_SRC::format("io operation failed: {}", strerror(-res)));
+        }
+
+        // static void(*fail_cb_handler)(int, const std::span<char>&); ///< Fail handler for commands errors handling
+
+        static void(*fail_cb_handler)(int); ///< Fail handler for commands errors handling
+
+        static thread_local nukes::dynamic::reg_freelist<command> _command_pool; ///< Pool of command to start hanged processing wo @c co_await usage
+    };
+
+    thread_local nukes::dynamic::reg_freelist<ace::core::io_hanged::command> ace::core::io_hanged::_command_pool {};
+
+    // inline void(*ace::core::io_hanged::fail_cb_handler)(int, const std::span<char>&) = basic_fail_handler;
+
+    inline void(*ace::core::io_hanged::fail_cb_handler)(int) = basic_fail_handler;
+
 
     template <typename query_core_t>
     struct ace::core::io_query : traits::future_traits<query_core_t>, services::kernel_observer {
@@ -191,11 +239,6 @@ public:                                                                         
         ~io_query() override = default;
     };
 
-#define IMPORT_IO_QUERY_ENV(class)                    \
-    typedef ace::core::io_query<class> io_query_t;    \
-    using io_query_t::_fd;                            \
-    using io_query_t::_res;                           \
-    ~class() override = default;
 
     struct ace::core::read_query : io_query<read_query> {
 
@@ -223,6 +266,7 @@ public:                                                                         
         const unsigned _nbytes;
         const uint64_t _offset;
     };
+
 
     struct ace::core::write_query : io_query<write_query> {
 
@@ -262,9 +306,7 @@ public:                                                                         
         [[nodiscard]] int await_resume() const { return _res; }
     };
 
-    /**
-     * @brief RAII io fd guard
-     */
+
     struct ace::core::io_guard final {
         io_guard() = delete;
         explicit io_guard(const int& fd, const bool& closed)
@@ -280,10 +322,22 @@ public:                                                                         
         }
 
         ~io_guard() noexcept {
-            if (_fd > 0 and not _closed)
+            if (_fd < 0 or _closed) return;
+
+            // NOTE: Trying to get thread local runner from the dispatcher
+            auto* runner_identity = reinterpret_cast<runner_pool_t*>(dispatcher::get_local_runner());
+            // NOTE: If can not get slot or identity not found -> scheduling closing task
+            if (io_hanged::command* cmd; not io_hanged::_command_pool.capture(cmd) or not runner_identity) [[unlikely]]
                 schedule(pending_close(_fd));
+            // NOTE: Setting identity for kernelic and run lazy
+            else [[likely]] {
+                cmd->_runner_identity = runner_identity;
+                if (not services::kernel_controller::close(cmd, _fd) and io_hanged::fail_cb_handler)
+                    io_hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
+            }
         }
     };
+
 
     template <typename entity_t>
     struct ace::core::io_entity {
@@ -357,43 +411,6 @@ public:                                                                         
         io_guard _guard {_fd, _is_closed};
     };
 
-    struct ace::core::io_hanged {
-
-        struct command : services::kernel_observer {
-
-            std::vector<uint8_t> _buffer {};
-            // std::span<char> _user_data {};
-
-            void on_result(const int res) override {
-                if (res < 0 and fail_cb_handler)
-                    // fail_cb_handler(res, _user_data);
-                    fail_cb_handler(res);
-                _command_pool.raw_sync(this);
-            }
-
-            ~command() override = default;
-        };
-
-        // static void basic_fail_handler(const int res, const std::span<char>& user_data) {
-        //     throw std::runtime_error(FMT_SRC::format("io operation failed: {}\nuser data: {}", strerror(-res), user_data));
-        // }
-
-        static void basic_fail_handler(const int res) {
-            throw std::runtime_error(FMT_SRC::format("io operation failed: {}", strerror(-res)));
-        }
-
-        // static void(*fail_cb_handler)(int, const std::span<char>&); ///< Fail handler for commands errors handling
-
-        static void(*fail_cb_handler)(int); ///< Fail handler for commands errors handling
-
-        static thread_local nukes::dynamic::reg_freelist<command> _command_pool; ///< Pool of command to start hanged processing wo @c co_await usage
-    };
-
-    thread_local nukes::dynamic::reg_freelist<ace::core::io_hanged::command> ace::core::io_hanged::_command_pool {};
-
-    // inline void(*ace::core::io_hanged::fail_cb_handler)(int, const std::span<char>&) = basic_fail_handler;
-
-    inline void(*ace::core::io_hanged::fail_cb_handler)(int) = basic_fail_handler;
 
     class ace::core::any {
 
@@ -420,8 +437,7 @@ public:                                                                         
         template <typename data_t>
         any(data_t&& data) noexcept {
             void* mem = malloc(sizeof(data_t));
-            // *reinterpret_cast<data_t*>(mem) = std::move(data);
-            _data = std::move(new (mem) data_t{std::move(data)});
+            *static_cast<data_t*>(mem) = std::forward<data_t>(data);
             _deleter = deleter_impl<data_t>;
         }
 
@@ -435,6 +451,7 @@ public:                                                                         
                 _deleter(_data);
         }
     };
+
 
     struct ace::core::io_link {
 

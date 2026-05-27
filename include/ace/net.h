@@ -206,6 +206,7 @@ namespace ace::net {
         }
     };
 
+
     /**
      * @base @c io_listener_entity caster specialization for fabricating it from another io_net_entities
      */
@@ -215,6 +216,7 @@ namespace ace::net {
         using net::io_net_entity_caster<net::io_listener_entity<domain_v>>::from_entity;
     };
 
+
     /**
      * @base @c io_stream_mode_entity caster specialization for fabricating it from another io_net_entities
      */
@@ -223,6 +225,7 @@ namespace ace::net {
         : net::io_net_entity_caster<net::io_stream_mode_entity<domain_v, type_v>> {
         using net::io_net_entity_caster<net::io_stream_mode_entity<domain_v, type_v>>::from_entity;
     };
+
 
     /**
      * @base @c io_mapping_entity caster specialization for fabricating it from another io_net_entities
@@ -500,6 +503,7 @@ namespace ace::net {
         -> recv_query { return recv_query{_fd, buf.data(), buf.size_bytes(), flags}; }
 
     };
+
 
     template <typename entity_t, int domain_v>
     struct ace::net::connect_query : core::io_query<connect_query<entity_t, domain_v>> {
@@ -790,6 +794,7 @@ namespace ace::net {
         }
 
     };
+
 
     template <int domain_v, int type_v, int protocol_v>
     struct ace::net::io_socket : core::io_query<io_socket<domain_v, type_v, protocol_v>> {

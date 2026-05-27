@@ -13,7 +13,6 @@
 #endif
 
 namespace ace::core {
-
     // NOTE: Concept to check if type is defined as io_query
     template <typename query_t>
     concept is_query = requires(query_t q, services::kernel_observer* kwp) {
@@ -35,7 +34,103 @@ namespace ace::core {
      * @warning Does not define @c await_resume(...) logic.
      */
     template <typename query_core_t>
-    struct io_query : traits::future_traits<query_core_t>, services::kernel_observer {
+    struct io_query;
+
+    struct read_query;
+
+    struct write_query;
+
+    struct close_query;
+
+    struct io_guard;
+
+    template <typename>
+    struct io_caster {
+
+        // NOTE: Defines how to create current entity from another entity
+        static auto from_entity(const int, const bool, auto&&) {
+            static_assert(false, "Can not cast from another <io_entity>");
+        }
+
+        // NOTE: Defines how to cast current to io_link derived type
+        static auto as_link(const int, const bool, auto&&) {
+            static_assert(false, "Can not cast to <io_link>");
+        }
+    };
+
+    /**
+     * @brief Handler for a file descriptor with RAII guard behavior.
+     * The io_entity derived types shall represent FD state by providing allowed async operations depending on FD state.
+     * @tparam entity_t Derived entity type
+     */
+    template <typename entity_t>
+    struct io_entity;
+
+    /**
+     * @brief Encapsulated set of global entities for starting and handling hanged processing
+     */
+    struct io_hanged;
+
+    class any;
+
+    /**
+     * @brief Common interface for io abstractions
+     */
+    struct io_link;
+
+}
+
+#define IMPORT_ERROR_HANDLING                                                               \
+                                                                                            \
+    operator bool() const { return _fd > -1 or INT_MIN == _fd; }                            \
+                                                                                            \
+    std::string_view error() const {                                                        \
+        if (_fd > -1)                                                                       \
+            throw std::logic_error("can not receive 'error()' on successed 'io_entity'");   \
+        if (INT_MIN == _fd)                                                                 \
+            throw std::logic_error("can not receive 'error()' on idle 'io_entry'");         \
+        return strerror(-_fd);                                                              \
+    }
+
+#define IMPORT_IO_ENTITY_ENV(class)                                                         \
+                                                                                            \
+    using io_entity_t = ace::core::io_entity<class>;                                        \
+                                                                                            \
+protected:                                                                                  \
+                                                                                            \
+    using io_entity_t::_fd;                                                                 \
+    using io_entity_t::_is_closed;                                                          \
+                                                                                            \
+public:                                                                                     \
+                                                                                            \
+    IMPORT_ERROR_HANDLING                                                                   \
+                                                                                            \
+    ~class() override = default;
+
+#define IMPORT_IO_ENTITY_FABRICATION using io_entity_t::io_entity_t;
+
+#define IMPORT_IO_LINK_ENV(class)                                                           \
+                                                                                            \
+    typedef ace::core::io_link io_link_t;                                                   \
+    typedef ace::core::any any_t;                                                           \
+                                                                                            \
+protected:                                                                                  \
+                                                                                            \
+    using io_link_t::_fd;                                                                   \
+    using io_link_t::_is_closed;                                                            \
+    using io_link_t::_data;                                                                 \
+                                                                                            \
+public:                                                                                     \
+                                                                                            \
+    IMPORT_ERROR_HANDLING                                                                   \
+                                                                                            \
+    ~class() override = default;
+
+#define IMPORT_IO_LINK_FABRICATION using io_link_t::io_link_t;
+
+
+    template <typename query_core_t>
+    struct ace::core::io_query : traits::future_traits<query_core_t>, services::kernel_observer {
 
         IMPORT_FUTURE_ENV(query_core_t);
 
@@ -102,8 +197,7 @@ namespace ace::core {
     using io_query_t::_res;                           \
     ~class() override = default;
 
-
-    struct read_query : io_query<read_query> {
+    struct ace::core::read_query : io_query<read_query> {
 
         read_query() = delete;
 
@@ -130,8 +224,7 @@ namespace ace::core {
         const uint64_t _offset;
     };
 
-
-    struct write_query : io_query<write_query> {
+    struct ace::core::write_query : io_query<write_query> {
 
         write_query() = delete;
 
@@ -154,8 +247,7 @@ namespace ace::core {
         const uint64_t _offset;
     };
 
-
-    struct close_query : io_query<close_query> {
+    struct ace::core::close_query : io_query<close_query> {
 
         IMPORT_IO_QUERY_ENV(close_query)
 
@@ -173,7 +265,7 @@ namespace ace::core {
     /**
      * @brief RAII io fd guard
      */
-    struct io_guard final {
+    struct ace::core::io_guard final {
         io_guard() = delete;
         explicit io_guard(const int& fd, const bool& closed)
             : _fd(fd)
@@ -193,27 +285,8 @@ namespace ace::core {
         }
     };
 
-    template <typename>
-    struct io_caster {
-
-        // NOTE: Defines how to create current entity from another entity
-        static auto from_entity(const int, const bool, auto&&) {
-            static_assert(false, "Can not cast from another <io_entity>");
-        }
-
-        // NOTE: Defines how to cast current to io_link derived type
-        static auto as_link(const int, const bool, auto&&) {
-            static_assert(false, "Can not cast to <io_link>");
-        }
-    };
-
-    /**
-     * @brief Handler for a file descriptor with RAII guard behavior.
-     * The io_entity derived types shall represent FD state by providing allowed async operations depending on FD state.
-     * @tparam entity_t Derived entity type
-     */
     template <typename entity_t>
-    struct io_entity {
+    struct ace::core::io_entity {
 
         io_entity()
             : _fd(-1)
@@ -284,17 +357,16 @@ namespace ace::core {
         io_guard _guard {_fd, _is_closed};
     };
 
-    /**
-     * @brief Encapsulated set of global entities for link processing
-     */
-    struct io_link_common {
+    struct ace::core::io_hanged {
 
         struct command : services::kernel_observer {
 
-            std::vector<uint8_t> _buffer{};
+            std::vector<uint8_t> _buffer {};
+            // std::span<char> _user_data {};
 
             void on_result(const int res) override {
                 if (res < 0 and fail_cb_handler)
+                    // fail_cb_handler(res, _user_data);
                     fail_cb_handler(res);
                 _command_pool.raw_sync(this);
             }
@@ -302,20 +374,28 @@ namespace ace::core {
             ~command() override = default;
         };
 
+        // static void basic_fail_handler(const int res, const std::span<char>& user_data) {
+        //     throw std::runtime_error(FMT_SRC::format("io operation failed: {}\nuser data: {}", strerror(-res), user_data));
+        // }
+
         static void basic_fail_handler(const int res) {
-            throw std::runtime_error(std::string("Write failed: ") + strerror(-res));
+            throw std::runtime_error(FMT_SRC::format("io operation failed: {}", strerror(-res)));
         }
 
-        static void(*fail_cb_handler)(int);
+        // static void(*fail_cb_handler)(int, const std::span<char>&); ///< Fail handler for commands errors handling
 
-        static thread_local nukes::dynamic::reg_freelist<command> _command_pool;
+        static void(*fail_cb_handler)(int); ///< Fail handler for commands errors handling
+
+        static thread_local nukes::dynamic::reg_freelist<command> _command_pool; ///< Pool of command to start hanged processing wo @c co_await usage
     };
 
-    thread_local nukes::dynamic::reg_freelist<io_link_common::command> io_link_common::_command_pool {};
+    thread_local nukes::dynamic::reg_freelist<ace::core::io_hanged::command> ace::core::io_hanged::_command_pool {};
 
-    inline void(*io_link_common::fail_cb_handler)(int) = basic_fail_handler;
+    // inline void(*ace::core::io_hanged::fail_cb_handler)(int, const std::span<char>&) = basic_fail_handler;
 
-    class any {
+    inline void(*ace::core::io_hanged::fail_cb_handler)(int) = basic_fail_handler;
+
+    class ace::core::any {
 
         void* _data = nullptr;
         void(*_deleter)(void*) = nullptr;
@@ -356,10 +436,7 @@ namespace ace::core {
         }
     };
 
-    /**
-     * @brief Common interface for io abstractions
-     */
-    struct io_link {
+    struct ace::core::io_link {
 
         io_link()
             : _fd(-1)
@@ -447,55 +524,5 @@ namespace ace::core {
 
         io_guard _guard {_fd, _is_closed};
     };
-
-#define IMPORT_ERROR_HANDLING                                                               \
-                                                                                            \
-    operator bool() const { return _fd > -1 or INT_MIN == _fd; }                            \
-                                                                                            \
-    std::string_view error() const {                                                        \
-        if (_fd > -1)                                                                       \
-            throw std::logic_error("can not receive 'error()' on successed 'io_entity'");   \
-        if (INT_MIN == _fd)                                                                 \
-            throw std::logic_error("can not receive 'error()' on idle 'io_entry'");         \
-        return strerror(-_fd);                                                              \
-    }
-
-#define IMPORT_IO_ENTITY_ENV(class)                                                         \
-                                                                                            \
-    using io_entity_t = ace::core::io_entity<class>;                                        \
-                                                                                            \
-protected:                                                                                  \
-                                                                                            \
-    using io_entity_t::_fd;                                                                 \
-    using io_entity_t::_is_closed;                                                          \
-                                                                                            \
-public:                                                                                     \
-                                                                                            \
-    IMPORT_ERROR_HANDLING                                                                   \
-                                                                                            \
-    ~class() override = default;
-
-#define IMPORT_IO_ENTITY_FABRICATION using io_entity_t::io_entity_t;
-
-#define IMPORT_IO_LINK_ENV(class)                                                           \
-                                                                                            \
-    typedef ace::core::io_link io_link_t;                                                   \
-    typedef ace::core::any any_t;                                                           \
-                                                                                            \
-protected:                                                                                  \
-                                                                                            \
-    using io_link_t::_fd;                                                                   \
-    using io_link_t::_is_closed;                                                            \
-    using io_link_t::_data;                                                                 \
-                                                                                            \
-public:                                                                                     \
-                                                                                            \
-    IMPORT_ERROR_HANDLING                                                                   \
-                                                                                            \
-    ~class() override = default;
-
-#define IMPORT_IO_LINK_FABRICATION using io_link_t::io_link_t;
-
-}
 
 #endif //ACE_IO_H

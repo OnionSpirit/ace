@@ -169,17 +169,17 @@ namespace ace::net {
             // NOTE: Trying to get thread local runner from the dispatcher
             auto* runner_identity = reinterpret_cast<runner_pool_t*>(core::dispatcher::get_local_runner());
             // NOTE: If can not get slot or identity not found -> using busy behavior
-            if (core::io_link_common::command* cmd; not core::io_link_common::_command_pool.capture(cmd) or not runner_identity) [[unlikely]] {
-                if (::send(_fd, buff.data(), buff.size(), 0) < 0 and core::io_link_common::fail_cb_handler)
-                    core::io_link_common::fail_cb_handler(errno);
+            if (core::io_hanged::command* cmd; not core::io_hanged::_command_pool.capture(cmd) or not runner_identity) [[unlikely]] {
+                if (::send(_fd, buff.data(), buff.size(), 0) < 0 and core::io_hanged::fail_cb_handler)
+                    core::io_hanged::fail_cb_handler(errno);
             }
             // NOTE: Pushing data to slot, and setting identity for kernelic
             else [[likely]] {
                 cmd->_runner_identity = runner_identity;
                 cmd->_buffer.assign(buff.begin(), buff.end());
                 if (not core::services::kernel_controller::send(cmd, _fd,
-                    cmd->_buffer.data(), cmd->_buffer.size(), 0) and core::io_link_common::fail_cb_handler)
-                    core::io_link_common::fail_cb_handler(EAGAIN); // Maybe EIO?
+                    cmd->_buffer.data(), cmd->_buffer.size(), 0) and core::io_hanged::fail_cb_handler)
+                    core::io_hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
             }
         };
 

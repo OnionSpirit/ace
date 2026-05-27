@@ -73,7 +73,7 @@ namespace ace::futures {
             auto* runner_ptr = core::pool_to_runner(coroutine.promise()._runner_pool);
             _task._coroutine.promise()._roaming = coroutine.promise()._roaming = false;
             runner_ptr->attach_front(std::forward<task>(_task));
-            return false;
+            return true;
         }
 
         /**

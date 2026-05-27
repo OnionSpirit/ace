@@ -14,27 +14,25 @@
 
 namespace ace::core {
 
+    // NOTE: Concept to check if type is defined as io_query
     template <typename query_t>
     concept is_query = requires(query_t q, services::kernel_observer* kwp) {
         { q.setup_query(kwp) } -> std::same_as<bool>;
     };
 
+    // NOTE: Concept to check if type is defined as io_entity
     template <typename entry_t>
     concept is_entity = requires(entry_t q) {
         { q._fd } -> std::same_as<int>;
         { q._is_closed } -> std::same_as<bool>;
     };
 
-    template <typename entry_t>
-    concept is_entry = requires(entry_t q) {
-        { q.clear() } -> std::same_as<void>;
-    };
-
     /**
      * @brief An interface to interact with the
      * @c ace::core::services::kernel_controller via @c co_await operator.
-     * <br>Does not define 'resume(...)' logic.
      * @tparam query_core_t Specific query type.
+     *
+     * @warning Does not define @c await_resume(...) logic.
      */
     template <typename query_core_t>
     struct io_query : traits::future_traits<query_core_t>, services::kernel_observer {
@@ -291,7 +289,7 @@ namespace ace::core {
      */
     struct io_link_common {
 
-        struct command : core::services::kernel_observer {
+        struct command : services::kernel_observer {
 
             std::vector<uint8_t> _buffer{};
 
@@ -321,17 +319,11 @@ namespace ace::core {
 
         void* _data = nullptr;
         void(*_deleter)(void*) = nullptr;
-        // void*(*_measure)() = nullptr;
 
         template <typename target_t>
         static void deleter_impl(void* mem) {
             delete static_cast<target_t*>(mem);
         }
-
-        // template <typename target_t>
-        // auto take() {
-        //     reinterpret_cast<>
-        // }
 
     public:
 
@@ -348,8 +340,8 @@ namespace ace::core {
         template <typename data_t>
         any(data_t&& data) noexcept {
             void* mem = malloc(sizeof(data_t));
-            *reinterpret_cast<data_t*>(mem) = std::move(data);
-            // _data = std::move(new (mem) data_t{std::move(data)});
+            // *reinterpret_cast<data_t*>(mem) = std::move(data);
+            _data = std::move(new (mem) data_t{std::move(data)});
             _deleter = deleter_impl<data_t>;
         }
 
@@ -383,7 +375,7 @@ namespace ace::core {
             , _is_closed(is_closed)
             , _data(std::move(data)) { };
 
-        io_link(const int fd)
+        explicit io_link(const int fd)
             : _fd(fd)
             , _is_closed(false) { };
 

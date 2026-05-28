@@ -22,7 +22,7 @@ namespace ace::fs {
         IMPORT_IO_LINK_ENV(file_link);
         IMPORT_IO_LINK_FABRICATION;
 
-        void output_action(FMT_SRC::string_view buff) override {
+        void output_action(const std::span<const char> buff) override {
             // NOTE: Trying to get thread local runner from the dispatcher
             auto* runner_identity = reinterpret_cast<runner_pool_t*>(core::dispatcher::get_local_runner());
             // NOTE: If can not get slot or identity not found -> using busy behavior
@@ -39,6 +39,10 @@ namespace ace::fs {
                     core::io_hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
             }
         };
+
+        promise<int> input_action(void *buff, const std::size_t len) override {
+            co_return co_await core::read_query(_fd, buff, len);
+        }
 
         file_link() = default;
 

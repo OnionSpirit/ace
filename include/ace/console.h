@@ -32,31 +32,7 @@ namespace ace {
     public:
 
         [[nodiscard]] static promise<std::expected<std::string, int>> input() {
-
-            std::deque<std::array<char, core::io_link::buff_len>> acc {};
-            int total = 0;
-
-            auto& buff = acc.emplace_back();
-            int bytes_read = co_await core::read_query(STDIN_FILENO, buff.data(), core::io_link::buff_len);
-            if (bytes_read < 0) co_return std::unexpected(-bytes_read);
-            total += bytes_read;
-
-            while (bytes_read == core::io_link::buff_len) {
-                buff = acc.emplace_back();
-                bytes_read = co_await core::read_query(STDIN_FILENO, buff.data(), core::io_link::buff_len);
-                if (bytes_read < 0) co_return std::unexpected(-bytes_read);
-                total += bytes_read;
-            }
-
-            std::string res {};
-            // NOTE: + null term char slot
-            res.reserve(total + 1);
-            for (auto& buf : acc) {
-                const int write_bytes { (total > core::io_link::buff_len) ? core::io_link::buff_len : total };
-                res.append(buf.data(), write_bytes);
-                total -= write_bytes;
-            }
-            co_return res;
+            co_return co_await _output.read_str();
         }
 
         template <class... Args>

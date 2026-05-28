@@ -503,17 +503,17 @@ public:                                                                         
         static constexpr int buff_len = 256;
 
         /**
-         * @brief Choosing way of writing
-         * @param [in] file file to write to
+         * @brief Writing function
          * @param [in] buff data to write
          */
-        virtual void output_action(FMT_SRC::string_view buff) = 0;
+        virtual void output_action(std::span<const char> buff) = 0;
 
-        template <class... Args>
-        void write(FMT_SRC::format_string<Args...>&& fmt, Args&&... args) {
-            const std::string buff = FMT_SRC::format(std::forward<FMT_SRC::format_string<Args...>>(fmt), std::forward<Args>(args)...);
-            output_action(buff);
-        }
+        /**
+         * @brief Reading function
+         * @param [out] buff buffer to read to
+         * @param [in] len size of read buffer
+         */
+        virtual promise<int> input_action(void *buff, std::size_t len) = 0;
 
         template <class... Args>
         void writeln(FMT_SRC::format_string<Args...>&& fmt, Args&&... args) {
@@ -521,15 +521,136 @@ public:                                                                         
             output_action(buff);
         }
 
-        void write(const FMT_SRC::string_view&& str) {
-            const std::string buff = std::string(std::forward<const FMT_SRC::string_view>(str));
-            output_action(buff);
-        }
-
         void writeln(const FMT_SRC::string_view&& str) {
             const std::string buff = std::string(std::forward<const FMT_SRC::string_view>(str)) + '\n';
             output_action(buff);
         }
+
+        template <class... Args>
+        void write(FMT_SRC::format_string<Args...>&& fmt, Args&&... args) {
+            std::span buff = FMT_SRC::format(std::forward<FMT_SRC::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            output_action(buff);
+        }
+
+        void write(const FMT_SRC::string_view&& str) {
+            output_action(std::forward<const FMT_SRC::string_view>(str));
+        }
+
+        void write(const void *buf, const size_t len) {
+            const auto buff = std::span<const char>(static_cast<const char*>(buf), len);
+            output_action(buff);
+        }
+
+        template <typename data_t>
+        requires std::is_pod_v<data_t>
+        auto write(const std::vector<data_t>& buf) {
+            const auto buff = std::span<const char>(buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)));
+            output_action(buff);
+        }
+
+        template <typename data_t, size_t len_v>
+        requires std::is_pod_v<data_t>
+        auto write(const std::array<data_t, len_v>& buf) {
+            const auto buff = std::span<const char>(buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)));
+            output_action(buff);
+        }
+
+        template <typename data_t, size_t len_v>
+        requires std::is_pod_v<data_t>
+        auto write(const std::span<data_t, len_v>& buf) {
+            const auto buff = std::span<const char>(buf.data(), buf.size_bytes());
+            output_action(buff);
+        }
+
+        ACE_AWAIT_NODISCARD promise<int> read(void *buf, const size_t len, const int flags = 0) {
+            co_return co_await input_action(buf, len);
+        }
+
+        template <typename data_t>
+        requires std::is_pod_v<data_t>
+        ACE_AWAIT_NODISCARD promise<int> read(std::vector<data_t>& buf, const int flags = 0) {
+            co_return co_await input_action(buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)));
+        }
+
+        ACE_AWAIT_NODISCARD promise<int> read(std::string& buf, const int flags = 0) {
+            co_return co_await input_action(buf.data(), buf.size());
+        }
+
+        template <typename data_t>
+        requires std::is_pod_v<data_t>
+        [[nodiscard]] auto read_vec(const int flags = 0)
+        -> promise<std::expected<std::vector<data_t>, int>> {
+            static constexpr int buff_len_bytes = buff_len * (sizeof(data_t) / sizeof(char));
+
+            std::deque<std::array<data_t, buff_len>> acc;
+            int total = 0;
+
+            auto& buff = acc.emplace_back();
+            int bytes_read = co_await input_action(reinterpret_cast<void*>(buff.data()), buff_len_bytes);
+            if (bytes_read < 0) co_return std::unexpected(-bytes_read);
+            total += bytes_read;
+
+            while (bytes_read == buff_len) {
+                buff = acc.emplace_back();
+                bytes_read = co_await input_action(reinterpret_cast<void*>(buff.data()), buff_len_bytes);
+                if (bytes_read < 0) co_return std::unexpected(-bytes_read);
+                total += bytes_read;
+            }
+
+            // NOTE: Cast to data object size
+            total /= (sizeof(data_t) / sizeof(char));
+            std::vector<data_t> res {};
+            res.reserve(total);
+            for (auto& buf : acc) {
+                const int write_items { (total > buff_len) ? buff_len : total };
+                for (int i = 0; i < write_items; ++i)
+                    res.push_back(std::forward<data_t>(buf[i]));
+                total -= write_items;
+            }
+            co_return res;
+        }
+
+        ACE_AWAIT_NODISCARD auto read_str(const int flags = 0)
+        -> promise<std::expected<std::string, int>> {
+
+            std::deque<std::array<char, buff_len>> acc {};
+            int total = 0;
+
+            auto& buff = acc.emplace_back();
+            int bytes_read = co_await input_action(buff.data(), buff_len);
+            if (bytes_read < 0) co_return std::unexpected(-bytes_read);
+            total += bytes_read;
+
+            while (bytes_read == buff_len) {
+                buff = acc.emplace_back();
+                bytes_read = co_await input_action(buff.data(), buff_len);
+                if (bytes_read < 0) co_return std::unexpected(-bytes_read);
+                total += bytes_read;
+            }
+
+            std::string res {};
+            // NOTE: + null term char slot
+            res.reserve(total + 1);
+            for (auto& buf : acc) {
+                const int write_bytes { (total > buff_len) ? buff_len : total };
+                res.append(buf.data(), write_bytes);
+                total -= write_bytes;
+            }
+            co_return res;
+        }
+
+        template <typename data_t, size_t len_v>
+        requires std::is_pod_v<data_t>
+        ACE_AWAIT_NODISCARD promise<int> read(std::array<data_t, len_v>& buf, const int flags = 0) {
+            co_return co_await input_action(reinterpret_cast<void*>(buf.data()), len_v * (sizeof(data_t) / sizeof(char)));
+        }
+
+        template <typename data_t, size_t len_v>
+        requires std::is_pod_v<data_t>
+        ACE_AWAIT_NODISCARD promise<int> read(std::span<data_t, len_v>& buf, const int flags = 0) {
+            co_return co_await input_action(reinterpret_cast<void*>(buf.data()), buf.size_bytes());
+        }
+
 
     protected:
 

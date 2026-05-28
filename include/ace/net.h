@@ -89,6 +89,8 @@ namespace ace::net {
     template <typename, int>
     struct connect_query;
 
+    struct send_query;
+
 
 // ================================- DECLARATIONS -================================
 
@@ -159,13 +161,67 @@ namespace ace::net {
 
 }
 
+    template <typename entity_t, int domain_v>
+    struct ace::net::connect_query : core::io_query<connect_query<entity_t, domain_v>> {
+
+        IMPORT_IO_QUERY_ENV(connect_query)
+
+        connect_query() = delete;
+
+        typedef io_transport_entity<domain_v, e_connected> io_transport_entity_t;
+
+        explicit connect_query(entity_t&& entity, const sockaddr* addr, const socklen_t addrlen)
+            : io_query_t(entity._fd)
+            , _entity(entity)
+            , _addr(addr)
+            , _addrlen(addrlen) {}
+
+        bool setup_query(core::services::kernel_observer* kwp) const {
+            return core::services::kernel_controller::connect(kwp, _fd, _addr, _addrlen);
+        }
+
+        [[nodiscard]] io_transport_entity_t await_resume() const {
+            if (_res > -1) {
+                return io_transport_entity_t::consume(_entity);
+            }
+            return io_transport_entity_t {};
+        }
+
+        entity_t& _entity;
+        const sockaddr* _addr;
+        const socklen_t _addrlen;
+    };
+
+    struct ace::net::send_query : core::io_query<send_query> {
+
+        IMPORT_IO_QUERY_ENV(send_query);
+
+        send_query() = delete;
+
+        explicit send_query(const int fd, const void *buf, const size_t len, const int flags = 0)
+            : io_query_t(fd)
+            , _buf(buf)
+            , _len(len)
+            , _flags(flags) {}
+
+        bool setup_query(core::services::kernel_observer* kwp) const {
+            return core::services::kernel_controller::send(kwp, _fd, _buf, _len, _flags);
+        }
+
+        [[nodiscard]] int await_resume() const { return _res; }
+
+        const void *_buf;
+        const size_t _len;
+        const int _flags;
+    };
+
 
     struct ace::net::io_connection_link : core::io_link {
 
         IMPORT_IO_LINK_ENV(io_connection_link);
         IMPORT_IO_LINK_FABRICATION;
 
-        void output_action(FMT_SRC::string_view buff) override {
+        void output_action(const std::span<const char> buff) override {
             // NOTE: Trying to get thread local runner from the dispatcher
             auto* runner_identity = reinterpret_cast<runner_pool_t*>(core::dispatcher::get_local_runner());
             // NOTE: If can not get slot or identity not found -> using busy behavior
@@ -182,6 +238,10 @@ namespace ace::net {
                     core::io_hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
             }
         };
+
+        promise<int> input_action(void *buff, const std::size_t len) override {
+            co_return co_await send_query{_fd, buff, len};
+        }
 
         io_connection_link() = default;
 
@@ -250,29 +310,6 @@ namespace ace::net {
 
         using connect_query_t = connect_query<io_transport_entity, domain_v>;
         friend connect_query_t;
-
-        struct send_query : core::io_query<send_query> {
-
-            IMPORT_IO_QUERY_ENV(send_query);
-
-            send_query() = delete;
-
-            explicit send_query(const int fd, const void *buf, const size_t len, const int flags = 0)
-                : io_query_t(fd)
-                , _buf(buf)
-                , _len(len)
-                , _flags(flags) {}
-
-            bool setup_query(core::services::kernel_observer* kwp) const {
-                return core::services::kernel_controller::send(kwp, _fd, _buf, _len, _flags);
-            }
-
-            [[nodiscard]] int await_resume() const { return _res; }
-
-            const void *_buf;
-            const size_t _len;
-            const int _flags;
-        };
 
         struct sendto_query : core::io_query<sendto_query> {
 
@@ -502,38 +539,6 @@ namespace ace::net {
         [[nodiscard]] auto recv(std::span<data_t, len_v>& buf, const int flags = 0) const
         -> recv_query { return recv_query{_fd, buf.data(), buf.size_bytes(), flags}; }
 
-    };
-
-
-    template <typename entity_t, int domain_v>
-    struct ace::net::connect_query : core::io_query<connect_query<entity_t, domain_v>> {
-
-        IMPORT_IO_QUERY_ENV(connect_query)
-
-        connect_query() = delete;
-
-        typedef io_transport_entity<domain_v, e_connected> io_transport_entity_t;
-
-        explicit connect_query(entity_t&& entity, const sockaddr* addr, const socklen_t addrlen)
-            : io_query_t(entity._fd)
-            , _entity(entity)
-            , _addr(addr)
-            , _addrlen(addrlen) {}
-
-        bool setup_query(core::services::kernel_observer* kwp) const {
-            return core::services::kernel_controller::connect(kwp, _fd, _addr, _addrlen);
-        }
-
-        [[nodiscard]] io_transport_entity_t await_resume() const {
-            if (_res > -1) {
-                return io_transport_entity_t::consume(_entity);
-            }
-            return io_transport_entity_t {};
-        }
-
-        entity_t& _entity;
-        const sockaddr* _addr;
-        const socklen_t _addrlen;
     };
 
 

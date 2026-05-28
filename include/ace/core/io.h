@@ -79,7 +79,7 @@ namespace ace::core {
     /**
      * @brief Common interface for io abstractions
      */
-    struct io_link;
+    class io_link;
 
 }
 
@@ -453,7 +453,27 @@ public:                                                                         
     };
 
 
-    struct ace::core::io_link {
+    class ace::core::io_link {
+
+    protected:
+
+
+        static constexpr int buff_len = 256;
+
+        /**
+         * @brief Writing function
+         * @param [in] buff data to write
+         */
+        virtual void output_action(std::span<const char> buff) = 0;
+
+        /**
+         * @brief Reading function
+         * @param [out] buff buffer to read to
+         * @param [in] len size of read buffer
+         */
+        virtual promise<int> input_action(void *buff, std::size_t len) = 0;
+
+    public:
 
         io_link()
             : _fd(-1)
@@ -499,21 +519,6 @@ public:                                                                         
         }
 
         virtual ~io_link() = default;
-
-        static constexpr int buff_len = 256;
-
-        /**
-         * @brief Writing function
-         * @param [in] buff data to write
-         */
-        virtual void output_action(std::span<const char> buff) = 0;
-
-        /**
-         * @brief Reading function
-         * @param [out] buff buffer to read to
-         * @param [in] len size of read buffer
-         */
-        virtual promise<int> input_action(void *buff, std::size_t len) = 0;
 
         template <class... Args>
         void writeln(FMT_SRC::format_string<Args...>&& fmt, Args&&... args) {

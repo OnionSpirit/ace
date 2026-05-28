@@ -209,7 +209,7 @@ namespace ace::core {
         void prefetch() const {
             const control_block* frame = control_block::get_block_from_address(_coroutine.address());
             const std::size_t frame_size = frame->_frame_size;
-            for (int i = 0; i <= frame_size / ACE_CACHE_LINE_SIZE; ++i) {
+            for (std::size_t i = 0; i <= frame_size / ACE_CACHE_LINE_SIZE; ++i) {
                 const void* cacheline_ptr = frame + (2 * i);
                 nukes::details::prefetch<nukes::details::e_temporal>(cacheline_ptr);
             }

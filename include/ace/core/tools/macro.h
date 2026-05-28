@@ -48,18 +48,4 @@ typedef struct {} ACE_EMPTY_TYPE;
 
 #define ACE_INCOMPATIBLE_COMPOSE_ERROR "Receiver's (Right Operand) input does not compatible with Sender's (Left Operand) return type"
 
-// #if defined(__GNUC__) || defined(__clang__)
-//     // For GCC/Clang: -Wunused-result is the specific warning for [[nodiscard]]
-//     #define ACE_AWAIT_NODISCARD                          \
-//     _Pragma("GCC diagnostic error \"-Wunused-result\"")  \
-//     [[nodiscard(ACE_AWAIT_MISSING_MSG)]]
-// #elif defined(_MSC_VER)
-//     // For MSVC: Warning 4834 is "discarding return value of function with 'nodiscard'"
-//     #define ACE_AWAIT_NODISCARD       \
-//     __pragma(warning(error : 4834))   \
-//     [[nodiscard(ACE_AWAIT_MISSING_MSG)]]
-// #else
-//     #define ACE_AWAIT_NODISCARD [[nodiscard(ACE_AWAIT_MISSING_MSG)]]
-// #endif
-
 #endif // ACE_COMMON_TERMS_H

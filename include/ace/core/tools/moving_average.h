@@ -48,7 +48,7 @@ namespace ace::core::tools {
         [[nodiscard]] long add(const int& new_one) {
             _total_sum = _total_sum + new_one - _members[_curr_member % (window_size - _zeros)];
             _members[_curr_member % (window_size - _zeros)] = new_one;
-            _zeros == 0 ? : --_zeros;
+            (_zeros == 0) ? 1 : (--_zeros);
             ++_curr_member;
             return value();
         }

@@ -353,7 +353,7 @@ public:                                                                         
         // NOTE: This method is made to never forget to move ownership
         template<typename entry_t>
         static entity_t consume(entry_t& io) noexcept {
-            auto [fd, is_closed] = std::move(io.extract());
+            auto [fd, is_closed] = io.extract();
             if (fd < 0) is_closed = true;
             return io_caster<entity_t>::from_entity(fd, is_closed, std::move(io));
         }
@@ -496,7 +496,7 @@ public:                                                                         
         // NOTE: This method is made to never forget to move ownership
         template<typename entity_t>
         static auto consume(entity_t& io) noexcept {
-            auto [fd, is_closed] = std::move(io.extract());
+            auto [fd, is_closed] = io.extract();
             if (fd < 0) is_closed = true;
             return io_caster<entity_t>::as_link(fd, is_closed, std::move(io));
         }

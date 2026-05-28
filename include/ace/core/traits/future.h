@@ -10,6 +10,8 @@
 #ifndef ACE_FUTURE_H
 #define ACE_FUTURE_H
 
+#include <variant>
+#include <tuple>
 #include <concepts>
 #include <memory>
 

@@ -1,6 +1,9 @@
 #ifndef ACE_NET_H
 #define ACE_NET_H
 
+
+#include <vector>
+#include <string>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
@@ -24,8 +27,14 @@ namespace ace::net {
 
         io_net_entity() = default;
 
-        io_net_entity(io_net_entity&& io) noexcept
-            : core::io_entity<derived_t>(static_cast<core::io_entity<derived_t>>(std::move(io))) { }
+        io_net_entity(io_net_entity&& io) noexcept {
+            core::io_entity<derived_t>::_fd = io._fd;
+            core::io_entity<derived_t>::_is_closed = io._is_closed;
+            _self_sin = io._self_sin;
+            _peer_sin = io._peer_sin;
+            io._fd = -1;
+            io._is_closed = true;
+        }
 
         io_net_entity(int fd, bool is_closed, const sockaddr_in self_sin, const sockaddr_in peer_sin) {
             core::io_entity<derived_t>::_fd = fd;
@@ -310,6 +319,16 @@ namespace ace::net {
 
         using connect_query_t = connect_query<io_transport_entity, domain_v>;
         friend connect_query_t;
+
+        io_transport_entity& operator =(io_transport_entity&& io) noexcept {
+            io_net_entity_t::_fd = io._fd;
+            io_net_entity_t::_is_closed = io._is_closed;
+            _self_sin = io._self_sin;
+            _peer_sin = io._peer_sin;
+            io._fd = -1;
+            io._is_closed = true;
+            return *this;
+        }
 
         struct sendto_query : core::io_query<sendto_query> {
 

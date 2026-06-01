@@ -471,7 +471,7 @@ public:                                                                         
          * @param [out] buff buffer to read to
          * @param [in] len size of read buffer
          */
-        virtual promise<int> input_action(void *buff, std::size_t len) = 0;
+        virtual async<int> input_action(void *buff, std::size_t len) = 0;
 
     public:
 
@@ -567,24 +567,24 @@ public:                                                                         
             output_action(buff);
         }
 
-        ACE_AWAIT_NODISCARD promise<int> read(void *buf, const size_t len, const int flags = 0) {
+        ACE_AWAIT_NODISCARD async<int> read(void *buf, const size_t len, const int flags = 0) {
             co_return co_await input_action(buf, len);
         }
 
         template <typename data_t>
         requires std::is_pod_v<data_t>
-        ACE_AWAIT_NODISCARD promise<int> read(std::vector<data_t>& buf, const int flags = 0) {
+        ACE_AWAIT_NODISCARD async<int> read(std::vector<data_t>& buf, const int flags = 0) {
             co_return co_await input_action(buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)));
         }
 
-        ACE_AWAIT_NODISCARD promise<int> read(std::string& buf, const int flags = 0) {
+        ACE_AWAIT_NODISCARD async<int> read(std::string& buf, const int flags = 0) {
             co_return co_await input_action(buf.data(), buf.size());
         }
 
         template <typename data_t>
         requires std::is_pod_v<data_t>
         [[nodiscard]] auto read_vec(const int flags = 0)
-        -> promise<std::expected<std::vector<data_t>, int>> {
+        -> async<std::expected<std::vector<data_t>, int>> {
             static constexpr int buff_len_bytes = buff_len * (sizeof(data_t) / sizeof(char));
 
             std::deque<std::array<data_t, buff_len>> acc;
@@ -616,7 +616,7 @@ public:                                                                         
         }
 
         ACE_AWAIT_NODISCARD auto read_str(const int flags = 0)
-        -> promise<std::expected<std::string, int>> {
+        -> async<std::expected<std::string, int>> {
 
             std::deque<std::array<char, buff_len>> acc {};
             int total = 0;
@@ -646,13 +646,13 @@ public:                                                                         
 
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
-        ACE_AWAIT_NODISCARD promise<int> read(std::array<data_t, len_v>& buf, const int flags = 0) {
+        ACE_AWAIT_NODISCARD async<int> read(std::array<data_t, len_v>& buf, const int flags = 0) {
             co_return co_await input_action(reinterpret_cast<void*>(buf.data()), len_v * (sizeof(data_t) / sizeof(char)));
         }
 
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
-        ACE_AWAIT_NODISCARD promise<int> read(std::span<data_t, len_v>& buf, const int flags = 0) {
+        ACE_AWAIT_NODISCARD async<int> read(std::span<data_t, len_v>& buf, const int flags = 0) {
             co_return co_await input_action(reinterpret_cast<void*>(buf.data()), buf.size_bytes());
         }
 

@@ -233,8 +233,8 @@ ping() {
     for (unsigned int i = 0; i < cqe_count; ++i) {
 
         const auto cqe = cqe_s[i];
-        const auto identity = io_uring_cqe_get_data64(cqe);
-        const auto observer = reinterpret_cast<kernel_observer*>(identity);
+        const auto identity = io_uring_cqe_get_data(cqe);
+        const auto observer = static_cast<kernel_observer*>(identity);
 
         if (observer == nullptr) {
             --_queries;
@@ -258,6 +258,8 @@ ping() {
 template <typename foo_t, typename ... Params> bool
 ACE_CORE_KERNEL_CONTROLLER_SPACE
 submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept {
+    if (not observer->_runner_identity)
+        observer->_runner_identity = reinterpret_cast<runner_pool_t*>(dispatcher::get_local_runner());
     touch(observer->_runner_identity);
     io_uring_sqe *sqe = io_uring_get_sqe(&_ring);
     io_uring_sqe_set_data(sqe, observer);

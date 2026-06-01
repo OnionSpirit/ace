@@ -51,7 +51,7 @@ namespace ace {
                 }
             };
 
-            promise<int> input_action(void *buff, const std::size_t len) override {
+            async<int> input_action(void *buff, const std::size_t len) override {
                 co_return co_await core::read_query(stdin->_fileno, buff, len);
             }
 
@@ -62,7 +62,7 @@ namespace ace {
 
     public:
 
-        [[nodiscard]] static promise<std::expected<std::string, int>> input() {
+        [[nodiscard]] static async<std::expected<std::string, int>> input() {
             co_return co_await _stdio.read_str();
         }
 

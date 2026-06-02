@@ -230,27 +230,34 @@ namespace ace::net {
         IMPORT_IO_LINK_ENV(io_connection_link);
         IMPORT_IO_LINK_FABRICATION;
 
+    protected:
+
         void output_action(const std::span<const char> buff) override {
-            // NOTE: Trying to get thread local runner from the dispatcher
+            // NOTE: Trying to get thread local runner from the dispatcher.
+            // NOTE: Doing it manually for cases when dispatcher is unused
             auto* runner_identity = reinterpret_cast<runner_pool_t*>(core::dispatcher::get_local_runner());
-            // NOTE: If can not get slot or identity not found -> using busy behavior
-            if (core::io_hanged::command* cmd; not core::io_hanged::_command_pool.capture(cmd) or not runner_identity) [[unlikely]] {
-                if (::send(_fd, buff.data(), buff.size(), 0) < 0 and core::io_hanged::fail_cb_handler)
-                    core::io_hanged::fail_cb_handler(errno);
-            }
             // NOTE: Pushing data to slot, and setting identity for kernelic
-            else [[likely]] {
+            if (core::io_hanged::command* cmd; runner_identity and core::io_hanged::_command_pool.capture(cmd)) [[likely]]
+            {
                 cmd->_runner_identity = runner_identity;
                 cmd->_buffer.assign(buff.begin(), buff.end());
                 if (not core::services::kernel_controller::send(cmd, _fd,
                     cmd->_buffer.data(), cmd->_buffer.size(), 0) and core::io_hanged::fail_cb_handler)
                     core::io_hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
             }
+            // NOTE: If can not get slot or identity not found -> using busy behavior
+            else
+            {
+                if (::send(_fd, buff.data(), buff.size(), 0) < 0 and core::io_hanged::fail_cb_handler)
+                    core::io_hanged::fail_cb_handler(errno);
+            }
         };
 
         async<int> input_action(void *buff, const std::size_t len) override {
             co_return co_await send_query{_fd, buff, len};
         }
+
+    public:
 
         io_connection_link() = default;
 

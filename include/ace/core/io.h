@@ -489,10 +489,6 @@ public:                                                                         
             , _is_closed(is_closed)
             , _data(std::move(data)) { };
 
-        explicit io_link(const int fd)
-            : _fd(fd)
-            , _is_closed(false) { };
-
         // NOTE: This method is made to never forget to move ownership
         template<typename entity_t>
         static auto consume(entity_t& io) noexcept {

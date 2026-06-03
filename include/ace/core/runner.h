@@ -45,6 +45,8 @@ namespace ace::core {
         long                        _tasks_amount {};
         runner_pool_t               _vortex_pool  {};
 
+        static thread_local ace::core::runner* current_runner_ptr;
+
         runner() = default;
 
         // TODO: Need to figure out how to validate this wo warn cuz its important
@@ -58,6 +60,13 @@ namespace ace::core {
         runner(runner &&t) noexcept;
 
         runner &operator=(runner &&t) noexcept;
+
+        /**
+         * @brief Defines current active runner on the current thread
+         * @warning Returns nullptr if @c runner::run() is not in action
+         * @return This thread runner ptr
+         */
+        static runner* get_runner() { return current_runner_ptr; }
 
         /**
          * @brief Returns task into source @c runner
@@ -307,7 +316,8 @@ namespace ace::core {
         if (not task_node) [[unlikely]] {
             if (const auto interthread_node = _interthread_pool.pop_node())
                 task_node = cast_node(interthread_node);
-            else return false;
+            // NOTE: If there is no regular tasks then processing services
+            else return yank_vortex();
         }
 
         // NOTE: Prefetching next task frame
@@ -404,6 +414,7 @@ namespace ace::core {
 
     inline bool runner::run() noexcept {
         int i = 0;
+        current_runner_ptr = this;
         for (constexpr int yank_limit = 128; i < yank_limit and yank(); ++i) {
             if (i % 16 == 0) {
                 yank_vortex();
@@ -416,11 +427,14 @@ namespace ace::core {
                 }
             }
         }
+        current_runner_ptr = nullptr;
         return i not_eq 0 or yank_vortex();
     }
 
 } // end namespace ace::core
 
+
+thread_local ace::core::runner* ace::core::runner::current_runner_ptr = nullptr;
 
 //==============================DEFINITIONS==================================
 

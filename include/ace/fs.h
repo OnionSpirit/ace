@@ -27,7 +27,7 @@ namespace ace::fs {
         void output_action(const std::span<const char> buff) override {
             // NOTE: Trying to get thread local runner from the dispatcher.
             // NOTE: Doing it manually for cases when dispatcher is unused
-            auto* runner_identity = reinterpret_cast<runner_pool_t*>(core::dispatcher::get_local_runner());
+            auto* runner_identity = reinterpret_cast<runner_pool_t*>(core::runner::get_runner());
             // NOTE: Pushing data to slot, and setting identity for kernelic
             if (core::io_hanged::command* cmd; runner_identity and core::io_hanged::_command_pool.capture(cmd)) [[likely]]
             {

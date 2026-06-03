@@ -319,18 +319,18 @@ public:                                                                         
 
         ~io_guard() noexcept {
             if (_fd < 0 or _closed) return;
-
-            // NOTE: Trying to get thread local runner from the dispatcher
-            auto* runner_identity = reinterpret_cast<runner_pool_t*>(dispatcher::get_local_runner());
-            // NOTE: If can not get slot or identity not found -> scheduling closing task
-            if (io_hanged::command* cmd; not io_hanged::_command_pool.capture(cmd) or not runner_identity) [[unlikely]]
-                schedule(pending_close(_fd));
-            // NOTE: Setting identity for kernelic and run lazy
-            else [[likely]] {
+            // NOTE: Trying to get current runner.
+            // NOTE: Doing it manually for cases when classic 'runner::run()' is unused
+            auto* runner_identity = reinterpret_cast<runner_pool_t*>(core::runner::get_runner());
+            // NOTE: Pushing data to slot, and setting identity for kernelic
+            if (core::io_hanged::command* cmd; runner_identity and core::io_hanged::_command_pool.capture(cmd)) [[likely]]
+            {
                 cmd->_runner_identity = runner_identity;
                 if (not services::kernel_controller::close(cmd, _fd) and io_hanged::fail_cb_handler)
                     io_hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
             }
+            // NOTE: If can not get slot or identity not found -> using busy behavior
+            else schedule(pending_close(_fd));
         }
     };
 

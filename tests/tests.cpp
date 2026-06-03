@@ -417,6 +417,7 @@ TEST(futures, do_io_socket_echo) {
     ace::schedule(socket_listener());
     ace::schedule(socket_abuser());
     ace::run();
+    ace::reset_signal();
     ASSERT_TRUE(ace::empty());
 }
 

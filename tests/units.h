@@ -282,18 +282,21 @@ inline ace::task socket_abuser() {
     auto bind_entry = co_await ace::net::io_socket_tcp();
     if (not bind_entry) {
         std::cerr << bind_entry.error() << std::endl;
+        ace::terminate();
         co_return;
     }
 
     auto selection_entry = co_await bind_entry.bind("127.0.0.1", 8001);
     if (not selection_entry) {
         std::cerr << selection_entry.error() << std::endl;
+        ace::terminate();
         co_return;
     }
 
     const auto connection = co_await selection_entry.connect("127.0.0.1", 8000);
     if (not connection) {
         std::cerr << connection.error() << std::endl;
+        ace::terminate();
         co_return;
     }
 
@@ -311,24 +314,28 @@ inline ace::task socket_listener() {
     auto bind_entry = co_await ace::net::io_socket_tcp();
     if (not bind_entry) {
         std::cerr << bind_entry.error() << std::endl;
+        ace::terminate();
         co_return;
     }
 
     auto selection_entry = co_await bind_entry.bind("127.0.0.1", 8000);
     if (not selection_entry) {
         std::cerr << selection_entry.error() << std::endl;
+        ace::terminate();
         co_return;
     }
 
     auto listener = co_await selection_entry.listen();
     if (not listener) {
         std::cerr << listener.error() << std::endl;
+        ace::terminate();
         co_return;
     }
 
     const auto connection = co_await listener.accept("127.0.0.1", 8001);
     if (not connection) {
         std::cerr << connection.error() << std::endl;
+        ace::terminate();
         co_return;
     }
 

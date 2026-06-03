@@ -21,6 +21,25 @@ depends += nukes
 liburing = dependency('liburing')
 depends += liburing
 
+# Define fmt source constant
+use_extern_fmt = get_option('extern_fmt')
+fmt_src = 'std'
+if use_extern_fmt
+    message('Extern fmt requested')
+    fmt_dep = dependency('fmt', fallback : ['fmt', 'fmt_dep'], required : true)
+    depends += fmt_dep
+    fmt_src = 'fmt'
+endif
+
+# Setting macro env data
+cdata = configuration_data()
+cdata.set('FMT_SRC', fmt_src)
+configure_file(
+    input: 'configure.h.in',
+    output: 'ace.env.h',
+    configuration: cdata
+)
+
 # Declaring interfacial lib
 ace_dep = declare_dependency(
     include_directories: include_dir,

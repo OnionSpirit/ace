@@ -1,15 +1,12 @@
 #ifndef ACE_CONSOLE_H
 #define ACE_CONSOLE_H
 
+#include "ace.env.h"
+
 #include <list>
 #include <ace/core/async.h>
 #include <ace/core/io.h>
 #include <ace/fs.h>
-
-// NOTE: It is needed to use external fmt lib with older standards which does not support std::format
-#ifndef FMT_SRC
-#define FMT_SRC std
-#endif
 
 namespace ace {
 

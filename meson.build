@@ -18,7 +18,7 @@ nukes = nukes.dependency('nukes')
 depends += nukes
 
 # Fetching liburing
-liburing = dependency('liburing')
+liburing = dependency('liburing', required : true)
 depends += liburing
 
 # Setting macro env data
@@ -49,7 +49,6 @@ if tests_enabled
       'tests/environment.h',
       'tests/units.h',
       'tests/tests.cpp',
-      'tests/main.cpp',
     )
 
     # NOTE: Defining compiler-dependent args

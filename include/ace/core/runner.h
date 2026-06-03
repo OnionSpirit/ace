@@ -68,6 +68,10 @@ namespace ace::core {
          */
         static runner* get_runner() { return current_runner_ptr; }
 
+        static runner* pool_to_runner(runner_pool_t *pool) noexcept;
+
+        static runner_pool_t* runner_to_pool(runner* rnr) noexcept;
+
         /**
          * @brief Returns task into source @c runner
          * @param ctx Task to be reattached into @c runner
@@ -222,8 +226,12 @@ namespace ace::core {
         }
     }
 
-    inline auto pool_to_runner(runner_pool_t *pool) noexcept {
+    inline runner* runner::pool_to_runner(runner_pool_t *pool) noexcept {
         return reinterpret_cast<runner *>(pool);
+    }
+
+    inline runner_pool_t* runner::runner_to_pool(runner* rnr) noexcept {
+        return reinterpret_cast<runner_pool_t*>(rnr);
     }
 
     inline runner::runner(runner &&t) noexcept {
@@ -435,6 +443,12 @@ namespace ace::core {
 
 
 thread_local ace::core::runner* ace::core::runner::current_runner_ptr = nullptr;
+
+template<typename returnT, ace::core::is_promise_rule promise_rule_t>
+inline auto ace::core::async<returnT, promise_rule_t>::get_current_pool() noexcept
+-> ace::core::async<returnT, promise_rule_t>::runner_pool_t* {
+    return runner::runner_to_pool(runner::get_runner());
+}
 
 //==============================DEFINITIONS==================================
 

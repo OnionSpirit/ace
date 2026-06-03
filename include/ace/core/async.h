@@ -84,7 +84,17 @@ namespace ace::core {
 
         coroutine_t _coroutine; ///< Underlying coroutine handle.  Null after move.
 
-        async() = default;
+        /// @brief Helper to get active runner pool ptr or @c nullptr
+        /// if @c async<...> is constructed out of runner context
+        static runner_pool_t* get_current_pool() noexcept;
+
+        void setup_runner() {
+            // TODO: Why not? But but not works
+            // if (not _coroutine.promise()._runner_pool)
+            //     _coroutine.promise()._runner_pool = get_current_pool();
+        }
+
+        async() { setup_runner(); }
 
         /**
          * @brief Move constructor.  Transfers ownership of the coroutine handle.
@@ -93,6 +103,7 @@ namespace ace::core {
         async(async && ctx) noexcept {
             _coroutine = std::forward<coroutine_t>(ctx._coroutine);
             ctx._coroutine = nullptr;
+            setup_runner();
         };
 
         /**
@@ -103,6 +114,7 @@ namespace ace::core {
         async &operator=(async && ctx)  noexcept {
             _coroutine = std::forward<coroutine_t>(ctx._coroutine);
             ctx._coroutine = nullptr;
+            setup_runner();
             return *this;
         };
 
@@ -114,7 +126,7 @@ namespace ace::core {
          * @details Used internally by @c promise_type::get_return_object().
          * @param handler  Coroutine handle to take ownership of.
          */
-        explicit async(coroutine_t &&handler) : _coroutine{handler} {};
+        explicit async(coroutine_t &&handler) : _coroutine{handler} { setup_runner(); };
 
         /**
          * @brief Check whether the coroutine is exist.
@@ -413,6 +425,7 @@ namespace ace::core {
          */
         template<typename promiseT>
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
+            // NOTE: Secure if _runner_pool is null
             if (not _coroutine.promise()._runner_pool)
                 _coroutine.promise()._runner_pool = outer.promise()._runner_pool;
             // NOTE: Extra call of await_ready fore differed async because it was skipped by idle runner pool ptr

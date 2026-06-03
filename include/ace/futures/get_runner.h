@@ -28,7 +28,7 @@ namespace ace::futures {
      * @brief Awaitable command that returns the calling coroutine's runner.
      *
      * @details Non-suspending — reads the @c _runner_pool pointer from the
-     * promise and converts it to a @c runner* via @c pool_to_runner().
+     * promise and converts it to a @c runner* via @c runner::pool_to_runner().
      */
     struct ACE_AWAIT_NODISCARD get_runner : core::traits::future_traits<get_runner> {
 
@@ -52,7 +52,7 @@ namespace ace::futures {
          *         if the coroutine has no associated runner yet.
          */
         [[nodiscard]] core::runner* await_resume() const {
-            return core::pool_to_runner(*_ptr);
+            return core::runner::pool_to_runner(*_ptr);
         }
     };
 

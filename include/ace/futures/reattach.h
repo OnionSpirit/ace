@@ -22,7 +22,7 @@ namespace ace::futures {
         reattach& operator=(const reattach&) = delete;
 
         explicit reattach(runner_pool_t* new_pool)
-            : _new_runner(core::pool_to_runner(new_pool)) {}
+            : _new_runner(core::runner::pool_to_runner(new_pool)) {}
 
         explicit reattach(core::runner* new_runner)
             : _new_runner(new_runner) {}

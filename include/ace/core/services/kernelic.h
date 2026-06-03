@@ -216,16 +216,14 @@ ACE_CORE_KERNEL_CONTROLLER_MEMBER(bool)
 ping() {
     // NOTE: Setting requests to the io_uring
     _need_submission = _need_submission or not _submission_buffer.empty();
-    for (unsigned int i = 0; i < max_entries and not _submission_buffer.empty(); ++i) {
+    for (unsigned int i = 0; i < (max_entries - _queries) and not _submission_buffer.empty(); ++i) {
         auto entity = _submission_buffer.dequeue();
         entity.apply();
     }
 
     // NOTE: Requesting submission if it's needed
-    if (_need_submission) {
+    if (std::exchange(_need_submission, false))
         io_uring_submit(&_ring);
-        _need_submission = false;
-    }
 
     // NOTE: Receiving responses from the io_uring
     io_uring_cqe* cqe_s[max_entries] {};

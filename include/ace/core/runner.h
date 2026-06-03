@@ -82,6 +82,14 @@ namespace ace::core {
 
         /**
          * @brief Returns task into source @c runner
+         * @param ctx Task to be reattached into @c runner
+         *
+         * @warning @b NOT @b THREADSAFE
+         */
+        static void reattach_front(task &&ctx);
+
+        /**
+         * @brief Returns task into source @c runner
          * @param ctx Task to be reattached safely into @c runner
          */
         static void threadsafe_reattach(task &&ctx);
@@ -101,6 +109,22 @@ namespace ace::core {
          * @warning @b NOT @b THREADSAFE
          */
         static void reattach(pool_node_ptr& node);
+
+        /**
+         * @brief Returns task node into source @c runner
+         * @param node Task node to be reattached into @c runner
+         *
+         * @warning @b NOT @b THREADSAFE
+         */
+        static void reattach_front(insert_node_ptr& node);
+
+        /**
+         * @brief Returns task node into source @c runner
+         * @param node Task node to be reattached into @c runner
+         *
+         * @warning @b NOT @b THREADSAFE
+         */
+        static void reattach_front(pool_node_ptr& node);
 
         /**
          * @brief Returns task node safely into source @c runner
@@ -262,6 +286,16 @@ namespace ace::core {
     }
 
 
+    inline void runner::reattach_front(task&& ctx) {
+        if (not ctx.is_exist() or not ctx._coroutine.promise()._runner_pool)
+            return;
+        if (ctx._coroutine.promise()._polling)
+            pool_to_runner(ctx._coroutine.promise()._runner_pool)->_vortex_pool.push_front(std::move(ctx));
+        else
+            ctx._coroutine.promise()._runner_pool->push_front(std::move(ctx));
+    }
+
+
     inline void runner::threadsafe_reattach(task&& ctx) {
         if (not ctx.is_exist() or not ctx._coroutine.promise()._runner_pool)
             return;
@@ -288,6 +322,29 @@ namespace ace::core {
             pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_vortex_pool.push_node(node);
         else
             pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node(node);
+        node = nullptr;
+    }
+
+
+    inline void runner::reattach_front(insert_node_ptr& node) {
+        if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
+            return;
+        auto n = nukes::details::nodes::cast_node(node);
+        if (node->_data._coroutine.promise()._polling)
+            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_vortex_pool.push_node_front(n);
+        else
+            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node_front(n);
+        node = nullptr;
+    }
+
+
+    inline void runner::reattach_front(pool_node_ptr& node) {
+        if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
+            return;
+        if (node->_data._coroutine.promise()._polling)
+            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_vortex_pool.push_node_front(node);
+        else
+            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node_front(node);
         node = nullptr;
     }
 

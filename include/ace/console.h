@@ -1,9 +1,9 @@
 #ifndef ACE_CONSOLE_H
 #define ACE_CONSOLE_H
 
-#include "ace.env.h"
 
 #include <list>
+#include <format>
 #include <ace/core/async.h>
 #include <ace/core/io.h>
 #include <ace/fs.h>
@@ -34,12 +34,12 @@ namespace ace {
         }
 
         template <class... Args>
-        static void println(fmt::format_string<Args...>&& frm, Args&&... args) {
-            _stdout.writeln(std::forward<fmt::format_string<Args...>>(frm), std::forward<Args>(args)...);
+        static void println(std::format_string<Args...>&& fmt, Args&&... args) {
+            _stdout.writeln(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
-        static void println(const fmt::string_view&& str) {
-            _stdout.writeln(std::forward<const fmt::string_view>(str));
+        static void println(const std::string_view&& str) {
+            _stdout.writeln(std::forward<const std::string_view>(str));
         }
 
         static void println() {
@@ -47,12 +47,12 @@ namespace ace {
         }
 
         template <class... Args>
-        static void print(fmt::format_string<Args...>&& frm, Args&&... args) {
-            _stdout.write(std::forward<fmt::format_string<Args...>>(frm), std::forward<Args>(args)...);
+        static void print(std::format_string<Args...>&& fmt, Args&&... args) {
+            _stdout.write(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
-        static void print(const fmt::string_view&& str) {
-            _stdout.write(std::forward<const fmt::string_view>(str));
+        static void print(const std::string_view&& str) {
+            _stdout.write(std::forward<const std::string_view>(str));
         }
 
     };

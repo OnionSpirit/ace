@@ -90,8 +90,9 @@ namespace ace::core {
 
         void setup_runner() {
             // TODO: Why not? But but not works
-            // if (not _coroutine.promise()._runner_pool)
-            //     _coroutine.promise()._runner_pool = get_current_pool();
+            // if constexpr (std::same_as<promise_rule_t, permanent>)
+            //     if (not _coroutine.promise()._runner_pool)
+            //         _coroutine.promise()._runner_pool = get_current_pool();
         }
 
         async() { setup_runner(); }

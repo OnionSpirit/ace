@@ -45,7 +45,7 @@ namespace ace::fs {
             }
         };
 
-        async<int> input_action(void *buff, const std::size_t len) override {
+        promise<int> input_action(void *buff, const std::size_t len) override {
             co_return co_await core::read_query(_fd, buff, len);
         }
 

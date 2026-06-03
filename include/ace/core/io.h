@@ -467,7 +467,7 @@ public:                                                                         
          * @param [out] buff buffer to read to
          * @param [in] len size of read buffer
          */
-        virtual async<int> input_action(void *buff, std::size_t len) = 0;
+        virtual promise<int> input_action(void *buff, std::size_t len) = 0;
 
     public:
 

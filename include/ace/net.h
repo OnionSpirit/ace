@@ -253,7 +253,7 @@ namespace ace::net {
             }
         };
 
-        async<int> input_action(void *buff, const std::size_t len) override {
+        promise<int> input_action(void *buff, const std::size_t len) override {
             co_return co_await send_query{_fd, buff, len};
         }
 

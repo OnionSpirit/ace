@@ -23,19 +23,17 @@ depends += liburing
 
 # Define fmt source constant
 use_extern_fmt = get_option('extern_fmt')
-fmt_src = 'std'
 if use_extern_fmt
     message('Extern fmt requested')
     fmt_dep = dependency('fmt', fallback : ['fmt', 'fmt_dep'], required : true)
     depends += fmt_dep
-    fmt_src = 'fmt'
 endif
 
 # Setting macro env data
 cdata = configuration_data()
-cdata.set('FMT_SRC', fmt_src)
+cdata.set('extern_fmt', use_extern_fmt)
 configure_file(
-    input: 'configure.h.in',
+    input: 'config.h.in',
     output: 'ace.env.h',
     configuration: cdata
 )

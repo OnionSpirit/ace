@@ -152,11 +152,11 @@ public:                                                                         
         };
 
         // static void basic_fail_handler(const int res, const std::span<char>& user_data) {
-        //     throw std::runtime_error(FMT_SRC::format("io operation failed: {}\nuser data: {}", strerror(-res), user_data));
+        //     throw std::runtime_error(fmt::format("io operation failed: {}\nuser data: {}", strerror(-res), user_data));
         // }
 
         static void basic_fail_handler(const int res) {
-            throw std::runtime_error(FMT_SRC::format("io operation failed: {}", strerror(-res)));
+            throw std::runtime_error(fmt::format("io operation failed: {}", strerror(-res)));
         }
 
         // static void(*fail_cb_handler)(int, const std::span<char>&); ///< Fail handler for commands errors handling
@@ -513,24 +513,24 @@ public:                                                                         
         virtual ~io_link() = default;
 
         template <class... Args>
-        void writeln(FMT_SRC::format_string<Args...>&& fmt, Args&&... args) {
-            const std::string buff = FMT_SRC::format(std::forward<FMT_SRC::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
+        void writeln(fmt::format_string<Args...>&& frm, Args&&... args) {
+            const std::string buff = fmt::format(std::forward<fmt::format_string<Args...>>(frm), std::forward<Args>(args)...) + '\n';
             output_action(buff);
         }
 
-        void writeln(const FMT_SRC::string_view&& str) {
-            const std::string buff = std::string(std::forward<const FMT_SRC::string_view>(str)) + '\n';
+        void writeln(const fmt::string_view&& str) {
+            const std::string buff = std::string(std::forward<const fmt::string_view>(str)) + '\n';
             output_action(buff);
         }
 
         template <class... Args>
-        void write(FMT_SRC::format_string<Args...>&& fmt, Args&&... args) {
-            std::span buff = FMT_SRC::format(std::forward<FMT_SRC::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+        void write(fmt::format_string<Args...>&& frm, Args&&... args) {
+            std::span buff = fmt::format(std::forward<fmt::format_string<Args...>>(frm), std::forward<Args>(args)...);
             output_action(buff);
         }
 
-        void write(const FMT_SRC::string_view&& str) {
-            output_action(std::forward<const FMT_SRC::string_view>(str));
+        void write(const fmt::string_view&& str) {
+            output_action(std::forward<const fmt::string_view>(str));
         }
 
         void write(const void *buf, const size_t len) {

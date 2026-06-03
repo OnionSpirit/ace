@@ -1,0 +1,16 @@
+#ifndef ACE_PREPROC_DEFINITIONS
+#define ACE_PREPROC_DEFINITIONS
+
+#mesondefine extern_fmt
+
+#if extern_fmt
+#include <fmt/core.h>
+#include <fmt/format.h>
+#include <fmt/ostream.h>
+#else
+#define fmt std
+#include <format>
+#endif
+
+
+#endif // ACE_PREPROC_DEFINITIONS

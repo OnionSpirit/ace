@@ -34,12 +34,12 @@ namespace ace {
         }
 
         template <class... Args>
-        static void println(FMT_SRC::format_string<Args...>&& fmt, Args&&... args) {
-            _stdout.writeln(std::forward<FMT_SRC::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+        static void println(fmt::format_string<Args...>&& frm, Args&&... args) {
+            _stdout.writeln(std::forward<fmt::format_string<Args...>>(frm), std::forward<Args>(args)...);
         }
 
-        static void println(const FMT_SRC::string_view&& str) {
-            _stdout.writeln(std::forward<const FMT_SRC::string_view>(str));
+        static void println(const fmt::string_view&& str) {
+            _stdout.writeln(std::forward<const fmt::string_view>(str));
         }
 
         static void println() {
@@ -47,12 +47,12 @@ namespace ace {
         }
 
         template <class... Args>
-        static void print(FMT_SRC::format_string<Args...>&& fmt, Args&&... args) {
-            _stdout.write(std::forward<FMT_SRC::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+        static void print(fmt::format_string<Args...>&& frm, Args&&... args) {
+            _stdout.write(std::forward<fmt::format_string<Args...>>(frm), std::forward<Args>(args)...);
         }
 
-        static void print(const FMT_SRC::string_view&& str) {
-            _stdout.write(std::forward<const FMT_SRC::string_view>(str));
+        static void print(const fmt::string_view&& str) {
+            _stdout.write(std::forward<const fmt::string_view>(str));
         }
 
     };

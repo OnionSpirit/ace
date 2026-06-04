@@ -282,6 +282,8 @@ public:
     bool await_suspend(auto ctx);
 
     auto await_resume() { return std::forward<data_t>(_output_data); }
+
+    ~pull_impl() override = default;
 };
 
 
@@ -414,6 +416,8 @@ public:
     bool await_suspend(auto ctx);
 
     auto await_resume() { return std::forward<data_t>(_output_data); }
+
+    ~pull_impl() override = default;
 };
 
 

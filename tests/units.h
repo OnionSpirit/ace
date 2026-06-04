@@ -30,8 +30,6 @@ struct once_suspend : ace::core::traits::busy_future_traits<once_suspend> {
     void await_suspend(auto) {};
 
     auto await_resume() { }
-
-    ~once_suspend() override = default;
 };
 
 inline ace::promise<bool> simple_context_test() {

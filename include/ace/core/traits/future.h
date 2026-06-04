@@ -56,15 +56,10 @@ namespace ace::core::traits {
         }
 
         bool await_ready() override { return false; };
-
-        /**
-         * @details Default destructor
-         */
-        ~future_traits() override = default;
     };
 
-    #define IMPORT_FUTURE_ENV(future_t)                                \
-        typedef ace::core::traits::future_traits<future_t> future_traits_t; \
+    #define IMPORT_FUTURE_ENV(future_t)                                      \
+        typedef ace::core::traits::future_traits<future_t> future_traits_t;  \
         using typename future_traits_t::derived_future_t;
 
 
@@ -104,8 +99,8 @@ namespace ace::core::traits {
         ~busy_future_traits() override = default;
     };
 
-    #define IMPORT_BUSY_FUTURE_ENV(future_t)                                     \
-        typedef ace::core::traits::busy_future_traits<future_t> busy_future_traits_t; \
+    #define IMPORT_BUSY_FUTURE_ENV(future_t)                                           \
+        typedef ace::core::traits::busy_future_traits<future_t> busy_future_traits_t;  \
         using typename busy_future_traits_t::derived_busy_future_t;
 
 }

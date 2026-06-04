@@ -214,8 +214,13 @@ namespace ace::core {
         void attach(async<async_return_t, async_rule_t> &&new_task) noexcept {
             ++_tasks_amount;
             new_task._coroutine.promise()._runner_pool = &_pool;
-            _pool.push(std::forward<task>(task_wrap(
-                std::forward<core::async<async_return_t, async_rule_t> >(new_task))));
+            if (new_task._coroutine.promise()._polling) {
+                _vortex_pool.push(std::forward<task>(task_wrap(
+                    std::forward<async<async_return_t, async_rule_t> >(new_task))));
+            } else {
+                _pool.push(std::forward<task>(task_wrap(
+                    std::forward<async<async_return_t, async_rule_t> >(new_task))));
+            }
         }
 
         /**
@@ -257,7 +262,11 @@ namespace ace::core {
     inline void runner::attach<void, differed>(task &&new_task) noexcept {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner_pool = &_pool;
-        _pool.push(std::forward<task>(new_task));
+        if (new_task._coroutine.promise()._polling) {
+            _vortex_pool.push(std::forward<task>(new_task));
+        } else {
+            _pool.push(std::forward<task>(new_task));
+        }
     }
 
     template<>

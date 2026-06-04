@@ -197,10 +197,24 @@ namespace ace::core {
          * @return void
          */
         template <typename async_return_t, typename async_rule_t>
-        void attach(async<async_return_t, async_rule_t> &&new_task) noexcept {
+        void threadsafe_attach(async<async_return_t, async_rule_t> &&new_task) noexcept {
             ++_tasks_amount;
             new_task._coroutine.promise()._runner_pool = &_pool;
             _interthread_pool.push(std::forward<task>(task_wrap(
+                std::forward<core::async<async_return_t, async_rule_t> >(new_task))));
+        }
+
+        /**
+         * @details Function to attach task to the runner
+         * @param new_task Task to be pushed into the runner
+         * @warning NOT THREADSAFE
+         * @return void
+         */
+        template <typename async_return_t, typename async_rule_t>
+        void attach(async<async_return_t, async_rule_t> &&new_task) noexcept {
+            ++_tasks_amount;
+            new_task._coroutine.promise()._runner_pool = &_pool;
+            _pool.push(std::forward<task>(task_wrap(
                 std::forward<core::async<async_return_t, async_rule_t> >(new_task))));
         }
 
@@ -233,10 +247,17 @@ namespace ace::core {
     };
 
     template<>
-    inline void runner::attach<void, differed>(task &&new_task) noexcept {
+    inline void runner::threadsafe_attach<void, differed>(task &&new_task) noexcept {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner_pool = &_pool;
         _interthread_pool.push(std::forward<task>(new_task));
+    }
+
+    template <>
+    inline void runner::attach<void, differed>(task &&new_task) noexcept {
+        ++_tasks_amount;
+        new_task._coroutine.promise()._runner_pool = &_pool;
+        _pool.push(std::forward<task>(new_task));
     }
 
     template<>
@@ -488,7 +509,7 @@ namespace ace::core {
                 while ((interthread_node = _interthread_pool.pop_node())) {
                     // NOTE: Fetching task from interthread insert queue
                     auto placing_node = cast_node(interthread_node);
-                    _pool.push_node(placing_node);
+                    _pool.push_node_front(placing_node);
                 }
             }
         }

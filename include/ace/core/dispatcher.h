@@ -174,7 +174,7 @@ namespace ace::core {
 
         void round_robin(task &&new_task) noexcept {
             const auto runner_id = _runner_selector.fetch_add(1, std::memory_order_relaxed);
-            _runners[runner_id % _dispatcher_config._runners_amount].attach(std::forward<task>(new_task));
+            _runners[runner_id % _dispatcher_config._runners_amount].threadsafe_attach(std::forward<task>(new_task));
         }
 
         static auto get_time()
@@ -280,7 +280,7 @@ namespace ace {
                 const double runner_attractiveness = 1.0 - (runner.velocity() / self._aggregate_velocity.load());
                 attractiveness_accumulator += runner_attractiveness;
                 if (probability <= attractiveness_accumulator) {
-                    runner.attach(std::forward<task>(new_task));
+                    runner.threadsafe_attach(std::forward<task>(new_task));
                     return;
                 }
             }
@@ -288,7 +288,7 @@ namespace ace {
             self.round_robin(std::move(new_task));
         } else {
             new_task._coroutine.promise()._roaming = false;
-            rnr->attach(std::forward<task>(new_task));
+            rnr->threadsafe_attach(std::forward<task>(new_task));
         }
     }
 

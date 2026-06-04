@@ -312,24 +312,23 @@ notify() {
             "which are not running at the 'ace::core::runner'"
         };
 
-    // NOTE: Reattaching if pool is the same
-    if (curr_runner_pool == waiter_node->_data._coroutine.promise()._runner_pool) {
+    const bool is_pool_same = curr_runner_pool == waiter_node->_data._coroutine.promise()._runner_pool;
+
+    const bool is_rescheduling_allowed = _rescheduling and waiter_node->_data._coroutine.promise()._roaming;
+
+    // NOTE: Reattaching fast if pool is the same
+    if (is_pool_same)
         core::runner::reattach_front(waiter_node);
-        return true;
-    }
-    // NOTE: Rescheduling waiter if rescheduling mode is on and waiter supports roaming
-    if (_rescheduling and waiter_node->_data._coroutine.promise()._roaming) {
+
+    // NOTE: Rescheduling waiter if rescheduling allowed
+    else if (is_rescheduling_allowed) {
         waiter_node->_data._coroutine.promise()._runner_pool = curr_runner_pool;
         core::runner::reattach_front(waiter_node);
-        return true;
-    }
-    // NOTE: Updating rescheduling pool if rescheduling mode is on and waiter forbids roaming
-    if (_rescheduling) {
-        core::runner::threadsafe_reattach(waiter_node);
-        return true;
     }
     // NOTE: Classic threadsafe reattach at the worst case
-    core::runner::threadsafe_reattach(waiter_node);
+    else
+        core::runner::threadsafe_reattach(waiter_node);
+
     return true;
 }
 

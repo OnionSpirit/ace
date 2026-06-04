@@ -74,7 +74,6 @@ namespace ace::futures {
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
         std::atomic<long>                           _users            {0};         ///< Number of active users (0 = unlocked).
         nukes::dynamic::roaming_mpsc_queue<task>    _waiters          { };            ///< Tasks waiting to acquire the mutex.
-        std::atomic<runner_pool_t*>                 _runner_pool      {nullptr};   ///< Runner pool of the task that currently owns the lock (used for rescheduling).
         bool                                        _rescheduling     {false};        ///< When @c true, released waiters are migrated to @c _runner_pool.
 
         /**
@@ -85,7 +84,7 @@ namespace ace::futures {
          * runner.
          * @return @c true if a waiter was successfully notified.
          */
-        bool notify() noexcept;
+        bool notify();
 
         /**
          * @brief Deadlock resolution coroutine.
@@ -296,117 +295,42 @@ try_lock() noexcept {
 }
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
-notify() noexcept {
+notify() {
     typedef nukes::dynamic::roaming_mpsc_queue<task>::node_t waiter_node_t;
     waiter_node_t* waiter_node = _waiters.pop_node();
-    // NOTE: Trying to fetch next waiter and release it on the runner
+
+    // NOTE: Trying to fetch next waiter and reattach it to the runner.
+    // NOTE: If it has failed to fetch then pending notification needed
     if (not waiter_node)
         return false;
-    // NOTE: Updating rescheduling pool if rescheduling mode is on and waiter forbids roaming
-    if (const bool roaming = waiter_node->_data._coroutine.promise()._roaming; _rescheduling and not roaming) {
-        if (_runner_pool.load(std::memory_order_acquire) not_eq waiter_node->_data._coroutine.promise()._runner_pool) {
-            _runner_pool.store(waiter_node->_data._coroutine.promise()._runner_pool, std::memory_order_release);
-            core::runner::threadsafe_reattach(waiter_node);
-        } else {
-            core::runner::reattach_front(waiter_node);
-        }
+
+    // NOTE: Fetching current pool data
+    auto* curr_runner_pool = core::runner::runner_to_pool(core::runner::get_runner());
+    if (not curr_runner_pool) [[unlikely]]
+        throw std::logic_error {
+            "The 'ace::future::cutex' can't work with 'ace::core::async<...>'s "
+            "which are not running at the 'ace::core::runner'"
+        };
+
+    // NOTE: Reattaching if pool is the same
+    if (curr_runner_pool == waiter_node->_data._coroutine.promise()._runner_pool) {
+        core::runner::reattach_front(waiter_node);
+        return true;
     }
     // NOTE: Rescheduling waiter if rescheduling mode is on and waiter supports roaming
-    else if (_rescheduling) {
-        waiter_node->_data._coroutine.promise()._runner_pool = _runner_pool.load(std::memory_order_acquire);
+    if (_rescheduling and waiter_node->_data._coroutine.promise()._roaming) {
+        waiter_node->_data._coroutine.promise()._runner_pool = curr_runner_pool;
         core::runner::reattach_front(waiter_node);
-    } else {
-        core::runner::threadsafe_reattach(waiter_node);
+        return true;
     }
+    // NOTE: Updating rescheduling pool if rescheduling mode is on and waiter forbids roaming
+    if (_rescheduling) {
+        core::runner::threadsafe_reattach(waiter_node);
+        return true;
+    }
+    // NOTE: Classic threadsafe reattach at the worst case
+    core::runner::threadsafe_reattach(waiter_node);
     return true;
-
-    // TODO: Need to make fine burst notification
-    // enum class reattach_mode : char { e_threadsafe, e_fast };
-    // typedef nukes::dynamic::roaming_mpsc_queue<task>::node_t waiter_node_t;
-    //
-    // waiter_node_t* waiter_node = _waiters.pop_node();
-    //
-    // // NOTE: Trying to fetch next waiter and release it on the runner
-    // if (not waiter_node) return false;
-    //
-    // waiter_node_t *head = waiter_node, *curr = waiter_node;
-    // auto mode = reattach_mode::e_threadsafe;
-    // int burst_len = 0;
-    //
-    // do {
-    //     // NOTE: Cutex now trying to reattach a batch of tasks instead of one
-    //     const bool burst_active = waiter_node not_eq curr;
-    //
-    //     // NOTE: Waiter allows rescheduling
-    //     const bool roaming = waiter_node->_data._coroutine.promise()._roaming;
-    //
-    //     // NOTE: Can not reschedule at all
-    //     const bool no_reschedule = _rescheduling and not roaming; //not _rescheduling or not roaming;
-    //
-    //     // NOTE: Need to update rescheduling pool because rescheduling mode is on but waiter forbids rescheduling
-    //     const bool shall_update_pool {
-    //         _rescheduling and not roaming
-    //         and _runner_pool.load(std::memory_order_acquire)
-    //         not_eq waiter_node->_data._coroutine.promise()._runner_pool
-    //     };
-    //
-    //     const bool no_reschedule_but_may_burst {
-    //         (not _rescheduling or not roaming)
-    //         and _runner_pool.load(std::memory_order_acquire)
-    //         == waiter_node->_data._coroutine.promise()._runner_pool
-    //     };
-    //
-    //     // NOTE: Returning popped waiter back to pool and breaking burst
-    //     if (shall_update_pool and burst_active) {
-    //         _waiters.push_node_front(waiter_node);
-    //         break;
-    //     }
-    //
-    //     // NOTE: Reattaching waiter and break
-    //     if (shall_update_pool) {
-    //         _runner_pool.store(waiter_node->_data._coroutine.promise()._runner_pool, std::memory_order_release);
-    //         mode = reattach_mode::e_threadsafe;
-    //         break;
-    //     }
-    //
-    //     // NOTE: Can not reschedule but at the same thread then increasing burst
-    //     if (no_reschedule_but_may_burst) {
-    //         waiter_node->_next = head;
-    //         head = waiter_node;
-    //         ++burst_len;
-    //         mode = reattach_mode::e_fast;
-    //         continue;
-    //     }
-    //
-    //     // NOTE: Rescheduling allowed then increasing burst
-    //     if (_rescheduling) {
-    //         waiter_node->_data._coroutine.promise()._runner_pool = _runner_pool.load(std::memory_order_acquire);
-    //         waiter_node->_next = head;
-    //         head = waiter_node;
-    //         ++burst_len;
-    //         mode = reattach_mode::e_fast;
-    //         continue;
-    //     }
-    //
-    //     // NOTE: Rescheduling disabled
-    //     mode = reattach_mode::e_threadsafe;
-    //     break;
-    //
-    // } while ((waiter_node = _waiters.pop_node()) not_eq nullptr);
-    //
-    // // NOTE: Mode is threadsafe means no burst then reattaching head
-    // if (mode == reattach_mode::e_threadsafe) {
-    //     core::runner::threadsafe_reattach(head);
-    //     return true;
-    // }
-    //
-    // // NOTE: Pushing front burst as list to runner pool
-    // auto list_head = cast_node(head);
-    // auto list_tail = cast_node(curr);
-    // curr->_data._coroutine.promise()._runner_pool
-    //     ->push_list(list_head, list_tail, burst_len);
-    //
-    // return true;
 }
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(ace::task)
@@ -420,11 +344,6 @@ pending_notify() noexcept {
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 await_suspend(auto coroutine) {
-
-    // NOTE: Selecting rescheduling pool if it doesn't set and rescheduling mode on
-    if (_rescheduling and not _runner_pool.load(std::memory_order_acquire))
-        _runner_pool.store(coroutine.promise()._runner_pool, std::memory_order_release);
-
     // NOTE: Setting conductor for dispatch to the cutex waiters queue
     coroutine.promise()._runner_conductor = cutex_conductor{this};
     return true;

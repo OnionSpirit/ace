@@ -49,6 +49,7 @@ if tests_enabled
       'tests/environment.h',
       'tests/units.h',
       'tests/tests.cpp',
+      'tests/main.cpp',
     )
 
     # NOTE: Defining compiler-dependent args

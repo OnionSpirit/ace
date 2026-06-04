@@ -36,6 +36,11 @@ namespace ace::net {
             io._is_closed = true;
         }
 
+        io_net_entity(int fd, bool is_closed) {
+            core::io_entity<derived_t>::_fd = fd;
+            core::io_entity<derived_t>::_is_closed = is_closed;
+        }
+
         io_net_entity(int fd, bool is_closed, const sockaddr_in self_sin, const sockaddr_in peer_sin) {
             core::io_entity<derived_t>::_fd = fd;
             core::io_entity<derived_t>::_is_closed = is_closed;
@@ -193,7 +198,7 @@ namespace ace::net {
             if (_res > -1) {
                 return io_transport_entity_t::consume(_entity);
             }
-            return io_transport_entity_t {};
+            return io_transport_entity_t {_res, true};
         }
 
         entity_t& _entity;
@@ -602,7 +607,7 @@ namespace ace::net {
                     _entity->_peer_sin = *reinterpret_cast<sockaddr_in*>(_addr);
                     return core::io_caster<io_transport_entity_t>::from_entity(_res, false, std::move(*_entity));
                 }
-                return io_transport_entity_t {};
+                return io_transport_entity_t {_res, true};
             }
 
             const io_listener_entity* _entity;
@@ -748,7 +753,7 @@ namespace ace::net {
                 return core::services::kernel_controller::bind(kwp, _fd, _addr, _addrlen);
             }
 
-            [[nodiscard]] io_stream_mode_entity_t await_resume() {
+            [[nodiscard]] auto await_resume() {
                 if constexpr (is_stream_type<type_v>)
                     return io_stream_mode_entity_t::consume(_entity);
                 else {
@@ -756,7 +761,7 @@ namespace ace::net {
                         _entity._peer_sin = *reinterpret_cast<sockaddr_in*>(_addr);
                         return io_transport_entity_t { _res, false, std::move(*_entity) };
                     }
-                    return io_transport_entity_t {};
+                    return io_transport_entity_t {_res, true};
                 }
             }
 

@@ -502,13 +502,13 @@ namespace ace::net {
 
             auto& buff = acc.emplace_back();
             int bytes_read = co_await recv_query(_fd, buff.data(), buff_len_bytes, flags);
-            if (bytes_read < 0) co_return std::unexpected(-bytes_read);
+            if (bytes_read < 1) co_return std::unexpected(-bytes_read);
             total += bytes_read;
 
             while (bytes_read == buff_len) {
                 buff = acc.emplace_back();
                 bytes_read = co_await recv_query(_fd, buff.data(), buff_len_bytes, flags);
-                if (bytes_read < 0) co_return std::unexpected(-bytes_read);
+                if (bytes_read < 1) co_return std::unexpected(-bytes_read);
                 total += bytes_read;
             }
 
@@ -534,13 +534,13 @@ namespace ace::net {
 
             auto& buff = acc.emplace_back();
             int bytes_read = co_await recv_query(_fd, buff.data(), buff_len, flags);
-            if (bytes_read < 0) co_return std::unexpected(-bytes_read);
+            if (bytes_read < 1) co_return std::unexpected(-bytes_read);
             total += bytes_read;
 
             while (bytes_read == buff_len) {
                 buff = acc.emplace_back();
                 bytes_read = co_await recv_query(_fd, buff.data(), buff_len, flags);
-                if (bytes_read < 0) co_return std::unexpected(-bytes_read);
+                if (bytes_read < 1) co_return std::unexpected(-bytes_read);
                 total += bytes_read;
             }
 

@@ -525,7 +525,7 @@ public:                                                                         
 
         template <class... Args>
         void write(std::format_string<Args...>&& fmt, Args&&... args) {
-            std::span buff = std::format(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            const std::string buff = std::format(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
             output_action(buff);
         }
 
@@ -584,13 +584,13 @@ public:                                                                         
 
             auto& buff = acc.emplace_back();
             int bytes_read = co_await input_action(reinterpret_cast<void*>(buff.data()), buff_len_bytes);
-            if (bytes_read < 0) co_return std::unexpected(-bytes_read);
+            if (bytes_read < 1) co_return std::unexpected(-bytes_read);
             total += bytes_read;
 
             while (bytes_read == buff_len) {
                 buff = acc.emplace_back();
                 bytes_read = co_await input_action(reinterpret_cast<void*>(buff.data()), buff_len_bytes);
-                if (bytes_read < 0) co_return std::unexpected(-bytes_read);
+                if (bytes_read < 1) co_return std::unexpected(-bytes_read);
                 total += bytes_read;
             }
 
@@ -615,13 +615,13 @@ public:                                                                         
 
             auto& buff = acc.emplace_back();
             int bytes_read = co_await input_action(buff.data(), buff_len);
-            if (bytes_read < 0) co_return std::unexpected(-bytes_read);
+            if (bytes_read < 1) co_return std::unexpected(-bytes_read);
             total += bytes_read;
 
             while (bytes_read == buff_len) {
                 buff = acc.emplace_back();
                 bytes_read = co_await input_action(buff.data(), buff_len);
-                if (bytes_read < 0) co_return std::unexpected(-bytes_read);
+                if (bytes_read < 1) co_return std::unexpected(-bytes_read);
                 total += bytes_read;
             }
 

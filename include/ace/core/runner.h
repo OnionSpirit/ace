@@ -218,7 +218,7 @@ namespace ace::core {
 
 
     inline void runner::reattach(task&& ctx, const runner* local_runner_ptr) {
-        const auto* target_runner_ptr = pool_to_runner(ctx._coroutine.promise()._runner_pool);
+        const auto* target_runner_ptr = ctx._coroutine.promise()._runner.as<runner>();
         if (not ctx.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach' idle context" };
         if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
@@ -234,7 +234,7 @@ namespace ace::core {
 
 
     inline void runner::reattach(pool_node_ptr& node, const runner* local_runner_ptr) {
-        const auto* target_runner_ptr = pool_to_runner(node->_data._coroutine.promise()._runner_pool);
+        const auto* target_runner_ptr = node->_data._coroutine.promise()._runner.as<runner>();
         if (not node or not node->_data.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach' idle context" };
         if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
@@ -254,7 +254,7 @@ namespace ace::core {
 
 
     inline void runner::reattach(insert_node_ptr& node, const runner* local_runner_ptr) {
-        const auto* target_runner_ptr = pool_to_runner(node->_data._coroutine.promise()._runner_pool);
+        const auto* target_runner_ptr = node->_data._coroutine.promise()._runner.as<runner>();
         if (not node or not node->_data.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach' idle context" };
         if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
@@ -274,7 +274,7 @@ namespace ace::core {
 
 
     inline void runner::reattach_front(task&& ctx, const runner* local_runner_ptr) {
-        const auto* target_runner_ptr = pool_to_runner(ctx._coroutine.promise()._runner_pool);
+        const auto* target_runner_ptr = ctx._coroutine.promise()._runner.as<runner>();
         if (not ctx.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach_front' idle context" };
         if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
@@ -291,7 +291,7 @@ namespace ace::core {
 
 
     inline void runner::reattach_front(pool_node_ptr& node, const runner* local_runner_ptr) {
-        const auto* target_runner_ptr = pool_to_runner(node->_data._coroutine.promise()._runner_pool);
+        const auto* target_runner_ptr = node->_data._coroutine.promise()._runner.as<runner>();
         if (not node or not node->_data.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach_front' idle context" };
         if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
@@ -312,7 +312,7 @@ namespace ace::core {
 
 
     inline void runner::reattach_front(insert_node_ptr& node, const runner* local_runner_ptr) {
-        const auto* target_runner_ptr = pool_to_runner(node->_data._coroutine.promise()._runner_pool);
+        const auto* target_runner_ptr = node->_data._coroutine.promise()._runner.as<runner>();
         if (not node or not node->_data.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach_front' idle context" };
         if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
@@ -335,7 +335,7 @@ namespace ace::core {
     template <typename async_return_t, typename async_rule_t>
     void runner::attach(async<async_return_t, async_rule_t> &&new_task) noexcept {
         ++_tasks_amount;
-        new_task._coroutine.promise()._runner_pool = &_pool;
+        new_task._coroutine.promise()._runner = &_pool;
         reattach(std::move(new_task), this);
     }
 
@@ -343,7 +343,7 @@ namespace ace::core {
     template <typename async_return_t, typename async_rule_t>
     void runner::attach_front(async<async_return_t, async_rule_t> &&new_task) noexcept {
         ++_tasks_amount;
-        new_task._coroutine.promise()._runner_pool = &_pool;
+        new_task._coroutine.promise()._runner = &_pool;
         reattach_front(std::move(new_task), pool_to_runner(&_pool));
     }
 

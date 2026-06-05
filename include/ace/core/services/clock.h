@@ -419,7 +419,7 @@ namespace ace::core::services {
         static auto detach(clock_node* node) { inspect()._multi_dial.detach_record(node); }
 
         [[nodiscard]] static clock_node* subscribe(task&& ctx, const duration_t dur) {
-            return touch(ctx._coroutine.promise()._runner_pool)._multi_dial.subscribe(std::forward<task>(ctx), dur);
+            return touch(ctx._coroutine.promise()._runner.as<runner_pool_t>())._multi_dial.subscribe(std::forward<task>(ctx), dur);
         };
 
         static bool ping() {

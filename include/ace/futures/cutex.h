@@ -307,7 +307,7 @@ notify() {
     // NOTE: Fetching current pool data
     auto* curr_runner_pool = core::runner::runner_to_pool(core::runner::get_runner());
 
-    const bool is_pool_same = curr_runner_pool == waiter_node->_data._coroutine.promise()._runner_pool;
+    const bool is_pool_same = curr_runner_pool == waiter_node->_data._coroutine.promise()._runner.as<runner_pool_t>();
 
     const bool is_rescheduling_allowed = _rescheduling and waiter_node->_data._coroutine.promise()._roaming;
 
@@ -317,7 +317,7 @@ notify() {
 
     // NOTE: Rescheduling waiter if rescheduling allowed
     else if (is_rescheduling_allowed) {
-        waiter_node->_data._coroutine.promise()._runner_pool = curr_runner_pool;
+        waiter_node->_data._coroutine.promise()._runner = curr_runner_pool;
         core::runner::reattach_front(waiter_node);
     }
     // NOTE: Classic threadsafe reattach at the worst case

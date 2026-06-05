@@ -70,7 +70,7 @@ namespace ace::futures {
          * @return Always @c false — the caller is never suspended.
          */
         bool await_suspend(auto coroutine) {
-            auto* runner_ptr = core::runner::pool_to_runner(coroutine.promise()._runner_pool);
+            auto* runner_ptr = coroutine.promise()._runner.template as<core::runner>();
             _task._coroutine.promise()._roaming = coroutine.promise()._roaming = false;
             runner_ptr->attach_front(std::forward<task>(_task));
             return true;

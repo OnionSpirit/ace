@@ -377,7 +377,7 @@ struct ACE_OR_AWAIT_FUTURE_SPACE or_await_conductor final : conductor_handler_t 
 
 ACE_OR_AWAIT_FUTURE_MEMBER(bool)
 await_suspend(auto external_coro) {
-    auto* runner_ptr = runner::pool_to_runner(external_coro.promise()._runner_pool);
+    auto* runner_ptr = external_coro.promise()._runner.template as<runner>();
     // NOTE: Creating observers for each futures
     task _l_observer = observer<0>(_l_future, _r_future_observer);
     task _r_observer = observer<1>(_r_future, _l_future_observer);
@@ -420,7 +420,7 @@ struct ACE_AND_AWAIT_FUTURE_SPACE and_await_conductor final : conductor_handler_
 
 ACE_AND_AWAIT_FUTURE_MEMBER(bool)
 await_suspend(auto external_coro) {
-    auto* runner_ptr = runner::pool_to_runner(external_coro.promise()._runner_pool);
+    auto* runner_ptr = external_coro.promise()._runner.template as<runner>();
     // NOTE: Creating observers for each futures
     task _l_observer = observer<0>(_l_future, _r_future_observer);
     task _r_observer = observer<1>(_r_future, _l_future_observer);
@@ -463,7 +463,7 @@ struct ACE_AND_AWAIT_COMPOSED_FUTURE_SPACE and_await_composed_conductor final : 
 
 ACE_AND_AWAIT_COMPOSED_FUTURE_MEMBER(bool)
 await_suspend(auto external_coro) {
-    auto* runner_ptr = runner::pool_to_runner(external_coro.promise()._runner_pool);
+    auto* runner_ptr = external_coro.promise()._runner.template as<runner>();
     // NOTE: Creating observers for each futures
     [&] <std::size_t ... index> (std::index_sequence<index...>) {
         (...,[&]{
@@ -506,7 +506,7 @@ struct ACE_OR_AWAIT_COMPOSED_FUTURE_SPACE or_await_composed_conductor final : co
 
 ACE_OR_AWAIT_COMPOSED_FUTURE_MEMBER(bool)
 await_suspend(auto external_coro) {
-    auto* runner_ptr = runner::pool_to_runner(external_coro.promise()._runner_pool);
+    auto* runner_ptr = external_coro.promise()._runner.template as<runner>();
     // NOTE: Creating observers for each futures
     [&] <std::size_t ... index> (std::index_sequence<index...>) {
         (...,[&]{

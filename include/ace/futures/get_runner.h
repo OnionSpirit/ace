@@ -42,7 +42,7 @@ namespace ace::futures {
          * @return Always @c false — no suspension.
          */
         bool await_suspend(auto coroutine) {
-            _ptr = &coroutine.promise()._runner_pool;
+            _ptr = coroutine.promise()._runner.template addr_of<runner_pool_t>();
             return true;
         }
 

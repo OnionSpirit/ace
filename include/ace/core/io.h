@@ -212,7 +212,7 @@ public:                                                                         
         bool await_ready() override { return false; };
 
         bool await_suspend(auto coroutine) {
-            _runner_identity = coroutine.promise()._runner_pool;
+            _runner_identity = coroutine.promise()._runner.template as<runner_pool_t>();
             if (_fd < 0)
                 throw std::logic_error("Trying to make query on failed 'io_entity' [Query object type: "
                     + std::string{typeid(query_core_t).name()} + "]");

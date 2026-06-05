@@ -49,6 +49,35 @@
 // чтобы запускать его в цикле for
 namespace ace::core {
 
+    struct casting_ptr {
+
+        void* _ptr;
+
+        explicit casting_ptr(void* ptr = nullptr) : _ptr{ptr} { };
+
+        template <typename T>
+        explicit casting_ptr(T* ptr) : _ptr{ptr} { };
+
+        casting_ptr (const casting_ptr & p) = default;
+
+        casting_ptr (casting_ptr&& p) = default;
+
+        casting_ptr& operator=(const casting_ptr & p) = default;
+
+        casting_ptr& operator=(casting_ptr&& p) = default;
+
+        casting_ptr& operator=(void* ptr) { _ptr = ptr; return *this; }
+
+        explicit operator bool() const noexcept { return _ptr not_eq nullptr; }
+
+        template <typename T>
+        auto as() { return static_cast<T*>(_ptr); }
+
+        template <typename T>
+        auto addr_of() { return reinterpret_cast<T**>(&_ptr); }
+
+    };
+
     /**
      * @brief Core coroutine async type.
      *
@@ -173,7 +202,7 @@ namespace ace::core {
          */
         bool is_resumable() {
             return (not _coroutine.promise()._busy_future or _coroutine.promise()._busy_future->await_ready())
-                    and _coroutine.promise()._runner_pool;
+                    and _coroutine.promise()._runner;
         }
 
         /**
@@ -201,7 +230,7 @@ namespace ace::core {
                 async<> waiter;
                 while (_coroutine.promise()._waiters->pop(waiter)) {
                     waiter.release_future();
-                    waiter._coroutine.promise()._runner_pool->push(std::move(waiter));
+                    waiter._coroutine.promise()._runner.as<runner_pool_t>()->push(std::move(waiter));
                 }
             }
         }
@@ -384,8 +413,8 @@ namespace ace::core {
 
             // NOTE: Order of the following variables is optimized. DO NOT SWAP THEM!!!
 
-            runner_conductor_slot_t _runner_conductor {}; ///< In-place conductor slot.  Set by the awaited future; read by the runner.
-            runner_pool_t* _runner_pool {nullptr};         ///< Pointer to the owning runner's MPSC task queue.  Set by @c runner::attach().
+            runner_conductor_slot_t _runner_conductor {};  ///< In-place conductor slot.  Set by the awaited future; read by the runner.
+            casting_ptr _runner {nullptr};                  ///< Pointer to the owning runner's MPSC task queue.  Set by @c runner::attach().
             std::shared_ptr<runner_pool_t> _waiters;
             // NOTE: Conductor to manage promise on suspended state.
             // NOTE: Context owns only one promise. Extra slot object is unnecessary
@@ -427,8 +456,8 @@ namespace ace::core {
         template<typename promiseT>
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
             // NOTE: Secure if _runner_pool is null
-            if (not _coroutine.promise()._runner_pool)
-                _coroutine.promise()._runner_pool = outer.promise()._runner_pool;
+            if (not _coroutine.promise()._runner)
+                _coroutine.promise()._runner = outer.promise()._runner;
             // NOTE: Extra call of await_ready fore differed async because it was skipped by idle runner pool ptr
             if (_coroutine.promise()._status == e_inited)
                 if (await_ready()) return false;

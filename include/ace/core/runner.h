@@ -255,20 +255,14 @@ namespace ace::core {
     inline void runner::reattach(task&& ctx) {
         if (not ctx.is_exist() or not ctx._coroutine.promise()._runner_pool)
             return;
-        if (ctx._coroutine.promise()._polling)
-            pool_to_runner(ctx._coroutine.promise()._runner_pool)->_vortex_pool.push(std::move(ctx));
-        else
-            ctx._coroutine.promise()._runner_pool->push(std::move(ctx));
+        ctx._coroutine.promise()._runner_pool->push(std::move(ctx));
     }
 
 
     inline void runner::reattach_front(task&& ctx) {
         if (not ctx.is_exist() or not ctx._coroutine.promise()._runner_pool)
             return;
-        if (ctx._coroutine.promise()._polling)
-            pool_to_runner(ctx._coroutine.promise()._runner_pool)->_vortex_pool.push_front(std::move(ctx));
-        else
-            ctx._coroutine.promise()._runner_pool->push_front(std::move(ctx));
+        ctx._coroutine.promise()._runner_pool->push_front(std::move(ctx));
     }
 
 
@@ -283,10 +277,7 @@ namespace ace::core {
         if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
             return;
         auto n = nukes::details::nodes::cast_node(node);
-        if (node->_data._coroutine.promise()._polling)
-            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_vortex_pool.push_node(n);
-        else
-            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node(n);
+        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node(n);
         node = nullptr;
     }
 
@@ -294,10 +285,7 @@ namespace ace::core {
     inline void runner::reattach(pool_node_ptr& node) {
         if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
             return;
-        if (node->_data._coroutine.promise()._polling)
-            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_vortex_pool.push_node(node);
-        else
-            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node(node);
+        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node(node);
         node = nullptr;
     }
 
@@ -306,10 +294,7 @@ namespace ace::core {
         if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
             return;
         auto n = nukes::details::nodes::cast_node(node);
-        if (node->_data._coroutine.promise()._polling)
-            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_vortex_pool.push_node_front(n);
-        else
-            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node_front(n);
+        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node_front(n);
         node = nullptr;
     }
 
@@ -317,10 +302,7 @@ namespace ace::core {
     inline void runner::reattach_front(pool_node_ptr& node) {
         if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
             return;
-        if (node->_data._coroutine.promise()._polling)
-            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_vortex_pool.push_node_front(node);
-        else
-            pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node_front(node);
+        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node_front(node);
         node = nullptr;
     }
 
@@ -488,7 +470,7 @@ namespace ace::core {
                 while ((interthread_node = _interthread_pool.pop_node())) {
                     // NOTE: Fetching task from interthread insert queue
                     auto placing_node = cast_node(interthread_node);
-                    _pool.push_node_front(placing_node);
+                    _pool.push_node(placing_node);
                 }
             }
         }

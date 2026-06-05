@@ -8,7 +8,6 @@
 #include <queue>
 #include <chrono>
 #include <nukes/dynamic/mpsc_queue.h>
-#include <nukes/details/prefetch.h>
 
 #include "ace/core/tools/moving_average.h"
 #include "ace/core/tools/macro.h"
@@ -75,44 +74,44 @@ namespace ace::core {
         /**
          * @brief Returns task into source @c runner
          * @param ctx Task to be reattached into @c runner
-         * @param runner_ptr Runner to reattach
+         * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach(task &&ctx, runner* runner_ptr = current_runner_ptr);
+        static void reattach(task &&ctx, const runner* local_runner_ptr = current_runner_ptr);
 
         /**
          * @brief Returns task node into source @c runner
          * @param node Task node to be reattached into @c runner
-         * @param runner_ptr Runner to reattach
+         * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach(pool_node_ptr& node, runner* runner_ptr = current_runner_ptr);
+        static void reattach(pool_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr);
 
         /**
          * @brief Returns task node into source @c runner
          * @param node Task node to be reattached into @c runner
-         * @param runner_ptr Runner to reattach
+         * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach(insert_node_ptr& node, runner* runner_ptr = current_runner_ptr);
+        static void reattach(insert_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr);
 
         /**
          * @brief Returns task into source @c runner
          * @param ctx Task to be reattached into @c runner
-         * @param runner_ptr Runner to reattach
+         * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach_front(task &&ctx, runner* runner_ptr = current_runner_ptr);
+        static void reattach_front(task &&ctx, const runner* local_runner_ptr = current_runner_ptr);
 
         /**
          * @brief Returns task node into source @c runner
          * @param node Task node to be reattached into @c runner
-         * @param runner_ptr Runner to reattach
+         * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach_front(pool_node_ptr& node, runner* runner_ptr = current_runner_ptr);
+        static void reattach_front(pool_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr);
 
         /**
          * @brief Returns task node into source @c runner
          * @param node Task node to be reattached into @c runner
-         * @param runner_ptr Runner to reattach
+         * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach_front(insert_node_ptr& node, runner* runner_ptr = current_runner_ptr);
+        static void reattach_front(insert_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr);
 
         /**
          * @details Calculates runner's velocity
@@ -218,31 +217,33 @@ namespace ace::core {
     };
 
 
-    inline void runner::reattach(task&& ctx, runner* runner_ptr) {
+    inline void runner::reattach(task&& ctx, const runner* local_runner_ptr) {
         const auto* target_runner_ptr = pool_to_runner(ctx._coroutine.promise()._runner_pool);
-        if (not ctx.is_exist() or not target_runner_ptr or not runner_ptr)
-            return;
-            // throw std::logic_error {
-            //     "'reattach' operation can't be applied to 'ace::core::async<...>'s "
-            //     "which are not running at the 'ace::core::runner'"
-            // };
-        if (runner_ptr == target_runner_ptr)
-            runner_ptr->_pool.push(std::move(ctx));
+        if (not ctx.is_exist()) [[unlikely]]
+            throw std::runtime_error { "trying to 'reattach' idle context" };
+        if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
+            throw std::logic_error {
+                "'reattach' operation can't be applied to 'ace::core::async<...>'s "
+                "which are not running at the 'ace::core::runner'"
+            };
+        if (local_runner_ptr == target_runner_ptr)
+            local_runner_ptr->_pool.push(std::move(ctx));
         else
             target_runner_ptr->_interthread_pool.push(std::move(ctx));
     }
 
 
-    inline void runner::reattach(pool_node_ptr& node, runner* runner_ptr) {
+    inline void runner::reattach(pool_node_ptr& node, const runner* local_runner_ptr) {
         const auto* target_runner_ptr = pool_to_runner(node->_data._coroutine.promise()._runner_pool);
-        if (not node or not node->_data.is_exist() or not target_runner_ptr or not runner_ptr)
-            return;
-            // throw std::logic_error {
-            //     "'reattach' operation can't be applied to 'ace::core::async<...>'s "
-            //     "which are not running at the 'ace::core::runner'"
-            // };
-        if (runner_ptr == target_runner_ptr) {
-            runner_ptr->_pool.push_node(node);
+        if (not node or not node->_data.is_exist()) [[unlikely]]
+            throw std::runtime_error { "trying to 'reattach' idle context" };
+        if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
+            throw std::logic_error {
+                "'reattach' operation can't be applied to 'ace::core::async<...>'s "
+                "which are not running at the 'ace::core::runner'"
+            };
+        if (local_runner_ptr == target_runner_ptr) {
+            local_runner_ptr->_pool.push_node(node);
             node = nullptr;
         } else {
             auto* n = nukes::details::nodes::cast_node(node);
@@ -252,17 +253,18 @@ namespace ace::core {
     }
 
 
-    inline void runner::reattach(insert_node_ptr& node, runner* runner_ptr) {
+    inline void runner::reattach(insert_node_ptr& node, const runner* local_runner_ptr) {
         const auto* target_runner_ptr = pool_to_runner(node->_data._coroutine.promise()._runner_pool);
-        if (not node or not node->_data.is_exist() or not target_runner_ptr or not runner_ptr)
-            return;
-            // throw std::logic_error {
-            //     "'reattach' operation can't be applied to 'ace::core::async<...>'s "
-            //     "which are not running at the 'ace::core::runner'"
-            // };
-        if (runner_ptr == target_runner_ptr) {
+        if (not node or not node->_data.is_exist()) [[unlikely]]
+            throw std::runtime_error { "trying to 'reattach' idle context" };
+        if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
+            throw std::logic_error {
+                "'reattach' operation can't be applied to 'ace::core::async<...>'s "
+                "which are not running at the 'ace::core::runner'"
+            };
+        if (local_runner_ptr == target_runner_ptr) {
             auto* n = nukes::details::nodes::cast_node(node);
-            runner_ptr->_pool.push_node(n);
+            local_runner_ptr->_pool.push_node(n);
             node = nullptr;
         } else {
             target_runner_ptr->_interthread_pool.push_node(node);
@@ -271,33 +273,35 @@ namespace ace::core {
     }
 
 
-    inline void runner::reattach_front(task&& ctx, runner* runner_ptr) {
+    inline void runner::reattach_front(task&& ctx, const runner* local_runner_ptr) {
         const auto* target_runner_ptr = pool_to_runner(ctx._coroutine.promise()._runner_pool);
-        if (not ctx.is_exist() or not target_runner_ptr or not runner_ptr)
-            return;
-            // throw std::logic_error {
-            //     "'reattach_front' operation can't be applied to 'ace::core::async<...>'s "
-            //     "which are not running at the 'ace::core::runner'"
-            // };
-        if (runner_ptr == target_runner_ptr) {
+        if (not ctx.is_exist()) [[unlikely]]
+            throw std::runtime_error { "trying to 'reattach_front' idle context" };
+        if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
+            throw std::logic_error {
+                "'reattach_front' operation can't be applied to 'ace::core::async<...>'s "
+                "which are not running at the 'ace::core::runner'"
+            };
+        if (local_runner_ptr == target_runner_ptr) {
             ctx.prefetch();
-            runner_ptr->_pool.push_front(std::move(ctx));
+            local_runner_ptr->_pool.push_front(std::move(ctx));
         } else
             target_runner_ptr->_interthread_pool.push(std::move(ctx));
     }
 
 
-    inline void runner::reattach_front(pool_node_ptr& node, runner* runner_ptr) {
+    inline void runner::reattach_front(pool_node_ptr& node, const runner* local_runner_ptr) {
         const auto* target_runner_ptr = pool_to_runner(node->_data._coroutine.promise()._runner_pool);
-        if (not node or not node->_data.is_exist() or not target_runner_ptr or not runner_ptr)
-            return;
-            // throw std::logic_error {
-            //     "'reattach_front' operation can't be applied to 'ace::core::async<...>'s "
-            //     "which are not running at the 'ace::core::runner'"
-            // };
-        if (runner_ptr == target_runner_ptr) {
+        if (not node or not node->_data.is_exist()) [[unlikely]]
+            throw std::runtime_error { "trying to 'reattach_front' idle context" };
+        if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
+            throw std::logic_error {
+                "'reattach_front' operation can't be applied to 'ace::core::async<...>'s "
+                "which are not running at the 'ace::core::runner'"
+            };
+        if (local_runner_ptr == target_runner_ptr) {
             node->_data.prefetch();
-            runner_ptr->_pool.push_node_front(node);
+            local_runner_ptr->_pool.push_node_front(node);
             node = nullptr;
         } else {
             auto* n = nukes::details::nodes::cast_node(node);
@@ -307,18 +311,19 @@ namespace ace::core {
     }
 
 
-    inline void runner::reattach_front(insert_node_ptr& node, runner* runner_ptr) {
+    inline void runner::reattach_front(insert_node_ptr& node, const runner* local_runner_ptr) {
         const auto* target_runner_ptr = pool_to_runner(node->_data._coroutine.promise()._runner_pool);
-        if (not node or not node->_data.is_exist() or not target_runner_ptr or not runner_ptr)
-            return;
-            // throw std::logic_error {
-            //     "'reattach_front' operation can't be applied to 'ace::core::async<...>'s "
-            //     "which are not running at the 'ace::core::runner'"
-            // };
-        if (runner_ptr == target_runner_ptr) {
+        if (not node or not node->_data.is_exist()) [[unlikely]]
+            throw std::runtime_error { "trying to 'reattach_front' idle context" };
+        if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
+            throw std::logic_error {
+                "'reattach_front' operation can't be applied to 'ace::core::async<...>'s "
+                "which are not running at the 'ace::core::runner'"
+            };
+        if (local_runner_ptr == target_runner_ptr) {
             node->_data.prefetch();
             auto* n = nukes::details::nodes::cast_node(node);
-            runner_ptr->_pool.push_node_front(n);
+            local_runner_ptr->_pool.push_node_front(n);
             node = nullptr;
         } else {
             target_runner_ptr->_interthread_pool.push_node(node);
@@ -331,7 +336,7 @@ namespace ace::core {
     void runner::attach(async<async_return_t, async_rule_t> &&new_task) noexcept {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner_pool = &_pool;
-        reattach(std::move(new_task), pool_to_runner(&_pool));
+        reattach(std::move(new_task), this);
     }
 
 

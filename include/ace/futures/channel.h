@@ -306,7 +306,7 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_conductor : conductor_handler_t {
         // TODO: Batch read needed
         auto* node = _waiters->pop_node();
         while (node)
-            core::runner::threadsafe_reattach(node);
+            core::runner::reattach(node);
     }
 
     ~channel_conductor() override = default;

@@ -57,7 +57,7 @@ struct ACE_FUTURE_REATTACH_SPACE reattach_conductor : conductor_handler_t {
         : target_runner(rnr) {};
 
     void forward(task&& ctx) override {
-        target_runner->threadsafe_attach(std::forward<task>(ctx));
+        target_runner->attach(std::forward<task>(ctx));
     }
 
     ~reattach_conductor() override = default;

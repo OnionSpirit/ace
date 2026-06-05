@@ -306,11 +306,6 @@ notify() {
 
     // NOTE: Fetching current pool data
     auto* curr_runner_pool = core::runner::runner_to_pool(core::runner::get_runner());
-    if (not curr_runner_pool) [[unlikely]]
-        throw std::logic_error {
-            "The 'ace::future::cutex' can't work with 'ace::core::async<...>'s "
-            "which are not running at the 'ace::core::runner'"
-        };
 
     const bool is_pool_same = curr_runner_pool == waiter_node->_data._coroutine.promise()._runner_pool;
 
@@ -327,7 +322,7 @@ notify() {
     }
     // NOTE: Classic threadsafe reattach at the worst case
     else
-        core::runner::threadsafe_reattach(waiter_node);
+        core::runner::reattach(waiter_node);
 
     return true;
 }

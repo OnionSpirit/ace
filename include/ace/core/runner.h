@@ -75,68 +75,44 @@ namespace ace::core {
         /**
          * @brief Returns task into source @c runner
          * @param ctx Task to be reattached into @c runner
-         *
-         * @warning @b NOT @b THREADSAFE
+         * @param runner_ptr Runner to reattach
          */
-        static void reattach(task &&ctx);
+        static void reattach(task &&ctx, runner* runner_ptr = current_runner_ptr);
+
+        /**
+         * @brief Returns task node into source @c runner
+         * @param node Task node to be reattached into @c runner
+         * @param runner_ptr Runner to reattach
+         */
+        static void reattach(pool_node_ptr& node, runner* runner_ptr = current_runner_ptr);
+
+        /**
+         * @brief Returns task node into source @c runner
+         * @param node Task node to be reattached into @c runner
+         * @param runner_ptr Runner to reattach
+         */
+        static void reattach(insert_node_ptr& node, runner* runner_ptr = current_runner_ptr);
 
         /**
          * @brief Returns task into source @c runner
          * @param ctx Task to be reattached into @c runner
-         *
-         * @warning @b NOT @b THREADSAFE
+         * @param runner_ptr Runner to reattach
          */
-        static void reattach_front(task &&ctx);
-
-        /**
-         * @brief Returns task into source @c runner
-         * @param ctx Task to be reattached safely into @c runner
-         */
-        static void threadsafe_reattach(task &&ctx);
+        static void reattach_front(task &&ctx, runner* runner_ptr = current_runner_ptr);
 
         /**
          * @brief Returns task node into source @c runner
          * @param node Task node to be reattached into @c runner
-         *
-         * @warning @b NOT @b THREADSAFE
+         * @param runner_ptr Runner to reattach
          */
-        static void reattach(insert_node_ptr& node);
+        static void reattach_front(pool_node_ptr& node, runner* runner_ptr = current_runner_ptr);
 
         /**
          * @brief Returns task node into source @c runner
          * @param node Task node to be reattached into @c runner
-         *
-         * @warning @b NOT @b THREADSAFE
+         * @param runner_ptr Runner to reattach
          */
-        static void reattach(pool_node_ptr& node);
-
-        /**
-         * @brief Returns task node into source @c runner
-         * @param node Task node to be reattached into @c runner
-         *
-         * @warning @b NOT @b THREADSAFE
-         */
-        static void reattach_front(insert_node_ptr& node);
-
-        /**
-         * @brief Returns task node into source @c runner
-         * @param node Task node to be reattached into @c runner
-         *
-         * @warning @b NOT @b THREADSAFE
-         */
-        static void reattach_front(pool_node_ptr& node);
-
-        /**
-         * @brief Returns task node safely into source @c runner
-         * @param node Task node to be reattached into @c runner
-         */
-        static void threadsafe_reattach(insert_node_ptr& node);
-
-        /**
-         * @brief Returns task node safely into source @c runner
-         * @param node Task node to be reattached into @c runner
-         */
-        static void threadsafe_reattach(pool_node_ptr& node);
+        static void reattach_front(insert_node_ptr& node, runner* runner_ptr = current_runner_ptr);
 
         /**
          * @details Calculates runner's velocity
@@ -197,21 +173,11 @@ namespace ace::core {
          * @return void
          */
         template <typename async_return_t, typename async_rule_t>
-        void threadsafe_attach(async<async_return_t, async_rule_t> &&new_task) noexcept;
-
-        /**
-         * @details Function to attach task to the runner
-         * @param new_task Task to be pushed into the runner
-         * @warning NOT THREADSAFE
-         * @return void
-         */
-        template <typename async_return_t, typename async_rule_t>
         void attach(async<async_return_t, async_rule_t> &&new_task) noexcept;
 
         /**
          * @details Function to attach task to the runner
          * @param new_task Task to be pushed into the runner
-         * @warning NOT THREADSAFE
          * @return void
          */
         template <typename async_return_t, typename async_rule_t>
@@ -252,83 +218,112 @@ namespace ace::core {
     };
 
 
-    inline void runner::reattach(task&& ctx) {
-        if (not ctx.is_exist() or not ctx._coroutine.promise()._runner_pool)
+    inline void runner::reattach(task&& ctx, runner* runner_ptr) {
+        const auto* target_runner_ptr = pool_to_runner(ctx._coroutine.promise()._runner_pool);
+        if (not ctx.is_exist() or not target_runner_ptr or not runner_ptr)
             return;
-        ctx._coroutine.promise()._runner_pool->push(std::move(ctx));
+            // throw std::logic_error {
+            //     "'reattach' operation can't be applied to 'ace::core::async<...>'s "
+            //     "which are not running at the 'ace::core::runner'"
+            // };
+        if (runner_ptr == target_runner_ptr)
+            runner_ptr->_pool.push(std::move(ctx));
+        else
+            target_runner_ptr->_interthread_pool.push(std::move(ctx));
     }
 
 
-    inline void runner::reattach_front(task&& ctx) {
-        if (not ctx.is_exist() or not ctx._coroutine.promise()._runner_pool)
+    inline void runner::reattach(pool_node_ptr& node, runner* runner_ptr) {
+        const auto* target_runner_ptr = pool_to_runner(node->_data._coroutine.promise()._runner_pool);
+        if (not node or not node->_data.is_exist() or not target_runner_ptr or not runner_ptr)
             return;
-        ctx._coroutine.promise()._runner_pool->push_front(std::move(ctx));
+            // throw std::logic_error {
+            //     "'reattach' operation can't be applied to 'ace::core::async<...>'s "
+            //     "which are not running at the 'ace::core::runner'"
+            // };
+        if (runner_ptr == target_runner_ptr) {
+            runner_ptr->_pool.push_node(node);
+            node = nullptr;
+        } else {
+            auto* n = nukes::details::nodes::cast_node(node);
+            target_runner_ptr->_interthread_pool.push_node(n);
+            node = nullptr;
+        }
     }
 
 
-    inline void runner::threadsafe_reattach(task&& ctx) {
-        if (not ctx.is_exist() or not ctx._coroutine.promise()._runner_pool)
+    inline void runner::reattach(insert_node_ptr& node, runner* runner_ptr) {
+        const auto* target_runner_ptr = pool_to_runner(node->_data._coroutine.promise()._runner_pool);
+        if (not node or not node->_data.is_exist() or not target_runner_ptr or not runner_ptr)
             return;
-        pool_to_runner(ctx._coroutine.promise()._runner_pool)->_interthread_pool.push(std::move(ctx));
+            // throw std::logic_error {
+            //     "'reattach' operation can't be applied to 'ace::core::async<...>'s "
+            //     "which are not running at the 'ace::core::runner'"
+            // };
+        if (runner_ptr == target_runner_ptr) {
+            auto* n = nukes::details::nodes::cast_node(node);
+            runner_ptr->_pool.push_node(n);
+            node = nullptr;
+        } else {
+            target_runner_ptr->_interthread_pool.push_node(node);
+            node = nullptr;
+        }
     }
 
 
-    inline void runner::reattach(insert_node_ptr& node) {
-        if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
+    inline void runner::reattach_front(task&& ctx, runner* runner_ptr) {
+        const auto* target_runner_ptr = pool_to_runner(ctx._coroutine.promise()._runner_pool);
+        if (not ctx.is_exist() or not target_runner_ptr or not runner_ptr)
             return;
-        auto n = nukes::details::nodes::cast_node(node);
-        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node(n);
-        node = nullptr;
+            // throw std::logic_error {
+            //     "'reattach_front' operation can't be applied to 'ace::core::async<...>'s "
+            //     "which are not running at the 'ace::core::runner'"
+            // };
+        if (runner_ptr == target_runner_ptr) {
+            ctx.prefetch();
+            runner_ptr->_pool.push_front(std::move(ctx));
+        } else
+            target_runner_ptr->_interthread_pool.push(std::move(ctx));
     }
 
 
-    inline void runner::reattach(pool_node_ptr& node) {
-        if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
+    inline void runner::reattach_front(pool_node_ptr& node, runner* runner_ptr) {
+        const auto* target_runner_ptr = pool_to_runner(node->_data._coroutine.promise()._runner_pool);
+        if (not node or not node->_data.is_exist() or not target_runner_ptr or not runner_ptr)
             return;
-        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node(node);
-        node = nullptr;
+            // throw std::logic_error {
+            //     "'reattach_front' operation can't be applied to 'ace::core::async<...>'s "
+            //     "which are not running at the 'ace::core::runner'"
+            // };
+        if (runner_ptr == target_runner_ptr) {
+            node->_data.prefetch();
+            runner_ptr->_pool.push_node_front(node);
+            node = nullptr;
+        } else {
+            auto* n = nukes::details::nodes::cast_node(node);
+            target_runner_ptr->_interthread_pool.push_node(n);
+            node = nullptr;
+        }
     }
 
 
-    inline void runner::reattach_front(insert_node_ptr& node) {
-        if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
+    inline void runner::reattach_front(insert_node_ptr& node, runner* runner_ptr) {
+        const auto* target_runner_ptr = pool_to_runner(node->_data._coroutine.promise()._runner_pool);
+        if (not node or not node->_data.is_exist() or not target_runner_ptr or not runner_ptr)
             return;
-        auto n = nukes::details::nodes::cast_node(node);
-        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node_front(n);
-        node = nullptr;
-    }
-
-
-    inline void runner::reattach_front(pool_node_ptr& node) {
-        if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
-            return;
-        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_pool.push_node_front(node);
-        node = nullptr;
-    }
-
-
-    inline void runner::threadsafe_reattach(insert_node_ptr& node) {
-        if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
-            return;
-        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_interthread_pool.push_node(node);
-        node = nullptr;
-    }
-
-
-    inline void runner::threadsafe_reattach(pool_node_ptr& node) {
-        if (not node or not node->_data.is_exist() or not node->_data._coroutine.promise()._runner_pool)
-            return;
-        auto n = nukes::details::nodes::cast_node(node);
-        pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_interthread_pool.push_node(n);
-        node = nullptr;
-    }
-
-
-    template <typename async_return_t, typename async_rule_t>
-    void runner::threadsafe_attach(async<async_return_t, async_rule_t> &&new_task) noexcept {
-        ++_tasks_amount;
-        new_task._coroutine.promise()._runner_pool = &_pool;
-        threadsafe_reattach(std::move(new_task));
+            // throw std::logic_error {
+            //     "'reattach_front' operation can't be applied to 'ace::core::async<...>'s "
+            //     "which are not running at the 'ace::core::runner'"
+            // };
+        if (runner_ptr == target_runner_ptr) {
+            node->_data.prefetch();
+            auto* n = nukes::details::nodes::cast_node(node);
+            runner_ptr->_pool.push_node_front(n);
+            node = nullptr;
+        } else {
+            target_runner_ptr->_interthread_pool.push_node(node);
+            node = nullptr;
+        }
     }
 
 
@@ -336,7 +331,7 @@ namespace ace::core {
     void runner::attach(async<async_return_t, async_rule_t> &&new_task) noexcept {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner_pool = &_pool;
-        reattach(std::move(new_task));
+        reattach(std::move(new_task), pool_to_runner(&_pool));
     }
 
 
@@ -344,7 +339,7 @@ namespace ace::core {
     void runner::attach_front(async<async_return_t, async_rule_t> &&new_task) noexcept {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner_pool = &_pool;
-        reattach_front(std::move(new_task));
+        reattach_front(std::move(new_task), pool_to_runner(&_pool));
     }
 
 

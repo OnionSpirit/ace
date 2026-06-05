@@ -257,7 +257,7 @@ template <typename foo_t, typename ... Params> bool
 ACE_CORE_KERNEL_CONTROLLER_SPACE
 submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept {
     if (not observer->_runner_identity)
-        observer->_runner_identity = reinterpret_cast<runner_pool_t*>(runner::get_runner());
+        observer->_runner_identity = runner::get().as<runner_pool_t>();
     touch(observer->_runner_identity);
     io_uring_sqe *sqe = io_uring_get_sqe(&_ring);
     io_uring_sqe_set_data(sqe, observer);

@@ -51,7 +51,7 @@ namespace ace::core {
 
     struct casting_ptr {
 
-        void* _ptr;
+        void* _ptr = nullptr;
 
         explicit casting_ptr(void* ptr = nullptr) : _ptr{ptr} { };
 

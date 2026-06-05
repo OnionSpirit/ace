@@ -305,7 +305,7 @@ notify() {
         return false;
 
     // NOTE: Fetching current pool data
-    auto* curr_runner_pool = core::runner::runner_to_pool(core::runner::get_runner());
+    auto* curr_runner_pool = core::runner::get().as<runner_pool_t>();
 
     const bool is_pool_same = curr_runner_pool == waiter_node->_data._coroutine.promise()._runner.as<runner_pool_t>();
 

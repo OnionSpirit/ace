@@ -44,7 +44,7 @@ namespace ace::core {
         long                        _tasks_amount {};
         runner_pool_t               _vortex_pool  {};
 
-        static thread_local ace::core::runner* current_runner_ptr;
+        static thread_local casting_ptr current_runner_ptr;
 
         runner() = default;
 
@@ -65,53 +65,49 @@ namespace ace::core {
          * @warning Returns nullptr if @c runner::run() is not in action
          * @return This thread runner ptr
          */
-        static runner* get_runner() { return current_runner_ptr; }
-
-        static runner* pool_to_runner(runner_pool_t *pool) noexcept;
-
-        static runner_pool_t* runner_to_pool(runner* rnr) noexcept;
+        static casting_ptr get() { return current_runner_ptr; }
 
         /**
          * @brief Returns task into source @c runner
          * @param ctx Task to be reattached into @c runner
          * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach(task &&ctx, const runner* local_runner_ptr = current_runner_ptr);
+        static void reattach(task &&ctx, const runner* local_runner_ptr = current_runner_ptr.as<runner>());
 
         /**
          * @brief Returns task node into source @c runner
          * @param node Task node to be reattached into @c runner
          * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach(pool_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr);
+        static void reattach(pool_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr.as<runner>());
 
         /**
          * @brief Returns task node into source @c runner
          * @param node Task node to be reattached into @c runner
          * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach(insert_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr);
+        static void reattach(insert_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr.as<runner>());
 
         /**
          * @brief Returns task into source @c runner
          * @param ctx Task to be reattached into @c runner
          * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach_front(task &&ctx, const runner* local_runner_ptr = current_runner_ptr);
+        static void reattach_front(task &&ctx, const runner* local_runner_ptr = current_runner_ptr.as<runner>());
 
         /**
          * @brief Returns task node into source @c runner
          * @param node Task node to be reattached into @c runner
          * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach_front(pool_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr);
+        static void reattach_front(pool_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr.as<runner>());
 
         /**
          * @brief Returns task node into source @c runner
          * @param node Task node to be reattached into @c runner
          * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach_front(insert_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr);
+        static void reattach_front(insert_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr.as<runner>());
 
         /**
          * @details Calculates runner's velocity
@@ -190,14 +186,6 @@ namespace ace::core {
             return _pool.empty() and _vortex_pool.empty() and _interthread_pool.empty();
         };
     };
-
-    inline runner* runner::pool_to_runner(runner_pool_t *pool) noexcept {
-        return reinterpret_cast<runner *>(pool);
-    }
-
-    inline runner_pool_t* runner::runner_to_pool(runner* rnr) noexcept {
-        return reinterpret_cast<runner_pool_t*>(rnr);
-    }
 
     inline runner::runner(runner &&t) noexcept {
         this->_pool = std::move(t._pool);
@@ -344,7 +332,7 @@ namespace ace::core {
     void runner::attach_front(async<async_return_t, async_rule_t> &&new_task) noexcept {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner = &_pool;
-        reattach_front(std::move(new_task), pool_to_runner(&_pool));
+        reattach_front(std::move(new_task), this);
     }
 
 
@@ -481,12 +469,12 @@ namespace ace::core {
 } // end namespace ace::core
 
 
-thread_local ace::core::runner* ace::core::runner::current_runner_ptr = nullptr;
+thread_local ace::core::casting_ptr ace::core::runner::current_runner_ptr {};
 
 template<typename returnT, ace::core::is_promise_rule promise_rule_t>
 inline auto ace::core::async<returnT, promise_rule_t>::get_current_pool() noexcept
 -> ace::core::async<returnT, promise_rule_t>::runner_pool_t* {
-    return runner::runner_to_pool(runner::get_runner());
+    return runner::get().as<runner_pool_t>();
 }
 
 //==============================DEFINITIONS==================================

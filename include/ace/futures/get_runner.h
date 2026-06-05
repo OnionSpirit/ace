@@ -52,7 +52,7 @@ namespace ace::futures {
          *         if the coroutine has no associated runner yet.
          */
         [[nodiscard]] core::runner* await_resume() const {
-            return core::runner::pool_to_runner(*_ptr);
+            return reinterpret_cast<core::runner*>(*_ptr);
         }
     };
 

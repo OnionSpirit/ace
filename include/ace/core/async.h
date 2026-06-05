@@ -414,7 +414,7 @@ namespace ace::core {
             // NOTE: Order of the following variables is optimized. DO NOT SWAP THEM!!!
 
             runner_conductor_slot_t _runner_conductor {};  ///< In-place conductor slot.  Set by the awaited future; read by the runner.
-            cast_ptr _runner {nullptr};                  ///< Pointer to the owning runner's MPSC task queue.  Set by @c runner::attach().
+            cast_ptr _runner {nullptr};                    ///< Pointer to the owning runner's MPSC task queue.  Set by @c runner::attach().
             std::shared_ptr<runner_pool_t> _waiters;
             // NOTE: Conductor to manage promise on suspended state.
             // NOTE: Context owns only one promise. Extra slot object is unnecessary

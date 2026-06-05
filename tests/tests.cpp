@@ -41,7 +41,7 @@ TEST(context, do_empty_context_test) {
 TEST(core, do_runner_test) {
 
     ace::core::runner runner;
-    runner.threadsafe_attach(nested_context_suspender());
+    runner.attach(nested_context_suspender());
     ASSERT_TRUE(runner.run());
     ASSERT_TRUE(runner.empty());
 }

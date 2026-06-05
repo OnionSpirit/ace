@@ -197,12 +197,7 @@ namespace ace::core {
          * @return void
          */
         template <typename async_return_t, typename async_rule_t>
-        void threadsafe_attach(async<async_return_t, async_rule_t> &&new_task) noexcept {
-            ++_tasks_amount;
-            new_task._coroutine.promise()._runner_pool = &_pool;
-            _interthread_pool.push(std::forward<task>(task_wrap(
-                std::forward<core::async<async_return_t, async_rule_t> >(new_task))));
-        }
+        void threadsafe_attach(async<async_return_t, async_rule_t> &&new_task) noexcept;
 
         /**
          * @details Function to attach task to the runner
@@ -211,17 +206,7 @@ namespace ace::core {
          * @return void
          */
         template <typename async_return_t, typename async_rule_t>
-        void attach(async<async_return_t, async_rule_t> &&new_task) noexcept {
-            ++_tasks_amount;
-            new_task._coroutine.promise()._runner_pool = &_pool;
-            if (new_task._coroutine.promise()._polling) {
-                _vortex_pool.push(std::forward<task>(task_wrap(
-                    std::forward<async<async_return_t, async_rule_t> >(new_task))));
-            } else {
-                _pool.push(std::forward<task>(task_wrap(
-                    std::forward<async<async_return_t, async_rule_t> >(new_task))));
-            }
-        }
+        void attach(async<async_return_t, async_rule_t> &&new_task) noexcept;
 
         /**
          * @details Function to attach task to the runner
@@ -230,17 +215,7 @@ namespace ace::core {
          * @return void
          */
         template <typename async_return_t, typename async_rule_t>
-        void attach_front(async<async_return_t, async_rule_t> &&new_task) noexcept {
-            ++_tasks_amount;
-            new_task._coroutine.promise()._runner_pool = &_pool;
-            if (new_task._coroutine.promise()._polling) {
-                _vortex_pool.push_front(std::forward<task>(task_wrap(
-                    std::forward<async<async_return_t, async_rule_t> >(new_task))));
-            } else {
-                _pool.push_front(std::forward<task>(task_wrap(
-                    std::forward<async<async_return_t, async_rule_t> >(new_task))));
-            }
-        }
+        void attach_front(async<async_return_t, async_rule_t> &&new_task) noexcept;
 
         /**
          * @details Checks if any Tasks stored in the runner
@@ -250,35 +225,6 @@ namespace ace::core {
             return _pool.empty() and _vortex_pool.empty() and _interthread_pool.empty();
         };
     };
-
-    template<>
-    inline void runner::threadsafe_attach<void, differed>(task &&new_task) noexcept {
-        ++_tasks_amount;
-        new_task._coroutine.promise()._runner_pool = &_pool;
-        _interthread_pool.push(std::forward<task>(new_task));
-    }
-
-    template <>
-    inline void runner::attach<void, differed>(task &&new_task) noexcept {
-        ++_tasks_amount;
-        new_task._coroutine.promise()._runner_pool = &_pool;
-        if (new_task._coroutine.promise()._polling) {
-            _vortex_pool.push(std::forward<task>(new_task));
-        } else {
-            _pool.push(std::forward<task>(new_task));
-        }
-    }
-
-    template<>
-    inline void runner::attach_front<void, differed>(task &&new_task) noexcept {
-        ++_tasks_amount;
-        new_task._coroutine.promise()._runner_pool = &_pool;
-        if (new_task._coroutine.promise()._polling) {
-            _vortex_pool.push_front(std::forward<task>(new_task));
-        } else {
-            _pool.push_front(std::forward<task>(new_task));
-        }
-    }
 
     inline runner* runner::pool_to_runner(runner_pool_t *pool) noexcept {
         return reinterpret_cast<runner *>(pool);
@@ -393,6 +339,30 @@ namespace ace::core {
         auto n = nukes::details::nodes::cast_node(node);
         pool_to_runner(node->_data._coroutine.promise()._runner_pool)->_interthread_pool.push_node(n);
         node = nullptr;
+    }
+
+
+    template <typename async_return_t, typename async_rule_t>
+    void runner::threadsafe_attach(async<async_return_t, async_rule_t> &&new_task) noexcept {
+        ++_tasks_amount;
+        new_task._coroutine.promise()._runner_pool = &_pool;
+        threadsafe_reattach(std::move(new_task));
+    }
+
+
+    template <typename async_return_t, typename async_rule_t>
+    void runner::attach(async<async_return_t, async_rule_t> &&new_task) noexcept {
+        ++_tasks_amount;
+        new_task._coroutine.promise()._runner_pool = &_pool;
+        reattach(std::move(new_task));
+    }
+
+
+    template <typename async_return_t, typename async_rule_t>
+    void runner::attach_front(async<async_return_t, async_rule_t> &&new_task) noexcept {
+        ++_tasks_amount;
+        new_task._coroutine.promise()._runner_pool = &_pool;
+        reattach_front(std::move(new_task));
     }
 
 

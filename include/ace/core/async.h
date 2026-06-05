@@ -49,29 +49,29 @@
 // чтобы запускать его в цикле for
 namespace ace::core {
 
-    struct casting_ptr {
+    struct cast_ptr {
 
         void* _ptr = nullptr;
 
-        explicit casting_ptr(void* ptr = nullptr) : _ptr{ptr} { };
+        cast_ptr(void* ptr = nullptr) : _ptr{ptr} { };
 
         template <typename T>
-        explicit casting_ptr(T* ptr) : _ptr{ptr} { };
+        cast_ptr(T* ptr) : _ptr{ptr} { };
 
-        casting_ptr (const casting_ptr & p) = default;
+        cast_ptr (const cast_ptr & p) = default;
 
-        casting_ptr (casting_ptr&& p) = default;
+        cast_ptr (cast_ptr&& p) = default;
 
-        casting_ptr& operator=(const casting_ptr & p) = default;
+        cast_ptr& operator=(const cast_ptr & p) = default;
 
-        casting_ptr& operator=(casting_ptr&& p) = default;
+        cast_ptr& operator=(cast_ptr&& p) = default;
 
-        casting_ptr& operator=(void* ptr) { _ptr = ptr; return *this; }
+        cast_ptr& operator=(void* ptr) { _ptr = ptr; return *this; }
 
         explicit operator bool() const noexcept { return _ptr not_eq nullptr; }
 
         template <typename T>
-        auto as() { return static_cast<T*>(_ptr); }
+        [[nodiscard]] auto as() const { return static_cast<T*>(_ptr); }
 
         template <typename T>
         auto addr_of() { return reinterpret_cast<T**>(&_ptr); }
@@ -414,7 +414,7 @@ namespace ace::core {
             // NOTE: Order of the following variables is optimized. DO NOT SWAP THEM!!!
 
             runner_conductor_slot_t _runner_conductor {};  ///< In-place conductor slot.  Set by the awaited future; read by the runner.
-            casting_ptr _runner {nullptr};                  ///< Pointer to the owning runner's MPSC task queue.  Set by @c runner::attach().
+            cast_ptr _runner {nullptr};                  ///< Pointer to the owning runner's MPSC task queue.  Set by @c runner::attach().
             std::shared_ptr<runner_pool_t> _waiters;
             // NOTE: Conductor to manage promise on suspended state.
             // NOTE: Context owns only one promise. Extra slot object is unnecessary

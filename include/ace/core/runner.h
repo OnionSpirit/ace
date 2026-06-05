@@ -44,7 +44,7 @@ namespace ace::core {
         long                        _tasks_amount {};
         runner_pool_t               _vortex_pool  {};
 
-        static thread_local casting_ptr current_runner_ptr;
+        static thread_local cast_ptr current_runner_ptr;
 
         runner() = default;
 
@@ -65,7 +65,7 @@ namespace ace::core {
          * @warning Returns nullptr if @c runner::run() is not in action
          * @return This thread runner ptr
          */
-        static casting_ptr get() { return current_runner_ptr; }
+        static cast_ptr get() { return current_runner_ptr; }
 
         /**
          * @brief Returns task into source @c runner
@@ -469,7 +469,7 @@ namespace ace::core {
 } // end namespace ace::core
 
 
-thread_local ace::core::casting_ptr ace::core::runner::current_runner_ptr {};
+thread_local ace::core::cast_ptr ace::core::runner::current_runner_ptr {};
 
 template<typename returnT, ace::core::is_promise_rule promise_rule_t>
 inline auto ace::core::async<returnT, promise_rule_t>::get_current_pool() noexcept

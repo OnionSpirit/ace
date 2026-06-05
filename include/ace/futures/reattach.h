@@ -21,8 +21,8 @@ namespace ace::futures {
         reattach(const reattach&) = delete;
         reattach& operator=(const reattach&) = delete;
 
-        explicit reattach(runner_pool_t* new_pool)
-            : _new_runner(reinterpret_cast<core::runner*>(new_pool)) {}
+        explicit reattach(core::cast_ptr new_pool)
+            : _new_runner(new_pool.as<core::runner>()) {}
 
         explicit reattach(core::runner* new_runner)
             : _new_runner(new_runner) {}

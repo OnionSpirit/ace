@@ -32,7 +32,7 @@ namespace ace::futures {
      */
     struct ACE_AWAIT_NODISCARD get_runner : core::traits::future_traits<get_runner> {
 
-        runner_pool_t** _ptr {}; ///< Pointer filled in by @c await_suspend.
+        core::cast_ptr _ptr {}; ///< Pointer filled in by @c await_suspend.
 
         IMPORT_FUTURE_ENV(get_runner)
 
@@ -52,7 +52,7 @@ namespace ace::futures {
          *         if the coroutine has no associated runner yet.
          */
         [[nodiscard]] core::runner* await_resume() const {
-            return reinterpret_cast<core::runner*>(*_ptr);
+            return *_ptr.as<core::runner*>();
         }
     };
 

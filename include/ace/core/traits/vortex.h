@@ -137,14 +137,14 @@ namespace ace::core::traits {
             }
         }
 
-        static derived_t& touch_impl(runner_pool_t* rnr = nullptr) noexcept {
+        static derived_t& touch_impl(cast_ptr rnr = nullptr) noexcept {
             if constexpr (spawn_mode_v == vortex_spawn_mode::e_thread_shared) {
                 static derived_t instance;
-                if (instance.detach_get()) instance.respawn(reinterpret_cast<runner*>(rnr));
+                if (instance.detach_get()) instance.respawn(rnr.as<runner>());
                 return instance;
             } else if constexpr (spawn_mode_v == vortex_spawn_mode::e_thread_local) {
                 static thread_local derived_t instance;
-                if (instance.detach_get()) instance.respawn(reinterpret_cast<runner*>(rnr));
+                if (instance.detach_get()) instance.respawn(rnr.as<runner>());
                 return instance;
             }
         }
@@ -152,11 +152,11 @@ namespace ace::core::traits {
     public:
 
         // NOTE: Gets vortex instance and respawns service if needed
-        static derived_t& touch(runner_pool_t* rnr = nullptr) noexcept
+        static derived_t& touch(cast_ptr rnr = nullptr) noexcept
         requires (spawn_mode_v == vortex_spawn_mode::e_thread_shared) { return touch_impl(rnr); }
 
         // NOTE: Gets vortex instance and respawns service if needed
-        static derived_t& touch(runner_pool_t* rnr) noexcept
+        static derived_t& touch(cast_ptr rnr) noexcept
         requires (spawn_mode_v == vortex_spawn_mode::e_thread_local) { return touch_impl(rnr); }
 
         // NOTE: Gets vortex instance to inspect

@@ -71,7 +71,7 @@ namespace ace::fs {
 
         std::filesystem::path _path;
 
-        explicit file(std::filesystem::path path)
+        file(std::filesystem::path path)
             : _path(std::move(path)) {};
 
         struct open_query : core::io_query<open_query> {

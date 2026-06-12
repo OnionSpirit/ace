@@ -499,6 +499,20 @@ inline ace::task composed_output(ace::futures::channel_dyn<int>& ch) {
 
 }
 
+inline ace::promise<int> wait_timer() {
+    const auto check = lifetime_watchdog("some_promise");
+    ace::console::println("some_promise working...");
+    co_await ace::futures::timeout(5ms);
+    ace::console::println("some_promise finished working");
+    co_return 1;
+}
+
+inline ace::task or_with_async() {
+    auto res = co_await ( wait_timer() or ace::futures::timeout(1ms) );
+    if (not res)
+        ace::console::println("timeout of promise");
+}
+
 
 inline ace::task fs_testing() {
 

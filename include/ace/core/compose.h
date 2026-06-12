@@ -19,13 +19,14 @@ namespace ace::core {
         struct or_await_conductor;
         friend or_await_conductor;
 
+        typedef meta::resume_type<l_future_t> l_future_ret_t;
+        typedef meta::resume_type<r_future_t> r_future_ret_t;
+
         or_await(l_future_t& l_future, r_future_t& r_future)
             : _l_future(l_future)
             , _r_future(r_future) {};
 
         static consteval auto define_return_type() {
-            typedef meta::resume_type<l_future_t> l_future_ret_t;
-            typedef meta::resume_type<r_future_t> r_future_ret_t;
             if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
                 return int();
             // Begin: syntax sugar
@@ -51,9 +52,9 @@ namespace ace::core {
 
             typedef decltype(std::declval<future_t>().await_resume()) future_ret_t;
 
-            if constexpr (not std::same_as<void, future_ret_t> and not std::same_as<return_t, future_ret_t>)
+            if constexpr (std::same_as<return_t, std::variant<l_future_ret_t, r_future_ret_t>>)
                 std::get<observer_idx>(_result) = co_await future;
-            else if constexpr (not std::same_as<void, future_ret_t> and std::same_as<return_t, future_ret_t>)
+            else if constexpr (std::same_as<return_t, std::optional<future_ret_t>>)
                 _result = co_await future;
             else
                 co_await future;
@@ -82,13 +83,14 @@ namespace ace::core {
         struct and_await_conductor;
         friend and_await_conductor;
 
+        typedef meta::resume_type<l_future_t> l_future_ret_t;
+        typedef meta::resume_type<r_future_t> r_future_ret_t;
+
         and_await(l_future_t& l_future, r_future_t& r_future)
             : _l_future(l_future)
             , _r_future(r_future) {};
 
         static consteval auto define_return_type() {
-            typedef meta::resume_type<l_future_t> l_future_ret_t;
-            typedef meta::resume_type<r_future_t> r_future_ret_t;
             if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
                 return std::monostate{}; /// 'await_resume()' will return void at this option
             // Begin: syntax sugar
@@ -114,9 +116,9 @@ namespace ace::core {
 
             typedef meta::resume_type<future_t> future_ret_t;
 
-            if constexpr (not std::same_as<void, future_ret_t> and not std::same_as<return_t, future_ret_t>)
+            if constexpr (std::same_as<return_t, std::tuple<l_future_ret_t, r_future_ret_t>>)
                 std::get<observer_idx>(_result) = co_await future;
-            else if constexpr (not std::same_as<void, future_ret_t> and std::same_as<return_t, future_ret_t>)
+            else if constexpr (std::same_as<return_t, future_ret_t>)
                 _result = co_await future;
             else
                 co_await future;

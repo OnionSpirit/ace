@@ -433,6 +433,12 @@ TEST(core, do_or_await_test) {
     EXPECT_LT(ms_time, 500);
 }
 
+TEST(core, do_or_with_promise_tests) {
+    ace::schedule(or_with_async());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+}
+
 TEST(core, do_and_await_test) {
     const auto start_time = std::chrono::steady_clock::now();
 

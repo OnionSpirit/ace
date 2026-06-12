@@ -143,7 +143,7 @@ namespace ace::core::traits {
                 if (instance.detach_get()) instance.respawn(rnr.as<runner>());
                 return instance;
             } else if constexpr (spawn_mode_v == vortex_spawn_mode::e_thread_local) {
-                static thread_local derived_t instance;
+                thread_local derived_t instance;
                 if (instance.detach_get()) instance.respawn(rnr.as<runner>());
                 return instance;
             }
@@ -168,7 +168,7 @@ namespace ace::core::traits {
     };
 
     template <typename derived_t, vortex_spawn_mode spawn_mode_v>
-    thread_local bool vortex_traits<derived_t, spawn_mode_v>::_unique_detached {true};
+    inline thread_local bool vortex_traits<derived_t, spawn_mode_v>::_unique_detached {true};
 
     template <typename vortex_t>
     concept is_vortex = is_vortex_compatible<vortex_t>

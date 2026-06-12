@@ -58,8 +58,8 @@ namespace ace {
     };
 
     // NOTE: I/O File links for stdio. Marked closed to not actually close this descriptors by RAII
-    fs::file_link console::_stdin  { stdin->_fileno , true };
-    fs::file_link console::_stdout { stdout->_fileno, true };
+    inline fs::file_link console::_stdin  { stdin->_fileno , true };
+    inline fs::file_link console::_stdout { stdout->_fileno, true };
 
 }
 

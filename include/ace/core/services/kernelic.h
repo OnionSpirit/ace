@@ -170,18 +170,18 @@ namespace ace::core::services {
         static thread_local tools::slab_mempool<kernel_entity> _kernelic_entity_mempool;
     };
 
-    thread_local tools::slab_mempool<kernel_controller::kernel_entity> kernel_controller::kernel_entity::_kernelic_entity_mempool {
+    inline thread_local tools::slab_mempool<kernel_controller::kernel_entity> kernel_controller::kernel_entity::_kernelic_entity_mempool {
         tools::slab_mempool<kernel_entity>()
     };
 
-    thread_local tools::queue<kernel_controller::kernel_entity> kernel_controller::_submission_buffer {
+    inline thread_local tools::queue<kernel_controller::kernel_entity> kernel_controller::_submission_buffer {
         kernel_entity::_kernelic_entity_mempool
     };
 
-    thread_local io_uring_params kernel_controller::_ring_params {};
-    thread_local io_uring kernel_controller::_ring {};
-    thread_local int kernel_controller::_queries {};
-    thread_local bool kernel_controller::_need_submission {false};
+    inline thread_local io_uring_params kernel_controller::_ring_params {};
+    inline thread_local io_uring kernel_controller::_ring {};
+    inline thread_local int kernel_controller::_queries {};
+    inline thread_local bool kernel_controller::_need_submission {false};
 
 }
 

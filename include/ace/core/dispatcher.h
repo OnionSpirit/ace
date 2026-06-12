@@ -216,7 +216,7 @@ namespace ace::core {
 
 } // end namespace ace::core
 
-thread_local std::chrono::time_point<std::chrono::steady_clock> ace::core::dispatcher::current_ts
+inline thread_local std::chrono::time_point<std::chrono::steady_clock> ace::core::dispatcher::current_ts
         = std::chrono::steady_clock::now();
 
 namespace ace {

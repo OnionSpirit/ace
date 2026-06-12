@@ -166,7 +166,7 @@ public:                                                                         
         static thread_local nukes::dynamic::reg_freelist<command> _command_pool; ///< Pool of command to start hanged processing wo @c co_await usage
     };
 
-    thread_local nukes::dynamic::reg_freelist<ace::core::io_hanged::command> ace::core::io_hanged::_command_pool {};
+    inline thread_local nukes::dynamic::reg_freelist<ace::core::io_hanged::command> ace::core::io_hanged::_command_pool {};
 
     // inline void(*ace::core::io_hanged::fail_cb_handler)(int, const std::span<char>&) = basic_fail_handler;
 

@@ -469,7 +469,7 @@ namespace ace::core {
 } // end namespace ace::core
 
 
-thread_local ace::core::cast_ptr ace::core::runner::current_runner_ptr {};
+inline thread_local ace::core::cast_ptr ace::core::runner::current_runner_ptr {};
 
 template<typename returnT, ace::core::is_promise_rule promise_rule_t>
 inline auto ace::core::async<returnT, promise_rule_t>::get_current_pool() noexcept

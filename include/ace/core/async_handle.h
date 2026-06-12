@@ -117,7 +117,7 @@ namespace ace::core {
          * coroutine until the target finishes.
          * @return Reference to the @c join_handler base.
          */
-        ACE_AWAIT_NODISCARD auto join() noexcept -> join_handler&;
+        ACE_AWAIT_NODISCARD inline auto join() noexcept -> join_handler&;
 
         /**
          * @brief Check if the target coroutine has finished.

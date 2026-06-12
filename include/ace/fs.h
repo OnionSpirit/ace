@@ -112,7 +112,7 @@ namespace ace::fs {
         -> open_query { return open_query { std::move(*this), _path.c_str(), O_CREAT | O_RDWR, 0777 }; }
 
         ACE_AWAIT_NODISCARD auto open_rdonly()
-        -> open_query { return open_query { std::move(*this), _path.c_str(), O_CREAT | O_RDONLY, 0777 }; }
+        -> open_query { return open_query { std::move(*this), _path.c_str(), O_RDONLY, 0777 }; }
 
         ACE_AWAIT_NODISCARD auto open_wronly()
         -> open_query { return open_query { std::move(*this), _path.c_str(), O_CREAT | O_APPEND | O_WRONLY, 0777 }; }

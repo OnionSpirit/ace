@@ -428,10 +428,10 @@ namespace ace::core::services {
         }
     };
 
-    thread_local tools::slab_mempool<clock_record> clock_record::_clock_record_mempool =
+    inline thread_local tools::slab_mempool<clock_record> clock_record::_clock_record_mempool =
         tools::slab_mempool<clock_record>();
 
-    thread_local multi_dial clock::_multi_dial =
+    inline thread_local multi_dial clock::_multi_dial =
         multi_dial{std::chrono::milliseconds(1), 256};
 
 }

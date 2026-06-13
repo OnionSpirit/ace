@@ -297,28 +297,48 @@ ace::futures::channel_dyn<int, 4> hybrid_chan;
 
 #### Cutex — Cooperative Userspace Mutex
 
-The **cutex** is a cooperative mutex with no kernel syscalls on the fast path.
+The **cutex** is a cooperative mutex with **zero kernel involvement** on the fast path. Lock/unlock are single atomic operations.
 
-```mermaid
-flowchart LR
-    [*] --> Unlocked
-    Unlocked -->|try_lock (fetch_add == 0)| Locked
-    Locked -->|sync (fetch_sub + notify)| Unlocked
-    Locked -->|try_lock fails (conductor)| WaiterQueue
-    WaiterQueue -->|notify (runner::reattach)| Locked
+**Fast path (no contention)** — `try_lock()` does `fetch_add(1)` on `_users`. If the previous value was 0, the lock is yours. No suspension, no syscall.
+
+**Slow path (contended)** — if `try_lock()` fails, the waiting task is moved into `_waiters` queue via the conductor. When the owner calls `sync()`, it does `fetch_sub(1)` and pops the next waiter, reattaching it to its runner.
+
+**Deadlock recovery** — a rare race can strand a waiter: OS preempts task B between `try_lock()` fail and enqueue → task A calls `sync()` → queue empty → task B resumes, enqueues, stuck forever. `pending_notify()` detects this by retrying while `_users > 0`.
+
+```
+         try_lock()                           sync()
+         fetch_add(1)                         fetch_sub(1)
+             │                                     │
+    ┌────────┴────────┐                   ┌────────┴────────┐
+    │ result == 0     │                   │ users > 1       │
+    │ → LOCKED ✓      │                   │ → notify()      │
+    └─────────────────┘                   │ → wake waiter   │
+    │ result > 0      │                   └─────────────────┘
+    │ → await_suspend │                   │ users == 0      │
+    │ → conductor     │                   │ → no waiters    │
+    │ → _waiters.push │                   │ → pending check │
+    └─────────────────┘                   └─────────────────┘
 ```
 
 ```cpp
 ace::cutex mtx;
 
 ace::task critical_section() {
-    volatile auto guard = ace::guard(mtx);     // RAII proxy
-    auto lock_future = co_await guard->capture();
+    volatile auto guard = ace::guard(mtx);   // volatile prevents destructor elision
+    auto lock = co_await guard->capture();   // acquire (may suspend if contended)
     // --- critical section ---
-    co_await lock_future;
-    guard->sync();                             // explicit unlock (also called by ~proxy)
+    co_await lock;                           // release
+    guard->sync();
     co_return;
 }
+```
+
+**Why `volatile`?** The compiler may optimise away the guard destructor if it thinks the variable is unused. `volatile` guarantees the RAII proxy runs `sync()` on scope exit.
+
+**Rescheduling mode** — when `mtx.set_rescheduling(true)`, the releasing runner migrates the next waiter to its own pool. This pins the critical section to one CPU for better cache locality.
+
+```cpp
+mtx.set_rescheduling(true);   // all waiters will run on the releasing CPU
 ```
 
 ---

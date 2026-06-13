@@ -198,7 +198,7 @@ The **balancer** distributes tasks across runners using an atomic counter for ro
 
 ```cpp
 // Configure runner count before first run()
-ace::core::s_balancer_config._runners_amount = 4;
+ace::core::s_dispatcher_config._runners_amount = 4;
 ace::reload();          // apply new config (only when queue is empty)
 
 ace::schedule(my_task());
@@ -304,10 +304,10 @@ stateDiagram-v2
     direction LR
     [*] --> Unlocked
 
-    Unlocked --> Locked : try_lock()\n(fetch_add == 0)
-    Locked --> Unlocked : sync()\n(fetch_sub + notify)
-    Locked --> WaiterQueue : try_lock() fails\n(conductor installed)
-    WaiterQueue --> Locked : notify()\n(runner::reattach)
+    Unlocked --> Locked : "try_lock()\n(fetch_add == 0)"
+    Locked --> Unlocked : "sync()\n(fetch_sub + notify)"
+    Locked --> WaiterQueue : "try_lock() fails\n(conductor installed)"
+    WaiterQueue --> Locked : "notify()\n(runner::reattach)"
 ```
 
 ```cpp
@@ -352,7 +352,7 @@ sequenceDiagram
 
     Parent->>Runner: co_await ace::spawn(child_task())
     Runner->>Child: attach to same runner
-    Runner-->>Parent: returns async_handle (non-suspending)
+    Runner-->>Parent: "returns async_handle (non-suspending)"
     Parent->>Parent: continues running
     Parent->>Runner: co_await handle.join()
     Runner-->>Parent: suspended until child finishes
@@ -682,7 +682,7 @@ int main() {
 ```cpp
 int main() {
     // use 4 OS threads
-    ace::core::s_balancer_config._runners_amount = 4;
+    ace::core::s_dispatcher_config._runners_amount = 4;
     ace::reload();
 
     for (int i = 0; i < 100; ++i)
@@ -749,7 +749,7 @@ ace::task increment(int times) {
 }
 
 int main() {
-    ace::core::s_balancer_config._runners_amount = 4;
+    ace::core::s_dispatcher_config._runners_amount = 4;
     ace::reload();
 
     for (int t = 0; t < 8; ++t)
@@ -896,18 +896,18 @@ Open `docs/doxygen/html/index.html` in a browser.
 
 ### Namespace map
 
-| Namespace | Contents |
+| Namespace | Key types / functions |
 |---|---|---|
-| `ace` | Public aliases: `async<T>`, `promise<T>`, `task`, `cutex`, `guard`; free functions: `schedule()`, `spawn()`, `post()`, `run()`, `reload()`, `interrupt()`, `terminate()`, `empty()`, `reset_signal()` |
-| `ace::core` | Runtime engine: `async<T,R>`, `dispatcher`, `runner`, `control_block`, `control_block_handle`, `cast_ptr`; I/O base types: `io_entity`, `io_link`, `io_query`, `any` |
-| `ace::core::traits` | Trait bases: `future_traits`, `busy_future_traits`, `promise_traits`, `promise_return_traits`, `runner_conductor_handle`, `control_conductor_handle`, `conductor_slot`, `vortex_traits` |
-| `ace::core::services` | Vortex services: `clock` (multi_dial time wheel), `kernel_controller` (io_uring) |
-| `ace::core::tools` | Utilities: `queue`, `q_node`, `slab_mempool`, `moving_average`, `id_allocator`, `lifetime` |
-| `ace::core::meta` | Dispatch concepts: `is_future`, `is_busy_future`, `is_awaitable`, `is_any_future_accurate`; meta-programming: `resume_type`, `replace_type`, `unique_tuple_t`, `tuple_to_variant_t` |
-| `ace::futures` | Synchronization & commands: `channel<T>`, `channel_static<T,N,_>`, `cutex_future`, `cutex`, `timeout`, `expire`, `spawn`, `post`, `async_handle`, `join_handler`, `reattach`, `roaming`, `polling`, `get_runner` |
-| `ace::fs` | Async filesystem: `file` (io_entity), `file_link` (io_link) |
-| `ace::net` | Async networking: `io_socket`, `io_mapping_entity`, `io_stream_mode_entity`, `io_listener_entity`, `io_transport_entity`, `io_connection_link` |
-| `ace::console` | Async console: `console` — stdin/stdout over `io_uring` |
+| `ace` | `async<T>`, `promise<T>`, `task`, `cutex`, `guard`; `schedule()`, `spawn()`, `post()`, `run()`, `reload()`, `interrupt()`, `terminate()`, `empty()`, `reset_signal()` |
+| `ace::core` | `async<T,R>`, `dispatcher`, `runner`, `control_block`, `control_block_handle`, `cast_ptr`, `io_entity`, `io_link`, `io_query`, `any` |
+| `ace::core::traits` | `future_traits`, `busy_future_traits`, `promise_traits`, `runner_conductor_handle`, `control_conductor_handle`, `conductor_slot`, `vortex_traits` |
+| `ace::core::services` | `clock` (multi_dial), `kernel_controller` (io_uring) |
+| `ace::core::tools` | `queue`, `q_node`, `slab_mempool`, `moving_average`, `id_allocator`, `lifetime` |
+| `ace::core::meta` | `is_future`, `is_busy_future`, `is_awaitable`, `resume_type`, `replace_type`, `unique_tuple_t`, `tuple_to_variant_t` |
+| `ace::futures` | `channel`, `channel_static`, `cutex`, `cutex_future`, `timeout`, `expire`, `spawn`, `post`, `async_handle`, `join_handler`, `reattach`, `roaming`, `polling`, `get_runner` |
+| `ace::fs` | `file` (io_entity), `file_link` (io_link) |
+| `ace::net` | `io_socket`, `io_mapping_entity`, `io_stream_mode_entity`, `io_listener_entity`, `io_transport_entity`, `io_connection_link` |
+| `ace::console` | `console` — stdin/stdout over io_uring |
 
 ### Key free functions (`namespace ace`)
 

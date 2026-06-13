@@ -205,12 +205,21 @@ namespace ace::core {
         [[nodiscard]] bool is_idle() const { return not _block; }
 
         /**
-         * @brief @c true if the associated coroutine has finished.
-         * @return @c false if @c is_idle(), otherwise @c !_exists.
+         * @brief Checks if the associated coroutine stack frame is destroyed.
+         * @return @c false if @c is_idle(), otherwise not exists.
          */
         [[nodiscard]] bool done() const {
             if (is_idle()) [[unlikely]] return false;
             return _block->_frame_size == 0;
+        }
+
+        /**
+         * @brief Checks if the associated coroutine finished.
+         * @return @c true if status is @c finished, otherwise @c false and if handler @c is_idle() .
+         */
+        [[nodiscard]] bool finished() const {
+            if (is_idle()) [[unlikely]] return false;
+            return _block->_status == e_finished;
         }
 
         /**

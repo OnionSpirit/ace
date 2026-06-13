@@ -1,34 +1,102 @@
-<!-- Custom Doxygen HTML header — injects Mermaid.js for diagram rendering -->
-<!DOCTYPE html>
-<html>
+<!-- ACE — Doxygen HTML header (doxygen-awesome + Catppuccin + Fira Code) -->
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "https://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en-US">
 <head>
-  <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <meta http-equiv="X-UA-Compatible" content="IE=9"/>
-  <title>$title</title>
-  <link href="$relpath^tabs.css" rel="stylesheet" type="text/css"/>
-  $treeview
-  $search
-  $mathjax
-  <link href="$relpath^doxygen.css" rel="stylesheet" type="text/css" />
-  <!-- Mermaid.js — renders diagrams injected via @mermaid alias -->
-  <script type="module">
-    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-    mermaid.initialize({
-      startOnLoad: true,
-      theme: 'dark',
-      themeVariables: {
-        primaryColor: '#1e88e5',
-        primaryTextColor: '#fff',
-        primaryBorderColor: '#1565c0',
-        lineColor: '#90caf9',
-        secondaryColor: '#263238',
-        tertiaryColor: '#1c1c2e'
+<meta http-equiv="Content-Type" content="text/xhtml;charset=UTF-8"/>
+<meta http-equiv="X-UA-Compatible" content="IE=11"/>
+<meta name="generator" content="Doxygen $doxygenversion"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<!--BEGIN PROJECT_NAME--><title>$projectname: $title</title><!--END PROJECT_NAME-->
+<!--BEGIN !PROJECT_NAME--><title>$title</title><!--END !PROJECT_NAME-->
+<link href="$relpath^tabs.css" rel="stylesheet" type="text/css"/>
+<!-- Fira Code -->
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&display=swap" rel="stylesheet"/>
+<script type="text/javascript" src="$relpath^jquery.js"></script>
+<script type="text/javascript" src="$relpath^dynsections.js"></script>
+$treeview
+$search
+$mathjax
+<link href="$relpath^$stylesheet" rel="stylesheet" type="text/css" />
+$extrastylesheet
+<!-- doxygen-awesome plugins -->
+<script type="text/javascript" src="$relpath^doxygen-awesome-darkmode-toggle.js"></script>
+<script type="text/javascript" src="$relpath^doxygen-awesome-fragment-copy-button.js"></script>
+<script type="text/javascript" src="$relpath^doxygen-awesome-paragraph-link.js"></script>
+<script type="text/javascript" src="$relpath^doxygen-awesome-interactive-toc.js"></script>
+<script type="text/javascript" src="$relpath^doxygen-awesome-tabs.js"></script>
+<script type="text/javascript">
+  DoxygenAwesomeFragmentCopyButton.init()
+  DoxygenAwesomeParagraphLink.init()
+  DoxygenAwesomeInteractiveToc.init()
+  DoxygenAwesomeTabs.init()
+  // patched: Doxygen 1.16.1 has no #MSearchBox, append toggle to titlearea
+  $(function() {
+    $(document).ready(function() {
+      const toggle = document.createElement('doxygen-awesome-dark-mode-toggle');
+      toggle.title = "Toggle Light/Dark Mode";
+      toggle.updateIcon();
+      const searchBox = document.getElementById("MSearchBox");
+      if (searchBox) {
+        searchBox.parentNode.appendChild(toggle);
+      } else {
+        const titlearea = document.getElementById("titlearea");
+        if (titlearea) titlearea.appendChild(toggle);
       }
+      // re-append on resize
+      $(window).resize(function() {
+        const box = document.getElementById("MSearchBox");
+        if (box) box.parentNode.appendChild(toggle);
+        else {
+          const ta = document.getElementById("titlearea");
+          if (ta && toggle.parentNode !== ta) ta.appendChild(toggle);
+        }
+      });
     });
-  </script>
-  <style>
-    .mermaid { background: #1e1e2e; border-radius: 8px; padding: 16px; margin: 12px 0; }
-  </style>
+  });
+</script>
+<!-- Mermaid — renders @mermaid diagrams -->
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      primaryColor: '#89b4fa',
+      primaryTextColor: '#cdd6f4',
+      primaryBorderColor: '#5576ba',
+      lineColor: '#b4befe',
+      secondaryColor: '#313244',
+      tertiaryColor: '#1e1e2e'
+    }
+  });
+</script>
 </head>
 <body>
+<div id="top"><!-- do not remove this div, it is closed by doxygen! -->
+<!--BEGIN TITLEAREA-->
+<div id="titlearea">
+<table cellspacing="0" cellpadding="0">
+ <tbody>
+ <tr id="projectrow">
+  <!--BEGIN PROJECT_NAME-->
+  <td id="projectalign">
+   <div id="projectname">$projectname<!--BEGIN PROJECT_NUMBER--><span id="projectnumber">&#160;$projectnumber</span><!--END PROJECT_NUMBER-->
+   </div>
+   <!--BEGIN PROJECT_BRIEF--><div id="projectbrief">$projectbrief</div><!--END PROJECT_BRIEF-->
+  </td>
+  <!--END PROJECT_NAME-->
+  <!--BEGIN !PROJECT_NAME-->
+   <!--BEGIN PROJECT_BRIEF-->
+    <td>
+    <div id="projectbrief">$projectbrief</div>
+    </td>
+   <!--END PROJECT_BRIEF-->
+  <!--END !PROJECT_NAME-->
+ </tr>
+ </tbody>
+</table>
+</div>
+<!--END TITLEAREA-->
+<!-- end header part -->

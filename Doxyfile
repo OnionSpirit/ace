@@ -46,7 +46,7 @@ FORCE_LOCAL_INCLUDES   = NO
 INLINE_INFO            = YES
 SORT_MEMBER_DOCS       = YES
 SORT_BRIEF_DOCS        = YES
-SORT_GROUP_DOCS        = YES
+# SORT_GROUP_DOCS        = YES  (removed: unsupported in Doxygen 1.16)
 ALWAYS_DETAILED_SEC    = YES
 REPEAT_BRIEF           = YES
 MULTILINE_CPP_IS_BRIEF = NO
@@ -90,7 +90,7 @@ WARNINGS               = YES
 WARN_IF_UNDOCUMENTED   = YES
 WARN_IF_DOC_ERROR      = YES
 WARN_NO_PARAMDOC       = YES
-WARN_RETURN_TYPE       = YES
+# WARN_RETURN_TYPE       = YES  (removed: unsupported in Doxygen 1.16)
 WARN_FORMAT            = "$file:$line: $text"
 WARN_LOGFILE           = docs/doxygen/warnings.log
 
@@ -101,7 +101,16 @@ GENERATE_HTML          = YES
 HTML_OUTPUT            = html
 HTML_FILE_EXTENSION    = .html
 HTML_HEADER            = docs/doxygen_header.html
-HTML_COLORSTYLE        = DARK
+HTML_COLORSTYLE        = LIGHT
+# extra stylesheets — doxygen-awesome + Catppuccin theme
+HTML_EXTRA_STYLESHEET   = docs/doxygen/doxygen-awesome.css \
+                          docs/doxygen/catppuccin.css
+# doxygen-awesome JS plugins (dark-mode toggle, copy button, etc.)
+HTML_EXTRA_FILES        = docs/doxygen/doxygen-awesome-darkmode-toggle.js \
+                          docs/doxygen/doxygen-awesome-fragment-copy-button.js \
+                          docs/doxygen/doxygen-awesome-paragraph-link.js \
+                          docs/doxygen/doxygen-awesome-interactive-toc.js \
+                          docs/doxygen/doxygen-awesome-tabs.js
 HTML_DYNAMIC_SECTIONS  = YES
 HTML_INDEX_NUM_ENTRIES = 100
 GENERATE_DOCSET        = NO

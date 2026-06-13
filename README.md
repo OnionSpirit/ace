@@ -300,14 +300,12 @@ ace::futures::channel_dyn<int, 4> hybrid_chan;
 The **cutex** is a cooperative mutex with no kernel syscalls on the fast path.
 
 ```mermaid
-stateDiagram-v2
-    direction LR
+flowchart LR
     [*] --> Unlocked
-
-    Unlocked --> Locked : try_lock (fetch_add == 0)
-    Locked --> Unlocked : sync (fetch_sub + notify)
-    Locked --> WaiterQueue : try_lock fails (conductor)
-    WaiterQueue --> Locked : notify (runner::reattach)
+    Unlocked -->|try_lock (fetch_add == 0)| Locked
+    Locked -->|sync (fetch_sub + notify)| Unlocked
+    Locked -->|try_lock fails (conductor)| WaiterQueue
+    WaiterQueue -->|notify (runner::reattach)| Locked
 ```
 
 ```cpp

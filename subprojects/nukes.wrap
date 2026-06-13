@@ -1,4 +1,4 @@
 [wrap-git]
 directory = nukes
-url = git@github.com:OnionSpirit/nukes.git
+url = https://github.com/OnionSpirit/ace.git
 revision = refactor

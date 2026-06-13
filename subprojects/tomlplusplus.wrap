@@ -1,4 +1,0 @@
-[wrap-git]
-directory = tomlplusplus
-url = https://github.com/marzer/tomlplusplus.git
-revision = v3.4.0

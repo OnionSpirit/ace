@@ -1,7 +1,33 @@
 /**
- * @file
- * @details This file contains a @b clock class, that provides service for time-dependent operations.
- * Clock handles global timestamp and releases passed tasks to those runners when time comes.
+ * @file clock.h
+ * @brief Hierarchical multi-dial time wheel and clock vortex for O(1) timer management.
+ *
+ * @details The clock module provides:
+ *
+ *  - <b>@c time_slot</b> — a single slot that holds all timers expiring at
+ *    the same tick.  Supports batched release.
+ *  - <b>@c dial</b> — a single level of the time wheel (256 slots per dial).
+ *    Higher-frequency dials cascade into lower-frequency ones as the arrow
+ *    wraps around.
+ *  - <b>@c multi_dial</b> — the full hierarchical time wheel.  Selects the
+ *    appropriate dial level based on the timer duration (logarithmic dial
+ *    selection).  Maximum timer range: ~4.6 hours with 3 dials (1ms base tick,
+ *    256 slots each).
+ *  - <b>@c clock</b> — a thread-local vortex that owns a @c multi_dial and
+ *    calls @c release() on each @c ping() to wake expired timers.
+ *
+ * ### How timeouts work
+ *
+ * 1. @c co_await timeout(500ms) creates a @c timeout future.
+ * 2. @c await_suspend() installs a @c timeout_conductor.
+ * 3. The runner calls @c conductor.forward(task) → @c clock::subscribe(task, 500ms).
+ * 4. @c multi_dial::subscribe() selects a dial level and inserts the task.
+ * 5. When 500ms elapses, @c clock::ping() → @c multi_dial::release() pops
+ *    the task and calls @c runner::reattach().
+ *
+ * @mermaid{ graph LR; Timeout[\"timeout(dur)\"]-->Conductor[\"timeout_conductor\"]; Conductor-->Subscribe[\"clock::subscribe\"]; Subscribe-->MultiDial[\"multi_dial\"]; MultiDial-->Slot[\"time_slot\"]; clock_ping[\"clock::ping()\"]-->Release[\"multi_dial::release\"]; Release-->Reattach[\"runner::reattach\"]; }
+ *
+ * @see ace::futures::timeout, ace::core::traits::vortex_traits
  */
 #ifndef ACE_CORE_CLOCK_H
 #define ACE_CORE_CLOCK_H
@@ -46,7 +72,7 @@ namespace ace::core {
 namespace ace::core::services {
 
     /**
-     * @brief Type of stored async record. Contains async and it's awaiting duration
+     * @brief A stored timer record — holds a task and its remaining duration.
      */
     struct clock_record {
         duration_t _duration {};
@@ -79,7 +105,7 @@ namespace ace::core::services {
     using clock_node = tools::q_node<clock_record>;
 
     /**
-     * @brief Represents time dial slot. Storing records with same expiration time and provides release functionality
+     * @brief A single slot in the time wheel holding records with the same expiration.
      */
     struct time_slot {
 
@@ -132,8 +158,12 @@ namespace ace::core::services {
     };
 
     /**
-     * @brief Abstraction of the Dial (Time Wheel)
-     * @details
+     * @brief A single level of the hierarchical time wheel.
+     *
+     * @details Each dial contains @c _tick_count slots (power of 2, default 256).
+     * When the arrow wraps around, remaining timers are cascaded to the upper
+     * (coarser-grained) dial via @c migrate().  An upper dial pointer
+     * (@c _upper_dial) links levels together.
      */
     struct dial {
 
@@ -246,6 +276,18 @@ namespace ace::core::services {
         }
     };
 
+    /**
+     * @brief Hierarchical multi-level time wheel with O(1) insert and release.
+     *
+     * @details Composed of multiple @c dial instances arranged in increasing
+     * tick duration.  Timers are placed into the dial level that best matches
+     * their duration (logarithmic dial selection).  Each call to @c release()
+     * advances the finest dial's arrow by the number of ticks that have
+     * passed since the last release.
+     *
+     * The default configuration uses 1ms ticks and 256-slot dials, supporting
+     * timers up to ~4.6 hours.
+     */
     struct multi_dial {
 
     private:
@@ -408,6 +450,15 @@ namespace ace::core::services {
 
     };
 
+    /**
+     * @brief Thread-local vortex that manages a @c multi_dial time wheel.
+     *
+     * @details On each @c ping(), calls @c multi_dial::release() to wake
+     * expired timers.  Provides @c subscribe() (used by @c timeout future)
+     * and @c detach() (for timer cancellation).  The @c current_time()
+     * static method returns the cached timepoint, updated every 16 calls
+     * for performance.
+     */
     struct clock : traits::vortex_traits<clock, vortex_spawn_mode::e_thread_local> {
 
         clock() = default;

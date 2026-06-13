@@ -1,3 +1,30 @@
+/**
+ * @file kernelic.h
+ * @brief Thread-local @c io_uring controller vortex and observer interface.
+ *
+ * @details This header defines the integration layer between ACE and the
+ * Linux @c io_uring subsystem:
+ *
+ *  - <b>@c kernel_observer</b> — polymorphic callback interface invoked when
+ *    a completion queue entry (CQE) arrives.  Used as the @c user_data
+ *    payload in SQE submissions.
+ *  - <b>@c kernel_controller</b> — thread-local vortex that owns the
+ *    @c io_uring ring.  Its @c ping() method dequeues and submits buffered
+ *    SQEs, then processes incoming CQEs by calling @c on_result() on the
+ *    associated observer.
+ *  - <b>@c kernel_entity</b> — deferred SQE storage.  When the submission
+ *    queue is full (4096 entries), new operations are buffered in a
+ *    thread-local queue and submitted on the next @c ping().
+ *
+ * ### How it fits into ACE
+ *
+ * @c kernel_controller is a vortex (background polling service).  The
+ * dispatcher calls @c yank_vortex() periodically, which invokes @c ping().
+ * @c ping() submits pending SQEs, drains CQEs, and notifies waiting
+ * coroutines via @c kernel_observer::on_result().
+ *
+ * @see ace::core::io_query, ace::core::io_entity, ace::core::traits::vortex_traits
+ */
 #ifndef ACE_CORE_KERNELIC_H
 #define ACE_CORE_KERNELIC_H
 
@@ -11,7 +38,15 @@
 namespace ace::core::services {
 
     /**
-     * @brief Proxy entity with activation method to use it as uring user_data
+     * @brief Polymorphic completion handler for @c io_uring operations.
+     *
+     * @details An instance of @c kernel_observer is passed as @c user_data
+     * in each SQE.  When the CQE arrives, @c kernel_controller::ping() calls
+     * @c on_result(res) which typically stores the result and re-attaches
+     * the waiting coroutine.
+     *
+     * Derived types include @c io_query (coroutine awaitable) and
+     * @c io_hanged::command (fire-and-forget).
      */
     struct kernel_observer {
 
@@ -33,9 +68,20 @@ namespace ace::core::services {
         virtual ~kernel_observer() = default;
     };
 
-    // TODO: Upgrade to buff operations
     /**
-     * @brief Thread local vortex to work with uring queues without kernel notification
+     * @brief Thread-local @c io_uring controller vortex.
+     *
+     * @details Each runner thread gets its own @c kernel_controller instance
+     * (via @c vortex_traits with @c e_thread_local).  It:
+     *  1. Initialises the @c io_uring ring on construction.
+     *  2. Exposes static convenience methods (@c read(), @c write(),
+     *     @c send(), @c accept(), etc.) that wrap @c submit().
+     *  3. Runs @c ping() from the vortex polling loop — submits buffered
+     *     SQEs, drains CQEs, and calls @c observer->on_result() for each
+     *     completion.
+     *
+     * The ring supports up to 4096 concurrent operations; overflow is
+     * buffered in @c _submission_buffer (a queue of @c kernel_entity).
      */
     struct kernel_controller : traits::vortex_traits<kernel_controller, vortex_spawn_mode::e_thread_local> {
 
@@ -144,7 +190,12 @@ namespace ace::core::services {
     };
 
     /**
-     * @brief Abstract object to interact with kernel controller
+     * @brief Deferred SQE — stores an @c io_uring operation for later submission.
+     *
+     * @details When the submission queue is full (4096 entries), new operations
+     * are buffered as @c kernel_entity objects in the thread-local
+     * @c _submission_buffer.  Each entity captures the function pointer, SQE,
+     * and up to 8 parameters.  @c apply() reconstructs the original call.
      */
     struct kernel_controller::kernel_entity {
 

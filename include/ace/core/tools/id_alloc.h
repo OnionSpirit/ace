@@ -1,3 +1,12 @@
+/**
+ * @file id_alloc.h
+ * @brief Lock-free unique ID allocator for coroutine tracing.
+ *
+ * @details Provides @c id_allocator (a simple monotonically-increasing ID
+ * pool with recycled IDs via an MPMC queue) and @c async_id_allocator (a
+ * singleton wrapper).  Used by @c promise_traits::setup_trace() to assign
+ * unique debug IDs to coroutine instances.
+ */
 #ifndef ACE_COMMON_ID_ALLOCA_H
 #define ACE_COMMON_ID_ALLOCA_H
 
@@ -5,6 +14,13 @@
 
 namespace ace::core::tools {
 
+    /**
+     * @brief Lock-free unique ID allocator.
+     *
+     * @details Allocates IDs via an atomic counter.  Released IDs are pushed
+     * into an MPMC queue and recycled on subsequent allocations.  This avoids
+     * both locks and unbounded counter growth in long-running systems.
+     */
     class id_allocator {
 
         nukes::dynamic::mpmc_queue<std::size_t> _released {};
@@ -25,6 +41,12 @@ namespace ace::core::tools {
         }
     };
 
+    /**
+     * @brief Singleton wrapper around @c id_allocator for coroutine tracing.
+     *
+     * @details Access via @c async_id_allocator::get_instance().  Used by
+     * @c promise_traits to assign globally unique trace IDs to each coroutine.
+     */
     class async_id_allocator : public id_allocator {
 
         async_id_allocator() = default;

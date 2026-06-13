@@ -1,3 +1,15 @@
+/**
+ * @file console.h
+ * @brief Async console I/O — stdin/stdout wrappers using @c io_uring.
+ *
+ * @details The @c ace::console class provides async @c input() (reads from
+ * stdin via @c file_link::read_str()) and sync @c print()/@c println()
+ * (writes to stdout via @c file_link::writeln()/write()).  Both stdin and
+ * stdout are represented as @c ace::fs::file_link instances marked as
+ * "already closed" to prevent RAII from closing the actual stdio descriptors.
+ *
+ * @see ace::fs::file_link
+ */
 #ifndef ACE_CONSOLE_H
 #define ACE_CONSOLE_H
 
@@ -11,13 +23,12 @@
 namespace ace {
 
     /**
-     * @warning Don't take it serious. For the most part this is a dumb joke.
-     * 0, 1, 2, 3, 4... Guinnesses and then things went wrong.
-     * Actually I've just wanned an abstraction for the async input.
-     * I've improved this thing up just to debug @c vortex mechanism and @c kernelic module.
-     * @c console module helped me to reveal a bunch of shitty bugs.
-     * That is why console has a set of async print functions.
-     * There are no blazing features just printing via @c io_uring
+     * @brief Async console I/O — prints to stdout, reads from stdin.
+     *
+     * @details Uses @c ace::fs::file_link internally for both streams.
+     * @c input() is an async coroutine; @c print()/@c println() are
+     * synchronous (they delegate to @c file_link methods which internally
+     * dispatch via @c io_uring or blocking fallback).
      */
     class console {
 

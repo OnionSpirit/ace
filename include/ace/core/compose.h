@@ -1,3 +1,40 @@
+/**
+ * @file compose.h
+ * @brief Future composition primitives — logical AND/OR combinators and monadic
+ *        piping (@c operator>>) for ACE awaitables.
+ *
+ * @details This header provides the building blocks for composing multiple
+ * asynchronous operations:
+ *
+ *  - <b>AND combinators</b> (@c and_await, @c and_await_composed) — await all
+ *    operands and collect their results (as @c std::tuple or a single value).
+ *  - <b>OR combinators</b> (@c or_await, @c or_await_composed) — await the
+ *    first operand that finishes and cancel the rest.
+ *  - <b>Monadic pipe</b> (@c compose(), @c operator>>) — forward the result of
+ *    one future into a responder coroutine or function.
+ *
+ * ### AND vs OR
+ *
+ * | Combinator | Arity | Return on @c void | Return on typed |
+ * |---|---|---|---|
+ * | @c and_await | 2 | @c std::monostate | @c std::tuple<T1,T2> |
+ * | @c and_await_composed | N | @c std::monostate | @c std::tuple<T1..TN> |
+ * | @c or_await | 2 | @c int (winner index) | @c std::variant<T1,T2> |
+ * | @c or_await_composed | N | @c int (winner index) | variant of unique types |
+ *
+ * ### How combinators work
+ *
+ * Each combinator creates observer tasks — one per operand future.  Observers
+ * run on the same runner as the caller (via @c attach_front()).  When an
+ * observer finishes:
+ *
+ *  - <b>OR</b>: the winner cancels all other observers, stores the result, and
+ *    re-attaches the waiting caller.
+ *  - <b>AND</b>: the last finishing observer re-attaches the waiting caller,
+ *    after all others have completed.
+ *
+ * @see ace::core::or_await, ace::core::and_await, ace::core::compose
+ */
 #ifndef ACE_CORE_COMPOSE_H
 #define ACE_CORE_COMPOSE_H
 
@@ -11,6 +48,24 @@
 
 namespace ace::core {
 
+    /**
+     * @brief Awaitable that races two futures — the first to finish wins.
+     *
+     * @details When @c co_await-ed, spawns two observer tasks (one per operand)
+     * on the current runner.  The first observer that completes stores its
+     * result in @c _result, cancels the other observer, and re-attaches the
+     * waiting caller.  The loser's observer is dropped.
+     *
+     * Return type depends on operand types:
+     *  - Both @c void → @c int (index of the winner: 0 = left, 1 = right).
+     *  - One @c void, one typed → @c std::optional<T> (non-void type).
+     *  - Both typed → @c std::variant<LeftT, RightT>.
+     *
+     * @tparam l_future_t  Left operand future type.
+     * @tparam r_future_t  Right operand future type.
+     *
+     * @see ace::core::or_await_composed (variadic version)
+     */
     template <typename l_future_t, typename r_future_t>
     struct ACE_AWAIT_NODISCARD or_await final : traits::future_traits<or_await<l_future_t, r_future_t>> {
 
@@ -75,6 +130,23 @@ namespace ace::core {
         return_t await_resume() { return _result; };
     };
 
+    /**
+     * @brief Awaitable that waits for both futures to complete.
+     *
+     * @details When @c co_await-ed, spawns two observer tasks on the current
+     * runner.  Both observers run to completion; the second one to finish
+     * re-attaches the waiting caller.  Results from both operands are collected.
+     *
+     * Return type depends on operand types:
+     *  - Both @c void → @c std::monostate (@c await_resume() returns @c void).
+     *  - One @c void, one typed → the non-@c void type.
+     *  - Both typed → @c std::tuple<LeftT, RightT>.
+     *
+     * @tparam l_future_t  Left operand future type.
+     * @tparam r_future_t  Right operand future type.
+     *
+     * @see ace::core::and_await_composed (variadic version)
+     */
     template <typename l_future_t, typename r_future_t>
     struct ACE_AWAIT_NODISCARD and_await final : traits::future_traits<and_await<l_future_t, r_future_t>> {
 
@@ -141,6 +213,19 @@ namespace ace::core {
         };
     };
 
+    /**
+     * @brief Variadic OR combinator — races N futures, returns the first to finish.
+     *
+     * @details Generalization of @c or_await to an arbitrary number of operands.
+     * Spawns one observer per future.  The winning observer cancels all others
+     * and re-attaches the calling coroutine.  If all operands return @c void,
+     * the result is an @c int (winner index); otherwise a @c std::variant of
+     * unique non-void types.
+     *
+     * @tparam future_ts  Variadic pack of future types to race.
+     *
+     * @see ace::core::or_await (2-operand version)
+     */
     template <meta::is_future ... future_ts>
     struct ACE_AWAIT_NODISCARD or_await_composed final : traits::future_traits<or_await_composed<future_ts...>> {
 
@@ -200,6 +285,18 @@ namespace ace::core {
         return_t await_resume() { return _result; };
     };
 
+    /**
+     * @brief Variadic AND combinator — awaits all N futures and collects results.
+     *
+     * @details Generalization of @c and_await to an arbitrary number of operands.
+     * Spawns one observer per future.  The last observer to finish re-attaches
+     * the calling coroutine.  If all operands return @c void, the result is
+     * @c std::monostate; otherwise a @c std::tuple of return types.
+     *
+     * @tparam future_ts  Variadic pack of future types to await.
+     *
+     * @see ace::core::and_await (2-operand version)
+     */
     template <meta::is_future ... future_ts>
     struct ACE_AWAIT_NODISCARD and_await_composed final : traits::future_traits<and_await_composed<future_ts...>> {
 
@@ -264,6 +361,23 @@ namespace ace::core {
 
 // =============================================- OUTPUT COMPOSERS -====================================================
 
+    /**
+     * @brief Monadic composition — pipe a future's result into a responder coroutine.
+     *
+     * @details Awaits @c sender, then passes its return value to @c responder
+     * and awaits the responder.  This is the implementation behind @c operator>>.
+     *
+     * Overloads handle both @c void and non-@c void sender return types, and
+     * both coroutine and regular function responders.
+     *
+     * @tparam sender_t              The upstream future to await first.
+     * @tparam async_return          Return type of the responder coroutine.
+     * @tparam async_input           Input type of the responder (must match sender's resume type).
+     * @tparam async_promise_rule_t  Suspension policy of the responder (default: @c differed).
+     * @param sender     The upstream future.
+     * @param responder  The responder coroutine (takes sender's result as argument).
+     * @return An @c ace::promise<async_return> that represents the composed operation.
+     */
     template <
         meta::is_future sender_t,
         typename async_return, typename async_input,
@@ -355,6 +469,14 @@ namespace ace::core {
 
 
 ACE_COMPOSE_AWAIT_FUTURE_META
+/**
+ * @brief Conductor for @c or_await — stores the waiting task until the race resolves.
+ *
+ * @details When @c forward() is called by the runner, the caller is saved in
+ * @c _or_await->_waiter.  When an observer finishes, it calls
+ * @c runner::reattach() on the stored waiter.  @c cancel() propagates
+ * cancellation to both observer tasks.
+ */
 struct ACE_OR_AWAIT_FUTURE_SPACE or_await_conductor final : conductor_handler_t {
 
     or_await_conductor() = delete;
@@ -398,6 +520,12 @@ await_suspend(auto external_coro) {
 
 
 ACE_COMPOSE_AWAIT_FUTURE_META
+/**
+ * @brief Conductor for @c and_await — stores the waiting task until both futures finish.
+ *
+ * @details Similar to @c or_await_conductor but the stored waiter is only
+ * re-attached after both observer tasks have completed.
+ */
 struct ACE_AND_AWAIT_FUTURE_SPACE and_await_conductor final : conductor_handler_t {
 
     and_await_conductor() = delete;
@@ -440,6 +568,10 @@ await_suspend(auto external_coro) {
 }
 
 ACE_COMPOSE_AWAIT_COMPOSED_FUTURE_META
+/**
+ * @brief Conductor for variadic @c and_await_composed.
+ * @see and_await_conductor
+ */
 struct ACE_AND_AWAIT_COMPOSED_FUTURE_SPACE and_await_composed_conductor final : conductor_handler_t {
 
     and_await_composed_conductor() = delete;
@@ -483,6 +615,10 @@ await_suspend(auto external_coro) {
 }
 
 ACE_COMPOSE_AWAIT_COMPOSED_FUTURE_META
+/**
+ * @brief Conductor for variadic @c or_await_composed.
+ * @see or_await_conductor
+ */
 struct ACE_OR_AWAIT_COMPOSED_FUTURE_SPACE or_await_composed_conductor final : conductor_handler_t {
 
     or_await_composed_conductor() = delete;
@@ -537,6 +673,23 @@ await_suspend(auto external_coro) {
 #undef ACE_OR_AWAIT_COMPOSED_FUTURE_SPACE
 
 //==============================- OPERATOR DEFINITIONS -=========================
+
+/**
+ * @name Future composition operators
+ *
+ * @details Two families of operators enable compact expression of AND/OR
+ * composition on awaitable futures:
+ *
+ *  - @c operator or — race two futures; returns @c or_await.
+ *  - @c operator and — wait for both futures; returns @c and_await.
+ *
+ * When chained, the operators build @c or_await_composed /
+ * @c and_await_composed (variadic versions).  Both lvalue and rvalue
+ * combinations are supported.
+ *
+ * @note These are free-function operators found via ADL on the operand types.
+ */
+///@{
 
 #define ACE_COMPOSE_MEMBERS_ASSERT                                                                                 \
     using namespace ace::core::meta;                                                                                 \
@@ -713,6 +866,21 @@ operator or(ace::core::or_await_composed<composed_future_ts...>& composed_future
 
 // ========================================- OUTPUT COMPOSE CREATORS -==================================================
 
+/**
+ * @name Monadic pipe operator (@c operator>>)
+ *
+ * @details @c sender >> responder is syntactic sugar for @c compose(sender, responder).
+ * It forwards the return value of @c sender as the argument to @c responder,
+ * enabling a pipeline style:
+ *
+ * @code{.cpp}
+ * co_await (open_file("data.txt") >> process_data);
+ * @endcode
+ *
+ * Overloads handle both coroutine and regular function responders, with or
+ * without input arguments.
+ */
+///@{
 template <
     ace::core::meta::is_future sender_t,
     typename async_return, typename async_input,
@@ -759,5 +927,6 @@ operator >> (sender_t&& sender, foo_return(responder)()) {
 }
 
 #undef ACE_COMPOSE_MEMBERS_ASSERT
+///@}
 
 #endif //ACE_CORE_COMPOSE_H

@@ -44,11 +44,21 @@
 #include "ace/core/traits/conduction.h"
 
 
-// ToDo: yield операцию надо преретащить в генератор,
-// пусть генератор имеет перегрузку итераторов,
-// чтобы запускать его в цикле for
+// TODO: Move yield operation to generator,
+// make generator overload iterators
+// so it can be used in a for loop
 namespace ace::core {
 
+    /**
+     * @brief Type-erased pointer with templated static-cast access.
+     *
+     * @details Stores a @c void* and provides @c as<T>() for casting to a
+     * concrete type and @c addr_of<T>() for obtaining a pointer-to-pointer.
+     * Used throughout ACE to store runner pool pointers and conductor
+     * references in a type-safe manner without virtual dispatch.
+     *
+     * Move and copy are defaulted — the stored pointer is simply transferred.
+     */
     struct cast_ptr {
 
         void* _ptr = nullptr;
@@ -551,7 +561,8 @@ namespace ace {
     typedef std::suspend_always suspend;
 }
 
-// Говно нахуй не нужное, но
-// raider - интерфейсный заместитель таски для множественного ожидания, предзахватывает ресурс future объектов, чтобы его можно было быстро вернуть в объект при отмене
+// NOTE: raider — an interface proxy for a task that enables multiple-wait,
+// pre-captures the future object's resource so it can be quickly returned
+// to the object on cancellation
 
 #endif // ACE_ASYNC_H

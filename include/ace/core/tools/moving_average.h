@@ -1,3 +1,11 @@
+/**
+ * @file moving_average.h
+ * @brief Simple moving-average calculator for runner velocity tracking.
+ *
+ * @details Used by @c ace::core::runner to compute task throughput (tasks
+ * per unit time) over a sliding window.  The balancer uses this metric for
+ * weighted task distribution across runners.
+ */
 #ifndef ACE_MOVING_AVERAGE_H
 #define ACE_MOVING_AVERAGE_H
 
@@ -8,6 +16,14 @@
 
 namespace ace::core::tools {
 
+    /**
+     * @brief Sliding-window moving average calculator.
+     *
+     * @details Maintains a fixed-size window (4 elements) of recent values.
+     * @c add() pushes a new value, evicts the oldest, and returns the updated
+     * average.  @c value() returns the current average (total / window_size).
+     * The window initially contains zeros until filled.
+     */
     struct moving_average {
         static constexpr int window_size = 4;
         long                          _total_sum    { };

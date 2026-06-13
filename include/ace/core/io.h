@@ -1,3 +1,31 @@
+/**
+ * @file io.h
+ * @brief Asynchronous I/O abstraction layer built on top of @c io_uring.
+ *
+ * @details This header defines a type-safe, coroutine-friendly I/O framework
+ * that wraps Linux @c io_uring operations.  The key building blocks are:
+ *
+ *  - <b>@c io_entity<T></b> — CRTP base for file-descriptor owners.  Provides
+ *    RAII FD lifecycle (via @c io_guard), move semantics, and async @c close().
+ *  - <b>@c io_query<T></b> — CRTP base for individual I/O requests (read,
+ *    write, close, etc.).  Each query is an awaitable that suspends the caller
+ *    until @c kernel_controller delivers the @c io_uring completion.
+ *  - <b>@c io_link</b> — Higher-level abstraction that combines an FD with
+ *    @c write() / @c read() methods and a polymorphic @c any data payload.
+ *  - <b>@c io_guard</b> — RAII guard that asynchronously closes the FD on
+ *    destruction if still open.
+ *  - <b>@c io_hanged</b> — Fire-and-forget command queue for I/O operations
+ *    that must run even outside a coroutine context (used internally by guards).
+ *  - <b>@c any</b> — Minimal type-erased value holder for carrying custom data
+ *    alongside an FD.
+ *
+ * ### Entity state machine
+ *
+ * @mermaid{ graph LR; Idle[\"invalid (fd=-1)\"]-->Open[\"open\"]; Open-->Closed[\"closed\"]; Closed-->Idle; Open-->Idle; }
+ *
+ * @see ace::core::services::kernel_controller, ace::core::io_entity,
+ *      ace::core::io_link
+ */
 #ifndef ACE_IO_H
 #define ACE_IO_H
 
@@ -9,13 +37,28 @@
 #include "ace/core/services/kernelic.h"
 
 namespace ace::core {
-    // NOTE: Concept to check if type is defined as io_query
+    /**
+     * @brief Concept that checks whether a type implements the I/O query interface.
+     *
+     * @details Satisfied by types that provide a @c setup_query(kernel_observer*)
+     * method, which is called by the @c io_query CRTP base to submit the
+     * operation to @c kernel_controller.
+     *
+     * @tparam query_t  Type to check.
+     */
     template <typename query_t>
     concept is_query = requires(query_t q, services::kernel_observer* kwp) {
         { q.setup_query(kwp) } -> std::same_as<bool>;
     };
 
-    // NOTE: Concept to check if type is defined as io_entity
+    /**
+     * @brief Concept that checks whether a type carries an FD and closed flag.
+     *
+     * @details Satisfied by types that have @c _fd (int) and @c _is_closed
+     * (bool) members — the minimal requirements for an I/O entity.
+     *
+     * @tparam entry_t  Type to check.
+     */
     template <typename entry_t>
     concept is_entity = requires(entry_t q) {
         { q._fd } -> std::same_as<int>;
@@ -23,26 +66,51 @@ namespace ace::core {
     };
 
     /**
-     * @brief An interface to interact with the
-     * @c ace::core::services::kernel_controller via @c co_await operator.
-     * @tparam query_core_t Specific query type.
+     * @brief CRTP base for I/O query types — wraps a single @c io_uring operation.
      *
-     * @warning Does not define @c await_resume(...) logic.
+     * @details Derived types (@c read_query, @c write_query, etc.) provide
+     * a @c setup_query() method that submits the operation to
+     * @c kernel_controller.  The query is an awaitable: @c await_suspend()
+     * registers the caller as a waiter and submits the I/O, while
+     * @c on_result() (called from the kernelic vortex on CQE arrival) stores
+     * the result and re-attaches the waiter.
+     *
+     * @tparam query_core_t  The concrete query type (CRTP).
+     *
+     * @warning Does not define @c await_resume() — derived types must provide it.
      */
     template <typename query_core_t>
     struct io_query;
 
+    /** @brief Awaitable for reading from a file descriptor. @see io_query */
     struct read_query;
 
+    /** @brief Awaitable for writing to a file descriptor. @see io_query */
     struct write_query;
 
+    /** @brief Awaitable for closing a file descriptor. @see io_query */
     struct close_query;
 
     /**
-     * @brief RAII io fd guard
+     * @brief RAII guard that asynchronously closes an FD on destruction.
+     *
+     * @details When the guard goes out of scope, it submits an async close
+     * request to @c kernel_controller via the @c io_hanged mechanism.  If
+     * the current thread is not running a runner, it falls back to scheduling
+     * a close task on the dispatcher.
      */
     struct io_guard;
 
+    /**
+     * @brief Customisation point for converting between I/O entity types.
+     *
+     * @details Specialisations of @c io_caster define how to:
+     *  - @c from_entity() — create the target entity from a source entity
+     *    (extracting FD and closed flag).
+     *  - @c as_link() — cast the entity to a derived @c io_link type.
+     *
+     * @tparam T  Target entity type (specialised by derived types).
+     */
     template <typename>
     struct io_caster {
 
@@ -58,22 +126,51 @@ namespace ace::core {
     };
 
     /**
-     * @brief Handler for a file descriptor with RAII guard behavior.
-     * The io_entity derived types shall represent FD state by providing allowed async operations depending on FD state.
-     * @tparam entity_t Derived entity type
+     * @brief CRTP base for file-descriptor owners with RAII lifecycle.
+     *
+     * @details Derived types represent entities that hold an open file
+     * descriptor.  The base provides:
+     *  - Move semantics (transferring FD ownership).
+     *  - @c extract() — extract FD + closed flag and invalidate the entity.
+     *  - @c close() — async close via @c close_query.
+     *  - @c consume() — static factory that moves FD from a source entity.
+     *  - @c io_guard member — ensures FD is closed on destruction via RAII.
+     *
+     * @tparam entity_t  The concrete derived entity type (CRTP).
      */
     template <typename entity_t>
     struct io_entity;
 
     /**
-     * @brief Encapsulated set of global entities for starting and handling hanged processing
+     * @brief Encapsulated set of global entities for fire-and-forget I/O.
+     *
+     * @details @c io_hanged provides a thread-local pool of @c command objects
+     * that can submit I/O operations without a coroutine context.  Used by
+     * @c io_guard to issue async @c close() even when the current thread is
+     * not running inside @c runner::run().
      */
     struct io_hanged;
 
+    /**
+     * @brief Minimal type-erased value holder for custom data associated with an FD.
+     *
+     * @details Stores a heap-allocated copy of an arbitrary-typed value and
+     * calls the appropriate destructor when released.  Used by @c io_link to
+     * carry user-defined context (e.g., connection metadata) alongside the
+     * file descriptor.
+     */
     class any;
 
     /**
-     * @brief Common interface for io abstractions
+     * @brief Common base for higher-level I/O abstractions.
+     *
+     * @details @c io_link combines an FD with a polymorphic @c output_action()
+     * (write) / @c input_action() (read) interface and a set of convenience
+     * @c write() / @c read() / @c read_vec() / @c read_str() methods.
+     *
+     * Derived types (@c ace::fs::file_link, @c ace::net::io_connection_link)
+     * implement the @c output_action and @c input_action to perform the actual
+     * I/O via @c io_uring or a fallback blocking call.
      */
     class io_link;
 
@@ -134,8 +231,24 @@ public:                                                                         
     ~class() override = default;
 
 
+    /**
+     * @brief Fire-and-forget I/O command system.
+     *
+     * @details Provides a thread-local pool of @c command objects for
+     * dispatching @c io_uring operations outside of coroutine context.
+     * This is used by @c io_guard to close FDs asynchronously even
+     * when the destructor runs outside @c runner::run().
+     */
     struct ace::core::io_hanged {
 
+        /**
+         * @brief A single fire-and-forget I/O command.
+         *
+         * @details Each @c command wraps an @c io_uring operation.  On
+         * completion, @c on_result() calls @c raw_sync() to return the
+         * command to the pool.  Errors are handled by the global
+         * @c fail_cb_handler.
+         */
         struct command : services::kernel_observer {
 
             std::vector<uint8_t> _buffer {};
@@ -183,6 +296,14 @@ public:                                                                         
                 "Query object shall implement 'bool setup_query(ace::core::kernel_waiter*)' method");
         }
 
+        /**
+         * @brief Conductor that stores the waiting task until the I/O operation completes.
+         *
+         * @details Installed into the awaiting coroutine's promise by
+         * @c await_suspend().  @c forward() saves the task, which is later
+         * re-attached by @c on_result().  @c cancel() submits a cancellation
+         * request to @c kernel_controller.
+         */
         struct io_socket_query_conductor : conductor_handler_t {
 
             io_socket_query_conductor() = delete;
@@ -236,6 +357,12 @@ public:                                                                         
     };
 
 
+    /**
+     * @brief Awaitable @c io_uring read query.
+     *
+     * @details Submits @c io_uring_prep_read via @c kernel_controller.
+     * On completion, null-terminates the read buffer.
+     */
     struct ace::core::read_query : io_query<read_query> {
 
         read_query() = delete;
@@ -264,6 +391,11 @@ public:                                                                         
     };
 
 
+    /**
+     * @brief Awaitable @c io_uring write query.
+     *
+     * @details Submits @c io_uring_prep_write via @c kernel_controller.
+     */
     struct ace::core::write_query : io_query<write_query> {
 
         write_query() = delete;
@@ -287,6 +419,11 @@ public:                                                                         
         const uint64_t _offset;
     };
 
+    /**
+     * @brief Awaitable @c io_uring close query.
+     *
+     * @details Submits @c io_uring_prep_close via @c kernel_controller.
+     */
     struct ace::core::close_query : io_query<close_query> {
 
         IMPORT_IO_QUERY_ENV(close_query)
@@ -303,6 +440,14 @@ public:                                                                         
     };
 
 
+    /**
+     * @brief Simple RAII guard that ensures an FD is asynchronously closed.
+     *
+     * @details Constructed with a reference to the FD and closed flag.  On
+     * destruction, if the FD is still valid and not already closed, it
+     * submits an async @c close() via @c io_hanged or falls back to
+     * scheduling a close task on the dispatcher.
+     */
     struct ace::core::io_guard final {
         io_guard() = delete;
         explicit io_guard(const int& fd, const bool& closed)
@@ -335,6 +480,15 @@ public:                                                                         
     };
 
 
+    /**
+     * @brief CRTP base for I/O entities — owners of a file descriptor with RAII lifecycle.
+     *
+     * @details Provides move semantics, @c extract(), async @c close(), and
+     * the @c consume() static factory.  An @c io_guard member ensures the FD
+     * is closed on destruction.
+     *
+     * @tparam entity_t  Derived entity type.
+     */
     template <typename entity_t>
     struct ace::core::io_entity {
 
@@ -408,6 +562,14 @@ public:                                                                         
     };
 
 
+    /**
+     * @brief Type-erased heap-allocated value holder.
+     *
+     * @details Stores an arbitrary copy-constructible value on the heap and
+     * destroys it when the @c any goes out of scope.  Supports move semantics
+     * and explicit @c release() to drop the managed value without destroying
+     * the @c any itself.
+     */
     class ace::core::any {
 
         void* _data = nullptr;
@@ -449,6 +611,14 @@ public:                                                                         
     };
 
 
+    /**
+     * @brief Common base for higher-level I/O abstractions.
+     *
+     * @details Owns an FD and an optional @c any data payload.  Provides
+     * @c writeln(), @c write(), @c read() (and variants like @c read_vec(),
+     * @c read_str()) as convenience methods.  Derived types implement
+     * @c output_action() and @c input_action() for the actual I/O.
+     */
     class ace::core::io_link {
 
     protected:

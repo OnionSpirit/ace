@@ -1,3 +1,14 @@
+/**
+ * @file fs.h
+ * @brief Asynchronous filesystem I/O — file entities and links on top of the
+ *        ACE I/O framework.
+ *
+ * @details Provides @c ace::fs::file (an @c io_entity for regular files) and
+ * @c ace::fs::file_link (an @c io_link for open files).  File opening is
+ * asynchronous via @c open_query (built on @c io_uring @c io_uring_prep_open).
+ *
+ * @see ace::core::io_entity, ace::core::io_link
+ */
 #ifndef ACE_FS_H
 #define ACE_FS_H
 
@@ -10,13 +21,35 @@
 
 namespace ace::fs {
 
+    /**
+     * @brief @c io_link for open files — async read/write via @c io_uring.
+     *
+     * @details @c output_action() writes via @c io_hanged (fallback to
+     * blocking @c ::write()).  @c input_action() reads via
+     * @c core::read_query.
+     */
     struct file_link;
 
+    /**
+     * @brief @c io_entity representing a regular file.
+     *
+     * @details Stores a @c std::filesystem::path and provides async
+     * @c open() / @c open_rewrite() / @c open_rdonly() / @c open_wronly()
+     * methods.  On successful open, the entity is consumed and produces a
+     * @c file_link.
+     */
     struct file;
 
 }
 
 
+    /**
+     * @brief @c io_link for open files.
+     *
+     * @details Implements @c output_action() via async write through
+     * @c io_hanged::command (with blocking @c ::write() fallback).
+     * @c input_action() uses @c core::read_query for async reads.
+     */
     struct ace::fs::file_link : core::io_link {
 
         IMPORT_IO_LINK_ENV(file_link);
@@ -65,6 +98,14 @@ namespace ace::fs {
     };
 
 
+    /**
+     * @brief @c io_entity for regular files with async open operations.
+     *
+     * @details On construction, the file is in "idle" state (invalid FD).
+     * Calling one of the @c open() variants returns an @c open_query
+     * awaitable; on success, @c await_resume() consumes the entity and
+     * returns a @c file_link ready for I/O.
+     */
     struct ace::fs::file : core::io_entity<file> {
 
         IMPORT_IO_ENTITY_ENV(file);
@@ -74,6 +115,13 @@ namespace ace::fs {
         file(std::filesystem::path path)
             : _path(std::move(path)) {};
 
+        /**
+         * @brief Awaitable query for opening a file via @c io_uring.
+         *
+         * @details Submits @c io_uring_prep_open to @c kernel_controller.
+         * On success, @c await_resume() consumes the @c file entity and
+         * returns a @c file_link.
+         */
         struct open_query : core::io_query<open_query> {
 
             IMPORT_IO_QUERY_ENV(open_query)

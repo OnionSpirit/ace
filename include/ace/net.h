@@ -1,3 +1,41 @@
+/**
+ * @file net.h
+ * @brief Asynchronous network I/O — sockets, listeners, and connections built
+ *        on top of @c io_uring via the ACE I/O framework.
+ *
+ * @details This header provides a type-safe, RAII-based networking stack
+ * where each socket lifecycle stage is represented by a distinct type.  The
+ * state machine prevents misuse at compile time (e.g., you cannot @c send()
+ * on a socket that hasn't been connected).
+ *
+ * ### Entity state machine
+ *
+ * @mermaid{ graph LR; Socket[\"io_socket\"]-->Mapping[\"io_mapping_entity\"]; Mapping-->|bind()|Stream[\"io_stream_mode_entity\"]; Stream-->|listen()|Listener[\"io_listener_entity\"]; Mapping-->|connect()|Transport[\"io_transport_entity&lt;e_indirect&gt;\"]; Transport-->|connect()|Connection[\"io_transport_entity&lt;e_connected&gt;\"]; Listener-->|accept()|Connection; }
+ *
+ * ### Key types (from creation to data transfer)
+ *
+ * | Type | Role |
+ * |---|---|
+ * | @c io_socket<domain,type,proto> | Creates a raw socket — awaitable, produces @c io_mapping_entity |
+ * | @c io_mapping_entity<domain,type> | Ready for @c bind() or @c connect() |
+ * | @c io_stream_mode_entity<domain,type> | After @c bind() — choose @c listen() or @c connect() |
+ * | @c io_listener_entity<domain> | Listening — produces connections via @c accept() |
+ * | @c io_transport_entity<domain,e_indirect> | Bound but not connected — supports @c sendto()/@c recv() |
+ * | @c io_transport_entity<domain,e_connected> | Connected — supports @c send()/@c recv() |
+ * | @c io_connection_link | Higher-level @c io_link for connected sockets (@c write/@c read) |
+ *
+ * ### Convenience aliases
+ *
+ * | Alias | Expansion |
+ * |---|---|
+ * | @c io_socket_tcp | @c io_socket<AF_INET, SOCK_STREAM, IPPROTO_TCP> |
+ * | @c io_socket_udp | @c io_socket<AF_INET, SOCK_DGRAM, IPPROTO_UDP> |
+ * | @c io_listener | @c io_listener_entity<AF_INET> |
+ * | @c io_net_interface | @c io_transport_entity<AF_INET, e_indirect> |
+ * | @c io_connection | @c io_transport_entity<AF_INET, e_connected> |
+ *
+ * @see ace::core::io_entity, ace::core::io_link, ace::core::services::kernel_controller
+ */
 #ifndef ACE_NET_H
 #define ACE_NET_H
 
@@ -95,20 +133,38 @@ namespace ace::net {
     template <int type_v>
     static inline constexpr bool is_stream_type = type_v == SOCK_STREAM;
 
+    /**
+     * @brief Ordered state of a network transport entity.
+     */
     enum transport_entity_state {
         e_indirect = 0,
         e_connected = 1
     };
 
+    /**
+     * @brief Awaitable query for connecting a socket to a remote address.
+     * @tparam entity_t  The source entity type (consumed on resume).
+     * @tparam domain_v  Address family (AF_INET, AF_INET6, etc.).
+     */
     template <typename, int>
     struct connect_query;
 
+    /**
+     * @brief Awaitable query for sending data over a connected socket.
+     */
     struct send_query;
 
 
 // ================================- DECLARATIONS -================================
 
 
+    /**
+     * @brief @c io_link implementation for connected sockets.
+     *
+     * @details Implements @c output_action() via async @c send() (with
+     * fallback to blocking @c ::send()) and @c input_action() via async
+     * @c send_query (which maps to @c io_uring recv).
+     */
     struct io_connection_link;
 
     /**

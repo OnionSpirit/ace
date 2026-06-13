@@ -1,6 +1,17 @@
 /**
- * @file
- * @details This file contains a @b queue classes, that provides atomic queues with eject operations
+ * @file queue.h
+ * @brief Intrusive doubly-linked list queue with slab memory pool and node
+ *        ejection support.
+ *
+ * @details Unlike the lock-free nukes queues, this queue is single-threaded and
+ * designed for use inside a single runner.  Its key feature is @c q_node::remove()
+ * — a node can unlink itself from the queue in O(1) without knowing its position.
+ * This is used by the clock's @c multi_dial for timer cancellation.
+ *
+ * Components:
+ *  - @c q_node<T> — doubly-linked node with in-place storage for @c T.
+ *  - @c slab_mempool<T> — pre-allocated slab allocator for nodes.
+ *  - @c queue<T> — intrusive doubly-linked FIFO queue.
  */
 #ifndef ACE_COMMON_QUEUE_H
 #define ACE_COMMON_QUEUE_H
@@ -13,6 +24,14 @@ namespace ace::core::tools {
     template <typename T>
     class queue;
 
+    /**
+     * @brief Doubly-linked node with in-place aligned storage for @c T.
+     *
+     * @details Each node can unlink itself from its owning queue via
+     * @c remove() — used by the time wheel for O(1) timer cancellation.
+     *
+     * @tparam T  The stored element type.
+     */
     template<typename T>
     struct q_node {
         q_node* prev = nullptr;
@@ -31,6 +50,15 @@ namespace ace::core::tools {
         bool remove() noexcept ;
     };
 
+    /**
+     * @brief Slab-allocated memory pool for @c q_node<T>.
+     *
+     * @details Allocates memory in chunks of 1024 nodes.  Freed nodes are
+     * returned to a free list for reuse.  Not thread-safe — intended for
+     * single-runner use.
+     *
+     * @tparam T  The element type stored in the nodes.
+     */
     template<typename T>
     class slab_mempool {
         q_node<T>* free_head = nullptr;
@@ -89,6 +117,16 @@ namespace ace::core::tools {
         }
     };
 
+    /**
+     * @brief Intrusive doubly-linked FIFO queue with O(1) node ejection.
+     *
+     * @details Nodes are allocated from a @c slab_mempool.  The key feature
+     * is @c remove_node() / @c q_node::remove() — a node can detach itself
+     * mid-queue in O(1), which is essential for timer cancellation in the
+     * time wheel.
+     *
+     * @tparam T  The stored element type.
+     */
     template<typename T>
     class queue {
         q_node<T>* head = nullptr;
@@ -157,7 +195,7 @@ namespace ace::core::tools {
         [[nodiscard]] bool empty() const noexcept { return head == nullptr; }
 
         T dequeue() noexcept {
-            // предполагаем, что очередь не пуста (для perf)
+            // NOTE: Assumes queue is not empty (for performance)
             q_node<T>* node = head;
             T val = std::forward<T>(*node->data());
             remove_node(node);

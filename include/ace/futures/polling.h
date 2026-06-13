@@ -1,3 +1,16 @@
+/**
+ * @file polling.h
+ * @brief Awaitable command that sets the @c _polling flag on the current promise.
+ *
+ * @details A coroutine with @c _polling == true is treated as a low-priority
+ * background task by the runner — it is moved to @c _vortex_pool instead of
+ * the main task pool.  Used internally by vortex services and for user-level
+ * polling coroutines.
+ *
+ * The command never suspends — @c await_suspend() returns @c false.
+ *
+ * @see ace::core::runner::yank(), ace::core::traits::vortex_traits
+ */
 #ifndef ACE_FUTURE_POLLING_H
 #define ACE_FUTURE_POLLING_H
 

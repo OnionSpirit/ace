@@ -1,6 +1,30 @@
 /**
- * @file
- * @details This file contains Channel future declaration
+ * @file channel.h
+ * @brief Lock-free MPMC channel for async message passing between coroutines.
+ *
+ * @details The @c ace::futures::channel<T> is a multi-producer/multi-consumer
+ * message-passing primitive.  Producers push data via @c push() or
+ * @c operator<<; consumers pull via @c pull() (returns an awaitable) or
+ * @c operator>>.  Blocking producers can use @c pending_push() which
+ * suspends until capacity is available.
+ *
+ * ### Allocation policies
+ *
+ * | Policy | Data queue | Waiters queue |
+ * |---|---|---|
+ * | @c e_dynamic (default) | Dynamic (heap-allocating) | Dynamic |
+ * | @c e_static | Bounded, fixed at compile time | Dynamic |
+ *
+ * ### Variants
+ *
+ * | Alias | Description |
+ * |---|---|
+ * | @c channel<T> | Fully dynamic data and waiters |
+ * | @c channel_static<T, N, _> | Static data buffer (N slots) |
+ * | @c channel_dyn<T> | Alias for @c channel<T> |
+ * | @c channel_st<T> | Uses @c std::queue + @c reg_queue (non-lock-free) |
+ *
+ * @see ace::futures::cutex
  */
 #ifndef ACE_FUTURE_CHANNEL_H
 #define ACE_FUTURE_CHANNEL_H
@@ -15,6 +39,9 @@
 
 namespace ace::futures {
 
+    /**
+     * @brief Channel buffer allocation policy.
+     */
     enum class allocation_type {
         e_static,
         e_on_init,
@@ -22,10 +49,15 @@ namespace ace::futures {
     };
 
 /**
- * @details Channel with async call operator @b(co_await) support.
- * @tparam data_t Storable data type.
- * @tparam data_buffer_size_v Size of data buffer
- * @tparam data_allocation_v Data buffer allocation policy
+ * @brief Lock-free MPMC channel with configurable allocation policy.
+ *
+ * @details Supports async @c pull() (returns awaitable) and non-blocking
+ * @c push().  Blocking producers should use @c pending_push() which
+ * suspends until a slot is available.
+ *
+ * @tparam data_t               Storable data type.
+ * @tparam data_buffer_size_v   Bounded data buffer size (for static policy).
+ * @tparam data_allocation_v    Allocation policy: @c e_dynamic, @c e_static, or @c e_on_init.
  */
 template
 <
@@ -135,6 +167,14 @@ public:
     ACE_AWAIT_NODISCARD task operator >> (data_t&& data) { data = std::move(co_await pull()); }
 };
 
+/**
+ * @brief Single-threaded channel backed by @c std::queue (non-lock-free).
+ *
+ * @details Intended for use within a single runner where lock-free guarantees
+ * are not needed.  Uses @c reg_queue for waiters (no dynamic allocation).
+ *
+ * @tparam data_t  Storable data type.
+ */
 template<typename data_t>
 class channel_st {
 

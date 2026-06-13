@@ -1,6 +1,27 @@
 /**
- * @file
- * @details This file contains a @b runner class, that executes and controls passed tasks
+ * @file runner.h
+ * @brief Per-thread task runner — the core execution unit of the ACE runtime.
+ *
+ * @details Each @c runner owns a lock-free MPSC task queue (@c _pool), an
+ * inter-thread insertion queue (@c _interthread_pool), and a vortex service
+ * pool (@c _vortex_pool).  The dispatcher assigns tasks to runners via
+ * @c attach() / @c attach_front().
+ *
+ * ### Execution loop
+ *
+ * @c run() processes up to 128 tasks per call (the @c yank_limit).  Every
+ * 16 tasks it drains the @c _interthread_pool and processes vortex tasks.
+ *
+ * ### Task lifecycle inside a runner
+ *
+ * 1. @c attach()/@c attach_front() — sets @c _runner_pool on the promise
+ *    and enqueues the task.
+ * 2. @c yank() — pops a task, calls @c awake(), and decides whether to
+ *    re-queue, release, or forward via conductor.
+ * 3. @c reattach() — returns a task to its owning runner (used by futures
+ *    to wake a suspended coroutine).
+ *
+ * @see ace::core::dispatcher, ace::core::async
  */
 #ifndef ACE_RUNNER_H
 #define ACE_RUNNER_H
@@ -17,11 +38,15 @@
 namespace ace::core {
 
     /**
-     * @details coroutines execution manager.
-     * @tparam InitialSize Initial size of Pools
-     * @tparam AllocationPolicy Pools allocation policy
-     * @tparam Policies Pools policies, each policy provides independent
-     * pool for coroutines
+     * @brief Per-thread coroutine execution manager.
+     *
+     * @details Owns three task queues:
+     *  - @c _pool — lock-free MPSC queue for local tasks (fast path).
+     *  - @c _interthread_pool — lock-free MPSC queue for cross-thread inserts.
+     *  - @c _vortex_pool — queue for low-priority polling tasks (vortex services).
+     *
+     * Tracks @c _tasks_amount for velocity calculation (used by the balancer
+     * for weighted task distribution).
      */
     struct runner {
 

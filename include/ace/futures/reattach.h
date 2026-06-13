@@ -1,3 +1,23 @@
+/**
+ * @file reattach.h
+ * @brief Awaitable command that migrates the current coroutine to another runner.
+ *
+ * @details @c ace::futures::reattach is @c co_await-ed to transfer the calling
+ * coroutine from its current runner to a specified target runner.  The transfer
+ * occurs via a @c reattach_conductor: the runner forwards the task, and the
+ * conductor calls @c target_runner->attach().
+ *
+ * Usage:
+ * @code{.cpp}
+ * ace::task migrate() {
+ *     auto* target = co_await ace::futures::get_runner{}; // get another runner
+ *     co_await ace::futures::reattach{target};             // move to it
+ *     co_return;
+ * }
+ * @endcode
+ *
+ * @see ace::futures::get_runner, ace::core::runner
+ */
 #ifndef ACE_FUTURE_REATTACH_H
 #define ACE_FUTURE_REATTACH_H
 
@@ -6,6 +26,17 @@
 
 namespace ace::futures {
 
+    /**
+     * @brief Awaitable that migrates the current coroutine to a target runner.
+     *
+     * @details Constructed with either a @c runner* or a @c cast_ptr
+     * (runner pool pointer).  When @c co_await-ed, installs a
+     * @c reattach_conductor into the promise so the current runner forwards
+     * the task to the target runner's queue.
+     *
+     * @note If the target runner is @c nullptr, @c await_ready() returns
+     * @c true (no-op).
+     */
     class ACE_AWAIT_NODISCARD reattach : public core::traits::future_traits<reattach> {
 
         core::runner* _new_runner {};

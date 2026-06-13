@@ -222,8 +222,8 @@ inline thread_local std::chrono::time_point<std::chrono::steady_clock> ace::core
 namespace ace {
 
     /**
-     * @details Checks if any Tasks stored in any of the runners
-     * @return @b true if empty, @b false otherwise
+     * @brief Check whether all runners are empty (no pending tasks).
+     * @return @c true if empty, @c false otherwise.
      */
     [[nodiscard]] inline bool empty() noexcept {
         const auto& self = core::dispatcher::get_instance();
@@ -234,7 +234,9 @@ namespace ace {
     };
 
     /**
-     * @brief Reloads dispatcher configuration
+     * @brief Reload the balancer configuration.
+     * @details Only takes effect when all queues are empty.
+     * @return @c true on success, @c false if queues are not empty.
      */
     inline bool reload() noexcept {
         auto& self = core::dispatcher::get_instance();
@@ -249,10 +251,12 @@ namespace ace {
     }
 
     /**
-     * @brief Function to schedule task at the dispatcher
-     * @param new_task Task to be pushed into the dispatcher
-     * @param rnr Specific runner to schedule on
-     * @return void
+     * @brief Schedule a task for execution.
+     * @details Distributes the task to a runner — round-robin when no
+     * specific runner is given, with probability-based weighted selection
+     * when runners have non-zero velocity.
+     * @param new_task  Task to schedule.
+     * @param rnr       Target runner (nullptr = auto-select).
      */
     inline void schedule(task &&new_task, core::runner *rnr) noexcept {
         new_task._coroutine.promise()._roaming = true;
@@ -293,7 +297,9 @@ namespace ace {
     }
 
     /**
-     * @details Resumes all tasks from the ready task pool until it is empty.
+     * @brief Execute all scheduled tasks — blocks until the queue is empty.
+     * @details Launches worker threads for runners 1..N-1, runs runner 0
+     * on the calling thread, and polls until all runners report no tasks.
      */
     inline void run() noexcept {
 
@@ -328,16 +334,25 @@ namespace ace {
         } while (not empty());
     }
 
+    /**
+     * @brief Drain the signal pipe, discarding all pending signals.
+     */
     inline void reset_signal() {
         std::unique_ptr<core::signal_handler> sgl;
         while (not core::dispatcher::get_sig_pipe().pop(sgl) and not core::dispatcher::get_sig_pipe().empty())
             sgl.reset();
     }
 
+    /**
+     * @brief Send an interruption signal to all vortex services.
+     */
     inline void interrupt() {
         core::dispatcher::get_sig_pipe().push(ace::core::make_signal(ace::core::interruption_signal{}));
     }
 
+    /**
+     * @brief Send a termination signal to all vortex services.
+     */
     inline void terminate() {
         core::dispatcher::get_sig_pipe().push(ace::core::make_signal(ace::core::termination_signal{}));
     }

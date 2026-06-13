@@ -37,6 +37,22 @@
 
 namespace ace::core {
 
+
+    /**
+     * @brief Lifecycle state of a coroutine promise.
+     *
+     * @details The runner inspects this value after each call to @c awake() to
+     * decide what to do with the coroutine frame next.
+     */
+    enum promise_lifecycle : uint32_t  {
+        e_failed,               ///< Coroutine terminated via unhandled exception.
+        e_inited,               ///< Coroutine was just created; runner pool not yet assigned.
+        e_executed,             ///< Coroutine is suspended normally (awaiting a future).
+        e_executed_with_value,  ///< Coroutine yielded a value and is suspended.
+        e_finished,             ///< Coroutine reached @c co_return successfully.
+        e_detached,             ///< Coroutine was cancelled and should be dropped.
+    };
+
     /**
      * @brief Intrusive reference-counted control block for a coroutine promise.
      *
@@ -54,7 +70,8 @@ namespace ace::core {
         uint64_t _weak_refcount {1};                                      ///< Number of watchers (handles). Initial value: 1 (the block itself).
         uint64_t _strong_refcount {1};                                    ///< Number of owners (always the coroutine frame). Initial value: 1.
         traits::control_conductor_handle* _control_conductor { nullptr }; ///< Optional conductor for external join/cancel; set by @c setup_control_block().
-        std::size_t _frame_size {1};                                      ///< Coroutine frame size, including control block. Non-zero value means stack is exist, 0 otherwise
+        uint32_t _frame_size {1};                                         ///< Coroutine frame size, including control block. Non-zero value means stack is exist, 0 otherwise
+        promise_lifecycle _status { e_inited };                           ///< Flag that shows that Coroutines completed without cancellation
 
         control_block() = default;
 

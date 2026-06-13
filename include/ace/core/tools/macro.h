@@ -48,4 +48,12 @@ typedef struct {} ACE_EMPTY_TYPE;
 
 #define ACE_INCOMPATIBLE_COMPOSE_ERROR "Receiver's (Right Operand) input does not compatible with Sender's (Left Operand) return type"
 
+#if defined(__GNUC__) || defined(__clang__)
+#define ACE_INLINE inline __attribute__((always_inline))
+#elif defined(_MSC_VER)
+#define ACE_INLINE __forceinline
+#else
+#define ACE_INLINE inline
+#endif
+
 #endif // ACE_COMMON_TERMS_H

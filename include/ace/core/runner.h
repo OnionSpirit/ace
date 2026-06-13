@@ -344,7 +344,7 @@ namespace ace::core {
 
     inline bool runner::yank() noexcept {
 
-        promise_touch_result touch_result = e_executed;
+        promise_lifecycle touch_result = e_executed;
         pool_node_ptr task_node = _pool.pop_node();
 
         // NOTE: Pulling from interthread pool if task is empty
@@ -397,7 +397,7 @@ namespace ace::core {
 
     inline bool runner::yank_vortex() noexcept {
 
-        promise_touch_result touch_result = e_executed;
+        promise_lifecycle touch_result = e_executed;
         pool_node_ptr vortex_node = _vortex_pool.pop_node();
 
         // NOTE: If node is empty breaking

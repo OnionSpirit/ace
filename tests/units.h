@@ -11,8 +11,11 @@
 #include <ace/futures/channel.h>
 #include <ace/futures/timeout.h>
 #include <ace/futures/cutex.h>
+#include <ace/core/tools/lifetime.h>
 #include <ace/console.h>
 #include <ace/net.h>
+
+namespace tool = ace::core::tools;
 
 struct once_suspend : ace::core::traits::busy_future_traits<once_suspend> {
 
@@ -143,33 +146,22 @@ inline ace::task join_spawner(ace::futures::channel_dyn<ace::core::runner*>& out
     else ace::console::println("'spawned' broken!!!");
 }
 
-struct lifetime_watchdog {
-
-    std::string _name;
-
-    explicit lifetime_watchdog(const std::string_view name) : _name(name) {
-        ace::console::println("{} constructed", _name);
-    };
-
-    ~lifetime_watchdog() { ace::console::println("{} destroyed", _name); }
-};
-
 inline ace::promise<> to_spawn_nested(ace::futures::channel_dyn<ace::core::runner*>& output) {
-    const auto _check = std::make_unique<lifetime_watchdog>("'parallel-nested'");
+    const auto wd = tool::lifetime("'parallel-nested'");
     ace::console::print("'parallel-nested' started\n");
     co_await ace::futures::timeout(1000ms);
     output << co_await ace::get_runner();
-    ace::console::println("{} finished", _check->_name);
+    ace::console::println("{} finished", wd.mark());
     co_return;
 }
 
 inline ace::task to_spawn_cancel(ace::futures::channel_dyn<ace::core::runner*>& output) {
-    const auto _check = std::make_unique<lifetime_watchdog>("'parallel'");
+    const auto wd = tool::lifetime("'parallel'");
     ace::console::print("'parallel' started\n");
     co_await to_spawn_nested(output);
     co_await ace::futures::timeout(1000ms);
     output << co_await ace::get_runner();
-    ace::console::println("{} finished", _check->_name);
+    ace::console::println("{} finished", wd.mark());
     co_return;
 }
 
@@ -202,6 +194,8 @@ inline ace::task racer(const int& max, std::string& shared_counter, ace::cutex& 
         co_await crx.capture();
         shared_counter = std::to_string(std::stoi(shared_counter) + 1);
         crx.sync();
+        // NOTE: sync twice to check no-op state
+        crx.sync();
     }
     co_await crx.capture();
     ace::console::println("'racer' finished");
@@ -216,23 +210,23 @@ ace::task sleeper(std::chrono::duration<Rep, Period> wait_time) {
 
 inline ace::task cutex_parallel(ace::futures::channel_dyn<ace::core::runner*>& output, ace::cutex& cut) {
     ace::console::println("'cutex_parallel' started");
-    const auto _check = std::make_unique<lifetime_watchdog>("'cutex_parallel'");
+    const auto wd = tool::lifetime("'cutex_parallel'");
     ace::guard crx(cut);
     co_await crx.capture();
     co_await ace::futures::timeout(50ms);
     output << co_await ace::get_runner();
-    ace::console::println("{} finished", _check->_name);
+    ace::console::println("{} finished", wd.mark());
 }
 
 inline ace::task cutex_carry(ace::futures::channel_dyn<ace::core::runner*>& output, ace::cutex& cut) {
     ace::console::println("'cutex_carry' started");
-    const auto _check = std::make_unique<lifetime_watchdog>("'cutex_carry'");
+    const auto wd = tool::lifetime("'cutex_carry'");
     ace::guard crx(cut);
     co_await crx.capture();
     ace::console::println("'cutex_carry' captured cutex");
     co_await ace::futures::timeout(100ms);
     output << co_await ace::get_runner();
-    ace::console::println("{} finished", _check->_name);
+    ace::console::println("{} finished", wd.mark());
 }
 
 inline ace::task cutex_checker(ace::futures::channel_dyn<ace::core::runner*>& output, ace::cutex& cut) {
@@ -500,10 +494,10 @@ inline ace::task composed_output(ace::futures::channel_dyn<int>& ch) {
 }
 
 inline ace::promise<int> wait_timer() {
-    const auto check = lifetime_watchdog("some_promise");
+    const auto wd = tool::lifetime("some_promise");
     ace::console::println("some_promise working...");
     co_await ace::futures::timeout(5ms);
-    ace::console::println("some_promise finished working");
+    ace::console::println("{} finished", wd.mark());
     co_return 1;
 }
 

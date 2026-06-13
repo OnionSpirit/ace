@@ -275,7 +275,7 @@ namespace ace::core {
                     handle.promise()._runner_conductor->cancel();
                     handle.promise()._runner_conductor.release();
                 }
-                handle.promise()._status = e_detached;
+                handle.promise().status(e_detached);
             }
 
             bool forward(void* undefined_waiter) noexcept override {
@@ -344,7 +344,7 @@ namespace ace::core {
              * @details Sets status to @c e_failed and prints the error.
              */
             void unhandled_exception() {
-                _status = e_failed;
+                status(e_failed);
                 interrupt("Unhandled exception.");
             }
 
@@ -459,7 +459,7 @@ namespace ace::core {
             if (not _coroutine.promise()._runner)
                 _coroutine.promise()._runner = outer.promise()._runner;
             // NOTE: Extra call of await_ready fore differed async because it was skipped by idle runner pool ptr
-            if (_coroutine.promise()._status == e_inited)
+            if (_coroutine.promise().status() == e_inited)
                 if (await_ready()) return false;
             // NOTE: No extra checks needed, because function would be called once before suspending.
             // NOTE: Just coping conductor ptr. Outer task will destroy conductor before current promise stack
@@ -495,13 +495,13 @@ namespace ace::core {
          * @return The return value of the coroutine (only meaningful for
          *         non-@c void types after @c e_finished).
          */
-        returnT awake(promise_touch_result *const _res = nullptr) noexcept {
+        returnT awake(promise_lifecycle *const _res = nullptr) noexcept {
             // NOTE: Checking if promise is ready
             const bool is_ready {
                 is_exist()
-                and _coroutine.promise()._status not_eq e_failed
-                and _coroutine.promise()._status not_eq e_finished
-                and _coroutine.promise()._status not_eq e_detached
+                and _coroutine.promise().status() not_eq e_failed
+                and _coroutine.promise().status() not_eq e_finished
+                and _coroutine.promise().status() not_eq e_detached
                 and is_resumable()
             };
             // NOTE: Releasing future and resume async
@@ -511,7 +511,7 @@ namespace ace::core {
             }
             // NOTE: For user provided touch result ptr
             if (_res != nullptr) [[likely]]
-                *_res = _coroutine.promise()._status;
+                *_res = _coroutine.promise().status();
             if constexpr (not std::same_as<void, returnT>)
                 return this->_coroutine.promise()._return_value;
             else return;

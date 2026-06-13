@@ -35,21 +35,6 @@
 
 namespace ace::core {
 
-    /**
-     * @brief Lifecycle state of a coroutine promise.
-     *
-     * @details The runner inspects this value after each call to @c awake() to
-     * decide what to do with the coroutine frame next.
-     */
-    enum promise_touch_result : uint8_t  {
-        e_failed,               ///< Coroutine terminated via unhandled exception.
-        e_inited,               ///< Coroutine was just created; runner pool not yet assigned.
-        e_executed,             ///< Coroutine is suspended normally (awaiting a future).
-        e_executed_with_value,  ///< Coroutine yielded a value and is suspended.
-        e_finished,             ///< Coroutine reached @c co_return successfully.
-        e_detached,             ///< Coroutine was cancelled and should be dropped.
-    };
-
     /// @brief CRTP tag base for promise suspension policy types.
     struct promise_rule_traits { struct e_promise_rule {}; };
 
@@ -111,9 +96,13 @@ namespace ace::core::traits {
 
         alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
 
-        alignas(ACE_BUS_SIZE) returnT _return_value {};                           ///< Storage for the value produced by @c co_return.
+        alignas(ACE_BUS_SIZE) returnT _return_value {};                          ///< Storage for the value produced by @c co_return.
 
-        alignas(ACE_BUS_SIZE) promise_touch_result _status { e_inited };          ///< Current lifecycle state.
+    protected:
+
+        alignas(ACE_BUS_SIZE) promise_lifecycle _status { e_inited };           ///< Current lifecycle state.
+
+    public:
 
         /**
          * @brief Called by the coroutine machinery when @c co_return expr is executed.
@@ -123,7 +112,7 @@ namespace ace::core::traits {
          */
         auto return_value(returnT return_value) {
             _return_value = std::forward<std::remove_reference_t<returnT>>(return_value);
-            _derived->_status = promise_touch_result::e_finished;
+            _derived->status(e_finished);
             return std::suspend_never{};
         }
 
@@ -135,7 +124,7 @@ namespace ace::core::traits {
          * @return @c std::suspend_always — suspends after yielding.
          */
         auto yield_value(returnT yield_value) {
-            _derived->_status = promise_touch_result::e_executed_with_value;
+            _derived->status(e_executed_with_value);
             _return_value = yield_value;
             return std::suspend_always{};
         }
@@ -153,7 +142,11 @@ namespace ace::core::traits {
 
         alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
 
-        alignas(ACE_BUS_SIZE) promise_touch_result _status { e_inited };          ///< Current lifecycle state.
+    protected:
+
+        alignas(ACE_BUS_SIZE) promise_lifecycle _status { e_inited };           ///< Current lifecycle state.
+
+    public:
 
         /**
          * @brief Called by the coroutine machinery when @c co_return (no value) is executed.
@@ -193,9 +186,16 @@ namespace ace::core::traits {
         typedef future_handle* future_handler_ptr_t; ///< Pointer type for the currently awaited busy future.
 
         typedef promise_return_traits<promise_traits, return_t> promise_return_traits_t;
-        using promise_return_traits_t::_status;
 
         promise_traits() = default;
+
+        promise_lifecycle status() { return promise_return_traits_t::_status; }
+
+        promise_lifecycle status(const promise_lifecycle status) {
+            promise_return_traits_t::_status = status;
+            if (_block) _block->_status = status;
+            return status;
+        }
 
         /**
          * @brief Destructor.  Releases the tracing ID if one was allocated.
@@ -213,7 +213,7 @@ namespace ace::core::traits {
          * @return The same @c std::suspend_always value.
          */
         std::suspend_always await_transform(const std::suspend_always& e) {
-            _status = e_executed;
+            status(e_executed);
             _busy_future = nullptr;
             return e;
         }
@@ -224,7 +224,7 @@ namespace ace::core::traits {
          * @return The same @c std::suspend_never value.
          */
         std::suspend_never await_transform(const std::suspend_never& e) {
-            _status = e_executed;
+            status(e_executed);
             _busy_future = nullptr;
             return e;
         }
@@ -240,7 +240,7 @@ namespace ace::core::traits {
         template <typename futureT>
         requires meta::is_future_accurate<std::remove_reference_t<futureT>, derived_t>
         futureT& await_transform(futureT& future) {
-            _status = e_executed;
+            status(e_executed);
             _busy_future = nullptr;
             return future;
         }
@@ -254,7 +254,7 @@ namespace ace::core::traits {
         template <typename futureT>
         requires meta::is_future_accurate<std::remove_reference_t<futureT>, derived_t>
         futureT&& await_transform(futureT&& future) {
-            _status = e_executed;
+            status(e_executed);
             _busy_future = nullptr;
             return future;
         }
@@ -270,7 +270,7 @@ namespace ace::core::traits {
         template <typename futureT>
         requires meta::is_busy_future_accurate<std::remove_reference_t<futureT>, derived_t>
         futureT& await_transform(futureT& future) {
-            _status = e_executed;
+            status(e_executed);
             _busy_future = &future;
             return future;
         }
@@ -284,7 +284,7 @@ namespace ace::core::traits {
         template <typename futureT>
         requires meta::is_busy_future_accurate<std::remove_reference_t<futureT>, derived_t>
         futureT&& await_transform(futureT&& future) {
-            _status = e_executed;
+            status(e_executed);
             _busy_future = &future;
             return std::forward<futureT>(future);
         }
@@ -338,7 +338,7 @@ namespace ace::core::traits {
 #define IMPORT_PROMISE_TRAITS_ENV               \
     using promise_traits_t::_busy_future;       \
     using promise_traits_t::_block;             \
-    using promise_traits_t::_status;
+    using promise_traits_t::status;
 
 }
 

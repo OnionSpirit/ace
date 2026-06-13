@@ -19,6 +19,8 @@
   - [Futures and Synchronization](#4-futures-and-synchronization)
   - [Time Wheel Scheduler](#5-time-wheel-scheduler)
   - [Control Blocks](#6-control-blocks-and-external-handles)
+  - [Async I/O](#7-async-io--filesystem-networking-console)
+  - [Task Control](#8-task-control--roaming-reattach-polling)
 - [Quickstart](#quickstart)
 - [Examples](#examples)
 - [Configuration](#configuration)
@@ -33,73 +35,92 @@
 |------------------------------|-------------------------------------------------------------|
 | **Header-only**              | Zero compilation overhead — just `#include "ace/ace.h"`     |
 | **Lazy & eager coroutines**  | `ace::async<T>` (lazy) and `ace::promise<T>` (eager)        |
-| **Multi-threaded scheduler** | Work-stealing balancer with configurable runner count       |
-| **Lock-free channels**       | MPMC message passing with static / dynamic allocation       |
+| **Multi-threaded scheduler** | Probability-weighted balancer with configurable runner count |
+| **Lock-free channels**       | MPMC / MPSC message passing with static, dynamic, or hybrid allocation |
 | **Cooperative mutex (cutex)** | Userspace mutex with zero kernel involvement on fast path  |
-| **Time-wheel timeouts**      | O(1) insert/remove — hierarchical multi-dial wheel          |
-| **Task cancellation**        | External `async_handle` with join / cancel / done           |
-| **io_uring integration**     | Async read / write / network via Linux `io_uring`           |
+| **Time-wheel timeouts**      | O(1) insert/remove — hierarchical multi-dial wheel (up to ~4.6h range) |
+| **Future composition**       | Logical AND/OR combinators + monadic pipe (`operator>>`)    |
+| **Task control**             | External `async_handle` (join/cancel/done), roaming, reattach, polling |
+| **Async I/O (io_uring)**     | File, socket, console I/O — read/write/send/recv/accept via Linux `io_uring` |
+| **Background services**      | Vortex pattern — clock (timers), kernelic (io_uring polling) |
 
 ---
 
 ## Architecture Overview
 
 ### Files overview
-| Directory        | Content description                                  |
-|------------------|------------------------------------------------------|
-| **core**         | Core framework tools                                 |
-| **core/misc**    | Helpers and basic tools for the framework mechanisms |
-| **core/modules** | Vortex singletons for non-busy polling operations    |
-| **core/traits**  | Traits to define framework compatible units          |
-| **futures**      | Various future objects                               |
+| Directory           | Content description                                        |
+|---------------------|------------------------------------------------------------|
+| **core**            | Runtime engine: `runner`, `dispatcher`, `async`, `compose` |
+| **core/tools**      | Utilities: `queue`, `macro`, `moving_average`, `id_alloc`  |
+| **core/services**   | Vortex background services: `clock` (time wheel), `kernelic` (io_uring) |
+| **core/traits**     | Traits to define framework-compatible units: `future`, `promise`, `conduction`, `vortex` |
+| **futures**         | Synchronization & commands: `channel`, `cutex`, `timeout`, `spawn`, `post`, `reattach`, `roaming`, `polling`, `get_runner` |
+| **ace/ (top-level)**| Public API: `ace.h`, I/O: `io.h`, FS: `fs.h`, Net: `net.h`, Console: `console.h` |
 
 ```mermaid
 graph TB
     subgraph User["User Code"]
-        UC["ace::async(T) coroutine"]
+        UC["ace::async(T)\nace::promise(T)"]
     end
 
     subgraph API["Public API — ace::"]
         SCH["ace::schedule()"]
-        SPN["ace::spawn()"]
+        SPN["ace::spawn()\nace::post()"]
         RUN["ace::run()"]
     end
 
     subgraph Core["Core Runtime"]
         DSP["dispatcher\nsingleton"]
-        BAL["balancer\nmulti-thread"]
         R0["runner 0\nmain thread"]
         R1["runner 1\nworker"]
         RN["runner N\nworker"]
     end
 
-    subgraph Futures["Futures and Synchronization"]
+    subgraph Futures["Futures & Synchronization"]
         TO["timeout / expire"]
         CH["channel(T)"]
         CX["cutex mutex"]
         AH["async_handle\njoin / cancel"]
+        CO["or_await / and_await\noperator>>"]
     end
 
-    subgraph Services["Background Services"]
-        CLK["clock\ntime-wheel vortex"]
-        IO["kernelic\nio_uring vortex"]
+    subgraph Commands["Task Commands"]
+        RM["roaming / polling"]
+        RA["reattach"]
+        GR["get_runner"]
+    end
+
+    subgraph Services["Background Vortex Services"]
+        CLK["clock\ntime wheel"]
+        IO["kernelic\nio_uring"]
+    end
+
+    subgraph IO_Layer["Async I/O Layer"]
+        FS["ace::fs::file\nasync open/read/write"]
+        NET["ace::net::*\nsocket/accept/send/recv"]
+        CON["ace::console\nstdin/stdout"]
     end
 
     UC --> SCH
     UC --> SPN
     SCH --> DSP
     SPN --> R0
-    DSP --> BAL
-    BAL --> R0
-    BAL --> R1
-    BAL --> RN
+    DSP --> R0
+    DSP --> R1
+    DSP --> RN
     R0 -->|co_await timeout| CLK
     R0 -->|co_await channel| CH
     R0 -->|co_await cutex| CX
     R0 -->|co_await spawn| AH
+    R0 -->|co_await reattach| RA
+    R0 -->|co_await roaming| RM
     CLK -->|timer expired| R0
     CH -->|data available| R0
     CX -->|mutex released| R0
+    IO -->|CQE ready| R0
+    FS -->|io_uring| IO
+    NET -->|io_uring| IO
     RUN --> DSP
 ```
 
@@ -353,6 +374,40 @@ ace::task parent() {
 
 ---
 
+#### Future Composition — AND / OR / Pipe
+
+ACE provides overloaded `operator and` and `operator or` for combining futures, plus a monadic pipe (`operator>>`).
+
+```cpp
+ace::task race_example() {
+    auto t1 = co_await ace::spawn(compute(3));
+    auto t2 = co_await ace::spawn(compute(7));
+
+    // Race: await whichever finishes first
+    auto result = co_await (t1.join() or t2.join());
+    // result is a std::variant<bool, bool> (type depends on operands)
+
+    co_return;
+}
+
+ace::task and_example() {
+    // Await both, collect results as tuple
+    auto [a, b] = co_await (
+        ace::futures::timeout(10ms) and
+        ace::futures::timeout(20ms)
+    );
+    co_return;
+}
+
+ace::task pipe_example() {
+    // Monadic pipe: result of left flows into right
+    co_await (compute(5) >> another_task);
+    co_return;
+}
+```
+
+---
+
 ### 5. Time Wheel Scheduler
 
 ACE uses a **hierarchical multi-dial time wheel** for O(1) timer insert and release. Each wheel level has 256 slots; finer wheels cascade into coarser ones.
@@ -426,6 +481,130 @@ Memory layout of a coroutine frame:
 └────────────────────────────────────┴──────────────────────┴─────────────────────┘
  ▲                                    ▲
  get_block_from_address(addr)         address returned by operator new
+```
+
+---
+
+### 7. Async I/O — Filesystem, Networking, Console
+
+ACE provides a layered async I/O stack built on top of `io_uring`:
+
+| Layer | Header | Key types |
+|---|---|---|
+| Raw io_uring | `ace/core/services/kernelic.h` | `kernel_controller`, `kernel_observer` |
+| I/O abstractions | `ace/core/io.h` | `io_entity<T>`, `io_link`, `io_query<T>` |
+| Filesystem | `ace/fs.h` | `ace::fs::file`, `ace::fs::file_link` |
+| Networking | `ace/net.h` | `io_socket`, `io_listener`, `io_connection` |
+| Console | `ace/console.h` | `ace::console` |
+
+#### Filesystem
+
+```cpp
+#include "ace/fs.h"
+
+ace::task read_file() {
+    ace::fs::file f{"/tmp/data.txt"};
+
+    // Open asynchronously — consumes the file, returns a file_link
+    auto link = co_await f.open_rdonly();
+
+    // Read entire file as string
+    auto data = co_await link.read_str();
+    if (data) {
+        std::cout << *data << std::endl;
+    }
+    co_return;
+}
+```
+
+#### Networking (TCP echo server)
+
+```cpp
+#include "ace/net.h"
+
+ace::task echo_server() {
+    // Create TCP socket → bind → listen
+    auto listener = co_await (
+        ace::net::io_socket_tcp{} >>
+        [](auto sock) -> ace::task {
+            co_return co_await sock.bind("0.0.0.0", 8080);
+        }
+    );
+
+    while (true) {
+        // Accept incoming connection
+        auto conn = co_await listener.accept();
+
+        // Convert to io_connection_link for read/write
+        auto link = ace::net::io_connection_link::consume(conn);
+
+        // Spawn handler for this connection
+        co_await ace::spawn([link = std::move(link)]() -> ace::task {
+            auto data = co_await link.read_str();
+            if (data) link.writeln(*data);
+            co_return;
+        }());
+    }
+    co_return;
+}
+```
+
+#### Console
+
+```cpp
+#include "ace/console.h"
+
+ace::task interactive() {
+    while (true) {
+        ace::console::print("> ");
+        auto input = co_await ace::console::input();
+        if (not input) break;
+        ace::console::println("echo: {}", *input);
+    }
+    co_return;
+}
+```
+
+---
+
+### 8. Task Control — Roaming, Reattach, Polling
+
+ACE provides awaitable commands that control how a coroutine interacts with the scheduler at runtime — without suspending the coroutine.
+
+#### Roaming — control cross-runner migration
+
+```cpp
+ace::task pinned_task() {
+    co_await ace::futures::roaming{false};  // pin to current runner
+    // ... CPU-local work ...
+    co_await ace::futures::roaming{true};   // allow migration again
+    co_return;
+}
+```
+
+#### Reattach — migrate to another runner
+
+```cpp
+ace::task migrate() {
+    auto* target_runner = co_await ace::futures::get_runner{};
+    // do work on current runner...
+    co_await ace::futures::reattach{target_runner};
+    // now executing on target_runner
+    co_return;
+}
+```
+
+#### Polling — mark as low-priority background task
+
+```cpp
+ace::task background_worker() {
+    co_await ace::futures::polling{true};  // moved to vortex_pool
+    while (not done) {
+        do_background_work();
+        co_await ace::suspend();
+    }
+    co_return;
+}
 ```
 
 ---
@@ -642,9 +821,13 @@ int main() {
 ### Runner count
 
 ```cpp
-ace::core::s_balancer_config._runners_amount = std::thread::hardware_concurrency();
+ace::core::s_dispatcher_config._runners_amount = std::thread::hardware_concurrency();
 ace::reload();   // must be called when the queue is empty
 ```
+
+### Task distribution mode
+
+When `_runners_amount > 1`, the dispatcher uses probability-weighted selection based on per-runner velocity (tasks/sec).  Runners with lower velocity are more likely to receive new tasks.
 
 ### Cutex rescheduling mode
 
@@ -714,22 +897,45 @@ Open `docs/doxygen/html/index.html` in a browser.
 ### Namespace map
 
 | Namespace | Contents |
-|---|---|
-| `ace` | Public aliases: `async<T>`, `promise<T>`, `cutex`, `guard`; free functions: `schedule()`, `spawn()`, `run()`, `reload()`, `interrupt()`, `terminate()` |
-| `ace::coroutines` | Internal coroutine machinery: `context<>`, `promise_traits`, `control_block`, conductors |
-| `ace::futures` | Synchronization primitives: `channel`, `cutex_future`, `timeout`, `expire`, `async_handle`, `join_handler` |
-| `ace::commands` | Awaitable commands: `spawn`, `reattach`, `roaming`, `get_runner` |
-| `ace::core` | Runtime engine: `dispatcher`, `balancer`, `runner`, `clock`, `vortex_traits` |
-| `ace::common` | Utilities: `queue`, `slab_mempool`, dispatch concepts |
+|---|---|---|
+| `ace` | Public aliases: `async<T>`, `promise<T>`, `task`, `cutex`, `guard`; free functions: `schedule()`, `spawn()`, `post()`, `run()`, `reload()`, `interrupt()`, `terminate()`, `empty()`, `reset_signal()` |
+| `ace::core` | Runtime engine: `async<T,R>`, `dispatcher`, `runner`, `control_block`, `control_block_handle`, `cast_ptr`; I/O base types: `io_entity`, `io_link`, `io_query`, `any` |
+| `ace::core::traits` | Trait bases: `future_traits`, `busy_future_traits`, `promise_traits`, `promise_return_traits`, `runner_conductor_handle`, `control_conductor_handle`, `conductor_slot`, `vortex_traits` |
+| `ace::core::services` | Vortex services: `clock` (multi_dial time wheel), `kernel_controller` (io_uring) |
+| `ace::core::tools` | Utilities: `queue`, `q_node`, `slab_mempool`, `moving_average`, `id_allocator`, `lifetime` |
+| `ace::core::meta` | Dispatch concepts: `is_future`, `is_busy_future`, `is_awaitable`, `is_any_future_accurate`; meta-programming: `resume_type`, `replace_type`, `unique_tuple_t`, `tuple_to_variant_t` |
+| `ace::futures` | Synchronization & commands: `channel<T>`, `channel_static<T,N,_>`, `cutex_future`, `cutex`, `timeout`, `expire`, `spawn`, `post`, `async_handle`, `join_handler`, `reattach`, `roaming`, `polling`, `get_runner` |
+| `ace::fs` | Async filesystem: `file` (io_entity), `file_link` (io_link) |
+| `ace::net` | Async networking: `io_socket`, `io_mapping_entity`, `io_stream_mode_entity`, `io_listener_entity`, `io_transport_entity`, `io_connection_link` |
+| `ace::console` | Async console: `console` — stdin/stdout over `io_uring` |
 
 ### Key free functions (`namespace ace`)
 
 ```cpp
+// --- Task lifecycle ---
+
 // Schedule task on the global dispatcher (marks task as roaming)
 void schedule(task&& task, const core::runner* rnr = nullptr);
 
 // Spawn a parallel task pinned to the current runner (must be co_awaited)
-commands::spawn spawn(task&& task);
+futures::spawn spawn(task&& task);
+
+// Post a parallel task to the front of the current runner's queue
+futures::post post(task&& task);
+
+// Migrate the calling coroutine to a different runner
+futures::reattach reattach(core::runner* target);
+
+// Enable/disable cross-runner migration for the current task
+futures::roaming roaming(bool is_roaming = true);
+
+// Mark/unmark the current task as a low-priority polling task
+futures::polling polling(bool is_polling = true);
+
+// Retrieve a pointer to the current runner
+futures::get_runner get_runner();
+
+// --- Runtime control ---
 
 // Returns true when all runners are empty
 bool empty();
@@ -737,11 +943,11 @@ bool empty();
 // Process all scheduled tasks — blocks until the queue is empty
 void run();
 
-// Reload balancer configuration (only effective when empty() == true)
-void reload();
+// Reload dispatcher configuration (only effective when empty() == true)
+bool reload();
 
 // Send signals to the running dispatcher
-void interrupt();    // pause execution loop
+void interrupt();    // pause execution loop (vortex services)
 void terminate();    // stop execution loop
 void reset_signal(); // clear pending signals
 ```

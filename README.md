@@ -1,6 +1,6 @@
 # ACE — Async Concurrent Execution
 
-**ACE** is a header-only C++23 coroutine-based concurrency framework that provides a production-grade async runtime with multi-threaded scheduling, lock-free synchronization primitives, and high-performance I/O integration via `io_uring`.
+**ACE** is a C++23 coroutine-based concurrency framework that provides a production-grade async runtime with multi-threaded scheduling, lock-free synchronization primitives, and high-performance I/O integration via `io_uring`.
 
 > **Version:** 0.9.9 &nbsp;|&nbsp; **Language:** C++23
 

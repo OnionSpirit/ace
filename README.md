@@ -304,10 +304,10 @@ stateDiagram-v2
     direction LR
     [*] --> Unlocked
 
-    Unlocked --> Locked : "try_lock()\n(fetch_add == 0)"
-    Locked --> Unlocked : "sync()\n(fetch_sub + notify)"
-    Locked --> WaiterQueue : "try_lock() fails\n(conductor installed)"
-    WaiterQueue --> Locked : "notify()\n(runner::reattach)"
+    Unlocked --> Locked : try_lock (fetch_add == 0)
+    Locked --> Unlocked : sync (fetch_sub + notify)
+    Locked --> WaiterQueue : try_lock fails (conductor)
+    WaiterQueue --> Locked : notify (runner::reattach)
 ```
 
 ```cpp
@@ -897,17 +897,17 @@ Open `docs/doxygen/html/index.html` in a browser.
 ### Namespace map
 
 | Namespace | Key types / functions |
-|---|---|---|
-| `ace` | `async<T>`, `promise<T>`, `task`, `cutex`, `guard`; `schedule()`, `spawn()`, `post()`, `run()`, `reload()`, `interrupt()`, `terminate()`, `empty()`, `reset_signal()` |
-| `ace::core` | `async<T,R>`, `dispatcher`, `runner`, `control_block`, `control_block_handle`, `cast_ptr`, `io_entity`, `io_link`, `io_query`, `any` |
-| `ace::core::traits` | `future_traits`, `busy_future_traits`, `promise_traits`, `runner_conductor_handle`, `control_conductor_handle`, `conductor_slot`, `vortex_traits` |
-| `ace::core::services` | `clock` (multi_dial), `kernel_controller` (io_uring) |
-| `ace::core::tools` | `queue`, `q_node`, `slab_mempool`, `moving_average`, `id_allocator`, `lifetime` |
-| `ace::core::meta` | `is_future`, `is_busy_future`, `is_awaitable`, `resume_type`, `replace_type`, `unique_tuple_t`, `tuple_to_variant_t` |
-| `ace::futures` | `channel`, `channel_static`, `cutex`, `cutex_future`, `timeout`, `expire`, `spawn`, `post`, `async_handle`, `join_handler`, `reattach`, `roaming`, `polling`, `get_runner` |
-| `ace::fs` | `file` (io_entity), `file_link` (io_link) |
-| `ace::net` | `io_socket`, `io_mapping_entity`, `io_stream_mode_entity`, `io_listener_entity`, `io_transport_entity`, `io_connection_link` |
-| `ace::console` | `console` — stdin/stdout over io_uring |
+|---|---|
+| `ace` | `async<T>` `promise<T>` `task` `cutex` `guard`<br>`schedule()` `spawn()` `post()` `run()` `reload()` `interrupt()` `terminate()` `empty()` `reset_signal()` |
+| `ace::core` | `async<T,R>` `dispatcher` `runner` `control_block` `control_block_handle`<br>`cast_ptr` `io_entity` `io_link` `io_query` `io_guard` `any` |
+| `ace::core::traits` | `future_traits` `busy_future_traits` `promise_traits` `promise_return_traits`<br>`runner_conductor_handle` `control_conductor_handle` `conductor_slot` `vortex_traits` |
+| `ace::core::services` | `clock` (multi_dial time wheel) `kernel_controller` (io_uring vortex) |
+| `ace::core::tools` | `queue` `q_node` `slab_mempool` `moving_average` `id_allocator` `lifetime` |
+| `ace::core::meta` | `is_future` `is_busy_future` `is_awaitable` `resume_type` `replace_type`<br>`unique_tuple_t` `tuple_to_variant_t` |
+| `ace::futures` | `channel` `channel_static` `cutex` `cutex_future` `timeout` `expire` `spawn` `post`<br>`async_handle` `join_handler` `reattach` `roaming` `polling` `get_runner` |
+| `ace::fs` | `file` (io_entity) `file_link` (io_link) |
+| `ace::net` | `io_socket` `io_mapping_entity` `io_stream_mode_entity`<br>`io_listener_entity` `io_transport_entity` `io_connection_link` |
+| `ace::console` | `console` — async stdin/stdout I/O |
 
 ### Key free functions (`namespace ace`)
 

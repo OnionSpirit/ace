@@ -1,6 +1,7 @@
 #ifndef UNITS_H
 #define UNITS_H
 
+#define ACE_NO_CO_MAIN
 #include <ace/ace.h>
 
 #include <memory>

@@ -15,7 +15,7 @@
  *  - @c ace/futures/cutex.h    — cooperative userspace mutex
  *  - @c ace/futures/timeout.h  — timer futures
  *
- * @par Minimal example
+ * @par Minimal example (traditional main)
  * @code{.cpp}
  * #include "ace/ace.h"
  *
@@ -29,7 +29,17 @@
  * }
  * @endcode
  *
- * @see ace::async, ace::promise, ace::schedule, ace::run
+ * @par Zero-boilerplate entry point (co_main)
+ * @code{.cpp}
+ * #include "ace/ace.h"
+ *
+ * ace::async<int> co_main(int argc, char** argv) {
+ *     ace::console::println("Hello from ACE!");
+ *     co_return 0;
+ * }
+ * @endcode
+ *
+ * @see ace::async, ace::promise, ace::schedule, ace::run, ace::detail::run_co_main_int
  */
 
 #ifndef ACE_H
@@ -38,6 +48,7 @@
 #include "ace/core/async.h"
 #include "ace/core/dispatcher.h"
 #include "ace/core/compose.h"
+#include "ace/core/co_main.h"
 #include "ace/futures/spawn.h"
 #include "ace/futures/post.h"
 #include "ace/futures/reattach.h"

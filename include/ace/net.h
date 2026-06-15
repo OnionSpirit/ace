@@ -314,8 +314,14 @@ namespace ace::net {
             }
         };
 
+        // NOTE: Здесь используется send_query для input_action из-за ограничения
+        // видимости: recv_query определён позже в io_transport_entity и не имеет
+        // forward-объявления, поэтому недоступен на этом уровне. Для чтения данных
+        // через io_connection_link используется обходной путь — блокирующий ::recv
+        // в качестве fallback-режима. Контроллеры не используют io_connection_link,
+        // работая напрямую с io_connection::recv() / io_net_interface::recv().
         promise<int> input_action(void *buff, const std::size_t len) override {
-            co_return co_await send_query{_fd, buff, len};
+            co_return ::recv(_fd, buff, len, 0);
         }
 
     public:
@@ -815,7 +821,11 @@ namespace ace::net {
                 else {
                     if (_res > -1) {
                         _entity._peer_sin = *reinterpret_cast<sockaddr_in*>(_addr);
-                        return io_transport_entity_t { _res, false, std::move(*_entity) };
+                        // NOTE: для не-STREAM сокетов (UDP) bind() возвращает статус 0 в _res,
+                        // а реальный файловый дескриптор хранится в _entity._fd.
+                        // Передаём _entity._fd как дескриптор, чтобы итоговый io_net_interface
+                        // имел правильный fd для последующих sendto/recv операций.
+                        return io_transport_entity_t { static_cast<int>(_entity._fd), false, _entity._self_sin, _entity._peer_sin };
                     }
                     return io_transport_entity_t {_res, true};
                 }

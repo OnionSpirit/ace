@@ -21,7 +21,7 @@
  * (@c _runner_selector).  A specific runner can also be targeted by passing a
  * non-null @c runner* to @c schedule().
  *
- * @see ace::core::runner, ace::core::dispatcher, ace::core::s_dispatcher_config
+ * @see ace::core::runner, ace::core::dispatcher, ace::cfg::param
  */
 
 #ifndef ACE_CORE_DISPATCHER_H
@@ -34,6 +34,7 @@
 #include "ace/core/tools/macro.h"
 #include "ace/core/runner.h"
 #include "ace/core/signal.h"
+#include "ace/core/config.h"
 
 namespace ace {
 
@@ -56,24 +57,6 @@ namespace ace {
 namespace ace::core {
 
     /**
-     * @brief Global configuration for the dispatcher.
-     *
-     * @details Modify @c s_dispatcher_config before calling @c ace::reload() to
-     * change the number of runner threads.  The reload takes effect only when
-     * all queues are empty.
-     *
-     * @par Example
-     * @code{.cpp}
-     * ace::core::s_dispatcher_config._runners_amount = 4;
-     * ace::reload();
-     * @endcode
-     */
-    struct dispatcher_config {
-        std::size_t _runners_amount{1}; ///< Number of runner threads (including the main thread).
-        bool operator==(const dispatcher_config &dispatcher_config) const = default;
-    } inline s_dispatcher_config{}; ///< Global singleton configuration instance.
-
-    /**
      * @brief Schedules and drives task execution across multiple runner threads.
      *
      * @details @c dispatcher is the core multi-thread scheduler.  It creates one
@@ -86,9 +69,9 @@ namespace ace::core {
     class dispatcher {
 
         dispatcher() {
-            fetch_config();
-            _runners.resize(_dispatcher_config._runners_amount);
-            _workers_states.resize(_dispatcher_config._runners_amount);
+            _runners_amount = cfg::g_config._runners_amount;
+            _runners.resize(_runners_amount);
+            _workers_states.resize(_runners_amount);
         };
 
         static thread_local std::chrono::time_point<std::chrono::steady_clock> current_ts;
@@ -110,7 +93,7 @@ namespace ace::core {
         std::vector<runner>        _runners             { };
         std::vector<worker_state>  _workers_states      { };
         std::atomic<double>        _aggregate_velocity  { };
-        dispatcher_config          _dispatcher_config   { };
+        std::size_t                _runners_amount      {1};
 
         ACE_CACHE_LINE(1)
 
@@ -131,7 +114,7 @@ namespace ace::core {
             auto now = start;
 
             // NOTE: Working with runner until interval ends (also updating last ts)
-            const bool velocity_tracking = _dispatcher_config._runners_amount > 1;
+            const bool velocity_tracking = _runners_amount > 1;
             bool is_polling = false;
             while (now - start < 1ms) {
                 active = _runners[worker_id].run() or active;
@@ -168,13 +151,13 @@ namespace ace::core {
                 worker_round(worker_id);
         }
 
-        void fetch_config() noexcept { _dispatcher_config = s_dispatcher_config; }
+        void fetch_config() noexcept { _runners_amount = cfg::g_config._runners_amount; }
 
         static constexpr uint8_t _min_service_skips = 3;
 
         void round_robin(task &&new_task) noexcept {
             const auto runner_id = _runner_selector.fetch_add(1, std::memory_order_relaxed);
-            _runners[runner_id % _dispatcher_config._runners_amount].attach(std::forward<task>(new_task));
+            _runners[runner_id % _runners_amount].attach(std::forward<task>(new_task));
         }
 
         static auto get_time()
@@ -240,13 +223,14 @@ namespace ace {
      */
     inline bool reload() noexcept {
         auto& self = core::dispatcher::get_instance();
-        if (self._dispatcher_config == core::s_dispatcher_config) return true;
-        if (not empty()) return false;
+        const auto prev_amount = self._runners_amount;
         self.fetch_config();
+        if (self._runners_amount == prev_amount) return true;
+        if (not empty()) return false;
         self._runners.clear();
-        self._runners.resize(self._dispatcher_config._runners_amount);
+        self._runners.resize(self._runners_amount);
         self._workers_states.clear();
-        self._workers_states.resize(self._dispatcher_config._runners_amount);
+        self._workers_states.resize(self._runners_amount);
         return true;
     }
 
@@ -263,7 +247,7 @@ namespace ace {
         auto& self = core::dispatcher::get_instance();
         if (not rnr) {
             // NOTE: No balancing for single runner
-            if (self._dispatcher_config._runners_amount == 1) {
+            if (self._runners_amount == 1) {
                 self._runners[0].attach(std::forward<task>(new_task));
                 return;
             }
@@ -304,7 +288,7 @@ namespace ace {
     inline void run() noexcept {
 
         auto& self = core::dispatcher::get_instance();
-        const int workers_amount = static_cast<int>(self._dispatcher_config._runners_amount);
+        const int workers_amount = static_cast<int>(self._runners_amount);
 
         // NOTE: Clearing velocity to make it zero before run
         for (auto &runner: self._runners) runner.clear_velocity();

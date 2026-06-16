@@ -9,6 +9,7 @@
  *  - @c ace::spawn()    — spawn a parallel task inside a running coroutine
  *  - @c ace::run()      — process all scheduled tasks (blocking)
  *  - @c ace::reload()   — reconfigure the balancer
+ *  - @c ace::cfg::param — template-based configuration (specialise to override)
  *
  * Synchronization primitives are in their own headers:
  *  - @c ace/futures/channel.h  — MPMC channel
@@ -39,16 +40,14 @@
  * }
  * @endcode
  *
- * @see ace::async, ace::promise, ace::schedule, ace::run, ace::detail::run_co_main_int
+ * @see ace::async, ace::promise, ace::schedule, ace::run, ace::reload, ace::cfg::init, ace::cfg::update, ace::cfg::g_config
  */
 
 #ifndef ACE_H
 #define ACE_H
 
-#include "ace/core/async.h"
-#include "ace/core/dispatcher.h"
+#include "ace/core/entry.h"
 #include "ace/core/compose.h"
-#include "ace/core/co_main.h"
 #include "ace/futures/spawn.h"
 #include "ace/futures/post.h"
 #include "ace/futures/reattach.h"

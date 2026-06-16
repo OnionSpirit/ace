@@ -1,6 +1,6 @@
 /**
- * @file co_main.h
- * @brief Macro-free coroutine entry point — drop-in replacement for main().
+ * @file entry.h
+ * @brief ACE entry point — drop-in replacement for main().
  *
  * @details A forward declaration of @c co_main plus a weak definition of
  * @c int main(int,char**) provide the real entry point.  The weak attribute
@@ -8,33 +8,56 @@
  * (the linker picks one), and also allows the user to override with their
  * own @c main() if they choose not to use @c co_main.
  *
+ * Also contains @c ace::cfg::init() — placed
+ * here so that @c detail::resolve<Tag>() is instantiated AFTER the user's
+ * @c ace_param<Tag> specialisation (which sits between @c config.h and
+ * @c ace.h).
+ *
  * @par Usage
  * @code{.cpp}
  * #include <ace/ace.h>
  *
  * ace::async<int> co_main(int argc, char** argv) {
- *     ace::console::println("Hello argc={}", argc);
  *     co_await ace::futures::timeout(500ms);
  *     co_return 0;
  * }
  * @endcode
  *
- * @c co_return provides the process exit code.  The signature matches
- * standard @c main: parameters @c (int argc, char** argv).
- *
- * @see ace::async, ace::schedule, ace::run
+ * @see ace::async, ace::schedule, ace::run, ace::cfg::init
  */
 
 #ifndef ACE_CORE_CO_MAIN_H
 #define ACE_CORE_CO_MAIN_H
 
 #include "ace/core/async.h"
+#include "ace/core/config.h"
+
+namespace ace::cfg {
+
+    /**
+     * @brief One-time initialisation of all configuration parameters.
+     *
+     * Called once from the injected main() before the dispatcher starts.
+     * Sets every known parameter from its compile-time default or user
+     * specialisation of @c ace_param<Tag> (picked up via @c detail::resolve).
+     *
+     * Place here parameters that are LOCKED after startup.
+     * @warning To apply user specialisation required include order is: config.h → (user specialisation) → entry.h
+     */
+    inline void init() {
+        g_config._runners_amount = detail::resolve<runners_amount>();
+
+        // [NEW PARAM]:
+        // g_config._max_tasks_per_yank = detail::resolve<max_tasks_per_yank>();
+    }
+
+} // namespace ace::cfg
+
 #include "ace/core/dispatcher.h"
 
-// ---------------------------------------------------------------------------
-// Forward declaration — the user's co_main must match this signature
-// ---------------------------------------------------------------------------
-
+/**
+ * @brief Ace framework entry point
+ */
 auto co_main(int argc, char** argv) -> ace::async<int>;
 
 // ---------------------------------------------------------------------------
@@ -66,6 +89,7 @@ int main(int argc, char** argv)
         co_return;
     }(std::move(coro), exit_code);
 
+    ace::cfg::init();
     ace::schedule(std::move(wrapper));
     ace::run();
     return exit_code;
@@ -77,14 +101,11 @@ int main(int argc, char** argv)
 
 #endif // !ACE_NO_CO_MAIN
 
-// ---------------------------------------------------------------------------
-// Unit-test helper
-// ---------------------------------------------------------------------------
 
 namespace ace::detail {
 
     /**
-     * @brief Runs an @c async<int> coroutine through the ACE event loop
+     * @brief Unit-test helper. Runs an @c async<int> coroutine through the ACE event loop
      *        and returns the exit code.  Exposed for testing.
      */
     inline int run_co_main_int(ace::async<int>&& coro) {
@@ -93,8 +114,9 @@ namespace ace::detail {
             out = co_await inner;
             co_return;
         }(std::move(coro), exit_code);
-        ace::schedule(std::move(wrapper));
-        ace::run();
+        cfg::init();
+        schedule(std::move(wrapper));
+        run();
         return exit_code;
     }
 

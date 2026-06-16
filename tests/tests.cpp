@@ -131,7 +131,7 @@ TEST(futures, do_expire_on_runner_test) {
 }
 
 TEST(futures, cutex_race) {
-    ace::core::s_dispatcher_config._runners_amount = 8;
+    ace::cfg::g_config._runners_amount = 8;
     ace::reload();
 
     ace::cutex cutx_;
@@ -139,20 +139,20 @@ TEST(futures, cutex_race) {
     std::string shared_cnt_ {"0"};
     constexpr int max_ = 100000;
 
-    for (volatile std::size_t i = 0; i < ace::core::s_dispatcher_config._runners_amount; i = i + 1)
+    for (volatile std::size_t i = 0; i < ace::cfg::g_config._runners_amount; i = i + 1)
         ace::schedule(racer(max_, shared_cnt_, cutx_));
 
     ace::run();
     ASSERT_TRUE(ace::empty());
-    ASSERT_EQ(std::stoi(shared_cnt_), max_ * ace::core::s_dispatcher_config._runners_amount);
+    ASSERT_EQ(std::stoi(shared_cnt_), max_ * ace::cfg::g_config._runners_amount);
 
-    ace::core::s_dispatcher_config._runners_amount = 1;
+    ace::cfg::g_config._runners_amount = 1;
     ace::reload();
     ace::reset_signal();
 }
 
 TEST(futures, cutex_race_resheduling) {
-    ace::core::s_dispatcher_config._runners_amount = 8;
+    ace::cfg::g_config._runners_amount = 8;
     ace::reload();
 
     ace::cutex cutx_;
@@ -161,21 +161,21 @@ TEST(futures, cutex_race_resheduling) {
     std::string shared_cnt_ {"0"};
     constexpr int max_ = 1000000;
 
-    for (volatile std::size_t i = 0; i < ace::core::s_dispatcher_config._runners_amount; i = i + 1)
+    for (volatile std::size_t i = 0; i < ace::cfg::g_config._runners_amount; i = i + 1)
         ace::schedule(racer(max_, shared_cnt_, cutx_));
 
     ace::run();
     ASSERT_TRUE(ace::empty());
-    ASSERT_EQ(std::stoi(shared_cnt_), max_ * ace::core::s_dispatcher_config._runners_amount);
+    ASSERT_EQ(std::stoi(shared_cnt_), max_ * ace::cfg::g_config._runners_amount);
     // }
 
-    ace::core::s_dispatcher_config._runners_amount = 1;
+    ace::cfg::g_config._runners_amount = 1;
     ace::reload();
     ace::reset_signal();
 }
 
 TEST(futures, do_timer_on_runner_parallel_test) {
-    ace::core::s_dispatcher_config._runners_amount = 4;
+    ace::cfg::g_config._runners_amount = 4;
     ace::reload();
 
     ace::futures::channel_dyn<long> channel_ {};
@@ -219,9 +219,9 @@ TEST(futures, do_timer_on_runner_parallel_test) {
     // NOTE: real_sum greater than exp_sum
     EXPECT_GT(real_sum, exp_sum);
     // NOTE: real_sum not greater than (exp_sum * 8 / thr_num) (Condition for <Ryzen 5 7500F, 64GB RAM DDR5>)
-    // EXPECT_LT(real_sum, exp_sum * 8 / ace::core::s_dispatcher_config._runners_amount);
+    // EXPECT_LT(real_sum, exp_sum * 8 / ace::cfg::g_config._runners_amount);
 
-    ace::core::s_dispatcher_config._runners_amount = 1;
+    ace::cfg::g_config._runners_amount = 1;
     ace::reload();
 }
 
@@ -327,7 +327,7 @@ TEST(commands, check_join_after_cancel) {
 
 
 TEST(commands, check_cutex_cancel_after_capture) {
-    ace::core::s_dispatcher_config._runners_amount = 2;
+    ace::cfg::g_config._runners_amount = 2;
     ace::reload();
 
     const auto start_time = std::chrono::steady_clock::now();
@@ -365,13 +365,13 @@ TEST(commands, check_cutex_cancel_after_capture) {
 
     EXPECT_LT(ms_time, 900);
 
-    ace::core::s_dispatcher_config._runners_amount = 1;
+    ace::cfg::g_config._runners_amount = 1;
     ace::reload();
 }
 
 
 TEST(commands, check_cutex_cancel_before_capture) {
-    ace::core::s_dispatcher_config._runners_amount = 2;
+    ace::cfg::g_config._runners_amount = 2;
     ace::reload();
 
     const auto start_time = std::chrono::steady_clock::now();
@@ -409,7 +409,7 @@ TEST(commands, check_cutex_cancel_before_capture) {
 
     EXPECT_LT(ms_time, 900);
 
-    ace::core::s_dispatcher_config._runners_amount = 1;
+    ace::cfg::g_config._runners_amount = 1;
     ace::reload();
 }
 

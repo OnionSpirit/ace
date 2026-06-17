@@ -1,2 +1,2 @@
 option('tests', type: 'boolean', value: false, description: 'Build tests')
-option('extern_fmt', type: 'boolean', value: false, description: 'Use external fmt lib')
+option('ace_main', type: 'boolean', value: true, description: 'Use framework built-in main function')

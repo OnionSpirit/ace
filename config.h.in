@@ -1,6 +1,6 @@
 #ifndef ACE_PREPROC_DEFINITIONS
 #define ACE_PREPROC_DEFINITIONS
 
-// #mesondefine option
+#mesondefine ACE_NO_CO_MAIN
 
 #endif // ACE_PREPROC_DEFINITIONS

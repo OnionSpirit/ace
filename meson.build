@@ -23,6 +23,12 @@ depends += liburing
 
 # Setting macro env data
 cdata = configuration_data()
+
+use_co_main = get_option('ace_main')
+if use_co_main
+    cdata.set10(ACE_NO_CO_MAIN, false)
+endif
+
 configure_file(
     input: 'config.h.in',
     output: 'ace.config.h',

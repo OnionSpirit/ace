@@ -14,6 +14,7 @@
 #include <tuple>
 #include <concepts>
 #include <memory>
+#include "ace.config.h"
 
 namespace ace::core::traits {
 

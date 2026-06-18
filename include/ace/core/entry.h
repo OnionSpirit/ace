@@ -55,71 +55,38 @@ namespace ace::cfg {
 
 #include "ace/core/dispatcher.h"
 
-/**
- * @brief Ace framework entry point
- */
-auto co_main(int argc, char** argv) -> ace::async<int>;
-
-// ---------------------------------------------------------------------------
-// Weak main — injected into every TU that includes this header.
+// TODO: Figure out to forbid defining both
+// namespace ace {
+//     struct entry_result {
+//         int code;
+//         entry_result(const int val) : code(val) {}
+//     };
+// }
 //
-// On ELF, weak symbols are safe across multiple translation units — the
-// linker picks one.  If the user defines a strong main(), the weak one is
-// silently overridden.
-//
-// Define ACE_NO_CO_MAIN before including ace.h to suppress this injection
-// (e.g. in test suites or when providing your own main()).
-// ---------------------------------------------------------------------------
+// namespace ace::detail {
+//     template <typename> struct double_entry_detector { static inline int cnt = 0; };
+// }
 
-#if !defined(ACE_NO_CO_MAIN)
-
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmain"
-#endif
-
-__attribute__((weak))
-int main(int argc, char** argv)
-{
-    auto coro = ::co_main(argc, argv);
-    int exit_code = 0;
-
-    auto wrapper = [](ace::async<int> inner, int& out) -> ace::task {
-        out = co_await inner;
-        co_return;
-    }(std::move(coro), exit_code);
-
-    ace::cfg::init();
-    ace::schedule(std::move(wrapper));
-    ace::run();
-    return exit_code;
+namespace ace {
+    // using entry = promise<entry_result>;
+    using entry = promise<int>;
 }
 
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
+/**
+ * @brief Helper to forbid compiling (linking) without entrypoint
+ * @warning IF THIS FUNCTION MENTIONED BY LINKER THEN PROGRAM ENTRYPOINT IS MISSING
+ */
+extern "C" void ACE_MISSING_ENTRYPOINT_ERROR();
 
-#endif // !ACE_NO_CO_MAIN
+/**
+ * @brief Ace framework entry point
+*/
+ACE_WEAK auto co_main() -> ace::entry;
 
+/**
+ * @brief Ace framework entry point
+*/
+ACE_WEAK auto co_main(int argc, char** argv) -> ace::entry;
 
-namespace ace::detail {
-
-    /**
-     * @brief Unit-test helper. Runs an @c async<int> coroutine through the ACE event loop
-     *        and returns the exit code.  Exposed for testing.
-     */
-    inline int run_co_main_int(ace::async<int>&& coro) {
-        int exit_code = 0;
-        auto wrapper = [](ace::async<int> inner, int& out) -> ace::task {
-            out = co_await inner;
-            co_return;
-        }(std::move(coro), exit_code);
-        cfg::init();
-        schedule(std::move(wrapper));
-        run();
-        return exit_code;
-    }
-
-} // namespace ace::detail
 
 #endif // ACE_CORE_CO_MAIN_H

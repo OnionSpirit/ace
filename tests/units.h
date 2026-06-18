@@ -1,11 +1,8 @@
 #ifndef UNITS_H
 #define UNITS_H
 
-#define ACE_NO_CO_MAIN
-#include <ace/ace.h>
-
 #include <memory>
-
+#include <ace/ace.h>
 #include <ace/core/traits/future.h>
 #include <ace/core/compose.h>
 #include <ace/futures/get_runner.h>
@@ -515,4 +512,5 @@ inline ace::task fs_testing() {
     if (auto f_entity = co_await f.open(O_CREAT | O_WRONLY | O_TRUNC))
         f_entity.writeln("testing flex {}", 1);
 }
+
 #endif // UNITS_H

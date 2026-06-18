@@ -23,22 +23,27 @@ depends += liburing
 
 # Setting macro env data
 cdata = configuration_data()
-
-use_co_main = get_option('ace_main')
-if use_co_main
-    cdata.set10(ACE_NO_CO_MAIN, false)
-endif
-
+# option = get_option('meson_options_member')
+# cdata.set('DEFINED_VAR_NAME', option)
 configure_file(
     input: 'config.h.in',
     output: 'ace.config.h',
     configuration: cdata
 )
 
+# Internal statics
+ace_internal = static_library('ace_internal',
+    'ace_main.cpp',
+    include_directories: include_dir,
+    dependencies: depends,
+    install: false,
+)
+
 # Declaring interfacial lib
 ace_dep = declare_dependency(
+    link_with: ace_internal,
     include_directories: include_dir,
-    dependencies: depends
+    dependencies: depends,
 )
 meson.override_dependency('ace', ace_dep)
 

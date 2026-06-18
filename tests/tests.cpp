@@ -455,18 +455,3 @@ TEST(core, do_fs_tests) {
     ace::run();
     ASSERT_TRUE(ace::empty());
 }
-
-TEST(core, do_co_main_test) {
-    auto flag = std::make_shared<bool>(false);
-
-    auto coro = [flag](int, char**) -> ace::async<int> {
-        ace::console::println("co_main test: running inside coroutine");
-        *flag = true;
-        co_return 42;
-    };
-
-    int exit_code = ace::detail::run_co_main_int(coro(0, nullptr));
-    ASSERT_EQ(exit_code, 42);
-    ASSERT_TRUE(*flag);
-    ASSERT_TRUE(ace::empty());
-}

@@ -53,24 +53,11 @@ namespace ace::cfg {
 
 } // namespace ace::cfg
 
-#include "ace/core/dispatcher.h"
+// NOTE: Predefining of entry result
+namespace ace { struct entry_result; }
 
-// TODO: Figure out to forbid defining both
-// namespace ace {
-//     struct entry_result {
-//         int code;
-//         entry_result(const int val) : code(val) {}
-//     };
-// }
-//
-// namespace ace::detail {
-//     template <typename> struct double_entry_detector { static inline int cnt = 0; };
-// }
-
-namespace ace {
-    // using entry = promise<entry_result>;
-    using entry = promise<int>;
-}
+// NOTE: Predefining main from global namespace
+// int main(int argc, char** argv);
 
 /**
  * @brief Helper to forbid compiling (linking) without entrypoint
@@ -81,12 +68,27 @@ extern "C" void ACE_MISSING_ENTRYPOINT_ERROR();
 /**
  * @brief Ace framework entry point
 */
-ACE_WEAK auto co_main() -> ace::entry;
+ACE_WEAK auto co_main() -> ace::promise<ace::entry_result>;
 
 /**
  * @brief Ace framework entry point
 */
-ACE_WEAK auto co_main(int argc, char** argv) -> ace::entry;
+ACE_WEAK auto co_main(int argc, char** argv) -> ace::promise<ace::entry_result>;
 
+namespace ace {
+
+    // inline constexpr bool entry_is_valid =
+    //    not ( requires { ::main(0, nullptr); } xor requires { ::co_main(0, nullptr); });
+
+    struct entry_result {
+        int code = 0;
+        entry_result() = default;
+        entry_result(const int code) : code(code) {
+            // static_assert(entry_is_valid, "main() and co_main() can not be declared both");
+        }
+    };
+
+    using entry = promise<entry_result>;
+}
 
 #endif // ACE_CORE_CO_MAIN_H

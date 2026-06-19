@@ -1,1 +1,3 @@
+option('ace_entry', type: 'boolean', value: false,
+       description: 'Entry-point mode: none = user defines main(), weak = lib injects weak main() for co_main support')
 option('tests', type: 'boolean', value: false, description: 'Build tests')

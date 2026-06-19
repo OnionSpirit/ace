@@ -31,17 +31,28 @@ configure_file(
     configuration: cdata
 )
 
-# Internal statics
-ace_internal = static_library('ace_internal',
-    'ace_main.cpp',
-    include_directories: include_dir,
-    dependencies: depends,
-    install: false,
-)
+# Framework entry usage
+entry_mode = get_option('ace_entry')
+if entry_mode
+    # Flexible mode — library injects a WEAK main() that bootstraps co_main().
+    # User may define int main() (overrides the weak one) or co_main().
+    message('ACE entry enabled: weak (supports both main and co_main)')
+    ace_entry = static_library('ace_entry',
+        'ace_entry.cpp',
+        include_directories: include_dir,
+        dependencies: depends,
+        install: false,
+    )
+else
+    # Traditional mode — library provides NO main().
+    # User MUST define int main() themselves.
+    message('ACE entry disabled: user provides main')
+    ace_entry = []
+endif
 
 # Declaring interfacial lib
 ace_dep = declare_dependency(
-    link_with: ace_internal,
+    link_with: ace_entry,
     include_directories: include_dir,
     dependencies: depends,
 )

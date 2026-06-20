@@ -93,6 +93,8 @@ namespace ace::core::services {
         static thread_local io_uring _ring;
         static thread_local int _queries;
         static thread_local bool _need_submission;
+        // TODO: Needed?
+        static thread_local bool _batch_mode;
 
     public:
 
@@ -124,6 +126,72 @@ namespace ace::core::services {
          */
         template <typename foo_t, typename ... Params>
         static bool submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept;
+
+        // TODO: Needed?
+        /**
+         * @brief Enters batched submission mode — subsequent submits are
+         * accumulated and flushed atomically with a single io_uring_enter().
+         * Call submit_batch() to flush.
+         */
+        static void begin_batch() noexcept { _batch_mode = true; }
+
+        // TODO: Needed?
+        /**
+         * @brief Flushes all accumulated SQEs in one io_uring_submit() call.
+         * @return number of SQEs submitted, or negative error
+         */
+        static int submit_batch() noexcept;
+
+        /**
+         * @brief Registers a set of I/O buffers with io_uring for zero-copy
+         * operations (IORING_REGISTER_BUFFERS). Once registered, buffers can
+         * be referenced by their fixed index in send_zc/recv calls.
+         * @param iovecs array of iovec descriptors
+         * @param nr_iovecs number of iovecs
+         * @return 0 on success, negative errno on failure
+         */
+        static int register_buffers(const iovec* iovecs, unsigned nr_iovecs) noexcept {
+            return io_uring_register_buffers(&_ring, iovecs, nr_iovecs);
+        }
+
+        /**
+         * @brief Unregisters previously registered I/O buffers.
+         * @return 0 on success, negative errno on failure
+         */
+        static int unregister_buffers() noexcept {
+            return io_uring_unregister_buffers(&_ring);
+        }
+
+        /**
+         * @brief Registers a set of file descriptors with io_uring for fixed-file
+         * operations (IORING_REGISTER_FILES). Once registered, FDs can be
+         * referenced by their fixed index (iosqe_fixed_file) bypassing the
+         * per-syscall FD table lookup.
+         * @param fds array of file descriptors
+         * @param nr_fds number of FDs
+         * @return 0 on success, negative errno on failure
+         */
+        static int register_files(const int* fds, unsigned nr_fds) noexcept {
+            return io_uring_register_files(&_ring, fds, nr_fds);
+        }
+
+        /**
+         * @brief Updates a single file descriptor in the registered files set.
+         * @param index index in the registered files array
+         * @param fd new file descriptor value
+         * @return 0 on success, negative errno on failure
+         */
+        static int register_files_update(unsigned index, int fd) noexcept {
+            return io_uring_register_files_update(&_ring, index, &fd, 1);
+        }
+
+        /**
+         * @brief Unregisters previously registered file descriptors.
+         * @return 0 on success, negative errno on failure
+         */
+        static int unregister_files() noexcept {
+            return io_uring_unregister_files(&_ring);
+        }
 
         static bool nop(kernel_observer* observer) {
             return submit(io_uring_prep_nop, observer);
@@ -173,6 +241,19 @@ namespace ace::core::services {
         static bool sendto(kernel_observer* observer, const int fd, const void *buf, const size_t len, const int flags,
             const sockaddr *addr, const socklen_t addrlen) {
             return submit(io_uring_prep_sendto, observer, fd, buf, len, flags, addr, addrlen);
+        }
+
+        /**
+         * @brief Scatter-gather send via io_uring_prep_sendmsg.
+         * Allows sending data from multiple non-contiguous buffers (iovec)
+         * in a single syscall, avoiding extra copy for composite headers.
+         * @param observer CQE completion handler
+         * @param fd socket file descriptor
+         * @param msg pointer to msghdr with iovec array
+         * @param flags send flags (MSG_ZEROCOPY etc.)
+         */
+        static bool sendmsg(kernel_observer* observer, const int fd, const msghdr* msg, const int flags) {
+            return submit(io_uring_prep_sendmsg, observer, fd, msg, flags);
         }
 
         static bool recv(kernel_observer* observer, const int fd, void *buf, const size_t len, const int flags) {
@@ -233,6 +314,7 @@ namespace ace::core::services {
     inline thread_local io_uring kernel_controller::_ring {};
     inline thread_local int kernel_controller::_queries {};
     inline thread_local bool kernel_controller::_need_submission {false};
+    inline thread_local bool kernel_controller::_batch_mode {false};
 
 }
 
@@ -320,6 +402,21 @@ submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept
     else if (not _submission_buffer.enqueue( kernel_entity{io_uring_foo, sqe, params...} )) [[unlikely]]
         return false;
     return true;
+}
+
+// TODO: Needed?
+ACE_CORE_KERNEL_CONTROLLER_MEMBER(int)
+submit_batch() noexcept {
+    _batch_mode = false;
+    if (std::exchange(_need_submission, false)) {
+        // NOTE: First drain any buffered entities
+        for (unsigned int i = 0; i < (max_entries - _queries) and not _submission_buffer.empty(); ++i) {
+            auto entity = _submission_buffer.dequeue();
+            entity.apply();
+        }
+        return io_uring_submit(&_ring);
+    }
+    return 0;
 }
 
 

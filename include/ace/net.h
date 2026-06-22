@@ -455,6 +455,68 @@ namespace ace::net {
             const int _flags;
         };
 
+        struct sendmsg_query : core::io_query<sendmsg_query> {
+
+            IMPORT_IO_QUERY_ENV(sendmsg_query)
+
+            sendmsg_query() = delete;
+
+            explicit sendmsg_query(const int fd, const iovec* iov, const size_t iovlen, const int flags = 0)
+                : io_query_t(fd)
+                , _iov(iov)
+                , _iovlen(iovlen)
+                , _flags(flags) {}
+
+            bool setup_query(core::services::kernel_observer* kwp) const {
+                msghdr* msg = kwp->acquire_msghdr();
+                if (!msg) return false;
+                msg->msg_iov = const_cast<iovec*>(_iov);
+                msg->msg_iovlen = _iovlen;
+                if (not core::services::kernel_controller::sendmsg(kwp, _fd, msg, _flags)) {
+                    kwp->release_msghdr();
+                    return false;
+                }
+                return true;
+            }
+
+            [[nodiscard]] int await_resume() const { return _res; }
+
+            const iovec* _iov;
+            const size_t _iovlen;
+            const int _flags;
+        };
+
+        struct recvmsg_query : core::io_query<recvmsg_query> {
+
+            IMPORT_IO_QUERY_ENV(recvmsg_query)
+
+            recvmsg_query() = delete;
+
+            explicit recvmsg_query(const int fd, iovec* iov, const size_t iovlen, const int flags = 0)
+                : io_query_t(fd)
+                , _iov(iov)
+                , _iovlen(iovlen)
+                , _flags(flags) {}
+
+            bool setup_query(core::services::kernel_observer* kwp) const {
+                msghdr* msg = kwp->acquire_msghdr();
+                if (!msg) return false;
+                msg->msg_iov = _iov;
+                msg->msg_iovlen = _iovlen;
+                if (not core::services::kernel_controller::recvmsg(kwp, _fd, msg, _flags)) {
+                    kwp->release_msghdr();
+                    return false;
+                }
+                return true;
+            }
+
+            [[nodiscard]] int await_resume() const { return _res; }
+
+            iovec* _iov;
+            const size_t _iovlen;
+            const int _flags;
+        };
+
         [[nodiscard]] auto send(const void *buf, const size_t len, const int flags = 0) const
         -> send_query requires (connection_state_v == e_connected)
         { return send_query{_fd, buf, len, flags}; }
@@ -480,6 +542,19 @@ namespace ace::net {
         [[nodiscard]] auto send(const std::span<data_t, len_v>& buf, const int flags = 0) const
         -> send_query requires (connection_state_v == e_connected)
         { return send_query{_fd, buf.data(), buf.size_bytes(), flags}; }
+
+        [[nodiscard]] auto sendmsg(const iovec* iov, const size_t iovlen, const int flags = 0) const
+        -> sendmsg_query requires (connection_state_v == e_connected)
+        { return sendmsg_query{_fd, iov, iovlen, flags}; }
+
+        [[nodiscard]] auto sendmsg(const std::vector<iovec>& iov, const int flags = 0) const
+        -> sendmsg_query requires (connection_state_v == e_connected)
+        { return sendmsg_query{_fd, iov.data(), iov.size(), flags}; }
+
+        template <size_t N>
+        [[nodiscard]] auto sendmsg(const std::array<iovec, N>& iov, const int flags = 0) const
+        -> sendmsg_query requires (connection_state_v == e_connected)
+        { return sendmsg_query{_fd, iov.data(), N, flags}; }
 
         /**
          * @warning This member operation causes @b consumption and will turn entire object into the invalid state
@@ -631,6 +706,16 @@ namespace ace::net {
         requires std::is_pod_v<data_t>
         [[nodiscard]] auto recv(std::span<data_t, len_v>& buf, const int flags = 0) const
         -> recv_query { return recv_query{_fd, buf.data(), buf.size_bytes(), flags}; }
+
+        [[nodiscard]] auto recvmsg(iovec* iov, const size_t iovlen, const int flags = 0) const
+        -> recvmsg_query { return recvmsg_query{_fd, iov, iovlen, flags}; }
+
+        [[nodiscard]] auto recvmsg(std::vector<iovec>& iov, const int flags = 0) const
+        -> recvmsg_query { return recvmsg_query{_fd, iov.data(), iov.size(), flags}; }
+
+        template <size_t N>
+        [[nodiscard]] auto recvmsg(std::array<iovec, N>& iov, const int flags = 0) const
+        -> recvmsg_query { return recvmsg_query{_fd, iov.data(), N, flags}; }
 
     };
 

@@ -421,6 +421,14 @@ TEST(futures, do_io_socket_echo) {
     ASSERT_TRUE(ace::empty());
 }
 
+TEST(futures, do_io_socket_sg) {
+    ace::schedule(socket_listener_sg());
+    ace::schedule(socket_abuser_sg());
+    ace::run();
+    ace::reset_signal();
+    ASSERT_TRUE(ace::empty());
+}
+
 TEST(core, do_or_await_test) {
     const auto start_time = std::chrono::steady_clock::now();
 

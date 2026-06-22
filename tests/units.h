@@ -2,6 +2,7 @@
 #define UNITS_H
 
 #include <memory>
+#include <cstring>
 #include <ace/ace.h>
 #include <ace/core/traits/future.h>
 #include <ace/core/compose.h>
@@ -333,6 +334,97 @@ inline ace::task socket_listener() {
         if (auto result = co_await connection.recv_str())
             ace::console::println("Server received: '{}'", result.value());
         else ace::console::println("Server failed: '{}'", strerror(result.error()));
+    }
+
+    co_return;
+}
+
+
+inline ace::task socket_abuser_sg() {
+
+    auto bind_entry = co_await ace::net::io_socket_tcp();
+    if (not bind_entry) {
+        std::cerr << bind_entry.error() << std::endl;
+        ace::terminate();
+        co_return;
+    }
+
+    auto selection_entry = co_await bind_entry.bind("127.0.0.1", 9001);
+    if (not selection_entry) {
+        std::cerr << selection_entry.error() << std::endl;
+        ace::terminate();
+        co_return;
+    }
+
+    const auto connection = co_await selection_entry.connect("127.0.0.1", 9000);
+    if (not connection) {
+        std::cerr << connection.error() << std::endl;
+        ace::terminate();
+        co_return;
+    }
+
+    for (int i = 1; i < 6; ++i) {
+        std::string msg = "Echo message " + std::to_string(i);
+        auto buf = ace::core::services::kernel_controller::iovec_allocate(msg.size());
+        if (not buf) {
+            ace::terminate();
+            co_return;
+        }
+        std::memcpy(buf->iov.iov_base, msg.data(), msg.size());
+        std::array<iovec, 1> iov {{{buf->iov}}};
+        if (co_await connection.sendmsg(iov))
+            ace::console::println("Client [sg] sent: '{}'", msg);
+        ace::core::services::kernel_controller::iovec_deallocate(*buf);
+    }
+
+    co_return;
+}
+
+inline ace::task socket_listener_sg() {
+
+    auto bind_entry = co_await ace::net::io_socket_tcp();
+    if (not bind_entry) {
+        std::cerr << bind_entry.error() << std::endl;
+        ace::terminate();
+        co_return;
+    }
+
+    auto selection_entry = co_await bind_entry.bind("127.0.0.1", 9000);
+    if (not selection_entry) {
+        std::cerr << selection_entry.error() << std::endl;
+        ace::terminate();
+        co_return;
+    }
+
+    auto listener = co_await selection_entry.listen();
+    if (not listener) {
+        std::cerr << listener.error() << std::endl;
+        ace::terminate();
+        co_return;
+    }
+
+    const auto connection = co_await listener.accept("127.0.0.1", 9001);
+    if (not connection) {
+        std::cerr << connection.error() << std::endl;
+        ace::terminate();
+        co_return;
+    }
+
+    for (int i = 0; i < 5; ++i) {
+        auto buf = ace::core::services::kernel_controller::iovec_allocate(128);
+        if (not buf) {
+            ace::terminate();
+            co_return;
+        }
+        std::array<iovec, 1> iov {{{buf->iov}}};
+        int n = co_await connection.recvmsg(iov);
+        if (n > 0) {
+            static_cast<char*>(buf->iov.iov_base)[n] = '\0';
+            ace::console::println("Server [sg] received: '{}'", static_cast<char*>(buf->iov.iov_base));
+        } else {
+            ace::console::println("Server [sg] failed");
+        }
+        ace::core::services::kernel_controller::iovec_deallocate(*buf);
     }
 
     co_return;

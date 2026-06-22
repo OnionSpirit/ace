@@ -5,14 +5,14 @@
  * @details This header defines the integration layer between ACE and the
  * Linux @c io_uring subsystem:
  *
- *  - <b>@c kernel_observer</b> — polymorphic callback interface invoked when
+ *  - <b>@c kernel_observer </b>— polymorphic callback interface invoked when
  *    a completion queue entry (CQE) arrives.  Used as the @c user_data
  *    payload in SQE submissions.
- *  - <b>@c kernel_controller</b> — thread-local vortex that owns the
+ *  - <b>@c kernel_controller </b>— thread-local vortex that owns the
  *    @c io_uring ring.  Its @c ping() method dequeues and submits buffered
  *    SQEs, then processes incoming CQEs by calling @c on_result() on the
  *    associated observer.
- *  - <b>@c kernel_entity</b> — deferred SQE storage.  When the submission
+ *  - <b>@c kernel_entity </b> — deferred SQE storage.  When the submission
  *    queue is full (4096 entries), new operations are buffered in a
  *    thread-local queue and submitted on the next @c ping().
  *
@@ -38,6 +38,9 @@
 
 namespace ace::core::services {
 
+    /// @brief Thread-local pool of @c msghdr objects for sendmsg/recvmsg zero-copy I/O.
+    inline thread_local nukes::dynamic::reg_freelist<msghdr> _msghdr_pool {};
+
     /**
      * @brief Polymorphic completion handler for @c io_uring operations.
      *
@@ -57,6 +60,30 @@ namespace ace::core::services {
             : _runner_identity(identity) {}
 
         /**
+         * @brief Acquires a msghdr from the thread-local pool for scatter-gather I/O.
+         * @return pointer to zeroed msghdr, or nullptr if pool exhausted
+         */
+        [[nodiscard]] msghdr* acquire_msghdr() {
+            if (_msghdr) return _msghdr;
+            msghdr* ptr = nullptr;
+            if (_msghdr_pool.capture(ptr)) {
+                _msghdr = ptr;
+                memset(_msghdr, 0, sizeof(msghdr));
+            }
+            return _msghdr;
+        }
+
+        /**
+         * @brief Releases the msghdr back to the thread-local pool.
+         */
+        void release_msghdr() {
+            if (_msghdr) {
+                _msghdr_pool.raw_sync(_msghdr);
+                _msghdr = nullptr;
+            }
+        }
+
+        /**
          * @brief Activates observer with CQE result
          * @param res CQE result value
          */
@@ -65,6 +92,8 @@ namespace ace::core::services {
         runner_pool_t* _runner_identity = nullptr;
         bool _on_cancel = false; ///< Next response will indicate count of canceled operations
         bool _multishot = false; ///< Mark if multishot is enabled
+
+        msghdr* _msghdr = nullptr; ///< Scatter-gather message header (allocated from pool for sendmsg/recvmsg)
 
         virtual ~kernel_observer() = default;
     };
@@ -94,8 +123,6 @@ namespace ace::core::services {
         static thread_local io_uring _ring;
         static thread_local int _queries;
         static thread_local bool _need_submission;
-        // TODO: Needed?
-        static thread_local bool _batch_mode;
 
     public:
 
@@ -117,7 +144,7 @@ namespace ace::core::services {
          * @param [in] io_uring_foo IO function ptr.
          * @param [in] observer pointer to an external object that waits
          * for the operation result of the requested operation.
-         * @param [in, out] params... IO function params (without sqe).
+         * @param [in, out] params IO function params (without sqe).
          * @warning IO function params shall be passed without SQE ptr.
          *
          * Same order but observer ptr required instead of the SQE ptr:
@@ -128,21 +155,6 @@ namespace ace::core::services {
          */
         template <typename foo_t, typename ... Params>
         static bool submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept;
-
-        // TODO: Needed?
-        /**
-         * @brief Enters batched submission mode — subsequent submits are
-         * accumulated and flushed atomically with a single io_uring_enter().
-         * Call submit_batch() to flush.
-         */
-        static void begin_batch() noexcept { _batch_mode = true; }
-
-        // TODO: Needed?
-        /**
-         * @brief Flushes all accumulated SQEs in one io_uring_submit() call.
-         * @return number of SQEs submitted, or negative error
-         */
-        static int submit_batch() noexcept;
 
         /**
          * @brief Registers a set of I/O buffers with io_uring for zero-copy
@@ -337,7 +349,6 @@ namespace ace::core::services {
     inline thread_local io_uring kernel_controller::_ring {};
     inline thread_local int kernel_controller::_queries {};
     inline thread_local bool kernel_controller::_need_submission {false};
-    inline thread_local bool kernel_controller::_batch_mode {false};
 
 }
 
@@ -396,6 +407,7 @@ ping() {
         }
 
         observer->on_result(cqe->res);
+        observer->release_msghdr();
 
         if (not observer->_multishot)
             --_queries;
@@ -425,21 +437,6 @@ submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept
     else if (not _submission_buffer.enqueue( kernel_entity{io_uring_foo, sqe, params...} )) [[unlikely]]
         return false;
     return true;
-}
-
-// TODO: Needed?
-ACE_CORE_KERNEL_CONTROLLER_MEMBER(int)
-submit_batch() noexcept {
-    _batch_mode = false;
-    if (std::exchange(_need_submission, false)) {
-        // NOTE: First drain any buffered entities
-        for (unsigned int i = 0; i < (max_entries - _queries) and not _submission_buffer.empty(); ++i) {
-            auto entity = _submission_buffer.dequeue();
-            entity.apply();
-        }
-        return io_uring_submit(&_ring);
-    }
-    return 0;
 }
 
 

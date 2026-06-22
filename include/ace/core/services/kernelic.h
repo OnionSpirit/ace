@@ -34,6 +34,7 @@
 
 #include "ace/core/traits/vortex.h"
 #include "ace/core/tools/queue.h"
+#include "ace/core/tools/iovec_alloc.h"
 
 namespace ace::core::services {
 
@@ -105,6 +106,7 @@ namespace ace::core::services {
         static constexpr unsigned max_entries = 4096;
 
         static thread_local tools::queue<kernel_entity> _submission_buffer;
+        static thread_local tools::iovec_allocator _iovec_alloc;
 
         static bool ping();
 
@@ -256,9 +258,28 @@ namespace ace::core::services {
             return submit(io_uring_prep_sendmsg, observer, fd, msg, flags);
         }
 
+        /**
+         * @brief Scatter-gather recv via io_uring_prep_recvmsg.
+         */
+        static bool recvmsg(kernel_observer* observer, const int fd, msghdr* msg, const int flags) {
+            return submit(io_uring_prep_recvmsg, observer, fd, msg, flags);
+        }
+
         static bool recv(kernel_observer* observer, const int fd, void *buf, const size_t len, const int flags) {
             return submit(io_uring_prep_recv, observer, fd, buf, len, flags);
         }
+
+        // ── iovec allocator ───────────────────────────────────────────
+
+        static auto iovec_allocate(size_t size) noexcept -> std::optional<tools::iovec_allocator::iovec_buf> {
+            return _iovec_alloc.allocate(size);
+        }
+
+        static auto iovec_deallocate(tools::iovec_allocator::iovec_buf buf) noexcept -> void {
+            _iovec_alloc.deallocate(buf);
+        }
+
+        static auto iovec_alloc() noexcept -> tools::iovec_allocator& { return _iovec_alloc; }
 
         static bool read(kernel_observer* observer, const int fd, void *buf, const unsigned nbytes, const uint64_t offset) {
             return submit(io_uring_prep_read, observer, fd, buf, nbytes, offset);
@@ -309,6 +330,8 @@ namespace ace::core::services {
     inline thread_local tools::queue<kernel_controller::kernel_entity> kernel_controller::_submission_buffer {
         kernel_entity::_kernelic_entity_mempool
     };
+
+    inline thread_local tools::iovec_allocator kernel_controller::_iovec_alloc {};
 
     inline thread_local io_uring_params kernel_controller::_ring_params {};
     inline thread_local io_uring kernel_controller::_ring {};

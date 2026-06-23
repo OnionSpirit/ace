@@ -134,6 +134,10 @@ namespace ace::core::services {
 
         static thread_local tools::queue<kernel_entity> _submission_buffer;
         static thread_local tools::iovec_allocator _iovec_alloc;
+        // TODO: Make configurable
+        static constexpr uint16_t kMaxRegBuffers = 1024;
+        static thread_local bool _sparse_registered;
+        static thread_local uint16_t _reg_buf_count;
 
         static bool ping();
 
@@ -283,12 +287,28 @@ namespace ace::core::services {
 
         // ── iovec allocator ───────────────────────────────────────────
 
-        static auto iovec_allocate(size_t size) noexcept -> std::optional<tools::iovec_allocator::iovec_buf> {
-            return _iovec_alloc.allocate(size);
+        static auto _register_buffer(const iovec* iov) -> bool {
+            if (!_sparse_registered) {
+                if (io_uring_register_buffers_sparse(&_ring, kMaxRegBuffers) < 0) return false;
+                _sparse_registered = true;
+            }
+            if (_reg_buf_count >= kMaxRegBuffers) return false;
+            if (io_uring_register_buffers_update_tag(&_ring, _reg_buf_count, iov, nullptr, 1) < 0)
+                return false;
+            ++_reg_buf_count;
+            return true;
         }
 
-        static auto iovec_deallocate(tools::iovec_allocator::iovec_buf buf) noexcept -> void {
-            _iovec_alloc.deallocate(buf);
+        static auto iovec_allocate(size_t size) noexcept -> iovec* {
+            bool brand_new = _iovec_alloc.will_malloc(size);
+            iovec* iov = _iovec_alloc.allocate(size);
+            if (!iov) return nullptr;
+            if (brand_new) _register_buffer(iov);
+            return iov;
+        }
+
+        static auto iovec_deallocate(iovec* iov) noexcept -> void {
+            _iovec_alloc.deallocate(iov);
         }
 
         static auto iovec_alloc() noexcept -> tools::iovec_allocator& { return _iovec_alloc; }
@@ -344,6 +364,9 @@ namespace ace::core::services {
     };
 
     inline thread_local tools::iovec_allocator kernel_controller::_iovec_alloc {};
+
+    inline thread_local bool kernel_controller::_sparse_registered {false};
+    inline thread_local uint16_t kernel_controller::_reg_buf_count {};
 
     inline thread_local io_uring_params kernel_controller::_ring_params {};
     inline thread_local io_uring kernel_controller::_ring {};

@@ -365,16 +365,16 @@ inline ace::task socket_abuser_sg() {
 
     for (int i = 1; i < 6; ++i) {
         std::string msg = "Echo message " + std::to_string(i);
-        auto buf = ace::core::services::kernel_controller::iovec_allocate(msg.size());
-        if (not buf) {
+        auto iov = ace::core::services::kernel_controller::iovec_allocate(msg.size());
+        if (not iov) {
             ace::terminate();
             co_return;
         }
-        std::memcpy(buf->iov.iov_base, msg.data(), msg.size());
-        std::array<iovec, 1> iov {{{buf->iov}}};
-        if (co_await connection.sendmsg(iov))
+        std::memcpy(iov->iov_base, msg.data(), msg.size());
+        std::array<iovec, 1> arr {{{*iov}}};
+        if (co_await connection.sendmsg(arr))
             ace::console::println("Client [sg] sent: '{}'", msg);
-        ace::core::services::kernel_controller::iovec_deallocate(*buf);
+        ace::core::services::kernel_controller::iovec_deallocate(iov);
     }
 
     co_return;
@@ -411,20 +411,20 @@ inline ace::task socket_listener_sg() {
     }
 
     for (int i = 0; i < 5; ++i) {
-        auto buf = ace::core::services::kernel_controller::iovec_allocate(128);
-        if (not buf) {
+        auto iov = ace::core::services::kernel_controller::iovec_allocate(128);
+        if (not iov) {
             ace::terminate();
             co_return;
         }
-        std::array<iovec, 1> iov {{{buf->iov}}};
-        int n = co_await connection.recvmsg(iov);
+        std::array<iovec, 1> arr {{{*iov}}};
+        int n = co_await connection.recvmsg(arr);
         if (n > 0) {
-            static_cast<char*>(buf->iov.iov_base)[n] = '\0';
-            ace::console::println("Server [sg] received: '{}'", static_cast<char*>(buf->iov.iov_base));
+            static_cast<char*>(iov->iov_base)[n] = '\0';
+            ace::console::println("Server [sg] received: '{}'", static_cast<char*>(iov->iov_base));
         } else {
             ace::console::println("Server [sg] failed");
         }
-        ace::core::services::kernel_controller::iovec_deallocate(*buf);
+        ace::core::services::kernel_controller::iovec_deallocate(iov);
     }
 
     co_return;

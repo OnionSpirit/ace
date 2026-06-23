@@ -75,12 +75,12 @@ namespace ace::cfg {
 
         template <>
         struct default_of<iovec_fixed_512> {
-            static constexpr uint16_t value = 256;
+            static constexpr std::size_t value = 256;
         };
 
         template <>
         struct default_of<iovec_fixed_2048> {
-            static constexpr uint16_t value = 64;
+            static constexpr std::size_t value = 64;
         };
 
         // [NEW PARAM]:

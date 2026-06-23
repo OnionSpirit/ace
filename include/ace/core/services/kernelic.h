@@ -136,7 +136,7 @@ namespace ace::core::services {
 
         static thread_local tools::queue<kernel_entity> _submission_buffer;
         static thread_local tools::iovec_allocator _iovec_alloc;
-        // static thread_local tools::iovec_fixed_allocator _iovec_fixed;
+        static thread_local tools::iovec_fixed_allocator _iovec_fixed;
 
         static bool ping();
 
@@ -265,9 +265,9 @@ namespace ace::core::services {
             return submit(io_uring_prep_recv, observer, fd, buf, len, flags);
         }
 
-        // static bool sendmsg_fixed(kernel_observer* observer, const int fd, const msghdr* msg, const int flags, unsigned buf_index) {
-        //     return submit(io_uring_prep_sendmsg_zc_fixed, observer, fd, msg, flags, buf_index);
-        // }
+        static bool sendmsg_fixed(kernel_observer* observer, const int fd, const msghdr* msg, const int flags, unsigned buf_index) {
+            return submit(io_uring_prep_sendmsg_zc_fixed, observer, fd, msg, flags, buf_index);
+        }
 
         static bool read(kernel_observer* observer, const int fd, void *buf, const unsigned nbytes, const uint64_t offset) {
             return submit(io_uring_prep_read, observer, fd, buf, nbytes, offset);
@@ -291,19 +291,17 @@ namespace ace::core::services {
 
         // ── iovec fixed allocator ─────────────────────────────────────
 
-        // static auto iovec_fixed_allocate(size_t size) noexcept -> iovec* {
-        //     return _iovec_fixed.allocate(size);
-        // }
-        //
-        // static auto iovec_fixed_deallocate(iovec* iov) noexcept -> void {
-        //     _iovec_fixed.deallocate(iov);
-        // }
-        //
-        // static auto iovec_fixed_buf_index(const iovec* iov) noexcept -> uint16_t {
-        //     return _iovec_fixed.buf_index(iov);
-        // }
-        //
-        // static auto iovec_fixed_alloc() noexcept -> tools::iovec_fixed_allocator& { return _iovec_fixed; }
+        static auto iovec_fixed_allocate(size_t size) noexcept -> std::tuple<iovec*, std::size_t> {
+            iovec* iov = _iovec_fixed.allocate(size);
+            const std::size_t buff_idx = _iovec_fixed.buf_index(iov);
+            return std::tie(iov, buff_idx);
+        }
+
+        static auto iovec_fixed_deallocate(iovec* iov) noexcept -> void {
+            _iovec_fixed.deallocate(iov);
+        }
+
+        static auto iovec_fixed_alloc() noexcept -> tools::iovec_fixed_allocator& { return _iovec_fixed; }
 
     };
 
@@ -348,7 +346,7 @@ namespace ace::core::services {
     };
 
     inline thread_local tools::iovec_allocator kernel_controller::_iovec_alloc {};
-    // inline thread_local tools::iovec_fixed_allocator kernel_controller::_iovec_fixed {};
+    inline thread_local tools::iovec_fixed_allocator kernel_controller::_iovec_fixed {};
 
     inline thread_local io_uring_params kernel_controller::_ring_params {};
     inline thread_local io_uring kernel_controller::_ring {};
@@ -376,18 +374,18 @@ kernel_controller() {
     memset(&_ring_params, 0, sizeof(_ring_params));
     io_uring_queue_init_params(max_entries, &_ring, &_ring_params);
 
-    // const auto count_512  = static_cast<uint16_t>(ace::cfg::detail::resolve<ace::cfg::iovec_fixed_512>());
-    // const auto count_2048 = static_cast<uint16_t>(ace::cfg::detail::resolve<ace::cfg::iovec_fixed_2048>());
-    // _iovec_fixed.init(count_512, count_2048);
-    // if (_iovec_fixed.registration_count() > 0) {
-    //     io_uring_register_buffers(&_ring, _iovec_fixed.registration_iovecs(), _iovec_fixed.registration_count());
-    // }
+    const auto count_512  = static_cast<uint16_t>(ace::cfg::detail::resolve<ace::cfg::iovec_fixed_512>());
+    const auto count_2048 = static_cast<uint16_t>(ace::cfg::detail::resolve<ace::cfg::iovec_fixed_2048>());
+    _iovec_fixed.init(count_512, count_2048);
+    if (_iovec_fixed.registration_count() > 0) {
+        io_uring_register_buffers(&_ring, _iovec_fixed.registration_iovecs(), _iovec_fixed.registration_count());
+    }
 }
 
 ACE_CORE_KERNEL_CONTROLLER_MEMBER()
 ~kernel_controller() {
-    // if (_iovec_fixed.registration_count() > 0)
-    //     io_uring_unregister_buffers(&_ring);
+    if (_iovec_fixed.registration_count() > 0)
+        io_uring_unregister_buffers(&_ring);
     io_uring_queue_exit(&_ring);
 }
 

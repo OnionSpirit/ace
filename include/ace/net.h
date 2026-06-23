@@ -543,6 +543,10 @@ namespace ace::net {
         -> send_query requires (connection_state_v == e_connected)
         { return send_query{_fd, buf.data(), buf.size_bytes(), flags}; }
 
+        [[nodiscard]] auto sendmsg(const iovec* iov, const int flags = 0) const
+        -> sendmsg_query requires (connection_state_v == e_connected)
+        { return sendmsg_query{_fd, iov, 1, flags}; }
+
         [[nodiscard]] auto sendmsg(const iovec* iov, const size_t iovlen, const int flags = 0) const
         -> sendmsg_query requires (connection_state_v == e_connected)
         { return sendmsg_query{_fd, iov, iovlen, flags}; }

@@ -41,11 +41,6 @@ struct iovec_allocator {
         _release_table[sc](_pool_ptrs[sc], iov);
     }
 
-    [[nodiscard]] auto will_malloc(size_t size) const noexcept -> bool {
-        uint8_t sc = size_to_class(size);
-        return sc > 5 or _empty_table[sc](_pool_ptrs[sc]);
-    }
-
 private:
 
     static auto size_to_class(size_t size) noexcept -> uint8_t {
@@ -70,7 +65,6 @@ private:
 
     using capture_fn_t = iovec* (*)(void*);
     using release_fn_t = bool   (*)(void*, void*);
-    using empty_fn_t   = bool   (*)(void*);
 
     template <typename BufT, size_t DataSize>
     static iovec* _capture_impl(void* pool) {
@@ -86,11 +80,6 @@ private:
     static bool _release_impl(void* pool, void* node) {
         auto& p = *static_cast<nukes::dynamic::reg_freelist<BufT>*>(pool);
         return p.raw_sync(node);
-    }
-
-    template <typename BufT>
-    static bool _empty_impl(void* pool) {
-        return static_cast<nukes::dynamic::reg_freelist<BufT>*>(pool)->empty();
     }
 
     static constexpr capture_fn_t _capture_table[6] = {
@@ -109,15 +98,6 @@ private:
         &_release_impl<buffer_1k>,
         &_release_impl<buffer_2k>,
         &_release_impl<buffer_4k>,
-    };
-
-    static constexpr empty_fn_t _empty_table[6] = {
-        &_empty_impl<buffer_128>,
-        &_empty_impl<buffer_256>,
-        &_empty_impl<buffer_512>,
-        &_empty_impl<buffer_1k>,
-        &_empty_impl<buffer_2k>,
-        &_empty_impl<buffer_4k>,
     };
 
     void* _pool_ptrs[6] = {

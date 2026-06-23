@@ -52,8 +52,11 @@ namespace ace::cfg {
     /// @brief Number of runner threads (including the main thread).
     struct runners_amount {};
 
-    // [NEW PARAM]
-    // struct max_tasks_per_yank {};
+    /// @brief Number of pre-allocated 512-byte fixed buffers for io_uring.
+    struct iovec_fixed_512 {};
+
+    /// @brief Number of pre-allocated 2048-byte fixed buffers for io_uring.
+    struct iovec_fixed_2048 {};
 
     // ===================================================================
     // detail::default_of — internal compile-time defaults
@@ -68,6 +71,16 @@ namespace ace::cfg {
         template <>
         struct default_of<runners_amount> {
             static constexpr std::size_t value = 1;
+        };
+
+        template <>
+        struct default_of<iovec_fixed_512> {
+            static constexpr uint16_t value = 256;
+        };
+
+        template <>
+        struct default_of<iovec_fixed_2048> {
+            static constexpr uint16_t value = 64;
         };
 
         // [NEW PARAM]:

@@ -35,6 +35,8 @@
 #include "ace/core/traits/vortex.h"
 #include "ace/core/tools/queue.h"
 #include "ace/core/tools/iovec_alloc.h"
+#include "ace/core/tools/iovec_fixed.h"
+#include "ace/core/config.h"
 
 namespace ace::core::services {
 
@@ -134,10 +136,7 @@ namespace ace::core::services {
 
         static thread_local tools::queue<kernel_entity> _submission_buffer;
         static thread_local tools::iovec_allocator _iovec_alloc;
-        // TODO: Make configurable
-        static constexpr uint16_t kMaxRegBuffers = 1024;
-        static thread_local bool _sparse_registered;
-        static thread_local uint16_t _reg_buf_count;
+        // static thread_local tools::iovec_fixed_allocator _iovec_fixed;
 
         static bool ping();
 
@@ -159,26 +158,6 @@ namespace ace::core::services {
          */
         template <typename foo_t, typename ... Params>
         static bool submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept;
-
-        /**
-         * @brief Registers a set of I/O buffers with io_uring for zero-copy
-         * operations (IORING_REGISTER_BUFFERS). Once registered, buffers can
-         * be referenced by their fixed index in send_zc/recv calls.
-         * @param iovecs array of iovec descriptors
-         * @param nr_iovecs number of iovecs
-         * @return 0 on success, negative errno on failure
-         */
-        static int register_buffers(const iovec* iovecs, unsigned nr_iovecs) noexcept {
-            return io_uring_register_buffers(&_ring, iovecs, nr_iovecs);
-        }
-
-        /**
-         * @brief Unregisters previously registered I/O buffers.
-         * @return 0 on success, negative errno on failure
-         */
-        static int unregister_buffers() noexcept {
-            return io_uring_unregister_buffers(&_ring);
-        }
 
         /**
          * @brief Registers a set of file descriptors with io_uring for fixed-file
@@ -265,6 +244,7 @@ namespace ace::core::services {
          * @brief Scatter-gather send via io_uring_prep_sendmsg.
          * Allows sending data from multiple non-contiguous buffers (iovec)
          * in a single syscall, avoiding extra copy for composite headers.
+         * For zero-copy with pre-registered buffers, use sendmsg_fixed().
          * @param observer CQE completion handler
          * @param fd socket file descriptor
          * @param msg pointer to msghdr with iovec array
@@ -285,33 +265,9 @@ namespace ace::core::services {
             return submit(io_uring_prep_recv, observer, fd, buf, len, flags);
         }
 
-        // ── iovec allocator ───────────────────────────────────────────
-
-        static auto _register_buffer(const iovec* iov) -> bool {
-            if (!_sparse_registered) {
-                if (io_uring_register_buffers_sparse(&_ring, kMaxRegBuffers) < 0) return false;
-                _sparse_registered = true;
-            }
-            if (_reg_buf_count >= kMaxRegBuffers) return false;
-            if (io_uring_register_buffers_update_tag(&_ring, _reg_buf_count, iov, nullptr, 1) < 0)
-                return false;
-            ++_reg_buf_count;
-            return true;
-        }
-
-        static auto iovec_allocate(size_t size) noexcept -> iovec* {
-            bool brand_new = _iovec_alloc.will_malloc(size);
-            iovec* iov = _iovec_alloc.allocate(size);
-            if (!iov) return nullptr;
-            if (brand_new) _register_buffer(iov);
-            return iov;
-        }
-
-        static auto iovec_deallocate(iovec* iov) noexcept -> void {
-            _iovec_alloc.deallocate(iov);
-        }
-
-        static auto iovec_alloc() noexcept -> tools::iovec_allocator& { return _iovec_alloc; }
+        // static bool sendmsg_fixed(kernel_observer* observer, const int fd, const msghdr* msg, const int flags, unsigned buf_index) {
+        //     return submit(io_uring_prep_sendmsg_zc_fixed, observer, fd, msg, flags, buf_index);
+        // }
 
         static bool read(kernel_observer* observer, const int fd, void *buf, const unsigned nbytes, const uint64_t offset) {
             return submit(io_uring_prep_read, observer, fd, buf, nbytes, offset);
@@ -320,6 +276,34 @@ namespace ace::core::services {
         static bool write(kernel_observer* observer, const int fd, const void *buf, const unsigned nbytes, const uint64_t offset) {
             return submit(io_uring_prep_write, observer, fd, buf, nbytes, offset);
         }
+
+        // ── iovec allocator ───────────────────────────────────────────
+
+        static auto iovec_allocate(size_t size) noexcept -> iovec* {
+            return _iovec_alloc.allocate(size);
+        }
+
+        static auto iovec_deallocate(iovec* iov) noexcept -> void {
+            _iovec_alloc.deallocate(iov);
+        }
+
+        static auto iovec_alloc() noexcept -> tools::iovec_allocator& { return _iovec_alloc; }
+
+        // ── iovec fixed allocator ─────────────────────────────────────
+
+        // static auto iovec_fixed_allocate(size_t size) noexcept -> iovec* {
+        //     return _iovec_fixed.allocate(size);
+        // }
+        //
+        // static auto iovec_fixed_deallocate(iovec* iov) noexcept -> void {
+        //     _iovec_fixed.deallocate(iov);
+        // }
+        //
+        // static auto iovec_fixed_buf_index(const iovec* iov) noexcept -> uint16_t {
+        //     return _iovec_fixed.buf_index(iov);
+        // }
+        //
+        // static auto iovec_fixed_alloc() noexcept -> tools::iovec_fixed_allocator& { return _iovec_fixed; }
 
     };
 
@@ -364,12 +348,11 @@ namespace ace::core::services {
     };
 
     inline thread_local tools::iovec_allocator kernel_controller::_iovec_alloc {};
-
-    inline thread_local bool kernel_controller::_sparse_registered {false};
-    inline thread_local uint16_t kernel_controller::_reg_buf_count {};
+    // inline thread_local tools::iovec_fixed_allocator kernel_controller::_iovec_fixed {};
 
     inline thread_local io_uring_params kernel_controller::_ring_params {};
     inline thread_local io_uring kernel_controller::_ring {};
+
     inline thread_local int kernel_controller::_queries {};
     inline thread_local bool kernel_controller::_need_submission {false};
 
@@ -392,12 +375,19 @@ ACE_CORE_KERNEL_CONTROLLER_MEMBER()
 kernel_controller() {
     memset(&_ring_params, 0, sizeof(_ring_params));
     io_uring_queue_init_params(max_entries, &_ring, &_ring_params);
-}
 
+    // const auto count_512  = static_cast<uint16_t>(ace::cfg::detail::resolve<ace::cfg::iovec_fixed_512>());
+    // const auto count_2048 = static_cast<uint16_t>(ace::cfg::detail::resolve<ace::cfg::iovec_fixed_2048>());
+    // _iovec_fixed.init(count_512, count_2048);
+    // if (_iovec_fixed.registration_count() > 0) {
+    //     io_uring_register_buffers(&_ring, _iovec_fixed.registration_iovecs(), _iovec_fixed.registration_count());
+    // }
+}
 
 ACE_CORE_KERNEL_CONTROLLER_MEMBER()
 ~kernel_controller() {
-    io_uring_unregister_buffers(&_ring);
+    // if (_iovec_fixed.registration_count() > 0)
+    //     io_uring_unregister_buffers(&_ring);
     io_uring_queue_exit(&_ring);
 }
 

@@ -139,11 +139,11 @@ namespace ace::core::traits {
 
         static derived_t& touch_impl(cast_ptr rnr = nullptr) noexcept {
             if constexpr (spawn_mode_v == vortex_spawn_mode::e_thread_shared) {
-                static derived_t instance;
+                static derived_t instance {};
                 if (instance.detach_get()) instance.respawn(rnr.as<runner>());
                 return instance;
             } else if constexpr (spawn_mode_v == vortex_spawn_mode::e_thread_local) {
-                thread_local derived_t instance;
+                thread_local derived_t instance {};
                 if (instance.detach_get()) instance.respawn(rnr.as<runner>());
                 return instance;
             }

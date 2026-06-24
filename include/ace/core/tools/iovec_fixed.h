@@ -28,7 +28,7 @@ struct iovec_fixed_allocator {
     ~iovec_fixed_allocator() {
         delete[] _buf_512;
         delete[] _buf_2048;
-        delete[] _reg_iovecs;
+        delete[] _iovec_pool;
     }
 
     iovec_fixed_allocator(const iovec_fixed_allocator&) = delete;
@@ -43,68 +43,55 @@ struct iovec_fixed_allocator {
         _count_2048 = count_2048;
         _total_count = count_512 + count_2048;
 
-        // ── allocate buffer arrays ────────────────────────────
-        if (count_512)
-            _buf_512  = new buffer_512[count_512]{};
-        if (count_2048)
-            _buf_2048 = new buffer_2048[count_2048]{};
+        if (_total_count == 0) return;
+        _iovec_pool = new iovec[_total_count];
 
-        // ── set up per-buffer iovec descriptors ───────────────
-        for (std::size_t i = 0; i < count_512; ++i) {
-            _buf_512[i]._iov.iov_base = _buf_512[i]._data.data();
-            _buf_512[i]._iov.iov_len  = kSize_512;
-        }
-        for (std::size_t i = 0; i < count_2048; ++i) {
-            _buf_2048[i]._iov.iov_base = _buf_2048[i]._data.data();
-            _buf_2048[i]._iov.iov_len  = kSize_2048;
-        }
-
-        // ── build free-list chains (stored in first 8 bytes of data) ──
+        // NOTE: Allocate and assign 512 chunks
         if (count_512 > 0) {
+            _buf_512  = new buffer_512[count_512]{};
+            for (std::size_t i = 0; i < count_512; ++i) {
+                *reinterpret_cast<std::size_t*>(_buf_512[i].data()) = i + 1;
+                _iovec_pool[i].iov_base = _buf_512[i].data();
+                _iovec_pool[i].iov_len  = kSize_512;
+            }
+            *reinterpret_cast<std::size_t*>(_buf_512[count_512 - 1].data()) = kSentinel;
             _free_head_512 = 0;
-            for (std::size_t i = 0; i < count_512 - 1; ++i)
-                *reinterpret_cast<std::size_t*>(_buf_512[i]._data.data()) = i + 1;
-            *reinterpret_cast<std::size_t*>(_buf_512[count_512 - 1]._data.data()) = kSentinel;
         }
 
+        // NOTE: Allocate and assign 2048 chunks
         if (count_2048 > 0) {
-            _free_head_2048 = 0;
-            for (std::size_t i = 0; i < count_2048 - 1; ++i)
-                *reinterpret_cast<std::size_t*>(_buf_2048[i]._data.data()) = i + 1;
-            *reinterpret_cast<std::size_t*>(_buf_2048[count_2048 - 1]._data.data()) = kSentinel;
+            _buf_2048 = new buffer_2048[count_2048]{};
+            for (std::size_t i = 0; i < count_2048; ++i) {
+                *reinterpret_cast<std::size_t*>(_buf_2048[i].data()) = count_512 + i + 1;
+                _iovec_pool[i].iov_base = _buf_2048[i].data();
+                _iovec_pool[i].iov_len  = kSize_2048;
+            }
+            *reinterpret_cast<std::size_t*>(_buf_2048[count_2048 - 1].data()) = kSentinel;
+            _free_head_2048 = count_512;
         }
 
-        // ── build registration iovec array ────────────────────
-        if (_total_count) {
-            // TODO: Fix later
-            // _reg_iovecs = new iovec[_total_count];
-            // for (std::size_t i = 0; i < count_512; ++i)
-            //     _reg_iovecs[i] = _buf_512[i]._iov;
-            // for (std::size_t i = 0; i < count_2048; ++i)
-            //     _reg_iovecs[count_512 + i] = _buf_2048[i]._iov;
-        }
     }
 
     [[nodiscard]] auto allocate(size_t size) noexcept -> iovec* {
         if (_total_count == 0 and !_buf_512 and !_buf_2048) return nullptr;
-        uint8_t cls = (size <= kSize_512) ? 0 : 1;
-        if (cls == 0)
+        if (size <= kSize_512)
             return _alloc_512();
-        else
+        if (size <= kSize_2048)
             return _alloc_2048();
+        return nullptr;
     }
 
     auto deallocate(iovec* iov) noexcept -> void {
-        if (!iov) return;
+        if (not iov) return;
         iov->iov_len = 0;
         if (iov->iov_base) {
             auto ptr = static_cast<uint8_t*>(iov->iov_base);
             if (_is_in_512(ptr)) {
-                std::size_t idx = static_cast<std::size_t>((ptr - _buf_512[0]._data.data()) / sizeof(buffer_512));
+                const std::size_t idx = (ptr - _buf_512[0].data()) / sizeof(buffer_512);
                 *reinterpret_cast<std::size_t*>(ptr) = _free_head_512;
                 _free_head_512 = idx;
             } else if (_is_in_2048(ptr)) {
-                std::size_t idx = static_cast<std::size_t>((ptr - _buf_2048[0]._data.data()) / sizeof(buffer_2048));
+                const std::size_t idx = (ptr - _buf_2048[0].data()) / sizeof(buffer_2048);
                 *reinterpret_cast<std::size_t*>(ptr) = _free_head_2048;
                 _free_head_2048 = idx;
             }
@@ -113,15 +100,15 @@ struct iovec_fixed_allocator {
 
     [[nodiscard]] auto buf_index(const iovec* iov) const noexcept -> std::size_t {
         if (not iov) return kSentinel;
-        auto ptr = static_cast<const uint8_t*>(iov->iov_base);
+        const auto ptr = static_cast<const uint8_t*>(iov->iov_base);
         if (_is_in_512(ptr)) {
-            return static_cast<std::size_t>((ptr - _buf_512[0]._data.data()) / sizeof(buffer_512));
+            return (ptr - _buf_512[0].data()) / sizeof(buffer_512);
         }
-        return _count_512 + static_cast<std::size_t>((ptr - _buf_2048[0]._data.data()) / sizeof(buffer_2048));
+        return _count_512 + ((ptr - _buf_2048[0].data()) / sizeof(buffer_2048));
     }
 
     [[nodiscard]] auto registration_iovecs() const noexcept -> const iovec* {
-        return _reg_iovecs;
+        return _iovec_pool;
     }
 
     [[nodiscard]] auto registration_count() const noexcept -> unsigned {
@@ -136,8 +123,8 @@ private:
 
     static constexpr std::size_t kSentinel = std::numeric_limits<std::size_t>::max();
 
-    struct alignas(64) buffer_512  { iovec _iov{}; std::array<uint8_t, 512>  _data{}; };
-    struct alignas(64) buffer_2048 { iovec _iov{}; std::array<uint8_t, 2048> _data{}; };
+    using buffer_512 = std::array<uint8_t, 512>;
+    using buffer_2048 = std::array<uint8_t, 2048>;
 
     buffer_512*  _buf_512  = nullptr;
     buffer_2048* _buf_2048 = nullptr;
@@ -149,35 +136,35 @@ private:
     std::size_t _free_head_512  = kSentinel;
     std::size_t _free_head_2048 = kSentinel;
 
-    iovec* _reg_iovecs = nullptr;
+    iovec* _iovec_pool = nullptr;
 
     [[nodiscard]] auto _alloc_512() noexcept -> iovec* {
         if (_free_head_512 == kSentinel) return nullptr;
-        std::size_t idx = _free_head_512;
-        _free_head_512 = *reinterpret_cast<std::size_t*>(_buf_512[idx]._data.data());
-        _buf_512[idx]._iov.iov_len = kSize_512;
-        return &_buf_512[idx]._iov;
+        const std::size_t idx = _free_head_512;
+        _free_head_512 = *static_cast<std::size_t*>(_iovec_pool[idx].iov_base);
+        _iovec_pool[idx].iov_len = kSize_512;
+        return &_iovec_pool[idx];
     }
 
     [[nodiscard]] auto _alloc_2048() noexcept -> iovec* {
         if (_free_head_2048 == kSentinel) return nullptr;
-        std::size_t idx = _free_head_2048;
-        _free_head_2048 = *reinterpret_cast<std::size_t*>(_buf_2048[idx]._data.data());
-        _buf_2048[idx]._iov.iov_len = kSize_2048;
-        return &_buf_2048[idx]._iov;
+        const std::size_t idx = _free_head_2048;
+        _free_head_2048 = *static_cast<std::size_t*>(_iovec_pool[idx].iov_base);
+        _iovec_pool[idx].iov_len = kSize_2048;
+        return &_iovec_pool[idx];
     }
 
     [[nodiscard]] auto _is_in_512(const uint8_t* ptr) const noexcept -> bool {
         if (!_buf_512 or !_count_512) return false;
-        auto base = _buf_512[0]._data.data();
-        auto end  = base + _count_512 * sizeof(buffer_512);
+        const auto base = _buf_512[0].data();
+        const auto end  = base + ( _count_512 * sizeof(buffer_512) );
         return ptr >= base && ptr < end;
     }
 
     [[nodiscard]] auto _is_in_2048(const uint8_t* ptr) const noexcept -> bool {
         if (!_buf_2048 or !_count_2048) return false;
-        auto base = _buf_2048[0]._data.data();
-        auto end  = base + _count_2048 * sizeof(buffer_2048);
+        const auto base = _buf_2048[0].data();
+        const auto end  = base + ( _count_2048 * sizeof(buffer_2048) );
         return ptr >= base && ptr < end;
     }
 };

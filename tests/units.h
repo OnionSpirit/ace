@@ -340,7 +340,7 @@ inline ace::task socket_listener() {
 }
 
 
-inline ace::task socket_abuser_sg() {
+inline ace::task socket_abuser_zc() {
 
     auto bind_entry = co_await ace::net::io_socket_tcp();
     if (not bind_entry) {
@@ -372,15 +372,15 @@ inline ace::task socket_abuser_sg() {
         }
         std::memcpy(iov->iov_base, msg.data(), msg.size());
         std::array<iovec, 1> arr {{{*iov}}};
-        if (co_await connection.sendmsg(arr))
-            ace::console::println("Client [sg] sent: '{}'", msg);
+        if (co_await connection.sendmsg(arr) == EXIT_SUCCESS)
+            ace::console::println("Client [zc] sent: '{}'", msg);
         ace::core::services::kernel_controller::iovec_deallocate(iov);
     }
 
     co_return;
 }
 
-inline ace::task socket_listener_sg() {
+inline ace::task socket_listener_zc() {
 
     auto bind_entry = co_await ace::net::io_socket_tcp();
     if (not bind_entry) {
@@ -420,9 +420,9 @@ inline ace::task socket_listener_sg() {
         int n = co_await connection.recvmsg(arr);
         if (n > 0) {
             static_cast<char*>(iov->iov_base)[n] = '\0';
-            ace::console::println("Server [sg] received: '{}'", static_cast<char*>(iov->iov_base));
+            ace::console::println("Server [zc] received: '{}'", static_cast<char*>(iov->iov_base));
         } else {
-            ace::console::println("Server [sg] failed");
+            ace::console::println("Server [zc] failed");
         }
         ace::core::services::kernel_controller::iovec_deallocate(iov);
     }

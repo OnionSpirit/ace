@@ -422,8 +422,8 @@ TEST(futures, do_io_socket_echo) {
 }
 
 TEST(futures, do_io_socket_sg) {
-    ace::schedule(socket_listener_sg());
-    ace::schedule(socket_abuser_sg());
+    ace::schedule(socket_listener_zc());
+    ace::schedule(socket_abuser_zc());
     ace::run();
     ace::reset_signal();
     ASSERT_TRUE(ace::empty());

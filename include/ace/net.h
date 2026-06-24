@@ -469,7 +469,7 @@ namespace ace::net {
 
             bool setup_query(core::services::kernel_observer* kwp) const {
                 msghdr* msg = kwp->acquire_msghdr();
-                if (!msg) return false;
+                if (not msg) return false;
                 msg->msg_iov = const_cast<iovec*>(_iov);
                 msg->msg_iovlen = _iovlen;
                 if (not core::services::kernel_controller::sendmsg(kwp, _fd, msg, _flags)) {
@@ -500,7 +500,7 @@ namespace ace::net {
 
             bool setup_query(core::services::kernel_observer* kwp) const {
                 msghdr* msg = kwp->acquire_msghdr();
-                if (!msg) return false;
+                if (not msg) return false;
                 msg->msg_iov = _iov;
                 msg->msg_iovlen = _iovlen;
                 if (not core::services::kernel_controller::recvmsg(kwp, _fd, msg, _flags)) {

@@ -235,6 +235,14 @@ namespace ace::core::services {
             return submit(io_uring_prep_send, observer, fd, buf, len, flags);
         }
 
+        static bool send_zc(kernel_observer* observer, const int fd, const void *buf, const size_t len, const int flags, const unsigned int zc_flags) {
+            return submit(io_uring_prep_send_zc, observer, fd, buf, len, flags, zc_flags);
+        }
+
+        // static bool send_zc_fixed(kernel_observer* observer, const int fd, const void *buf, const size_t len, const int flags, const unsigned int zc_flags) {
+        //     return submit(io_uring_prep_send_zc_fixed, observer, fd, buf, len, flags, zc_flags);
+        // }
+
         static bool sendto(kernel_observer* observer, const int fd, const void *buf, const size_t len, const int flags,
             const sockaddr *addr, const socklen_t addrlen) {
             return submit(io_uring_prep_sendto, observer, fd, buf, len, flags, addr, addrlen);
@@ -251,7 +259,7 @@ namespace ace::core::services {
          * @param flags send flags (MSG_ZEROCOPY etc.)
          */
         static bool sendmsg(kernel_observer* observer, const int fd, const msghdr* msg, const int flags) {
-            return submit(io_uring_prep_sendmsg, observer, fd, msg, flags);
+            return submit(io_uring_prep_sendmsg_zc, observer, fd, msg, flags);
         }
 
         /**
@@ -263,10 +271,6 @@ namespace ace::core::services {
 
         static bool recv(kernel_observer* observer, const int fd, void *buf, const size_t len, const int flags) {
             return submit(io_uring_prep_recv, observer, fd, buf, len, flags);
-        }
-
-        static bool sendmsg_fixed(kernel_observer* observer, const int fd, const msghdr* msg, const int flags, unsigned buf_index) {
-            return submit(io_uring_prep_sendmsg_zc_fixed, observer, fd, msg, flags, buf_index);
         }
 
         static bool read(kernel_observer* observer, const int fd, void *buf, const unsigned nbytes, const uint64_t offset) {
@@ -417,13 +421,27 @@ ping() {
             continue;
         }
 
-        observer->on_result(cqe->res);
-        observer->release_msghdr();
+        // NOTE: CQE flow operations tracking
+        const bool cqe_flow = IORING_CQE_F_MORE & cqe->flags;
+        const bool multishot_active = cqe_flow and observer->_multishot;
 
-        if (not observer->_multishot)
-            --_queries;
-        else if (observer->_multishot and observer->_on_cancel)
+        if (cqe_flow)
+            ++_queries;
+        else {
+            observer->on_result(cqe->res);
+            observer->release_msghdr();
+        }
+
+        // NOTE: Awaking observer on multishot CQE
+        if (multishot_active)
+            observer->on_result(cqe->res);
+
+        if (multishot_active and observer->_on_cancel) {
             _queries -= cqe->res;
+            // NOTE: Releasing msghdr only at the end of the multishot operation lifetime
+            observer->release_msghdr();
+        } else
+            --_queries;
 
         io_uring_cqe_seen(&_ring, cqe);
     }

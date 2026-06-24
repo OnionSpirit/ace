@@ -830,4 +830,8 @@ public:                                                                         
         io_guard _guard {_fd, _is_closed};
     };
 
+namespace ace {
+    using io_reactive_link = std::shared_ptr<core::io_link>;
+}
+
 #endif //ACE_IO_H

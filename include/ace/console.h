@@ -16,6 +16,7 @@
 
 #include <list>
 #include <format>
+#include <utility>
 #include <ace/core/async.h>
 #include <ace/core/io.h>
 #include <ace/fs.h>
@@ -34,43 +35,60 @@ namespace ace {
 
         console() = default;
 
-        // TODO: Make io_router and upgrade this fields to it
-        static fs::file_link _stdin;
-        static fs::file_link _stdout;
+        static io_reactive_link _input;
+        static io_reactive_link _output;
 
     public:
 
         [[nodiscard]] static async<std::expected<std::string, int>> input() {
-            co_return co_await _stdin.read_str();
+            co_return co_await _input->read_str();
         }
 
         template <class... Args>
         static void println(std::format_string<Args...>&& fmt, Args&&... args) {
-            _stdout.writeln(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            _output->writeln(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
         static void println(const std::string_view&& str) {
-            _stdout.writeln(std::forward<const std::string_view>(str));
+            _output->writeln(std::forward<const std::string_view>(str));
         }
 
         static void println() {
-            _stdout.writeln("");
+            _output->writeln("");
         }
 
         template <class... Args>
         static void print(std::format_string<Args...>&& fmt, Args&&... args) {
-            _stdout.write(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            _output->write(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
         static void print(const std::string_view&& str) {
-            _stdout.write(std::forward<const std::string_view>(str));
+            _output->write(std::forward<const std::string_view>(str));
         }
+
+        // NOTE: I/O File links for stdio. Marked closed to not actually close this descriptors by RAII
+        static auto stdin_link() -> std::shared_ptr<fs::file_link> {
+            static auto in = std::make_shared<fs::file_link>(stdin->_fileno , true);
+            return in;
+        }
+
+        static auto stdout_link() -> std::shared_ptr<fs::file_link> {
+            static auto out = std::make_shared<fs::file_link>(stdout->_fileno , true);
+            return out;
+        }
+
+        static auto input_link(io_reactive_link link = _input) {
+            return _input = std::move(link);
+        };
+
+        static auto output_link(io_reactive_link link = _output) {
+            return _output = std::move(link);
+        };
 
     };
 
-    // NOTE: I/O File links for stdio. Marked closed to not actually close this descriptors by RAII
-    inline fs::file_link console::_stdin  { stdin->_fileno , true };
-    inline fs::file_link console::_stdout { stdout->_fileno, true };
+    inline io_reactive_link console::_input = stdin_link();
+    inline io_reactive_link console::_output = stdout_link();
 
 }
 

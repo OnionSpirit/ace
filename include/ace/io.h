@@ -34,7 +34,6 @@
 #include <utility>
 #include <format>
 
-#include "io.h"
 #include "ace/services/kernelic.h"
 
 namespace ace::io {

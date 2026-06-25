@@ -41,7 +41,7 @@ namespace ace {
     public:
 
         [[nodiscard]] static async<std::expected<std::string, int>> input() {
-            co_return co_await _input->read_str();
+            co_return co_await _input->read_as<std::string>();
         }
 
         template <class... Args>

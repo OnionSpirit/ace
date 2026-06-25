@@ -64,4 +64,6 @@ typedef struct {} ACE_EMPTY_TYPE;
 #define ACE_WEAK
 #endif
 
+#define ACE_IO_BUFFER_CHUNK_LIMIT 16
+
 #endif // ACE_COMMON_TERMS_H

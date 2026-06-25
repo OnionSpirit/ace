@@ -708,8 +708,8 @@ public:                                                                         
             output_action(std::forward<const std::string_view>(str));
         }
 
-        void write(const void *buf, const size_t len) {
-            const auto buff = std::span<const char>(static_cast<const char*>(buf), len);
+        void write(const void *first, const void* last) {
+            const auto buff = std::span(static_cast<const char*>(first), static_cast<const char*>(last));
             output_action(buff);
         }
 

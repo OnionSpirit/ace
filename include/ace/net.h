@@ -497,9 +497,11 @@ namespace ace::net {
             const int _flags;
         };
 
-        [[nodiscard]] auto send(const void *buf, const size_t len, const int flags = 0) const
-        -> send_query requires (connection_state_v == e_connected)
-        { return send_query{_fd, buf, len, flags}; }
+        [[nodiscard]] auto send(const void *first, const void* last, const int flags = 0) const
+        -> send_query requires (connection_state_v == e_connected) {
+            const size_t len = static_cast<const std::byte*>(last) - static_cast<const std::byte*>(first);
+            return send_query{_fd, first, len, flags};
+        }
 
         [[nodiscard]] auto send(const std::string_view buf, const int flags = 0) const
         -> send_query requires (connection_state_v == e_connected)
@@ -560,10 +562,12 @@ namespace ace::net {
             return connect_query_t { std::move(*this), reinterpret_cast<sockaddr*>(&_peer_sin), sizeof(sockaddr_in)};
         }
 
-        [[nodiscard]] auto sendto(const void *buf, const size_t len, const int flags,
+        [[nodiscard]] auto sendto(const void *first, const void* last, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const
-        -> sendto_query requires (connection_state_v == e_indirect)
-        { return sendto_query{_fd, buf, len, flags, addr, addrlen}; }
+        -> sendto_query requires (connection_state_v == e_indirect) {
+            const size_t len = static_cast<const std::byte*>(last) - static_cast<const std::byte*>(first);
+            return sendto_query{_fd, first, len, flags, addr, addrlen};
+        }
 
         [[nodiscard]] auto sendto(const std::string_view buf, const int flags,
                 const sockaddr *addr, const socklen_t addrlen) const

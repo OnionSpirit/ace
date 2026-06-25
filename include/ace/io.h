@@ -754,40 +754,6 @@ public:                                                                         
             return std::decay_t<T>{};
         }
 
-        // template <typename data_t>
-        // requires std::is_pod_v<data_t>
-        // [[nodiscard]] auto read_vec(const int flags = 0)
-        // -> async<std::expected<std::vector<data_t>, int>> {
-        //     static constexpr int buff_len_bytes = buff_len * (sizeof(data_t) / sizeof(char));
-        //
-        //     std::deque<std::array<data_t, buff_len>> acc;
-        //     int total = 0;
-        //
-        //     auto& buff = acc.emplace_back();
-        //     int bytes_read = co_await input_action(reinterpret_cast<void*>(buff.data()), buff_len_bytes);
-        //     if (bytes_read < 1) co_return std::unexpected(-bytes_read);
-        //     total += bytes_read;
-        //
-        //     while (bytes_read == buff_len) {
-        //         buff = acc.emplace_back();
-        //         bytes_read = co_await input_action(reinterpret_cast<void*>(buff.data()), buff_len_bytes);
-        //         if (bytes_read < 1) co_return std::unexpected(-bytes_read);
-        //         total += bytes_read;
-        //     }
-        //
-        //     // NOTE: Cast to data object size
-        //     total /= (sizeof(data_t) / sizeof(char));
-        //     std::vector<data_t> res {};
-        //     res.reserve(total);
-        //     for (auto& buf : acc) {
-        //         const int write_items { (total > buff_len) ? buff_len : total };
-        //         for (int i = 0; i < write_items; ++i)
-        //             res.push_back(std::forward<data_t>(buf[i]));
-        //         total -= write_items;
-        //     }
-        //     co_return res;
-        // }
-
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         ACE_AWAIT_NODISCARD async<int> read(std::array<data_t, len_v>& buf, const int flags = 0) {
@@ -1204,19 +1170,18 @@ public:                                                                         
     template <>
     [[nodiscard]] inline auto ace::io::link::read_as<std::vector<std::byte>>(const int flags)
     -> async<std::expected<std::vector<std::byte>, int>> {
-        static constexpr int buff_len_bytes = buff_len * (sizeof(std::byte) / sizeof(char));
 
         std::deque<std::array<std::byte, buff_len>> acc;
         int total = 0;
 
         auto& buff = acc.emplace_back();
-        int bytes_read = co_await input_action(reinterpret_cast<void*>(buff.data()), buff_len_bytes);
+        int bytes_read = co_await input_action(reinterpret_cast<void*>(buff.data()), buff_len);
         if (bytes_read < 1) co_return std::unexpected(-bytes_read);
         total += bytes_read;
 
         while (bytes_read == buff_len) {
             buff = acc.emplace_back();
-            bytes_read = co_await input_action(reinterpret_cast<void*>(buff.data()), buff_len_bytes);
+            bytes_read = co_await input_action(reinterpret_cast<void*>(buff.data()), buff_len);
             if (bytes_read < 1) co_return std::unexpected(-bytes_read);
             total += bytes_read;
         }
@@ -1239,14 +1204,14 @@ public:                                                                         
         static constexpr int buff_len_bytes = buff_len - buffer::control_hdr_len;
 
         buffer buf {};
-        buf.extend(buff_len);
+        buf.extend(buff_len_bytes);
         auto [data, _] = buf.tail_chunk();
 
         int bytes_read = co_await input_action(data, buff_len_bytes);
         if (bytes_read < 1) co_return std::unexpected(-bytes_read);
 
-        while (bytes_read == buff_len) {
-            buf.extend(buff_len);
+        while (bytes_read == buff_len_bytes) {
+            buf.extend(buff_len_bytes);
             std::tie(data, _) = buf.tail_chunk();
             bytes_read = co_await input_action(data, buff_len_bytes);
             if (bytes_read < 1) co_return std::unexpected(-bytes_read);

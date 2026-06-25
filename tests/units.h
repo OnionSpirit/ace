@@ -331,8 +331,8 @@ inline ace::task socket_listener() {
     }
 
     for (int i =0; i < 5; ++i) {
-        if (auto result = co_await connection.recv_str())
-            ace::console::println("Server received: '{}'", result.value());
+        if (auto result = co_await connection.recv_buf())
+            ace::console::println("Server received: '{}'", result.value().as<std::string>());
         else ace::console::println("Server failed: '{}'", strerror(result.error()));
     }
 

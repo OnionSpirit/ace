@@ -611,71 +611,6 @@ namespace ace::net {
         [[nodiscard]] auto recv(std::string& buf, const int flags = 0) const
         -> recv_query { return recv_query{_fd, buf.data(), buf.capacity(), flags}; }
 
-        template <typename data_t>
-        requires std::is_pod_v<data_t>
-        [[nodiscard]] auto recv_vec(const int flags = 0) const
-        -> promise<std::expected<std::vector<data_t>, int>> {
-            static constexpr int buff_len = 128;
-            static constexpr int buff_len_bytes = buff_len * (sizeof(data_t) / sizeof(char));
-
-            std::deque<std::array<data_t, buff_len>> acc;
-            int total = 0;
-
-            auto& buff = acc.emplace_back();
-            int bytes_read = co_await recv_query(_fd, buff.data(), buff_len_bytes, flags);
-            if (bytes_read < 1) co_return std::unexpected(-bytes_read);
-            total += bytes_read;
-
-            while (bytes_read == buff_len) {
-                buff = acc.emplace_back();
-                bytes_read = co_await recv_query(_fd, buff.data(), buff_len_bytes, flags);
-                if (bytes_read < 1) co_return std::unexpected(-bytes_read);
-                total += bytes_read;
-            }
-
-            // NOTE: Cast to data object size
-            total /= (sizeof(data_t) / sizeof(char));
-            std::vector<data_t> res {};
-            res.reserve(total);
-            for (auto& buf : acc) {
-                const int write_items { (total > buff_len) ? buff_len : total };
-                for (int i = 0; i < write_items; ++i)
-                    res.push_back(std::forward<data_t>(buf[i]));
-                total -= write_items;
-            }
-            co_return res;
-        }
-
-        [[nodiscard]] auto recv_str(const int flags = 0) const
-        -> promise<std::expected<std::string, int>> {
-            static constexpr int buff_len = 128;
-
-            std::deque<std::array<char, buff_len>> acc {};
-            int total = 0;
-
-            auto& buff = acc.emplace_back();
-            int bytes_read = co_await recv_query(_fd, buff.data(), buff_len, flags);
-            if (bytes_read < 1) co_return std::unexpected(-bytes_read);
-            total += bytes_read;
-
-            while (bytes_read == buff_len) {
-                buff = acc.emplace_back();
-                bytes_read = co_await recv_query(_fd, buff.data(), buff_len, flags);
-                if (bytes_read < 1) co_return std::unexpected(-bytes_read);
-                total += bytes_read;
-            }
-
-            std::string res {};
-            // NOTE: + null term char slot
-            res.reserve(total + 1);
-            for (auto& buf : acc) {
-                const int write_bytes { (total > buff_len) ? buff_len : total };
-                res.append(buf.data(), write_bytes);
-                total -= write_bytes;
-            }
-            co_return res;
-        }
-
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         [[nodiscard]] auto recv(std::array<data_t, len_v>& buf, const int flags = 0) const
@@ -692,6 +627,26 @@ namespace ace::net {
         [[nodiscard]] auto recv(io::buffer& buff, const int flags = 0) const
         -> recvmsg_query { return recvmsg_query{_fd, buff.header(), flags}; }
 
+        [[nodiscard]] auto recv_buf(const int flags = 0) const
+        -> promise<std::expected<io::buffer, int>> {
+            static constexpr int buff_len_bytes = 128 - io::buffer::control_hdr_len;
+
+            io::buffer buf {};
+            buf.extend(buff_len_bytes);
+            auto [data, _] = buf.tail_chunk();
+
+            int bytes_read = co_await recv_query(_fd, data, buff_len_bytes, flags);
+            if (bytes_read < 1) co_return std::unexpected(-bytes_read);
+
+            while (bytes_read == buff_len_bytes) {
+                buf.extend(buff_len_bytes);
+                std::tie(data, _) = buf.tail_chunk();
+                bytes_read = co_await recv_query(_fd, data, buff_len_bytes, flags);
+                if (bytes_read < 1) co_return std::unexpected(-bytes_read);
+            }
+
+            co_return buf;
+        }
     };
 
 

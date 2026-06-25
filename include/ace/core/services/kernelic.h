@@ -35,8 +35,6 @@
 #include "ace/core/traits/vortex.h"
 #include "ace/core/tools/queue.h"
 #include "ace/core/tools/iovec_alloc.h"
-#include "ace/core/tools/iovec_fixed.h"
-#include "ace/core/config.h"
 
 namespace ace::core::services {
 
@@ -136,7 +134,6 @@ namespace ace::core::services {
 
         static thread_local tools::queue<kernel_entity> _submission_buffer;
         static thread_local tools::iovec_allocator _iovec_alloc;
-        static thread_local tools::iovec_fixed_allocator _iovec_fixed;
 
         static bool ping();
 
@@ -300,20 +297,6 @@ namespace ace::core::services {
 
         static auto iovec_alloc() noexcept -> tools::iovec_allocator& { return _iovec_alloc; }
 
-        // ── iovec fixed allocator ─────────────────────────────────────
-
-        static auto iovec_fixed_allocate(size_t size) noexcept -> std::tuple<iovec*, std::size_t> {
-            iovec* iov = _iovec_fixed.allocate(size);
-            const std::size_t buff_idx = _iovec_fixed.buf_index(iov);
-            return std::tie(iov, buff_idx);
-        }
-
-        static auto iovec_fixed_deallocate(iovec* iov) noexcept -> void {
-            _iovec_fixed.deallocate(iov);
-        }
-
-        static auto iovec_fixed_alloc() noexcept -> tools::iovec_fixed_allocator& { return _iovec_fixed; }
-
     };
 
     /**
@@ -357,7 +340,6 @@ namespace ace::core::services {
     };
 
     inline thread_local tools::iovec_allocator kernel_controller::_iovec_alloc {};
-    inline thread_local tools::iovec_fixed_allocator kernel_controller::_iovec_fixed {};
 
     inline thread_local io_uring_params kernel_controller::_ring_params {};
     inline thread_local io_uring kernel_controller::_ring {};
@@ -384,9 +366,6 @@ ACE_CORE_KERNEL_CONTROLLER_MEMBER()
 kernel_controller() {
     memset(&_ring_params, 0, sizeof(_ring_params));
     io_uring_queue_init_params(max_entries, &_ring, &_ring_params);
-
-    auto profile = ace::cfg::detail::resolve<ace::cfg::iovec_fixed_profile>();
-    _iovec_fixed.init(profile);
 }
 
 ACE_CORE_KERNEL_CONTROLLER_MEMBER()

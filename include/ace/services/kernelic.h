@@ -23,7 +23,7 @@
  * @c ping() submits pending SQEs, drains CQEs, and notifies waiting
  * coroutines via @c kernel_observer::on_result().
  *
- * @see ace::core::io_query, ace::core::io_entity, ace::core::traits::vortex_traits
+ * @see ace::io::query, ace::io::entity, ace::core::traits::vortex_traits
  */
 #ifndef ACE_SERVICES_KERNELIC_H
 #define ACE_SERVICES_KERNELIC_H

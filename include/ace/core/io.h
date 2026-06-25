@@ -23,8 +23,8 @@
  *
  * @mermaid{ graph LR; Idle[\"invalid (fd=-1)\"]-->Open[\"open\"]; Open-->Closed[\"closed\"]; Closed-->Idle; Open-->Idle; }
  *
- * @see ace::services::kernel_controller, ace::core::io_entity,
- *      ace::core::io_link
+ * @see ace::services::kernel_controller, ace::io::entity,
+ *      ace::io::link
  */
 #ifndef ACE_IO_H
 #define ACE_IO_H
@@ -37,7 +37,7 @@
 #include "io.h"
 #include "ace/services/kernelic.h"
 
-namespace ace::core {
+namespace ace::io {
     /**
      * @brief Concept that checks whether a type implements the I/O query interface.
      *
@@ -81,7 +81,7 @@ namespace ace::core {
      * @warning Does not define @c await_resume() — derived types must provide it.
      */
     template <typename query_core_t>
-    struct io_query;
+    struct query;
 
     /** @brief Awaitable for reading from a file descriptor. @see io_query */
     struct read_query;
@@ -100,7 +100,7 @@ namespace ace::core {
      * the current thread is not running a runner, it falls back to scheduling
      * a close task on the dispatcher.
      */
-    struct io_guard;
+    struct guard;
 
     /**
      * @brief Customisation point for converting between I/O entity types.
@@ -113,7 +113,7 @@ namespace ace::core {
      * @tparam T  Target entity type (specialised by derived types).
      */
     template <typename T>
-    struct io_caster {
+    struct caster {
 
         // NOTE: Defines how to create current entity from another entity
         static auto from_entity(const int, const bool, auto&&) {
@@ -140,7 +140,7 @@ namespace ace::core {
      * @tparam entity_t  The concrete derived entity type (CRTP).
      */
     template <typename entity_t>
-    struct io_entity;
+    struct entity;
 
     /**
      * @brief Encapsulated set of global entities for fire-and-forget I/O.
@@ -150,7 +150,7 @@ namespace ace::core {
      * @c io_guard to issue async @c close() even when the current thread is
      * not running inside @c runner::run().
      */
-    struct io_hanged;
+    struct hanged;
 
     /**
      * @brief Minimal type-erased value holder for custom data associated with an FD.
@@ -173,7 +173,7 @@ namespace ace::core {
      * implement the @c output_action and @c input_action to perform the actual
      * I/O via @c io_uring or a fallback blocking call.
      */
-    class io_link;
+    class link;
 
     /**
      * @brief Thin wrapper for msghdr handling and processing
@@ -196,7 +196,7 @@ namespace ace::core {
 
 #define IMPORT_IO_ENTITY_ENV(class)                                                         \
                                                                                             \
-    using io_entity_t = ace::core::io_entity<class>;                                        \
+    using io_entity_t = ace::io::entity<class>;                                             \
                                                                                             \
 protected:                                                                                  \
                                                                                             \
@@ -213,8 +213,8 @@ public:                                                                         
 
 #define IMPORT_IO_LINK_ENV(class)                                                           \
                                                                                             \
-    typedef ace::core::io_link io_link_t;                                                   \
-    typedef ace::core::any any_t;                                                           \
+    typedef ace::io::link io_link_t;                                                        \
+    typedef ace::io::any any_t;                                                             \
                                                                                             \
 protected:                                                                                  \
                                                                                             \
@@ -231,7 +231,7 @@ public:                                                                         
 #define IMPORT_IO_LINK_FABRICATION using io_link_t::io_link_t;
 
 #define IMPORT_IO_QUERY_ENV(class)                    \
-    typedef ace::core::io_query<class> io_query_t;    \
+    typedef ace::io::query<class> io_query_t;         \
     using io_query_t::_fd;                            \
     using io_query_t::_res;                           \
     ~class() override = default;
@@ -245,7 +245,7 @@ public:                                                                         
      * This is used by @c io_guard to close FDs asynchronously even
      * when the destructor runs outside @c runner::run().
      */
-    struct ace::core::io_hanged {
+    struct ace::io::hanged {
 
         /**
          * @brief A single fire-and-forget I/O command.
@@ -285,19 +285,19 @@ public:                                                                         
         static thread_local nukes::dynamic::reg_freelist<command> _command_pool; ///< Pool of command to start hanged processing wo @c co_await usage
     };
 
-    inline thread_local nukes::dynamic::reg_freelist<ace::core::io_hanged::command> ace::core::io_hanged::_command_pool {};
+    inline thread_local nukes::dynamic::reg_freelist<ace::io::hanged::command> ace::io::hanged::_command_pool {};
 
-    // inline void(*ace::core::io_hanged::fail_cb_handler)(int, const std::span<char>&) = basic_fail_handler;
+    // inline void(*ace::io::hanged::fail_cb_handler)(int, const std::span<char>&) = basic_fail_handler;
 
-    inline void(*ace::core::io_hanged::fail_cb_handler)(int) = basic_fail_handler;
+    inline void(*ace::io::hanged::fail_cb_handler)(int) = basic_fail_handler;
 
 
     template <typename query_core_t>
-    struct ace::core::io_query : traits::future_traits<query_core_t>, services::kernel_observer {
+    struct ace::io::query : core::traits::future_traits<query_core_t>, services::kernel_observer {
 
         IMPORT_FUTURE_ENV(query_core_t);
 
-        explicit io_query(const int fd) : _fd(fd) {
+        explicit query(const int fd) : _fd(fd) {
             static_assert(is_query<query_core_t>,
                 "Query object shall implement 'bool setup_query(ace::core::kernel_waiter*)' method");
         }
@@ -314,7 +314,7 @@ public:                                                                         
 
             io_socket_query_conductor() = delete;
 
-            explicit io_socket_query_conductor(io_query* query_)
+            explicit io_socket_query_conductor(query* query_)
                 : _query(query_) {};
 
             void forward(task&& ctx) override {
@@ -328,7 +328,7 @@ public:                                                                         
 
             ~io_socket_query_conductor() override = default;
 
-            io_query* _query;
+            query* _query;
         };
 
         task       _waiter;               ///< Awaited task storage
@@ -356,10 +356,10 @@ public:                                                                         
         void on_result(const int res) override {
             _res = res;
             if (_waiter)
-                runner::reattach(std::move(_waiter));
+                core::runner::reattach(std::move(_waiter));
         }
 
-        ~io_query() override = default;
+        ~query() override = default;
     };
 
 
@@ -369,12 +369,12 @@ public:                                                                         
      * @details Submits @c io_uring_prep_read via @c kernel_controller.
      * On completion, null-terminates the read buffer.
      */
-    struct ace::core::read_query : io_query<read_query> {
+    struct ace::io::read_query : query<read_query> {
 
         read_query() = delete;
 
         [[nodiscard]] explicit read_query(const int fd, void *buf, const unsigned nbytes, const uint64_t offset = 0)
-            : io_query(fd)
+            : query(fd)
             , _fd(fd)
             , _buf(buf)
             , _nbytes(nbytes)
@@ -402,12 +402,12 @@ public:                                                                         
      *
      * @details Submits @c io_uring_prep_write via @c kernel_controller.
      */
-    struct ace::core::write_query : io_query<write_query> {
+    struct ace::io::write_query : query<write_query> {
 
         write_query() = delete;
 
         explicit write_query(const int fd, const void *buf, const unsigned nbytes, const uint64_t offset = 0)
-            : io_query(fd)
+            : query(fd)
             , _fd(fd)
             , _buf(buf)
             , _nbytes(nbytes)
@@ -430,7 +430,7 @@ public:                                                                         
      *
      * @details Submits @c io_uring_prep_close via @c kernel_controller.
      */
-    struct ace::core::close_query : io_query<close_query> {
+    struct ace::io::close_query : query<close_query> {
 
         IMPORT_IO_QUERY_ENV(close_query)
 
@@ -454,9 +454,9 @@ public:                                                                         
      * submits an async @c close() via @c io_hanged or falls back to
      * scheduling a close task on the dispatcher.
      */
-    struct ace::core::io_guard final {
-        io_guard() = delete;
-        explicit io_guard(const int& fd, const bool& closed)
+    struct ace::io::guard final {
+        guard() = delete;
+        explicit guard(const int& fd, const bool& closed)
             : _fd(fd)
             , _closed(closed) {}
 
@@ -468,17 +468,17 @@ public:                                                                         
                 std::cerr << strerror(res) << std::endl;
         }
 
-        ~io_guard() noexcept {
+        ~guard() noexcept {
             if (_fd < 0 or _closed) return;
             // NOTE: Trying to get current runner.
             // NOTE: Doing it manually for cases when classic 'runner::run()' is unused
-            auto* runner_identity = runner::get().as<runner_pool_t>();
+            auto* runner_identity = core::runner::get().as<runner_pool_t>();
             // NOTE: Pushing data to slot, and setting identity for kernelic
-            if (core::io_hanged::command* cmd; runner_identity and core::io_hanged::_command_pool.capture(cmd)) [[likely]]
+            if (io::hanged::command* cmd; runner_identity and io::hanged::_command_pool.capture(cmd)) [[likely]]
             {
                 cmd->_runner_identity = runner_identity;
-                if (not services::kernel_controller::close(cmd, _fd) and io_hanged::fail_cb_handler)
-                    io_hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
+                if (not services::kernel_controller::close(cmd, _fd) and hanged::fail_cb_handler)
+                    hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
             }
             // NOTE: If can not get slot or identity not found -> using busy behavior
             else schedule(pending_close(_fd));
@@ -496,13 +496,13 @@ public:                                                                         
      * @tparam entity_t  Derived entity type.
      */
     template <typename entity_t>
-    struct ace::core::io_entity {
+    struct ace::io::entity {
 
-        io_entity()
+        entity()
             : _fd(-1)
             , _is_closed(true) {}
 
-        io_entity(const int fd, const bool is_closed)
+        entity(const int fd, const bool is_closed)
             : _fd(fd)
             , _is_closed(is_closed) { };
 
@@ -511,17 +511,17 @@ public:                                                                         
         static entity_t consume(entry_t& io) noexcept {
             auto [fd, is_closed] = io.extract();
             if (fd < 0) is_closed = true;
-            return io_caster<entity_t>::from_entity(fd, is_closed, std::move(io));
+            return caster<entity_t>::from_entity(fd, is_closed, std::move(io));
         }
 
-        io_entity(io_entity&& io) noexcept {
+        entity(entity&& io) noexcept {
             _fd = io._fd;
             _is_closed = io._is_closed;
             io._fd = -1;
             io._is_closed = true;
         }
 
-        io_entity& operator=(io_entity&& io) noexcept {
+        entity& operator=(entity&& io) noexcept {
             _fd = io._fd;
             _is_closed = io._is_closed;
             io._fd = -1;
@@ -553,9 +553,9 @@ public:                                                                         
          * @return @c close_query future object that shall be processed via @c co_await operator
          */
         [[nodiscard]] auto close()
-            -> core::close_query { _is_closed = true; return core::close_query{_fd}; }
+            -> io::close_query { _is_closed = true; return io::close_query{_fd}; }
 
-        virtual ~io_entity() = default;
+        virtual ~entity() = default;
 
     protected:
 
@@ -564,7 +564,7 @@ public:                                                                         
 
     private:
 
-        io_guard _guard {_fd, _is_closed};
+        guard _guard {_fd, _is_closed};
     };
 
 
@@ -576,7 +576,7 @@ public:                                                                         
      * and explicit @c release() to drop the managed value without destroying
      * the @c any itself.
      */
-    class ace::core::any {
+    class ace::io::any {
 
         void* _data = nullptr;
         void(*_deleter)(void*) = nullptr;
@@ -625,7 +625,7 @@ public:                                                                         
      * @c read_str()) as convenience methods.  Derived types implement
      * @c output_action() and @c input_action() for the actual I/O.
      */
-    class ace::core::io_link {
+    class ace::io::link {
 
     protected:
 
@@ -647,16 +647,16 @@ public:                                                                         
 
     public:
 
-        io_link()
+        link()
             : _fd(-1)
             , _is_closed(true)
             , _data() {}
 
-        io_link(const int fd, const bool is_closed)
+        link(const int fd, const bool is_closed)
             : _fd(fd)
             , _is_closed(is_closed) { };
 
-        io_link(const int fd, const bool is_closed, any data)
+        link(const int fd, const bool is_closed, any data)
             : _fd(fd)
             , _is_closed(is_closed)
             , _data(std::move(data)) { };
@@ -666,10 +666,10 @@ public:                                                                         
         static auto consume(entity_t& io) noexcept {
             auto [fd, is_closed] = io.extract();
             if (fd < 0) is_closed = true;
-            return io_caster<entity_t>::as_link(fd, is_closed, std::move(io));
+            return caster<entity_t>::as_link(fd, is_closed, std::move(io));
         }
 
-        io_link(io_link&& io) noexcept {
+        link(link&& io) noexcept {
             _fd = io._fd;
             _is_closed = io._is_closed;
             _data = std::move(io._data);
@@ -677,7 +677,7 @@ public:                                                                         
             io._is_closed = true;
         }
 
-        io_link& operator=(io_link&& io) noexcept {
+        link& operator=(link&& io) noexcept {
             _fd = io._fd;
             _is_closed = io._is_closed;
             _data = std::move(io._data);
@@ -686,7 +686,7 @@ public:                                                                         
             return *this;
         }
 
-        virtual ~io_link() = default;
+        virtual ~link() = default;
 
         template <class... Args>
         void writeln(std::format_string<Args...>&& fmt, Args&&... args) {
@@ -833,15 +833,15 @@ public:                                                                         
 
     private:
 
-        io_guard _guard {_fd, _is_closed};
+        guard _guard {_fd, _is_closed};
     };
 
-    namespace ace {
-        using io_reactive_link = std::shared_ptr<core::io_link>;
+    namespace ace::io {
+        using reactive_link = std::shared_ptr<io::link>;
     }
 
 
-    class ace::core::buffer {
+    class ace::io::buffer {
 
         msghdr      _hdr {
             .msg_iov = nullptr,
@@ -1086,9 +1086,10 @@ public:                                                                         
 
         /**
          * @brief Reserve space in the buffer
+         * @param [in] len extension size
          * @return @c msghdr with @c iovec set
          */
-        msghdr* extend(std::size_t len) {
+        msghdr* extend(const std::size_t len) {
             // NOTE: Allocating buffer
             const auto buf = allocate_buf(len, true);
             if (not buf) return nullptr;
@@ -1118,7 +1119,7 @@ public:                                                                         
         }
 
         /**
-         * @return buffer's @c msghdr
+         * @return buffer's @c msghdr*
          */
         msghdr* header() { return &_hdr; }
 
@@ -1159,7 +1160,7 @@ public:                                                                         
     };
 
     template <>
-    inline std::string ace::core::buffer::as<std::string>() const {
+    inline std::string ace::io::buffer::as<std::string>() const {
         std::string str;
         const iovec* current = _chunk_list_begin;
         for (int i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {

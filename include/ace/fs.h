@@ -7,7 +7,7 @@
  * @c ace::fs::file_link (an @c io_link for open files).  File opening is
  * asynchronous via @c open_query (built on @c io_uring @c io_uring_prep_open).
  *
- * @see ace::core::io_entity, ace::core::io_link
+ * @see ace::io::entity, ace::io::link
  */
 #ifndef ACE_FS_H
 #define ACE_FS_H
@@ -50,7 +50,7 @@ namespace ace::fs {
      * @c io_hanged::command (with blocking @c ::write() fallback).
      * @c input_action() uses @c core::read_query for async reads.
      */
-    struct ace::fs::file_link : core::io_link {
+    struct ace::fs::file_link : io::link {
 
         IMPORT_IO_LINK_ENV(file_link);
         IMPORT_IO_LINK_FABRICATION;
@@ -62,24 +62,24 @@ namespace ace::fs {
             // NOTE: Doing it manually for cases when classic 'runner::run()' is unused
             auto* runner_identity = core::runner::get().as<runner_pool_t>();
             // NOTE: Pushing data to slot, and setting identity for kernelic
-            if (core::io_hanged::command* cmd; runner_identity and core::io_hanged::_command_pool.capture(cmd)) [[likely]]
+            if (io::hanged::command* cmd; runner_identity and io::hanged::_command_pool.capture(cmd)) [[likely]]
             {
                 cmd->_runner_identity = runner_identity;
                 cmd->_buffer.assign(buff.begin(), buff.end());
                 if (not services::kernel_controller::write(cmd, _fd,
-                    cmd->_buffer.data(), cmd->_buffer.size(), 0) and core::io_hanged::fail_cb_handler)
-                    core::io_hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
+                    cmd->_buffer.data(), cmd->_buffer.size(), 0) and io::hanged::fail_cb_handler)
+                    io::hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
             }
             // NOTE: If can not get slot or identity not found -> using busy behavior
             else
             {
-                if (::write(_fd, buff.data(), buff.size()) < 0 and core::io_hanged::fail_cb_handler)
-                    core::io_hanged::fail_cb_handler(errno);
+                if (::write(_fd, buff.data(), buff.size()) < 0 and io::hanged::fail_cb_handler)
+                    io::hanged::fail_cb_handler(errno);
             }
         };
 
         promise<int> input_action(void *buff, const std::size_t len) override {
-            co_return co_await core::read_query(_fd, buff, len);
+            co_return co_await io::read_query(_fd, buff, len);
         }
 
     public:
@@ -90,7 +90,7 @@ namespace ace::fs {
 
 
     template<>
-    struct ace::core::io_caster<ace::fs::file> {
+    struct ace::io::caster<ace::fs::file> {
 
         static auto as_link(int fd, bool is_closed, fs::file&&) {
             return fs::file_link { fd, is_closed };
@@ -106,7 +106,7 @@ namespace ace::fs {
      * awaitable; on success, @c await_resume() consumes the entity and
      * returns a @c file_link ready for I/O.
      */
-    struct ace::fs::file : core::io_entity<file> {
+    struct ace::fs::file : io::entity<file> {
 
         IMPORT_IO_ENTITY_ENV(file);
 
@@ -122,7 +122,7 @@ namespace ace::fs {
          * On success, @c await_resume() consumes the @c file entity and
          * returns a @c file_link.
          */
-        struct open_query : core::io_query<open_query> {
+        struct open_query : io::query<open_query> {
 
             IMPORT_IO_QUERY_ENV(open_query)
 
@@ -135,13 +135,13 @@ namespace ace::fs {
                 , _flags(flags)
                 , _mode(mode) {}
 
-            bool setup_query(kernel_observer* kwp) const noexcept {
+            bool setup_query(services::kernel_observer* kwp) const noexcept {
                 return services::kernel_controller::open(kwp, _path, _flags, _mode);
             }
 
             [[nodiscard]] auto await_resume() const {
                 _entity._fd = _res;
-                return core::io_link::consume(_entity);
+                return io::link::consume(_entity);
             }
 
             file& _entity;

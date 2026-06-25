@@ -35,8 +35,8 @@ namespace ace {
 
         console() = default;
 
-        static io_reactive_link _input;
-        static io_reactive_link _output;
+        static io::reactive_link _input;
+        static io::reactive_link _output;
 
     public:
 
@@ -77,18 +77,18 @@ namespace ace {
             return out;
         }
 
-        static auto input_link(io_reactive_link link = _input) {
+        static auto input_link(io::reactive_link link = _input) {
             return _input = std::move(link);
         };
 
-        static auto output_link(io_reactive_link link = _output) {
+        static auto output_link(io::reactive_link link = _output) {
             return _output = std::move(link);
         };
 
     };
 
-    inline io_reactive_link console::_input = stdin_link();
-    inline io_reactive_link console::_output = stdout_link();
+    inline io::reactive_link console::_input = stdin_link();
+    inline io::reactive_link console::_output = stdout_link();
 
 }
 

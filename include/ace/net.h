@@ -34,7 +34,7 @@
  * | @c io_net_interface | @c io_transport_entity<AF_INET, e_indirect> |
  * | @c io_connection | @c io_transport_entity<AF_INET, e_connected> |
  *
- * @see ace::core::io_entity, ace::core::io_link, ace::services::kernel_controller
+ * @see ace::io::entity, ace::io::link, ace::services::kernel_controller
  */
 #ifndef ACE_NET_H
 #define ACE_NET_H
@@ -58,7 +58,7 @@ namespace ace::net {
      * @tparam derived_t Derived net entity
      */
     template <typename derived_t>
-    struct io_net_entity : core::io_entity<derived_t> {
+    struct io_net_entity : io::entity<derived_t> {
 
         mutable sockaddr_in _self_sin {};
         mutable sockaddr_in _peer_sin {};
@@ -66,8 +66,8 @@ namespace ace::net {
         io_net_entity() = default;
 
         io_net_entity(io_net_entity&& io) noexcept {
-            core::io_entity<derived_t>::_fd = io._fd;
-            core::io_entity<derived_t>::_is_closed = io._is_closed;
+            io::entity<derived_t>::_fd = io._fd;
+            io::entity<derived_t>::_is_closed = io._is_closed;
             _self_sin = io._self_sin;
             _peer_sin = io._peer_sin;
             io._fd = -1;
@@ -75,20 +75,20 @@ namespace ace::net {
         }
 
         io_net_entity(int fd, bool is_closed) {
-            core::io_entity<derived_t>::_fd = fd;
-            core::io_entity<derived_t>::_is_closed = is_closed;
+            io::entity<derived_t>::_fd = fd;
+            io::entity<derived_t>::_is_closed = is_closed;
         }
 
         io_net_entity(int fd, bool is_closed, const sockaddr_in self_sin, const sockaddr_in peer_sin) {
-            core::io_entity<derived_t>::_fd = fd;
-            core::io_entity<derived_t>::_is_closed = is_closed;
+            io::entity<derived_t>::_fd = fd;
+            io::entity<derived_t>::_is_closed = is_closed;
             _self_sin = self_sin;
             _peer_sin = peer_sin;
         }
 
         io_net_entity& operator =(io_net_entity&& io) noexcept {
-            core::io_entity<derived_t>::_fd = io._fd;
-            core::io_entity<derived_t>::_is_closed = io._is_closed;
+            io::entity<derived_t>::_fd = io._fd;
+            io::entity<derived_t>::_is_closed = io._is_closed;
             _self_sin = io._self_sin;
             _peer_sin = io._peer_sin;
             io._fd = -1;
@@ -232,7 +232,7 @@ namespace ace::net {
 }
 
     template <typename entity_t, int domain_v>
-    struct ace::net::connect_query : core::io_query<connect_query<entity_t, domain_v>> {
+    struct ace::net::connect_query : io::query<connect_query<entity_t, domain_v>> {
 
         IMPORT_IO_QUERY_ENV(connect_query)
 
@@ -262,7 +262,7 @@ namespace ace::net {
         const socklen_t _addrlen;
     };
 
-    struct ace::net::send_query : core::io_query<send_query> {
+    struct ace::net::send_query : io::query<send_query> {
 
         IMPORT_IO_QUERY_ENV(send_query);
 
@@ -286,7 +286,7 @@ namespace ace::net {
     };
 
 
-    struct ace::net::io_connection_link : core::io_link {
+    struct ace::net::io_connection_link : io::link {
 
         IMPORT_IO_LINK_ENV(io_connection_link);
         IMPORT_IO_LINK_FABRICATION;
@@ -298,19 +298,19 @@ namespace ace::net {
             // NOTE: Doing it manually for cases when classic 'runner::run()' is unused
             auto* runner_identity = core::runner::get().as<runner_pool_t>();
             // NOTE: Pushing data to slot, and setting identity for kernelic
-            if (core::io_hanged::command* cmd; runner_identity and core::io_hanged::_command_pool.capture(cmd)) [[likely]]
+            if (io::hanged::command* cmd; runner_identity and io::hanged::_command_pool.capture(cmd)) [[likely]]
             {
                 cmd->_runner_identity = runner_identity;
                 cmd->_buffer.assign(buff.begin(), buff.end());
                 if (not services::kernel_controller::send(cmd, _fd,
-                    cmd->_buffer.data(), cmd->_buffer.size(), 0) and core::io_hanged::fail_cb_handler)
-                    core::io_hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
+                    cmd->_buffer.data(), cmd->_buffer.size(), 0) and io::hanged::fail_cb_handler)
+                    io::hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
             }
             // NOTE: If can not get slot or identity not found -> using busy behavior
             else
             {
-                if (::send(_fd, buff.data(), buff.size(), 0) < 0 and core::io_hanged::fail_cb_handler)
-                    core::io_hanged::fail_cb_handler(errno);
+                if (::send(_fd, buff.data(), buff.size(), 0) < 0 and io::hanged::fail_cb_handler)
+                    io::hanged::fail_cb_handler(errno);
             }
         };
 
@@ -338,7 +338,7 @@ namespace ace::net {
      * @base @c io_transport_entity caster specialization for fabricating it from another io_net_entities
      */
     template<int domain_v, ace::net::transport_entity_state connection_state_v>
-    struct ace::core::io_caster<ace::net::io_transport_entity<domain_v, connection_state_v>>
+    struct ace::io::caster<ace::net::io_transport_entity<domain_v, connection_state_v>>
         : net::io_net_entity_caster<net::io_transport_entity<domain_v, connection_state_v>> {
         using net::io_net_entity_caster<net::io_transport_entity<domain_v, connection_state_v>>::from_entity;
 
@@ -354,7 +354,7 @@ namespace ace::net {
      * @base @c io_listener_entity caster specialization for fabricating it from another io_net_entities
      */
     template<int domain_v>
-    struct ace::core::io_caster<ace::net::io_listener_entity<domain_v>>
+    struct ace::io::caster<ace::net::io_listener_entity<domain_v>>
         : net::io_net_entity_caster<net::io_listener_entity<domain_v>> {
         using net::io_net_entity_caster<net::io_listener_entity<domain_v>>::from_entity;
     };
@@ -364,7 +364,7 @@ namespace ace::net {
      * @base @c io_stream_mode_entity caster specialization for fabricating it from another io_net_entities
      */
     template<int domain_v, int type_v>
-    struct ace::core::io_caster<ace::net::io_stream_mode_entity<domain_v, type_v>>
+    struct ace::io::caster<ace::net::io_stream_mode_entity<domain_v, type_v>>
         : net::io_net_entity_caster<net::io_stream_mode_entity<domain_v, type_v>> {
         using net::io_net_entity_caster<net::io_stream_mode_entity<domain_v, type_v>>::from_entity;
     };
@@ -374,7 +374,7 @@ namespace ace::net {
      * @base @c io_mapping_entity caster specialization for fabricating it from another io_net_entities
      */
     template<int domain_v, int type_v>
-    struct ace::core::io_caster<ace::net::io_mapping_entity<domain_v, type_v>>
+    struct ace::io::caster<ace::net::io_mapping_entity<domain_v, type_v>>
         : net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>> {
         using net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>>::from_entity;
     };
@@ -404,7 +404,7 @@ namespace ace::net {
             return *this;
         }
 
-        struct sendto_query : core::io_query<sendto_query> {
+        struct sendto_query : io::query<sendto_query> {
 
             IMPORT_IO_QUERY_ENV(sendto_query);
 
@@ -432,7 +432,7 @@ namespace ace::net {
             const socklen_t _addrlen;
         };
 
-        struct recv_query : core::io_query<recv_query> {
+        struct recv_query : io::query<recv_query> {
 
             IMPORT_IO_QUERY_ENV(recv_query)
 
@@ -455,7 +455,7 @@ namespace ace::net {
             const int _flags;
         };
 
-        struct sendmsg_query : core::io_query<sendmsg_query> {
+        struct sendmsg_query : io::query<sendmsg_query> {
 
             IMPORT_IO_QUERY_ENV(sendmsg_query)
 
@@ -476,7 +476,7 @@ namespace ace::net {
             const int _flags;
         };
 
-        struct recvmsg_query : core::io_query<recvmsg_query> {
+        struct recvmsg_query : io::query<recvmsg_query> {
 
             IMPORT_IO_QUERY_ENV(recvmsg_query)
 
@@ -527,7 +527,7 @@ namespace ace::net {
         -> sendmsg_query requires (connection_state_v == e_connected)
         { return sendmsg_query{_fd, msg, flags}; }
 
-        [[nodiscard]] auto send(core::buffer& buf, const int flags = 0) const
+        [[nodiscard]] auto send(io::buffer& buf, const int flags = 0) const
         -> sendmsg_query requires (connection_state_v == e_connected)
         { return sendmsg_query{_fd, buf.assemble(), flags}; }
 
@@ -685,7 +685,7 @@ namespace ace::net {
         [[nodiscard]] auto recv(msghdr* msg, const int flags = 0) const
         -> recvmsg_query { return recvmsg_query{_fd, msg, flags}; }
 
-        [[nodiscard]] auto recv(core::buffer& buff, const int flags = 0) const
+        [[nodiscard]] auto recv(io::buffer& buff, const int flags = 0) const
         -> recvmsg_query { return recvmsg_query{_fd, buff.header(), flags}; }
 
     };
@@ -699,9 +699,9 @@ namespace ace::net {
 
         io_listener_entity() = default;
 
-        friend core::io_caster<io_listener_entity>;
+        friend io::caster<io_listener_entity>;
 
-        struct accept_query : core::io_query<accept_query> {
+        struct accept_query : io::query<accept_query> {
 
             IMPORT_IO_QUERY_ENV(accept_query)
 
@@ -723,7 +723,7 @@ namespace ace::net {
             [[nodiscard]] io_transport_entity_t await_resume() const {
                 if (_res > -1) {
                     _entity->_peer_sin = *reinterpret_cast<sockaddr_in*>(_addr);
-                    return core::io_caster<io_transport_entity_t>::from_entity(_res, false, std::move(*_entity));
+                    return io::caster<io_transport_entity_t>::from_entity(_res, false, std::move(*_entity));
                 }
                 return io_transport_entity_t {_res, true};
             }
@@ -772,7 +772,7 @@ namespace ace::net {
 
         typedef io_listener_entity<domain_v> io_listener_entity_t;
 
-        struct listen_query : core::io_query<listen_query> {
+        struct listen_query : io::query<listen_query> {
 
             IMPORT_IO_QUERY_ENV(listen_query)
 
@@ -851,7 +851,7 @@ namespace ace::net {
             if (io_entity_t::_fd > -1) io_entity_t::_is_closed = false;
         }
 
-        struct bind_query : core::io_query<bind_query> {
+        struct bind_query : io::query<bind_query> {
 
             IMPORT_IO_QUERY_ENV(bind_query)
 
@@ -955,7 +955,7 @@ namespace ace::net {
 
 
     template <int domain_v, int type_v, int protocol_v>
-    struct ace::net::io_socket : core::io_query<io_socket<domain_v, type_v, protocol_v>> {
+    struct ace::net::io_socket : io::query<io_socket<domain_v, type_v, protocol_v>> {
 
         IMPORT_IO_QUERY_ENV(io_socket)
 

@@ -364,7 +364,7 @@ inline ace::task socket_abuser_zc() {
     }
 
     for (int i = 1; i < 6; ++i) {
-        ace::core::buffer buf;
+        ace::io::buffer buf;
         buf.append("Echo message {}", i);
         buf.term_str();
         if (co_await connection.send(buf) == EXIT_SUCCESS)
@@ -405,7 +405,7 @@ inline ace::task socket_listener_zc() {
     }
 
     for (int i = 0; i < 5; ++i) {
-        ace::core::buffer buf;
+        ace::io::buffer buf;
         buf.extend(100);
         if (co_await connection.recv(buf) > 0)
             ace::console::println("Server [zc] received: '{}'", buf.as<std::string>());

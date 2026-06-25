@@ -5,18 +5,18 @@
  * @details This header defines a type-safe, coroutine-friendly I/O framework
  * that wraps Linux @c io_uring operations.  The key building blocks are:
  *
- *  - <b>@c io_entity<T></b> — CRTP base for file-descriptor owners.  Provides
+ *  - <b>@c io_entity<T> </b> — CRTP base for file-descriptor owners.  Provides
  *    RAII FD lifecycle (via @c io_guard), move semantics, and async @c close().
- *  - <b>@c io_query<T></b> — CRTP base for individual I/O requests (read,
+ *  - <b>@c io_query<T> </b> — CRTP base for individual I/O requests (read,
  *    write, close, etc.).  Each query is an awaitable that suspends the caller
  *    until @c kernel_controller delivers the @c io_uring completion.
- *  - <b>@c io_link</b> — Higher-level abstraction that combines an FD with
+ *  - <b>@c io_link </b> — Higher-level abstraction that combines an FD with
  *    @c write() / @c read() methods and a polymorphic @c any data payload.
- *  - <b>@c io_guard</b> — RAII guard that asynchronously closes the FD on
+ *  - <b>@c io_guard </b> — RAII guard that asynchronously closes the FD on
  *    destruction if still open.
- *  - <b>@c io_hanged</b> — Fire-and-forget command queue for I/O operations
+ *  - <b>@c io_hanged </b> — Fire-and-forget command queue for I/O operations
  *    that must run even outside a coroutine context (used internally by guards).
- *  - <b>@c any</b> — Minimal type-erased value holder for carrying custom data
+ *  - <b>@c any </b> — Minimal type-erased value holder for carrying custom data
  *    alongside an FD.
  *
  * ### Entity state machine
@@ -112,7 +112,7 @@ namespace ace::core {
      *
      * @tparam T  Target entity type (specialised by derived types).
      */
-    template <typename>
+    template <typename T>
     struct io_caster {
 
         // NOTE: Defines how to create current entity from another entity
@@ -178,7 +178,7 @@ namespace ace::core {
     /**
      * @brief Thin wrapper for msghdr handling and processing
      */
-    class io_buff;
+    class buffer;
 
 }
 
@@ -841,7 +841,7 @@ public:                                                                         
     }
 
 
-    class ace::core::io_buff {
+    class ace::core::buffer {
 
         msghdr      _hdr {
             .msg_iov = nullptr,
@@ -855,26 +855,27 @@ public:                                                                         
 
         static constexpr std::size_t control_hdr_len = sizeof(void*);
 
-        iovec* allocate_buf(const size_t len) {
+        iovec* allocate_buf(const size_t len, const bool is_tail) {
             // NOTE: Allocating and subscribing new buff to chunk set
-            const auto buf = services::kernel_controller::iovec_allocate(len);
+            const auto buf = services::kernel_controller::iovec_allocate(len + control_hdr_len);
             auto** new_control_hdr = static_cast<iovec**>(buf->iov_base);
             *new_control_hdr = nullptr;
 
+            if (not buf) return nullptr;
+
+            // NOTE: Saving tail buf capacity
+            if (is_tail)
+                _tail_capacity = buf->iov_len - control_hdr_len;
             buf->iov_len = len;
             return buf;
         }
 
         void init_buf_list(iovec* buf) {
             _chunk_list_begin = _chunk_list_end = buf;
-            // NOTE: Saving tail buf capacity
-            _tail_capacity = buf->iov_len - control_hdr_len;
             ++_hdr.msg_iovlen;
         }
 
         void append_buf_list(iovec* buf) {
-            // NOTE: Saving tail buf capacity
-            _tail_capacity = buf->iov_len - control_hdr_len;
             auto** old_control_hdr = static_cast<iovec**>(_chunk_list_end->iov_base);
             *old_control_hdr = buf;
             _chunk_list_end = buf;
@@ -893,17 +894,6 @@ public:                                                                         
         }
 
         /**
-         * @brief Applies C-string termination
-         */
-        void c_terminate() {
-            if (_terminated) return;
-            if (const auto mem = memtail(1)) {
-                *static_cast<char*>(mem) = '\0';
-                _terminated = true;
-            }
-        }
-
-        /**
          * @brief Extends mempool if it's needed by required len and returns pointer at the buffer ending
          * @param len Required preallocated memory size
          * @return ptr to the preallocated memory at the buffer tail
@@ -918,7 +908,8 @@ public:                                                                         
                 return ret;
             }
             // NOTE: Allocating buffer
-            const auto buf = allocate_buf(len);
+            const auto buf = allocate_buf(len, true);
+            if (not buf) return nullptr;
 
             // NOTE: Initializing list with buf or appending it to the list
             if (not tail_buf) init_buf_list(buf);
@@ -938,7 +929,8 @@ public:                                                                         
             const auto tail_buf = _chunk_list_end;
 
             // NOTE: Allocating buffer
-            const auto buf = allocate_buf(len);
+            const auto buf = allocate_buf(len, false);
+            if (not buf) return nullptr;
 
             // NOTE: Initializing list with buf or prepending it to the list
             if (not tail_buf) init_buf_list(buf);
@@ -948,17 +940,17 @@ public:                                                                         
             return announce_buf_mem(buf);
         }
 
-        template <void* (io_buff::*mem_selector)(std::size_t), class... Args>
+        template <void* (buffer::*mem_selector)(std::size_t), class... Args>
         bool emplace(std::format_string<Args...>&& fmt, Args&&... args) {
             const size_t len = std::formatted_size(fmt, args...);
-            if (const auto mem = (this->*mem_selector)(len)) {
-                std::format_to(mem, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            if (auto mem = static_cast<char*>((this->*mem_selector)(len))) {
+                std::format_to_n(mem, len, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
                 return true;
             }
             return false;
         }
 
-        template <void* (io_buff::*mem_selector)(std::size_t)>
+        template <void* (buffer::*mem_selector)(std::size_t)>
         bool emplace(const std::string_view&& str) {
             const size_t len = str.size();
             if (const auto mem = (this->*mem_selector)(len)) {
@@ -968,16 +960,17 @@ public:                                                                         
             return false;
         }
 
-        template <void* (io_buff::*mem_selector)(std::size_t)>
-        bool emplace(const void *buf, const size_t len) {
+        template <void* (buffer::*mem_selector)(std::size_t)>
+        bool emplace(const void *first, const void* last) {
+            const size_t len = static_cast<const std::byte*>(last) - static_cast<const std::byte*>(first);
             if (const auto mem = (this->*mem_selector)(len)) {
-                std::memcpy(mem, buf, len);
+                std::memcpy(mem, first, len);
                 return true;
             }
             return false;
         }
 
-        template <void* (io_buff::*mem_selector)(std::size_t), typename data_t>
+        template <void* (buffer::*mem_selector)(std::size_t), typename data_t>
         requires std::is_pod_v<data_t>
         bool emplace(const std::vector<data_t>& buf) {
             const size_t len = buf.size() * (sizeof(data_t) / sizeof(char));
@@ -988,7 +981,7 @@ public:                                                                         
             return false;
         }
 
-        template <void* (io_buff::*mem_selector)(std::size_t), typename data_t, size_t len_v>
+        template <void* (buffer::*mem_selector)(std::size_t), typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         bool emplace(const std::array<data_t, len_v>& buf) {
             constexpr size_t len = len_v * (sizeof(data_t) / sizeof(char));
@@ -999,7 +992,7 @@ public:                                                                         
             return false;
         }
 
-        template <void* (io_buff::*mem_selector)(std::size_t), typename data_t, size_t len_v>
+        template <void* (buffer::*mem_selector)(std::size_t), typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         bool emplace(const std::span<data_t, len_v>& buf) {
             constexpr size_t len = len_v * (sizeof(data_t) / sizeof(char));
@@ -1014,78 +1007,129 @@ public:                                                                         
 
         template <class... Args>
         bool append(std::format_string<Args...>&& fmt, Args&&... args) {
-            return emplace<&io_buff::memtail>(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            return emplace<&buffer::memtail>(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
         bool append(const std::string_view&& str) {
-            return emplace<&io_buff::memtail>(std::forward<const std::string_view>(str));
+            return emplace<&buffer::memtail>(std::forward<const std::string_view>(str));
         }
 
-        bool append(const void *buf, const size_t len) {
-            return emplace<&io_buff::memtail>(std::forward<const void*>(buf), std::forward<const size_t>(len));
+        bool append(const void *first, const void* last) {
+            return emplace<&buffer::memtail>(std::forward<const void*>(first), std::forward<const void*>(last));
         }
 
         template <typename data_t>
         requires std::is_pod_v<data_t>
         bool append(const std::vector<data_t>& buf) {
-            return emplace<&io_buff::memtail>(std::forward<const std::vector<data_t>>(buf));
+            return emplace<&buffer::memtail>(std::forward<const std::vector<data_t>>(buf));
         }
 
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         bool append(const std::array<data_t, len_v>& buf) {
-            return emplace<&io_buff::memtail>(std::forward<const std::array<data_t, len_v>>(buf));
+            return emplace<&buffer::memtail>(std::forward<const std::array<data_t, len_v>>(buf));
         }
 
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         bool append(const std::span<data_t, len_v>& buf) {
-            return emplace<&io_buff::memtail>(std::forward<const std::span<data_t, len_v>>(buf));
+            return emplace<&buffer::memtail>(std::forward<const std::span<data_t, len_v>>(buf));
         }
 
         template <class... Args>
         bool prepend(std::format_string<Args...>&& fmt, Args&&... args) {
-            return emplace<&io_buff::memhead>(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            return emplace<&buffer::memhead>(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
         bool prepend(const std::string_view&& str) {
-            return emplace<&io_buff::memhead>(std::forward<const std::string_view>(str));
+            return emplace<&buffer::memhead>(std::forward<const std::string_view>(str));
         }
 
-        bool prepend(const void *buf, const size_t len) {
-            return emplace<&io_buff::memhead>(std::forward<const void*>(buf), std::forward<const size_t>(len));
+        bool prepend(const void *first, const void* last) {
+            return emplace<&buffer::memhead>(std::forward<const void*>(first), std::forward<const void*>(last));
         }
 
         template <typename data_t>
         requires std::is_pod_v<data_t>
         bool prepend(const std::vector<data_t>& buf) {
-            return emplace<&io_buff::memhead>(std::forward<const std::vector<data_t>>(buf));
+            return emplace<&buffer::memhead>(std::forward<const std::vector<data_t>>(buf));
         }
 
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         bool prepend(const std::array<data_t, len_v>& buf) {
-            return emplace<&io_buff::memhead>(std::forward<const std::array<data_t, len_v>>(buf));
+            return emplace<&buffer::memhead>(std::forward<const std::array<data_t, len_v>>(buf));
         }
 
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         bool prepend(const std::span<data_t, len_v>& buf) {
-            return emplace<&io_buff::memhead>(std::forward<const std::span<data_t, len_v>>(buf));
+            return emplace<&buffer::memhead>(std::forward<const std::span<data_t, len_v>>(buf));
+        }
+
+        template <typename T>
+        T as() const {
+            static_assert("Can not perform buf as passed type <T>");
+            return std::decay_t<T>{};
         }
 
         /**
-         * @return Returns message iovec sequence len
+         * @brief Applies C-string termination to the buffer content
          */
-        [[nodiscard]] std::size_t get_len() const { return _hdr.msg_iovlen; }
+        void term_str() {
+            if (_terminated) return;
+            if (const auto mem = memtail(1)) {
+                *static_cast<char*>(mem) = '\0';
+                _terminated = true;
+            }
+        }
+
+        /**
+         * @brief Reserve space in the buffer
+         * @return @c msghdr with @c iovec set
+         */
+        msghdr* extend(std::size_t len) {
+            // NOTE: Allocating buffer
+            const auto buf = allocate_buf(len, true);
+            if (not buf) return nullptr;
+
+            // NOTE: Preparing new buf set
+            auto* iovecs = new iovec[_hdr.msg_iovlen + 1]{};
+
+            // NOTE: Copying prev data
+            for (int i =0; i < _hdr.msg_iovlen; ++i)
+                iovecs[i] = _hdr.msg_iov[i];
+
+            // NOTE: Initializing list with buf or appending it to the list
+            if (not _chunk_list_end)
+                init_buf_list(buf);
+            else
+                append_buf_list(buf);
+
+            // NOTE: Setting new page in the back of a list
+            iovecs[_hdr.msg_iovlen - 1].iov_base = static_cast<char*>(buf->iov_base) + control_hdr_len;
+            iovecs[_hdr.msg_iovlen - 1].iov_len = buf->iov_len;
+
+            // NOTE: Erasing prev set
+            delete [] _hdr.msg_iov;
+
+            _hdr.msg_iov = iovecs;
+            return &_hdr;
+        }
+
+        /**
+         * @return buffer's @c msghdr
+         */
+        msghdr* header() { return &_hdr; }
 
         /**
          * @brief Assembles buffer into @c msghdr
          * @return Pointer to @c msghdr
          */
         msghdr* assemble() {
+            if (_hdr.msg_iov) return &_hdr;
             auto* iovecs = new iovec[_hdr.msg_iovlen];
-            const iovec* current = *static_cast<iovec**>(_chunk_list_begin->iov_base);
+            const iovec* current = _chunk_list_begin;
             for (int i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
                 iovecs[i].iov_base = static_cast<char*>(current->iov_base) + control_hdr_len;
                 iovecs[i].iov_len = current->iov_len;
@@ -1096,7 +1140,7 @@ public:                                                                         
         }
 
         void clear() {
-            iovec* current = *static_cast<iovec**>(_chunk_list_begin->iov_base);
+            iovec* current = _chunk_list_begin;
             while (current not_eq nullptr) {
                 const auto next = *static_cast<iovec**>(current->iov_base);
                 services::kernel_controller::iovec_deallocate(current);
@@ -1111,7 +1155,18 @@ public:                                                                         
             _hdr.msg_iovlen = 0;
         }
 
-        ~io_buff() { clear(); }
+        ~buffer() { clear(); }
     };
+
+    template <>
+    inline std::string ace::core::buffer::as<std::string>() const {
+        std::string str;
+        const iovec* current = _chunk_list_begin;
+        for (int i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
+            str.append(static_cast<char*>(current->iov_base) + control_hdr_len);
+            current = *static_cast<iovec**>(current->iov_base);
+        }
+        return str;
+    }
 
 #endif //ACE_IO_H

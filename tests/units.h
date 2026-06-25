@@ -364,17 +364,11 @@ inline ace::task socket_abuser_zc() {
     }
 
     for (int i = 1; i < 6; ++i) {
-        std::string msg = "Echo message " + std::to_string(i);
-        auto iov = ace::core::services::kernel_controller::iovec_allocate(msg.size());
-        if (not iov) {
-            ace::terminate();
-            co_return;
-        }
-        std::memcpy(iov->iov_base, msg.data(), msg.size());
-        std::array<iovec, 1> arr {{{*iov}}};
-        if (co_await connection.sendmsg(arr) == EXIT_SUCCESS)
-            ace::console::println("Client [zc] sent: '{}'", msg);
-        ace::core::services::kernel_controller::iovec_deallocate(iov);
+        ace::core::buffer buf;
+        buf.append("Echo message {}", i);
+        buf.term_str();
+        if (co_await connection.send(buf) == EXIT_SUCCESS)
+            ace::console::println("Client [zc] sent: '{}'", buf.as<std::string>());
     }
 
     co_return;
@@ -411,20 +405,12 @@ inline ace::task socket_listener_zc() {
     }
 
     for (int i = 0; i < 5; ++i) {
-        auto iov = ace::core::services::kernel_controller::iovec_allocate(128);
-        if (not iov) {
-            ace::terminate();
-            co_return;
-        }
-        std::array<iovec, 1> arr {{{*iov}}};
-        int n = co_await connection.recvmsg(arr);
-        if (n > 0) {
-            static_cast<char*>(iov->iov_base)[n] = '\0';
-            ace::console::println("Server [zc] received: '{}'", static_cast<char*>(iov->iov_base));
-        } else {
+        ace::core::buffer buf;
+        buf.extend(100);
+        if (co_await connection.recv(buf) > 0)
+            ace::console::println("Server [zc] received: '{}'", buf.as<std::string>());
+        else
             ace::console::println("Server [zc] failed");
-        }
-        ace::core::services::kernel_controller::iovec_deallocate(iov);
     }
 
     co_return;

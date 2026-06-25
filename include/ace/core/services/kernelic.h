@@ -38,9 +38,6 @@
 
 namespace ace::core::services {
 
-    /// @brief Thread-local pool of @c msghdr objects for sendmsg/recvmsg zero-copy I/O.
-    inline thread_local nukes::dynamic::reg_freelist<msghdr> _msghdr_pool {};
-
     /**
      * @brief Polymorphic completion handler for @c io_uring operations.
      *
@@ -60,30 +57,6 @@ namespace ace::core::services {
             : _runner_identity(identity) {}
 
         /**
-         * @brief Acquires a msghdr from the thread-local pool for scatter-gather I/O.
-         * @return pointer to zeroed msghdr, or nullptr if pool exhausted
-         */
-        [[nodiscard]] msghdr* acquire_msghdr() {
-            if (_msghdr) return _msghdr;
-            msghdr* ptr = nullptr;
-            if (_msghdr_pool.capture(ptr)) {
-                _msghdr = ptr;
-                memset(_msghdr, 0, sizeof(msghdr));
-            }
-            return _msghdr;
-        }
-
-        /**
-         * @brief Releases the msghdr back to the thread-local pool.
-         */
-        void release_msghdr() {
-            if (_msghdr) {
-                _msghdr_pool.raw_sync(_msghdr);
-                _msghdr = nullptr;
-            }
-        }
-
-        /**
          * @brief Activates observer with CQE result
          * @param res CQE result value
          */
@@ -92,8 +65,6 @@ namespace ace::core::services {
         runner_pool_t* _runner_identity = nullptr;
         bool _on_cancel = false; ///< Next response will indicate count of canceled operations
         bool _multishot = false; ///< Mark if multishot is enabled
-
-        msghdr* _msghdr = nullptr; ///< Scatter-gather message header (allocated from pool for sendmsg/recvmsg)
 
         virtual ~kernel_observer() = default;
     };
@@ -409,7 +380,6 @@ ping() {
             ++_queries;
         else {
             observer->on_result(cqe->res);
-            observer->release_msghdr();
         }
 
         // NOTE: Awaking observer on multishot CQE
@@ -418,10 +388,17 @@ ping() {
 
         if (multishot_active and observer->_on_cancel) {
             _queries -= cqe->res;
-            // NOTE: Releasing msghdr only at the end of the multishot operation lifetime
-            observer->release_msghdr();
         } else
             --_queries;
+
+        // if (cqe_flow) ++_queries;
+        //
+        // if (multishot_active and observer->_on_cancel) {
+        //     _queries -= cqe->res;
+        // } else if (multishot_active or not cqe_flow) {
+        //     observer->on_result(cqe->res);
+        //     --_queries;
+        // }
 
         io_uring_cqe_seen(&_ring, cqe);
     }

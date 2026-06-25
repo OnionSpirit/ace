@@ -629,19 +629,19 @@ namespace ace::net {
 
         [[nodiscard]] auto recv_buf(const int flags = 0) const
         -> promise<std::expected<io::buffer, int>> {
-            static constexpr int buff_len_bytes = 128 - io::buffer::control_hdr_len;
+            static constexpr int buf_len = core::tools::iovec_allocator::kMinSize - io::buffer::control_hdr_len;
 
             io::buffer buf {};
-            buf.extend(buff_len_bytes);
+            buf.extend(buf_len);
             auto [data, _] = buf.tail_chunk();
 
-            int bytes_read = co_await recv_query(_fd, data, buff_len_bytes, flags);
+            int bytes_read = co_await recv_query(_fd, data, buf_len, flags);
             if (bytes_read < 1) co_return std::unexpected(-bytes_read);
 
-            while (bytes_read == buff_len_bytes) {
-                buf.extend(buff_len_bytes);
+            while (bytes_read == buf_len) {
+                buf.extend(buf_len);
                 std::tie(data, _) = buf.tail_chunk();
-                bytes_read = co_await recv_query(_fd, data, buff_len_bytes, flags);
+                bytes_read = co_await recv_query(_fd, data, buf_len, flags);
                 if (bytes_read < 1) co_return std::unexpected(-bytes_read);
             }
 

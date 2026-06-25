@@ -40,8 +40,8 @@ namespace ace {
 
     public:
 
-        [[nodiscard]] static async<std::expected<std::string, int>> input() {
-            co_return co_await _input->read_as<std::string>();
+        [[nodiscard]] static async<std::expected<io::buffer, int>> input() {
+            co_return co_await _input->read_buf();
         }
 
         template <class... Args>

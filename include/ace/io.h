@@ -616,173 +616,6 @@ public:                                                                         
     };
 
 
-    /**
-     * @brief Common base for higher-level I/O abstractions.
-     *
-     * @details Owns an FD and an optional @c any data payload.  Provides
-     * @c writeln(), @c write(), @c read() (and variants like @c read_vec(),
-     * @c read_str()) as convenience methods.  Derived types implement
-     * @c output_action() and @c input_action() for the actual I/O.
-     */
-    class ace::io::link {
-
-    protected:
-
-
-        static constexpr int buff_len = 256;
-
-        /**
-         * @brief Writing function
-         * @param [in] buff data to write
-         */
-        virtual void output_action(std::span<const char> buff) = 0;
-
-        /**
-         * @brief Reading function
-         * @param [out] buff buffer to read to
-         * @param [in] len size of read buffer
-         */
-        virtual promise<int> input_action(void *buff, std::size_t len) = 0;
-
-    public:
-
-        link()
-            : _fd(-1)
-            , _is_closed(true)
-            , _data() {}
-
-        link(const int fd, const bool is_closed)
-            : _fd(fd)
-            , _is_closed(is_closed) { };
-
-        link(const int fd, const bool is_closed, any data)
-            : _fd(fd)
-            , _is_closed(is_closed)
-            , _data(std::move(data)) { };
-
-        // NOTE: This method is made to never forget to move ownership
-        template<typename entity_t>
-        static auto consume(entity_t& io) noexcept {
-            auto [fd, is_closed] = io.extract();
-            if (fd < 0) is_closed = true;
-            return caster<entity_t>::as_link(fd, is_closed, std::move(io));
-        }
-
-        link(link&& io) noexcept {
-            _fd = io._fd;
-            _is_closed = io._is_closed;
-            _data = std::move(io._data);
-            io._fd = -1;
-            io._is_closed = true;
-        }
-
-        link& operator=(link&& io) noexcept {
-            _fd = io._fd;
-            _is_closed = io._is_closed;
-            _data = std::move(io._data);
-            io._fd = -1;
-            io._is_closed = true;
-            return *this;
-        }
-
-        virtual ~link() = default;
-
-        template <class... Args>
-        void writeln(std::format_string<Args...>&& fmt, Args&&... args) {
-            const std::string buff = std::format(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
-            output_action(buff);
-        }
-
-        void writeln(const std::string_view&& str) {
-            const std::string buff = std::string(std::forward<const std::string_view>(str)) + '\n';
-            output_action(buff);
-        }
-
-        template <class... Args>
-        void write(std::format_string<Args...>&& fmt, Args&&... args) {
-            const std::string buff = std::format(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
-            output_action(buff);
-        }
-
-        void write(const std::string_view&& str) {
-            output_action(std::forward<const std::string_view>(str));
-        }
-
-        void write(const void *first, const void* last) {
-            const auto buff = std::span(static_cast<const char*>(first), static_cast<const char*>(last));
-            output_action(buff);
-        }
-
-        template <typename data_t>
-        requires std::is_pod_v<data_t>
-        auto write(const std::vector<data_t>& buf) {
-            const auto buff = std::span<const char>(buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)));
-            output_action(buff);
-        }
-
-        template <typename data_t, size_t len_v>
-        requires std::is_pod_v<data_t>
-        auto write(const std::array<data_t, len_v>& buf) {
-            const auto buff = std::span<const char>(buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)));
-            output_action(buff);
-        }
-
-        template <typename data_t, size_t len_v>
-        requires std::is_pod_v<data_t>
-        auto write(const std::span<data_t, len_v>& buf) {
-            const auto buff = std::span<const char>(buf.data(), buf.size_bytes());
-            output_action(buff);
-        }
-
-        ACE_AWAIT_NODISCARD async<int> read(void *buf, const size_t len, const int flags = 0) {
-            co_return co_await input_action(buf, len);
-        }
-
-        template <typename data_t>
-        requires std::is_pod_v<data_t>
-        ACE_AWAIT_NODISCARD async<int> read(std::vector<data_t>& buf, const int flags = 0) {
-            co_return co_await input_action(buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)));
-        }
-
-        ACE_AWAIT_NODISCARD async<int> read(std::string& buf, const int flags = 0) {
-            co_return co_await input_action(buf.data(), buf.size());
-        }
-
-        template <typename T>
-        async<std::expected<T, int>> read_as(const int flags = 0) {
-            static_assert("No specialization for passed type <T>");
-            return std::decay_t<T>{};
-        }
-
-        template <typename data_t, size_t len_v>
-        requires std::is_pod_v<data_t>
-        ACE_AWAIT_NODISCARD async<int> read(std::array<data_t, len_v>& buf, const int flags = 0) {
-            co_return co_await input_action(reinterpret_cast<void*>(buf.data()), len_v * (sizeof(data_t) / sizeof(char)));
-        }
-
-        template <typename data_t, size_t len_v>
-        requires std::is_pod_v<data_t>
-        ACE_AWAIT_NODISCARD async<int> read(std::span<data_t, len_v>& buf, const int flags = 0) {
-            co_return co_await input_action(reinterpret_cast<void*>(buf.data()), buf.size_bytes());
-        }
-
-
-    protected:
-
-        int         _fd;        ///< Socket file descriptor
-        bool        _is_closed; ///< Socket closed flag
-        any         _data;      ///< FD related params
-
-    private:
-
-        guard _guard {_fd, _is_closed};
-    };
-
-    namespace ace::io {
-        using reactive_link = std::shared_ptr<io::link>;
-    }
-
-
     class ace::io::buffer {
 
         msghdr      _hdr {
@@ -1110,6 +943,183 @@ public:                                                                         
         ~buffer() { clear(); }
     };
 
+
+    /**
+     * @brief Common base for higher-level I/O abstractions.
+     *
+     * @details Owns an FD and an optional @c any data payload.  Provides
+     * @c writeln(), @c write(), @c read() (and variants like @c read_vec(),
+     * @c read_str()) as convenience methods.  Derived types implement
+     * @c output_action() and @c input_action() for the actual I/O.
+     */
+    class ace::io::link {
+
+    protected:
+
+        /**
+         * @brief Writing function
+         * @param [in] buff data to write
+         */
+        virtual void output_action(std::span<const char> buff) = 0;
+
+        /**
+         * @brief Reading function
+         * @param [out] buff buffer to read to
+         * @param [in] len size of read buffer
+         */
+        virtual promise<int> input_action(void *buff, std::size_t len) = 0;
+
+    public:
+
+        link()
+            : _fd(-1)
+            , _is_closed(true)
+            , _data() {}
+
+        link(const int fd, const bool is_closed)
+            : _fd(fd)
+            , _is_closed(is_closed) { };
+
+        link(const int fd, const bool is_closed, any data)
+            : _fd(fd)
+            , _is_closed(is_closed)
+            , _data(std::move(data)) { };
+
+        // NOTE: This method is made to never forget to move ownership
+        template<typename entity_t>
+        static auto consume(entity_t& io) noexcept {
+            auto [fd, is_closed] = io.extract();
+            if (fd < 0) is_closed = true;
+            return caster<entity_t>::as_link(fd, is_closed, std::move(io));
+        }
+
+        link(link&& io) noexcept {
+            _fd = io._fd;
+            _is_closed = io._is_closed;
+            _data = std::move(io._data);
+            io._fd = -1;
+            io._is_closed = true;
+        }
+
+        link& operator=(link&& io) noexcept {
+            _fd = io._fd;
+            _is_closed = io._is_closed;
+            _data = std::move(io._data);
+            io._fd = -1;
+            io._is_closed = true;
+            return *this;
+        }
+
+        virtual ~link() = default;
+
+        template <class... Args>
+        void writeln(std::format_string<Args...>&& fmt, Args&&... args) {
+            const std::string buff = std::format(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
+            output_action(buff);
+        }
+
+        void writeln(const std::string_view&& str) {
+            const std::string buff = std::string(std::forward<const std::string_view>(str)) + '\n';
+            output_action(buff);
+        }
+
+        template <class... Args>
+        void write(std::format_string<Args...>&& fmt, Args&&... args) {
+            const std::string buff = std::format(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            output_action(buff);
+        }
+
+        void write(const std::string_view&& str) {
+            output_action(std::forward<const std::string_view>(str));
+        }
+
+        void write(const void *first, const void* last) {
+            const auto buff = std::span(static_cast<const char*>(first), static_cast<const char*>(last));
+            output_action(buff);
+        }
+
+        template <typename data_t>
+        requires std::is_pod_v<data_t>
+        auto write(const std::vector<data_t>& buf) {
+            const auto buff = std::span<const char>(buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)));
+            output_action(buff);
+        }
+
+        template <typename data_t, size_t len_v>
+        requires std::is_pod_v<data_t>
+        auto write(const std::array<data_t, len_v>& buf) {
+            const auto buff = std::span<const char>(buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)));
+            output_action(buff);
+        }
+
+        template <typename data_t, size_t len_v>
+        requires std::is_pod_v<data_t>
+        auto write(const std::span<data_t, len_v>& buf) {
+            const auto buff = std::span<const char>(buf.data(), buf.size_bytes());
+            output_action(buff);
+        }
+
+        ACE_AWAIT_NODISCARD async<int> read(void *buf, const size_t len, const int flags = 0) {
+            co_return co_await input_action(buf, len);
+        }
+
+        template <typename data_t>
+        requires std::is_pod_v<data_t>
+        ACE_AWAIT_NODISCARD async<int> read(std::vector<data_t>& buf, const int flags = 0) {
+            co_return co_await input_action(buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)));
+        }
+
+        ACE_AWAIT_NODISCARD async<int> read(std::string& buf, const int flags = 0) {
+            co_return co_await input_action(buf.data(), buf.size());
+        }
+
+        template <typename data_t, size_t len_v>
+        requires std::is_pod_v<data_t>
+        ACE_AWAIT_NODISCARD async<int> read(std::array<data_t, len_v>& buf, const int flags = 0) {
+            co_return co_await input_action(reinterpret_cast<void*>(buf.data()), len_v * (sizeof(data_t) / sizeof(char)));
+        }
+
+        template <typename data_t, size_t len_v>
+        requires std::is_pod_v<data_t>
+        ACE_AWAIT_NODISCARD async<int> read(std::span<data_t, len_v>& buf, const int flags = 0) {
+            co_return co_await input_action(reinterpret_cast<void*>(buf.data()), buf.size_bytes());
+        }
+
+        async<std::expected<buffer, int>> read_buf(const int flags = 0) {
+            static constexpr int buf_len = core::tools::iovec_allocator::kMinSize - buffer::control_hdr_len;
+
+            buffer buf {};
+            buf.extend(buf_len);
+            auto [data, _] = buf.tail_chunk();
+
+            int bytes_read = co_await input_action(data, buf_len);
+            if (bytes_read < 1) co_return std::unexpected(-bytes_read);
+
+            while (bytes_read == buf_len) {
+                buf.extend(buf_len);
+                std::tie(data, _) = buf.tail_chunk();
+                bytes_read = co_await input_action(data, buf_len);
+                if (bytes_read < 1) co_return std::unexpected(-bytes_read);
+            }
+
+            co_return buf;
+        }
+
+    protected:
+
+        int         _fd;        ///< Socket file descriptor
+        bool        _is_closed; ///< Socket closed flag
+        any         _data;      ///< FD related params
+
+    private:
+
+        guard _guard {_fd, _is_closed};
+    };
+
+    namespace ace::io {
+        using reactive_link = std::shared_ptr<io::link>;
+    }
+
     template <>
     inline std::string ace::io::buffer::as<std::string>() const {
         std::string str;
@@ -1135,89 +1145,6 @@ public:                                                                         
             current = *static_cast<iovec**>(current->iov_base);
         }
         return buf;
-    }
-
-    template <>
-    ACE_AWAIT_NODISCARD inline auto ace::io::link::read_as<std::string>(const int flags)
-    -> async<std::expected<std::string, int>> {
-
-        std::deque<std::array<char, buff_len>> acc {};
-        int total = 0;
-
-        auto& buff = acc.emplace_back();
-        int bytes_read = co_await input_action(buff.data(), buff_len);
-        if (bytes_read < 1) co_return std::unexpected(-bytes_read);
-        total += bytes_read;
-
-        while (bytes_read == buff_len) {
-            buff = acc.emplace_back();
-            bytes_read = co_await input_action(buff.data(), buff_len);
-            if (bytes_read < 1) co_return std::unexpected(-bytes_read);
-            total += bytes_read;
-        }
-
-        std::string res {};
-        // NOTE: + null term char slot
-        res.reserve(total + 1);
-        for (auto& buf : acc) {
-            const int write_bytes { (total > buff_len) ? buff_len : total };
-            res.append(buf.data(), write_bytes);
-            total -= write_bytes;
-        }
-        co_return res;
-    }
-
-    template <>
-    [[nodiscard]] inline auto ace::io::link::read_as<std::vector<std::byte>>(const int flags)
-    -> async<std::expected<std::vector<std::byte>, int>> {
-
-        std::deque<std::array<std::byte, buff_len>> acc;
-        int total = 0;
-
-        auto& buff = acc.emplace_back();
-        int bytes_read = co_await input_action(reinterpret_cast<void*>(buff.data()), buff_len);
-        if (bytes_read < 1) co_return std::unexpected(-bytes_read);
-        total += bytes_read;
-
-        while (bytes_read == buff_len) {
-            buff = acc.emplace_back();
-            bytes_read = co_await input_action(reinterpret_cast<void*>(buff.data()), buff_len);
-            if (bytes_read < 1) co_return std::unexpected(-bytes_read);
-            total += bytes_read;
-        }
-
-        std::vector<std::byte> res {};
-        res.reserve(total);
-        for (auto& buf : acc) {
-            const int write_items { (total > buff_len) ? buff_len : total };
-            for (int i = 0; i < write_items; ++i)
-                res.push_back(std::forward<std::byte>(buf[i]));
-            total -= write_items;
-        }
-        co_return res;
-    }
-
-    template <>
-    [[nodiscard]] inline auto ace::io::link::read_as<ace::io::buffer>(const int flags)
-    -> async<std::expected<buffer, int>> {
-
-        static constexpr int buff_len_bytes = buff_len - buffer::control_hdr_len;
-
-        buffer buf {};
-        buf.extend(buff_len_bytes);
-        auto [data, _] = buf.tail_chunk();
-
-        int bytes_read = co_await input_action(data, buff_len_bytes);
-        if (bytes_read < 1) co_return std::unexpected(-bytes_read);
-
-        while (bytes_read == buff_len_bytes) {
-            buf.extend(buff_len_bytes);
-            std::tie(data, _) = buf.tail_chunk();
-            bytes_read = co_await input_action(data, buff_len_bytes);
-            if (bytes_read < 1) co_return std::unexpected(-bytes_read);
-        }
-
-        co_return buf;
     }
 
 #endif //ACE_IO_H

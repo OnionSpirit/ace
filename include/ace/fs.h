@@ -66,7 +66,7 @@ namespace ace::fs {
             {
                 cmd->_runner_identity = runner_identity;
                 cmd->_buffer.assign(buff.begin(), buff.end());
-                if (not core::services::kernel_controller::write(cmd, _fd,
+                if (not services::kernel_controller::write(cmd, _fd,
                     cmd->_buffer.data(), cmd->_buffer.size(), 0) and core::io_hanged::fail_cb_handler)
                     core::io_hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
             }
@@ -136,7 +136,7 @@ namespace ace::fs {
                 , _mode(mode) {}
 
             bool setup_query(kernel_observer* kwp) const noexcept {
-                return core::services::kernel_controller::open(kwp, _path, _flags, _mode);
+                return services::kernel_controller::open(kwp, _path, _flags, _mode);
             }
 
             [[nodiscard]] auto await_resume() const {

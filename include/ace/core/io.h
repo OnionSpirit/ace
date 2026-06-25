@@ -23,7 +23,7 @@
  *
  * @mermaid{ graph LR; Idle[\"invalid (fd=-1)\"]-->Open[\"open\"]; Open-->Closed[\"closed\"]; Closed-->Idle; Open-->Idle; }
  *
- * @see ace::core::services::kernel_controller, ace::core::io_entity,
+ * @see ace::services::kernel_controller, ace::core::io_entity,
  *      ace::core::io_link
  */
 #ifndef ACE_IO_H
@@ -35,7 +35,7 @@
 #include <format>
 
 #include "io.h"
-#include "ace/core/services/kernelic.h"
+#include "ace/services/kernelic.h"
 
 namespace ace::core {
     /**

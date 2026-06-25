@@ -25,8 +25,8 @@
  *
  * @see ace::core::io_query, ace::core::io_entity, ace::core::traits::vortex_traits
  */
-#ifndef ACE_CORE_KERNELIC_H
-#define ACE_CORE_KERNELIC_H
+#ifndef ACE_SERVICES_KERNELIC_H
+#define ACE_SERVICES_KERNELIC_H
 
 #include <algorithm>
 #include <cstring>
@@ -36,7 +36,7 @@
 #include "ace/core/tools/queue.h"
 #include "ace/core/tools/iovec_alloc.h"
 
-namespace ace::core::services {
+namespace ace::services {
 
     /**
      * @brief Polymorphic completion handler for @c io_uring operations.
@@ -84,7 +84,7 @@ namespace ace::core::services {
      * The ring supports up to 4096 concurrent operations; overflow is
      * buffered in @c _submission_buffer (a queue of @c kernel_entity).
      */
-    struct kernel_controller : traits::vortex_traits<kernel_controller, vortex_spawn_mode::e_thread_local> {
+    struct kernel_controller : core::traits::vortex_traits<kernel_controller, core::vortex_spawn_mode::e_thread_local> {
 
     private:
 
@@ -103,8 +103,8 @@ namespace ace::core::services {
 
         static constexpr unsigned max_entries = 4096;
 
-        static thread_local tools::queue<kernel_entity> _submission_buffer;
-        static thread_local tools::iovec_allocator _iovec_alloc;
+        static thread_local core::tools::queue<kernel_entity> _submission_buffer;
+        static thread_local core::tools::iovec_allocator _iovec_alloc;
 
         static bool ping();
 
@@ -266,7 +266,7 @@ namespace ace::core::services {
             _iovec_alloc.deallocate(iov);
         }
 
-        static auto iovec_alloc() noexcept -> tools::iovec_allocator& { return _iovec_alloc; }
+        static auto iovec_alloc() noexcept -> core::tools::iovec_allocator& { return _iovec_alloc; }
 
     };
 
@@ -299,18 +299,18 @@ namespace ace::core::services {
         io_uring_sqe* _sqe = nullptr;
         void* _io_uring_foo = nullptr;
 
-        static thread_local tools::slab_mempool<kernel_entity> _kernelic_entity_mempool;
+        static thread_local core::tools::slab_mempool<kernel_entity> _kernelic_entity_mempool;
     };
 
-    inline thread_local tools::slab_mempool<kernel_controller::kernel_entity> kernel_controller::kernel_entity::_kernelic_entity_mempool {
-        tools::slab_mempool<kernel_entity>()
+    inline thread_local core::tools::slab_mempool<kernel_controller::kernel_entity> kernel_controller::kernel_entity::_kernelic_entity_mempool {
+        core::tools::slab_mempool<kernel_entity>()
     };
 
-    inline thread_local tools::queue<kernel_controller::kernel_entity> kernel_controller::_submission_buffer {
+    inline thread_local core::tools::queue<kernel_controller::kernel_entity> kernel_controller::_submission_buffer {
         kernel_entity::_kernelic_entity_mempool
     };
 
-    inline thread_local tools::iovec_allocator kernel_controller::_iovec_alloc {};
+    inline thread_local core::tools::iovec_allocator kernel_controller::_iovec_alloc {};
 
     inline thread_local io_uring_params kernel_controller::_ring_params {};
     inline thread_local io_uring kernel_controller::_ring {};
@@ -320,32 +320,32 @@ namespace ace::core::services {
 
 }
 
-#define ACE_CORE_KERNEL_CONTROLLER_SPACE \
-ace::core::services::kernel_controller::
+#define ACE_SERVICES_KERNEL_CONTROLLER_SPACE \
+ace::services::kernel_controller::
 
-#define ACE_CORE_KERNEL_CONTROLLER_MEMBER(returnT) \
-inline returnT ACE_CORE_KERNEL_CONTROLLER_SPACE
+#define ACE_SERVICES_KERNEL_CONTROLLER_MEMBER(returnT) \
+inline returnT ACE_SERVICES_KERNEL_CONTROLLER_SPACE
 
-#define ACE_CORE_KERNEL_ENTITY_SPACE \
-ace::core::services::kernel_controller::kernel_entity::
+#define ACE_SERVICES_KERNEL_ENTITY_SPACE \
+ace::services::kernel_controller::kernel_entity::
 
-#define ACE_CORE_KERNEL_ENTITY_MEMBER(returnT) \
-inline returnT ACE_CORE_KERNEL_ENTITY_SPACE
+#define ACE_SERVICES_KERNEL_ENTITY_MEMBER(returnT) \
+inline returnT ACE_SERVICES_KERNEL_ENTITY_SPACE
 
 
-ACE_CORE_KERNEL_CONTROLLER_MEMBER()
+ACE_SERVICES_KERNEL_CONTROLLER_MEMBER()
 kernel_controller() {
     memset(&_ring_params, 0, sizeof(_ring_params));
     io_uring_queue_init_params(max_entries, &_ring, &_ring_params);
 }
 
-ACE_CORE_KERNEL_CONTROLLER_MEMBER()
+ACE_SERVICES_KERNEL_CONTROLLER_MEMBER()
 ~kernel_controller() {
     io_uring_queue_exit(&_ring);
 }
 
 
-ACE_CORE_KERNEL_CONTROLLER_MEMBER(bool)
+ACE_SERVICES_KERNEL_CONTROLLER_MEMBER(bool)
 ping() {
     // NOTE: Setting requests to the io_uring
     _need_submission = _need_submission or not _submission_buffer.empty();
@@ -408,10 +408,10 @@ ping() {
 
 
 template <typename foo_t, typename ... Params> bool
-ACE_CORE_KERNEL_CONTROLLER_SPACE
+ACE_SERVICES_KERNEL_CONTROLLER_SPACE
 submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept {
     if (not observer->_runner_identity)
-        observer->_runner_identity = runner::get().as<runner_pool_t>();
+        observer->_runner_identity = core::runner::get().as<runner_pool_t>();
     touch(observer->_runner_identity);
     io_uring_sqe *sqe = io_uring_get_sqe(&_ring);
     io_uring_sqe_set_data(sqe, observer);
@@ -427,7 +427,7 @@ submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept
 
 
 template <typename io_uring_foo_t, typename ... Args>
-ACE_CORE_KERNEL_ENTITY_SPACE
+ACE_SERVICES_KERNEL_ENTITY_SPACE
 kernel_entity(io_uring_foo_t foo, io_uring_sqe *sqe, Args... args) {
     _action = action_templ<io_uring_foo_t, Args...>;
     _sqe = sqe;
@@ -438,7 +438,7 @@ kernel_entity(io_uring_foo_t foo, io_uring_sqe *sqe, Args... args) {
 
 
 template <typename io_uring_foo_t, typename ... Args> void
-ACE_CORE_KERNEL_ENTITY_SPACE
+ACE_SERVICES_KERNEL_ENTITY_SPACE
 action_templ(void* io_uring_foo, io_uring_sqe* sqe, const uintptr_t* params) {
     std::tuple<Args...> tuple { *reinterpret_cast<const std::tuple<Args...>*>(params) };
     io_uring_foo_t foo { reinterpret_cast<io_uring_foo_t>(io_uring_foo) };
@@ -448,14 +448,14 @@ action_templ(void* io_uring_foo, io_uring_sqe* sqe, const uintptr_t* params) {
 }
 
 
-ACE_CORE_KERNEL_ENTITY_MEMBER(void)
+ACE_SERVICES_KERNEL_ENTITY_MEMBER(void)
 apply() {
     if (_sqe not_eq nullptr)
         _action(_io_uring_foo, _sqe, _params);
 }
 
-#undef ACE_CORE_KERNEL_CONTROLLER_SPACE
-#undef ACE_CORE_KERNEL_CONTROLLER_MEMBER
-#undef ACE_CORE_KERNEL_ENTITY_SPACE
-#undef ACE_CORE_KERNEL_ENTITY_MEMBER
-#endif //ACE_CORE_KERNELIC_H
+#undef ACE_SERVICES_KERNEL_CONTROLLER_SPACE
+#undef ACE_SERVICES_KERNEL_CONTROLLER_MEMBER
+#undef ACE_SERVICES_KERNEL_ENTITY_SPACE
+#undef ACE_SERVICES_KERNEL_ENTITY_MEMBER
+#endif //ACE_SERVICES_KERNELIC_H

@@ -34,7 +34,7 @@
  * | @c io_net_interface | @c io_transport_entity<AF_INET, e_indirect> |
  * | @c io_connection | @c io_transport_entity<AF_INET, e_connected> |
  *
- * @see ace::core::io_entity, ace::core::io_link, ace::core::services::kernel_controller
+ * @see ace::core::io_entity, ace::core::io_link, ace::services::kernel_controller
  */
 #ifndef ACE_NET_H
 #define ACE_NET_H
@@ -246,8 +246,8 @@ namespace ace::net {
             , _addr(addr)
             , _addrlen(addrlen) {}
 
-        bool setup_query(core::services::kernel_observer* kwp) const {
-            return core::services::kernel_controller::connect(kwp, _fd, _addr, _addrlen);
+        bool setup_query(services::kernel_observer* kwp) const {
+            return services::kernel_controller::connect(kwp, _fd, _addr, _addrlen);
         }
 
         [[nodiscard]] io_transport_entity_t await_resume() const {
@@ -274,8 +274,8 @@ namespace ace::net {
             , _len(len)
             , _flags(flags) {}
 
-        bool setup_query(core::services::kernel_observer* kwp) const {
-            return core::services::kernel_controller::send(kwp, _fd, _buf, _len, _flags);
+        bool setup_query(services::kernel_observer* kwp) const {
+            return services::kernel_controller::send(kwp, _fd, _buf, _len, _flags);
         }
 
         [[nodiscard]] int await_resume() const { return _res; }
@@ -302,7 +302,7 @@ namespace ace::net {
             {
                 cmd->_runner_identity = runner_identity;
                 cmd->_buffer.assign(buff.begin(), buff.end());
-                if (not core::services::kernel_controller::send(cmd, _fd,
+                if (not services::kernel_controller::send(cmd, _fd,
                     cmd->_buffer.data(), cmd->_buffer.size(), 0) and core::io_hanged::fail_cb_handler)
                     core::io_hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
             }
@@ -419,8 +419,8 @@ namespace ace::net {
                 , _addr(addr)
                 , _addrlen(addrlen) {}
 
-            bool setup_query(core::services::kernel_observer* kwp) const {
-                return core::services::kernel_controller::sendto(kwp, _fd, _buf, _len, _flags, _addr, _addrlen);
+            bool setup_query(services::kernel_observer* kwp) const {
+                return services::kernel_controller::sendto(kwp, _fd, _buf, _len, _flags, _addr, _addrlen);
             }
 
             [[nodiscard]] int await_resume() const { return _res; }
@@ -444,8 +444,8 @@ namespace ace::net {
                 , _len(len)
                 , _flags(flags) {}
 
-            bool setup_query(core::services::kernel_observer* kwp) const {
-                return core::services::kernel_controller::recv(kwp, _fd, _buf, _len, _flags);
+            bool setup_query(services::kernel_observer* kwp) const {
+                return services::kernel_controller::recv(kwp, _fd, _buf, _len, _flags);
             }
 
             [[nodiscard]] int await_resume() const { return _res; }
@@ -466,8 +466,8 @@ namespace ace::net {
                 , _msg(msg)
                 , _flags(flags) {}
 
-            bool setup_query(core::services::kernel_observer* kwp) const {
-                return core::services::kernel_controller::sendmsg(kwp, _fd, _msg, _flags);
+            bool setup_query(services::kernel_observer* kwp) const {
+                return services::kernel_controller::sendmsg(kwp, _fd, _msg, _flags);
             }
 
             [[nodiscard]] int await_resume() const { return _res; }
@@ -487,8 +487,8 @@ namespace ace::net {
                 , _msg(msg)
                 , _flags(flags) {}
 
-            bool setup_query(core::services::kernel_observer* kwp) const {
-                return core::services::kernel_controller::recvmsg(kwp, _fd, _msg, _flags);
+            bool setup_query(services::kernel_observer* kwp) const {
+                return services::kernel_controller::recvmsg(kwp, _fd, _msg, _flags);
             }
 
             [[nodiscard]] int await_resume() const { return _res; }
@@ -716,8 +716,8 @@ namespace ace::net {
                 , _addrlen(addrlen)
                 , _flags(flags) {}
 
-            bool setup_query(core::services::kernel_observer* kwp) const {
-                return core::services::kernel_controller::accept(kwp, _fd, _addr, _addrlen, _flags);
+            bool setup_query(services::kernel_observer* kwp) const {
+                return services::kernel_controller::accept(kwp, _fd, _addr, _addrlen, _flags);
             }
 
             [[nodiscard]] io_transport_entity_t await_resume() const {
@@ -783,8 +783,8 @@ namespace ace::net {
                 , _entity(entity)
                 , _backlog(backlog) {}
 
-            bool setup_query(core::services::kernel_observer* kwp) const {
-                return core::services::kernel_controller::listen(kwp, _fd, _backlog);
+            bool setup_query(services::kernel_observer* kwp) const {
+                return services::kernel_controller::listen(kwp, _fd, _backlog);
             }
 
             [[nodiscard]] io_listener_entity_t await_resume() const {
@@ -867,8 +867,8 @@ namespace ace::net {
                 , _addr(addr)
                 , _addrlen(addrlen) {}
 
-            bool setup_query(core::services::kernel_observer* kwp) const {
-                return core::services::kernel_controller::bind(kwp, _fd, _addr, _addrlen);
+            bool setup_query(services::kernel_observer* kwp) const {
+                return services::kernel_controller::bind(kwp, _fd, _addr, _addrlen);
             }
 
             [[nodiscard]] auto await_resume() {
@@ -967,8 +967,8 @@ namespace ace::net {
             : io_query_t(0)
             , _flags(flags) {}
 
-        bool setup_query(core::services::kernel_observer* kwp) const {
-            core::services::kernel_controller::socket(kwp, domain_v, type_v, protocol_v, _flags);
+        bool setup_query(services::kernel_observer* kwp) const {
+            services::kernel_controller::socket(kwp, domain_v, type_v, protocol_v, _flags);
             return true;
         }
 

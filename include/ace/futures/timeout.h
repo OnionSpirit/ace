@@ -34,7 +34,7 @@
 #ifndef ACE_FUTURE_TIMEOUT_H
 #define ACE_FUTURE_TIMEOUT_H
 
-#include <ace/core/services/clock.h>
+#include <ace/services/clock.h>
 #include <ace/core/traits/future.h>
 #include <ace/core/async.h>
 
@@ -50,7 +50,7 @@ namespace ace::futures {
  */
 class ACE_AWAIT_NODISCARD timeout : public core::traits::future_traits<timeout> {
 
-    core::duration_t _duration; ///< Suspension duration in milliseconds.
+    services::duration_t _duration; ///< Suspension duration in milliseconds.
 
     struct timeout_conductor;
     friend timeout_conductor;
@@ -101,8 +101,8 @@ struct ACE_AWAIT_NODISCARD expire : timeout {
      * @param expires  The absolute deadline.  The computed duration is
      *                 @c expires - clock::current_time().
      */
-    explicit expire(core::timepoint_t expires)
-        : timeout(expires - core::services::clock::current_time()) {}
+    explicit expire(services::timepoint_t expires)
+        : timeout(expires - services::clock::current_time()) {}
 
     expire() = default;
 };
@@ -127,17 +127,17 @@ struct ACE_FUTURE_TIMEOUT_SPACE timeout_conductor : conductor_handler_t {
         : _timeout(timeout_) {};
 
     void forward(task&& ctx) override {
-        _injected_node = core::services::clock::subscribe(std::move(ctx), _timeout->_duration);
+        _injected_node = services::clock::subscribe(std::move(ctx), _timeout->_duration);
     }
 
     void cancel() override {
         if (_injected_node)
-            core::services::clock::detach(_injected_node);
+            services::clock::detach(_injected_node);
     }
 
     ~timeout_conductor() override = default;
 
-    core::services::clock_node* _injected_node = nullptr;
+    services::clock_node* _injected_node = nullptr;
     timeout* const _timeout;
 };
 

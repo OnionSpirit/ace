@@ -29,8 +29,8 @@
  *
  * @see ace::futures::timeout, ace::core::traits::vortex_traits
  */
-#ifndef ACE_CORE_CLOCK_H
-#define ACE_CORE_CLOCK_H
+#ifndef ACE_SERVICES_CLOCK_H
+#define ACE_SERVICES_CLOCK_H
 #include <chrono>
 #include <complex>
 #include <list>
@@ -39,7 +39,7 @@
 #include "ace/core/async.h"
 #include "ace/core/tools/queue.h"
 
-namespace ace::core {
+namespace ace::services {
 
     using timepoint_t = decltype(
         std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
@@ -69,7 +69,7 @@ namespace ace::core {
 
 }
 
-namespace ace::core::services {
+namespace ace::services {
 
     /**
      * @brief A stored timer record — holds a task and its remaining duration.
@@ -99,10 +99,10 @@ namespace ace::core::services {
             : _duration(dur)
             , _context(std::forward<task>(ctx)) {}
 
-        static thread_local tools::slab_mempool<clock_record> _clock_record_mempool;
+        static thread_local core::tools::slab_mempool<clock_record> _clock_record_mempool;
     };
 
-    using clock_node = tools::q_node<clock_record>;
+    using clock_node = core::tools::q_node<clock_record>;
 
     /**
      * @brief A single slot in the time wheel holding records with the same expiration.
@@ -121,7 +121,7 @@ namespace ace::core::services {
          * @warning May cause cross-runner roaming in future updates
          */
         static void release_record(clock_record&& record) {
-            runner::reattach(std::move(record._context));
+            core::runner::reattach(std::move(record._context));
         }
 
         /**
@@ -154,7 +154,7 @@ namespace ace::core::services {
          */
         [[nodiscard]] bool empty() const { return _records.empty(); }
 
-        tools::queue<clock_record> _records{clock_record::_clock_record_mempool}; ///< Queue of stored records
+        core::tools::queue<clock_record> _records{clock_record::_clock_record_mempool}; ///< Queue of stored records
     };
 
     /**
@@ -413,7 +413,7 @@ namespace ace::core::services {
             const auto idx = select_dial(dur);
 
             if (not idx) [[unlikely]] {
-                runner::reattach(std::move(ctx));
+                core::runner::reattach(std::move(ctx));
                 return nullptr;
             }
             ++_total_records;
@@ -459,7 +459,7 @@ namespace ace::core::services {
      * static method returns the cached timepoint, updated every 16 calls
      * for performance.
      */
-    struct clock : traits::vortex_traits<clock, vortex_spawn_mode::e_thread_local> {
+    struct clock : core::traits::vortex_traits<clock, core::vortex_spawn_mode::e_thread_local> {
 
         clock() = default;
 
@@ -479,12 +479,12 @@ namespace ace::core::services {
         }
     };
 
-    inline thread_local tools::slab_mempool<clock_record> clock_record::_clock_record_mempool =
-        tools::slab_mempool<clock_record>();
+    inline thread_local core::tools::slab_mempool<clock_record> clock_record::_clock_record_mempool =
+        core::tools::slab_mempool<clock_record>();
 
     inline thread_local multi_dial clock::_multi_dial =
         multi_dial{std::chrono::milliseconds(1), 256};
 
 }
 
-#endif //ACE_CORE_CLOCK_H
+#endif //ACE_SERVICES_CLOCK_H

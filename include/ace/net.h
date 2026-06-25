@@ -645,7 +645,7 @@ namespace ace::net {
                 if (bytes_read < 1) co_return std::unexpected(-bytes_read);
             }
 
-            co_return buf;
+            co_return std::forward<io::buffer>(buf);
         }
     };
 

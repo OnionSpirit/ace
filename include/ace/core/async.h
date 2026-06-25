@@ -484,7 +484,7 @@ namespace ace::core {
          */
         returnT await_resume() {
             if constexpr (requires(promise_type promise_t) { promise_t._return_value; })
-                return _coroutine.promise()._return_value;
+                return std::forward<returnT>(_coroutine.promise()._return_value);
             else return;
         }
 

@@ -778,6 +778,38 @@ public:                                                                         
 
     public:
 
+        buffer() = default;
+
+        buffer(const buffer&) = delete;
+        buffer& operator=(const buffer&) = delete;
+
+        buffer(buffer&& b) noexcept {
+            _hdr = b._hdr;
+            b._hdr = msghdr{};
+            _chunk_list_begin = b._chunk_list_begin;
+            b._chunk_list_begin = nullptr;
+            _chunk_list_end = b._chunk_list_end;
+            b._chunk_list_end = nullptr;
+            _tail_capacity = b._tail_capacity;
+            b._tail_capacity = 0;
+            _terminated = b._terminated;
+            b._terminated = false;
+        }
+
+        buffer& operator=(buffer&& b) noexcept {
+            _hdr = b._hdr;
+            b._hdr = msghdr{};
+            _chunk_list_begin = b._chunk_list_begin;
+            b._chunk_list_begin = nullptr;
+            _chunk_list_end = b._chunk_list_end;
+            b._chunk_list_end = nullptr;
+            _tail_capacity = b._tail_capacity;
+            b._tail_capacity = 0;
+            _terminated = b._terminated;
+            b._terminated = false;
+            return *this;
+        }
+
         static constexpr std::size_t control_hdr_len = sizeof(void*);
 
         template <class... Args>
@@ -1102,7 +1134,7 @@ public:                                                                         
                 if (bytes_read < 1) co_return std::unexpected(-bytes_read);
             }
 
-            co_return buf;
+            co_return std::forward<buffer>(buf);
         }
 
     protected:

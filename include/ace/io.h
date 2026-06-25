@@ -1120,6 +1120,10 @@ public:                                                                         
         using reactive_link = std::shared_ptr<io::link>;
     }
 
+
+// ====================================- io::buffer::as<...> specialisations -====================================
+
+
     template <>
     inline std::string ace::io::buffer::as<std::string>() const {
         std::string str;

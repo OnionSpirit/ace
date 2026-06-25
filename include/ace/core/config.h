@@ -42,6 +42,7 @@
 #define ACE_CORE_CONFIG_H
 
 #include <cstddef>
+#include <span>
 
 namespace ace::cfg {
 
@@ -52,11 +53,17 @@ namespace ace::cfg {
     /// @brief Number of runner threads (including the main thread).
     struct runners_amount {};
 
-    /// @brief Number of pre-allocated 512-byte fixed buffers for io_uring.
-    struct iovec_fixed_512 {};
+    /// @brief Spec of a single power-of-2 pool: power (2^power bytes per chunk)
+    /// and count (number of chunks).
+    struct iovec_fixed_pool_spec {
+        unsigned power;
+        unsigned count;
+    };
 
-    /// @brief Number of pre-allocated 2048-byte fixed buffers for io_uring.
-    struct iovec_fixed_2048 {};
+    /// @brief Profile for the fixed iovec allocator. A list of
+    /// {power, count} pairs. Powers not listed alias to the nearest
+    /// larger configured power.
+    struct iovec_fixed_profile {};
 
     // ===================================================================
     // detail::default_of — internal compile-time defaults
@@ -74,13 +81,12 @@ namespace ace::cfg {
         };
 
         template <>
-        struct default_of<iovec_fixed_512> {
-            static constexpr std::size_t value = 256;
-        };
-
-        template <>
-        struct default_of<iovec_fixed_2048> {
-            static constexpr std::size_t value = 64;
+        struct default_of<iovec_fixed_profile> {
+            static constexpr iovec_fixed_pool_spec data[] = {
+                {10, 256},  // 1024-byte chunks
+                {12, 64}    // 4096-byte chunks
+            };
+            static constexpr std::span<const iovec_fixed_pool_spec> value{data};
         };
 
         // [NEW PARAM]:

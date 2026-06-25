@@ -3,107 +3,164 @@
 /// @brief Thread-local fixed-size iovec buffer allocator for io_uring
 /// zero-copy sendmsg with pre-registered buffers.
 ///
-/// Pre-allocates a configurable number of 1024B and 4096B buffers.
-/// All buffers are registered with io_uring as fixed buffers once,
-/// and each allocation returns an iovec* that can be mapped to its
-/// corresponding fixed-buffer index via buf_index().
+/// Pre-allocates pools of power-of-2 sized buffers configured via
+/// the ace::cfg::iovec_fixed_profile tag (a list of {power, count}
+/// pairs).  Powers not explicitly listed alias to the nearest larger
+/// configured power.
+///
+/// All metadata resides in a single _mem_arena; the iovec array is a
+/// separate allocation to satisfy io_uring alignment requirements.
+/// All internal lookups are O(1):
+///   allocate() → _power_to_pool[bit_width(size-1) - _min_power]
+///   deallocate() → _buf_pool_idx[iov - _iovec_pool]
+///   buf_index()  → iov - _iovec_pool
 ///
 /// The registration iovec array is built once during init() and can
 /// be passed directly to io_uring_register_buffers().
 
-#include <array>
+#include <bit>
 #include <cstdint>
 #include <cstddef>
+#include <span>
+
+#include "ace/core/config.h"
 
 namespace ace::core::tools {
 
 struct iovec_fixed_allocator {
 
-    static constexpr size_t quarter_len = 1024;
-    static constexpr size_t frame_len   = 4096;
-
     iovec_fixed_allocator() = default;
 
-    ~iovec_fixed_allocator() {
-        delete[] _quarter_pool;
-        delete[] _frame_pool;
-        delete[] _iovec_pool;
-    }
+    ~iovec_fixed_allocator() { delete[] _mem_arena; delete[] _iovec_pool; }
 
     iovec_fixed_allocator(const iovec_fixed_allocator&) = delete;
     iovec_fixed_allocator& operator=(const iovec_fixed_allocator&) = delete;
     iovec_fixed_allocator(iovec_fixed_allocator&&) = delete;
     iovec_fixed_allocator& operator=(iovec_fixed_allocator&&) = delete;
 
-    void init(std::size_t quarter_count, std::size_t frame_count) {
-        if (_total_count or _quarter_pool or _frame_pool) return; // already initialized
+    void init(std::span<const ace::cfg::iovec_fixed_pool_spec> specs) {
+        if (_mem_arena or _iovec_pool) return;
+        if (specs.empty()) return;
 
-        _quarter_count  = quarter_count;
-        _frame_count = frame_count;
-        _total_count = quarter_count + frame_count;
-
+        // ── pass 1: compute dimensions ──────────────────────────
+        _min_power = _max_power = specs[0].power;
+        _pool_count = specs.size();
+        _total_count = 0;
+        for (const auto& spec : specs) {
+            if (spec.power < _min_power) _min_power = spec.power;
+            if (spec.power > _max_power) _max_power = spec.power;
+            _total_count += spec.count;
+        }
         if (_total_count == 0) return;
+
+        const std::size_t power_range = _max_power - _min_power + 1;
+
+        auto align = [](std::size_t value, std::size_t alignment) {
+            return (value + alignment - 1) & ~(alignment - 1);
+        };
+
+        std::size_t offset = 0;
+
+        offset = align(offset, alignof(pool));
+        const std::size_t pools_offset = offset;
+        offset += _pool_count * sizeof(pool);
+
+        const std::size_t power_to_pool_offset = offset;
+        offset += power_range;
+
+        const std::size_t buf_pool_idx_offset = offset;
+        offset += _total_count;
+
+        offset = align(offset, alignof(std::max_align_t));
+        const std::size_t buffers_offset = offset;
+        for (const auto& spec : specs)
+            offset += spec.count * (1ull << spec.power);
+
+        // ── allocations ─────────────────────────────────────────
+        _mem_arena  = new uint8_t[offset];
         _iovec_pool = new iovec[_total_count];
 
-        // NOTE: Allocate and assign 1024 chunks
-        if (quarter_count > 0) {
-            _quarter_pool  = new quarter[quarter_count]{};
-            for (std::size_t i = 0; i < quarter_count; ++i) {
-                *reinterpret_cast<std::size_t*>(_quarter_pool[i].data()) = i + 1;
-                _iovec_pool[i].iov_base = _quarter_pool[i].data();
-                _iovec_pool[i].iov_len  = quarter_len;
-            }
-            *reinterpret_cast<std::size_t*>(_quarter_pool[quarter_count - 1].data()) = usage_sentinel;
-            _free_head_quarter = 0;
+        _pools         = reinterpret_cast<pool*>(_mem_arena + pools_offset);
+        _power_to_pool = _mem_arena + power_to_pool_offset;
+        _buf_pool_idx  = _mem_arena + buf_pool_idx_offset;
+
+        // ── power → pool alias table ────────────────────────────
+        for (std::size_t p = _min_power, pool_i = 0; p <= _max_power; ++p) {
+            while (pool_i < _pool_count && specs[pool_i].power < p) ++pool_i;
+            _power_to_pool[p - _min_power] = static_cast<uint8_t>(
+                pool_i < _pool_count ? pool_i : _pool_count - 1);
         }
 
-        // NOTE: Allocate and assign 4096 chunks
-        if (frame_count > 0) {
-            _frame_pool = new frame[frame_count]{};
-            for (std::size_t i = 0; i < frame_count; ++i) {
-                *reinterpret_cast<std::size_t*>(_frame_pool[i].data()) = quarter_count + i + 1;
-                _iovec_pool[i].iov_base = _frame_pool[i].data();
-                _iovec_pool[i].iov_len  = frame_len;
-            }
-            *reinterpret_cast<std::size_t*>(_frame_pool[frame_count - 1].data()) = usage_sentinel;
-            _free_head_frame = quarter_count;
-        }
+        // ── pass 2: init pools, free-lists, iovec & buf_pool_idx
+        std::size_t buf_cursor   = buffers_offset;
+        std::size_t iovec_cursor = 0;
+        for (std::size_t pool_i = 0; pool_i < _pool_count; ++pool_i) {
+            const auto chunk_size  = 1ull << specs[pool_i].power;
+            const auto chunk_count = specs[pool_i].count;
 
+            auto& pool_desc       = _pools[pool_i];
+            pool_desc.data        = _mem_arena + buf_cursor;
+            pool_desc.chunk_size  = chunk_size;
+            pool_desc.count       = chunk_count;
+            pool_desc.power       = specs[pool_i].power;
+            pool_desc.iovec_start = iovec_cursor;
+
+            if (chunk_count == 0) {
+                pool_desc.free_head = usage_sentinel;
+                continue;
+            }
+
+            for (std::size_t i = 0; i < chunk_count; ++i) {
+                const auto global_idx = iovec_cursor + i;
+                const auto buf_ptr    = pool_desc.data + i * chunk_size;
+                const auto next       = (i + 1 < chunk_count) ? (global_idx + 1) : usage_sentinel;
+                *reinterpret_cast<std::size_t*>(buf_ptr) = next;
+                _iovec_pool[global_idx].iov_base = buf_ptr;
+                _iovec_pool[global_idx].iov_len  = chunk_size;
+                _buf_pool_idx[global_idx] = static_cast<uint8_t>(pool_i);
+            }
+            pool_desc.free_head = iovec_cursor;
+            iovec_cursor += chunk_count;
+            buf_cursor   += chunk_count * chunk_size;
+        }
     }
 
     [[nodiscard]] auto allocate(size_t size) noexcept -> iovec* {
-        if (_total_count == 0 and !_quarter_pool and !_frame_pool) return nullptr;
-        if (size <= quarter_len)
-            return _alloc_quarter();
-        if (size <= frame_len)
-            return _alloc_frame();
+        if (_total_count == 0) return nullptr;
+
+        auto power = std::bit_width(size > 0 ? size - 1 : 0);
+        if (power < _min_power) power = _min_power;
+        if (power > _max_power) return nullptr;
+
+        const auto start_pool = _power_to_pool[power - _min_power];
+        for (auto pool_i = start_pool; pool_i < _pool_count; ++pool_i) {
+            auto& pool_desc = _pools[pool_i];
+            if (pool_desc.free_head == usage_sentinel) continue;
+            const auto global_idx  = pool_desc.free_head;
+            pool_desc.free_head = *static_cast<std::size_t*>(_iovec_pool[global_idx].iov_base);
+            _iovec_pool[global_idx].iov_len = pool_desc.chunk_size;
+            return &_iovec_pool[global_idx];
+        }
         return nullptr;
     }
 
     auto deallocate(iovec* iov) noexcept -> void {
-        if (not iov) return;
+        if (not iov or not iov->iov_base) return;
         iov->iov_len = 0;
-        if (iov->iov_base) {
-            auto ptr = static_cast<uint8_t*>(iov->iov_base);
-            if (_is_in_quarter_pool(ptr)) {
-                const std::size_t idx = (ptr - _quarter_pool[0].data()) / sizeof(quarter);
-                *reinterpret_cast<std::size_t*>(ptr) = _free_head_quarter;
-                _free_head_quarter = idx;
-            } else if (_is_in_frame_pool(ptr)) {
-                const std::size_t idx = (ptr - _frame_pool[0].data()) / sizeof(frame);
-                *reinterpret_cast<std::size_t*>(ptr) = _free_head_frame;
-                _free_head_frame = idx;
-            }
-        }
+
+        const auto global_idx = static_cast<std::size_t>(iov - _iovec_pool);
+        if (global_idx >= _total_count) return;
+
+        const auto pool_i = _buf_pool_idx[global_idx];
+        auto& pool_desc = _pools[pool_i];
+
+        *static_cast<std::size_t*>(iov->iov_base) = pool_desc.free_head;
+        pool_desc.free_head = global_idx;
     }
 
     [[nodiscard]] auto buf_index(const iovec* iov) const noexcept -> std::size_t {
         if (not iov) return usage_sentinel;
-        const auto ptr = static_cast<const uint8_t*>(iov->iov_base);
-        if (_is_in_quarter_pool(ptr)) {
-            return (ptr - _quarter_pool[0].data()) / sizeof(quarter);
-        }
-        return _quarter_count + ((ptr - _frame_pool[0].data()) / sizeof(frame));
+        return static_cast<std::size_t>(iov - _iovec_pool);
     }
 
     [[nodiscard]] auto registration_iovecs() const noexcept -> const iovec* {
@@ -111,61 +168,36 @@ struct iovec_fixed_allocator {
     }
 
     [[nodiscard]] auto registration_count() const noexcept -> unsigned {
-        return _total_count;
+        return static_cast<unsigned>(_total_count);
     }
 
     [[nodiscard]] auto is_initialized() const noexcept -> bool {
-        return _total_count > 0 or _quarter_pool or _frame_pool;
+        return _total_count > 0;
     }
 
 private:
 
     static constexpr std::size_t usage_sentinel = std::numeric_limits<std::size_t>::max();
 
-    using quarter = std::array<uint8_t, 1024>;
-    using frame   = std::array<uint8_t, 4096>;
+    struct pool {
+        uint8_t*    data        = nullptr;
+        std::size_t chunk_size  = 0;
+        std::size_t count       = 0;
+        std::size_t power       = 0;
+        std::size_t iovec_start = 0;
+        std::size_t free_head   = usage_sentinel;
+    };
 
-    quarter* _quarter_pool = nullptr;
-    frame*   _frame_pool   = nullptr;
+    uint8_t*   _mem_arena      = nullptr;
+    pool*      _pools          = nullptr;
+    iovec*     _iovec_pool     = nullptr;
+    uint8_t*   _power_to_pool  = nullptr;
+    uint8_t*   _buf_pool_idx   = nullptr;
 
-    std::size_t _quarter_count  = 0;
-    std::size_t _frame_count = 0;
-    std::size_t _total_count = 0;
-
-    std::size_t _free_head_quarter = usage_sentinel;
-    std::size_t _free_head_frame   = usage_sentinel;
-
-    iovec* _iovec_pool = nullptr;
-
-    [[nodiscard]] auto _alloc_quarter() noexcept -> iovec* {
-        if (_free_head_quarter == usage_sentinel) return nullptr;
-        const std::size_t idx = _free_head_quarter;
-        _free_head_quarter = *static_cast<std::size_t*>(_iovec_pool[idx].iov_base);
-        _iovec_pool[idx].iov_len = quarter_len;
-        return &_iovec_pool[idx];
-    }
-
-    [[nodiscard]] auto _alloc_frame() noexcept -> iovec* {
-        if (_free_head_frame == usage_sentinel) return nullptr;
-        const std::size_t idx = _free_head_frame;
-        _free_head_frame = *static_cast<std::size_t*>(_iovec_pool[idx].iov_base);
-        _iovec_pool[idx].iov_len = frame_len;
-        return &_iovec_pool[idx];
-    }
-
-    [[nodiscard]] auto _is_in_quarter_pool(const uint8_t* ptr) const noexcept -> bool {
-        if (!_quarter_pool or !_quarter_count) return false;
-        const auto base = _quarter_pool[0].data();
-        const auto end  = base + ( _quarter_count * sizeof(quarter) );
-        return ptr >= base && ptr < end;
-    }
-
-    [[nodiscard]] auto _is_in_frame_pool(const uint8_t* ptr) const noexcept -> bool {
-        if (!_frame_pool or !_frame_count) return false;
-        const auto base = _frame_pool[0].data();
-        const auto end  = base + ( _frame_count * sizeof(frame) );
-        return ptr >= base && ptr < end;
-    }
+    std::size_t _total_count  = 0;
+    std::size_t _pool_count   = 0;
+    std::size_t _min_power    = 0;
+    std::size_t _max_power    = 0;
 };
 
 } // namespace ace::core::tools

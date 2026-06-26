@@ -444,7 +444,8 @@ inline ace::task tcp_echo_client() {
     ace::console::println("[ CLIENT ] - Connected to server...");
 
     for (int i =1; i < 6; ++i) {
-        if (auto input = co_await ace::console::input(); not input)
+        auto input = co_await ace::console::input();
+        if (not input)
             ace::console::println("[ CLIENT ERROR ] : {}", strerror(input.error()));
         else if (co_await connection.send(input.value()))
             ace::console::println("[ CLIENT SENT ] : {}", input.value().as<std::string>());

@@ -613,9 +613,12 @@ public:                                                                         
             .msg_iovlen = 0
         };
         iovec*           _chunk_list_end   = nullptr;
+
+        ACE_CACHE_LINE(0)
+
         iovec*           _chunk_list_begin = nullptr;
-        unsigned         _tail_capacity    = 0;
-        bool             _control_on_heap  = false;
+        std::size_t      _tail_capacity    = 0;
+
 
         iovec* allocate_buf(const size_t len, const bool is_tail) {
             // NOTE: Allocating and subscribing new buff to chunk set
@@ -773,6 +776,11 @@ public:                                                                         
 
         buffer() = default;
 
+        buffer(const std::size_t len) {
+            if (iovec* buf = allocate_buf(len, true))
+                init_buf_list(buf);
+        }
+
         buffer(const buffer&) = delete;
         buffer& operator=(const buffer&) = delete;
 
@@ -785,8 +793,6 @@ public:                                                                         
             b._chunk_list_end = nullptr;
             _tail_capacity = b._tail_capacity;
             b._tail_capacity = 0;
-            _control_on_heap = b._control_on_heap;
-            b._control_on_heap = false;
         }
 
         buffer& operator=(buffer&& b) noexcept {
@@ -798,8 +804,6 @@ public:                                                                         
             b._chunk_list_end = nullptr;
             _tail_capacity = b._tail_capacity;
             b._tail_capacity = 0;
-            _control_on_heap = b._control_on_heap;
-            b._control_on_heap = false;
             return *this;
         }
 
@@ -869,7 +873,7 @@ public:                                                                         
 
         template <typename T>
         T as() const {
-            static_assert("No specialization for passed type <T>");
+            static_assert("No 'as()' specialization for passed type <T>");
             return std::decay_t<T>{};
         }
 
@@ -883,12 +887,12 @@ public:                                                                         
         /**
          * @brief Assembles buffer into @c msghdr .
          *
-         * @c assemble(...) actually has effect once before @c drop_control(),
+         * @c assemble(...) actually has effect once before @c disassemble(),
          * @c clear(), @c clone() operations.
          *
          * - If you use @c io::buffer with @c ace::io interfaces then manual usage of this function overload has no point.
          *
-         * - Allocates a control buffer of @c iovec on the heap with same len as inner chunk list.
+         * - Allocates a control buffer of @c iovec on the special pool with same len as inner chunk list.
          *
          * - Memory size of @c iovec message buffer is much less than actual size of all listed chunks.
          *
@@ -898,111 +902,40 @@ public:                                                                         
          * @return Pointer to local @c msghdr entity
          */
         msghdr* assemble() {
+
+            iovec* current = _chunk_list_begin;
+
+            // NOTE: Effect once guard
             if (_hdr.msg_iov)
                 return &_hdr;
 
-            auto* iovecs = new iovec[_hdr.msg_iovlen];
-            _control_on_heap = true;
-            const iovec* current = _chunk_list_begin;
+            _hdr.msg_iov =
+                static_cast<iovec*>(
+                    services::kernel_controller::_msg_iov_pool.allocate(sizeof(iovec) * _hdr.msg_iovlen)
+                );
 
             for (int i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
-                iovecs[i].iov_base = static_cast<char*>(current->iov_base) + control_hdr_len;
-                iovecs[i].iov_len = current->iov_len;
+                _hdr.msg_iov[i].iov_base = static_cast<char*>(current->iov_base) + control_hdr_len;
+                _hdr.msg_iov[i].iov_len = current->iov_len;
                 current = *static_cast<iovec**>(current->iov_base);
             }
-            _hdr.msg_iov = iovecs;
-            return &_hdr;
-        }
-
-        /**
-         * @brief Assembles buffer into @c msghdr . Using external buffer to store @c iovec message buffer of the @c msghdr
-         *
-         * @c assemble(...) actually has effect once before @c drop_control(),
-         * @c clear(), @c clone() operations.
-         *
-         * - Manual usage of this function is recommended only for optimization cases.
-         * Use it if external memory management might be more efficient,
-         * then heap allocation of an @c iovec message buffer.
-         *
-         * - Memory size of @c iovec message buffer is much less than actual size of all listed chunks.
-         *
-         * - Whole chunk list would be provided into the @c iovec message buffer.
-         *
-         * @warning @c msghdr* lifetime is equal to @c ace::io::buffer lifetime
-         * @return Pointer to local @c msghdr entity
-         */
-        template <std::size_t len_v>
-        msghdr* assemble(std::array<iovec, len_v>& external_buf) {
-            if (_hdr.msg_iov)
-                return &_hdr;
-
-            // NOTE: Guard if data doesn't fit into provided buf
-            if (len_v < _hdr.msg_iovlen)
-                return nullptr;
-
-            auto* iovecs = external_buf.data();
-            const iovec* current = _chunk_list_begin;
-
-            for (int i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
-                iovecs[i].iov_base = static_cast<char*>(current->iov_base) + control_hdr_len;
-                iovecs[i].iov_len = current->iov_len;
-                current = *static_cast<iovec**>(current->iov_base);
-            }
-            _hdr.msg_iov = iovecs;
-            return &_hdr;
-        }
-
-        /**
-         * @brief Assembles buffer into @c msghdr . Using external buffer to store @c iovec message buffer of the @c msghdr
-         *
-         * @c assemble(...) actually has effect once before @c drop_control(),
-         * @c clear(), @c clone() operations.
-         *
-         * - Manual usage of this function is recommended only for optimization cases.
-         * Use it if external memory management might be more efficient,
-         * then heap allocation of an @c iovec message buffer.
-         *
-         * - Memory size of @c iovec message buffer is much less than actual size of all listed chunks.
-         *
-         * - Whole chunk list would be provided into the @c iovec message buffer.
-         *
-         * @warning @c msghdr* lifetime is equal to @c ace::io::buffer lifetime
-         * @return Pointer to local @c msghdr entity
-         */
-        msghdr* assemble(iovec* iovecs, const std::size_t len = -1) {
-            if (_hdr.msg_iov)
-                return &_hdr;
-
-            // NOTE: Guard if chunk list doesn't fit into provided buf len
-            if (len < _hdr.msg_iovlen)
-                return nullptr;
-
-            const iovec* current = _chunk_list_begin;
-
-            for (int i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
-                iovecs[i].iov_base = static_cast<char*>(current->iov_base) + control_hdr_len;
-                iovecs[i].iov_len = current->iov_len;
-                current = *static_cast<iovec**>(current->iov_base);
-            }
-            _hdr.msg_iov = iovecs;
             return &_hdr;
         }
 
         /**
          * @brief Drops local @c msghdr control metadata. Allows to reassemble without clear
          */
-        void drop_control() {
-            if (_control_on_heap)
-                delete [] _hdr.msg_iov;
+        void disassemble() {
+            services::kernel_controller::_msg_iov_pool.deallocate(_hdr.msg_iov, sizeof(iovec) * _hdr.msg_iovlen);
             _hdr.msg_iov = nullptr;
-            _control_on_heap = false;
         }
 
         /**
          * @brief Clones current buffer data to a brand-new instance of buffer
+         * @warning Disassembles buffer
          * @return Buffer instance with data copy
          */
-        [[nodiscard]] buffer clone() const {
+        [[nodiscard]] buffer clone() {
             buffer cl;
             const iovec* current = _chunk_list_begin;
             while (current not_eq nullptr) {
@@ -1010,6 +943,7 @@ public:                                                                         
                 cl.append( data, data + current->iov_len);
                 current = *static_cast<iovec**>(current->iov_base);
             }
+
             return std::forward<buffer>(cl);
         }
 
@@ -1017,6 +951,7 @@ public:                                                                         
          * @brief Clears and releases all resources
          */
         void clear() {
+            disassemble();
             iovec* current = _chunk_list_begin;
             while (current not_eq nullptr) {
                 const auto next = *static_cast<iovec**>(current->iov_base);
@@ -1027,9 +962,6 @@ public:                                                                         
             _chunk_list_begin = nullptr;
             _chunk_list_end = nullptr;
             _tail_capacity = 0;
-            if (_control_on_heap)
-                delete [] _hdr.msg_iov;
-            _hdr.msg_iov = nullptr;
             _hdr.msg_iovlen = 0;
         }
 

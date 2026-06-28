@@ -30,6 +30,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory_resource>
 #include <liburing.h>
 
 #include "ace/core/traits/vortex.h"
@@ -105,6 +106,7 @@ namespace ace::services {
 
         static thread_local core::tools::queue<kernel_entity> _submission_buffer;
         static thread_local core::tools::iovec_allocator _iovec_alloc;
+        static thread_local std::pmr::unsynchronized_pool_resource _msg_iov_pool;
 
         static bool ping();
 
@@ -311,6 +313,7 @@ namespace ace::services {
     };
 
     inline thread_local core::tools::iovec_allocator kernel_controller::_iovec_alloc {};
+    inline thread_local std::pmr::unsynchronized_pool_resource kernel_controller::_msg_iov_pool {};
 
     inline thread_local io_uring_params kernel_controller::_ring_params {};
     inline thread_local io_uring kernel_controller::_ring {};

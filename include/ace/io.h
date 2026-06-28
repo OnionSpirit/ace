@@ -166,9 +166,8 @@ namespace ace::io {
      *
      * @details @c io_link combines an FD with a polymorphic @c output_action()
      * (write) / @c input_action() (read) interface and a set of convenience
-     * @c write() / @c read() / @c read_vec() / @c read_str() methods.
-     *
-     * Derived types (@c ace::fs::file_link, @c ace::net::io_connection_link)
+     * @c write() / @c read() / @c read_buf() methods.
+     * Derived types example (@c ace::fs::file_link, @c ace::net::io_connection_link)
      * implement the @c output_action and @c input_action to perform the actual
      * I/O via @c io_uring or a fallback blocking call.
      */
@@ -257,38 +256,29 @@ public:                                                                         
         struct command : services::kernel_observer {
 
             std::vector<uint8_t> _buffer {};
-            // std::span<char> _user_data {};
+            std::span<const char> _user_data {};
 
             void on_result(const int res) override {
                 if (res < 0 and fail_cb_handler)
-                    // fail_cb_handler(res, _user_data);
-                        fail_cb_handler(res);
+                    fail_cb_handler(res, _user_data);
                 _command_pool.raw_sync(this);
             }
 
             ~command() override = default;
         };
 
-        // static void basic_fail_handler(const int res, const std::span<char>& user_data) {
-        //     throw std::runtime_error(std::format("io operation failed: {}\nuser data: {}", strerror(-res), user_data));
-        // }
-
-        static void basic_fail_handler(const int res) {
-            throw std::runtime_error(std::format("io operation failed: {}", strerror(-res)));
+        static void basic_fail_handler(const int res, const std::span<const char>& user_data) {
+            throw std::runtime_error(std::format("io operation failed: {}\nuser data: {}", strerror(-res), user_data));
         }
 
-        // static void(*fail_cb_handler)(int, const std::span<char>&); ///< Fail handler for commands errors handling
-
-        static void(*fail_cb_handler)(int); ///< Fail handler for commands errors handling
+        static void(*fail_cb_handler)(int, const std::span<const char>&); ///< Fail handler for commands errors handling
 
         static thread_local nukes::dynamic::reg_freelist<command> _command_pool; ///< Pool of command to start hanged processing wo @c co_await usage
     };
 
     inline thread_local nukes::dynamic::reg_freelist<ace::io::hanged::command> ace::io::hanged::_command_pool {};
 
-    // inline void(*ace::io::hanged::fail_cb_handler)(int, const std::span<char>&) = basic_fail_handler;
-
-    inline void(*ace::io::hanged::fail_cb_handler)(int) = basic_fail_handler;
+    inline void(*ace::io::hanged::fail_cb_handler)(int, const std::span<const char>&) = basic_fail_handler;
 
 
     template <typename query_core_t>
@@ -477,7 +467,7 @@ public:                                                                         
             {
                 cmd->_runner_identity = runner_identity;
                 if (not services::kernel_controller::close(cmd, _fd) and hanged::fail_cb_handler)
-                    hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
+                    hanged::fail_cb_handler(EAGAIN, "FD guard failure"); // Maybe EIO?
             }
             // NOTE: If can not get slot or identity not found -> using busy behavior
             else schedule(pending_close(_fd));

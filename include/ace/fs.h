@@ -68,13 +68,13 @@ namespace ace::fs {
                 cmd->_buffer.assign(buff.begin(), buff.end());
                 if (not services::kernel_controller::write(cmd, _fd,
                     cmd->_buffer.data(), cmd->_buffer.size(), 0) and io::hanged::fail_cb_handler)
-                    io::hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
+                    io::hanged::fail_cb_handler(EAGAIN, "file_link lazy-write failure"); // Maybe EIO?
             }
             // NOTE: If can not get slot or identity not found -> using busy behavior
             else
             {
                 if (::write(_fd, buff.data(), buff.size()) < 0 and io::hanged::fail_cb_handler)
-                    io::hanged::fail_cb_handler(errno);
+                    io::hanged::fail_cb_handler(errno, "file_link busy-write failure");
             }
         };
 

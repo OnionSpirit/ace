@@ -304,13 +304,13 @@ namespace ace::net {
                 cmd->_buffer.assign(buff.begin(), buff.end());
                 if (not services::kernel_controller::send(cmd, _fd,
                     cmd->_buffer.data(), cmd->_buffer.size(), 0) and io::hanged::fail_cb_handler)
-                    io::hanged::fail_cb_handler(EAGAIN); // Maybe EIO?
+                    io::hanged::fail_cb_handler(EAGAIN, "io_connection_link lazy-send failure"); // Maybe EIO?
             }
             // NOTE: If can not get slot or identity not found -> using busy behavior
             else
             {
                 if (::send(_fd, buff.data(), buff.size(), 0) < 0 and io::hanged::fail_cb_handler)
-                    io::hanged::fail_cb_handler(errno);
+                    io::hanged::fail_cb_handler(errno, "io_connection_link busy-send failure");
             }
         };
 

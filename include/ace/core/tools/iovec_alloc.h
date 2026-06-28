@@ -27,21 +27,45 @@ struct iovec_allocator {
 
     iovec_allocator() = default;
 
-    [[nodiscard]] auto allocate(size_t size) const noexcept -> iovec* {
+    // NOTE: Allocates requested size and puts it into the iovec struct
+    [[nodiscard]] auto allocate(size_t size) noexcept -> iovec* {
         const uint8_t sc = size_to_class(size);
+        // if (sc == 0) return allocate_small(size);
         if (sc > 5) return nullptr;
         return _capture_table[sc](_pool_ptrs[sc]);
     }
 
-    auto deallocate(iovec* iov) const noexcept -> void {
+    auto deallocate(iovec* iov) noexcept -> void {
         if (!iov) return;
         const uint8_t sc = size_to_class(iov->iov_len);
+        // if (sc == 0) return deallocate_small(iov);
         if (sc > 5) return;
         iov->iov_len = 0;
         _release_table[sc](_pool_ptrs[sc], iov);
     }
 
+    template <typename data_t>
+    [[nodiscard]] auto allocate_as(size_t len = 1) noexcept -> data_t* {
+        auto data = static_cast<data_t*>(_small_pool.allocate(sizeof(data_t) * len));
+        return data;
+    }
+
+    auto deallocate_as(void* mem, const size_t len) noexcept -> void {
+        _small_pool.deallocate(mem, len);
+    }
+
 private:
+
+    [[nodiscard]] auto allocate_small(size_t size) noexcept -> iovec* {
+        auto iov = static_cast<iovec*>(_small_pool.allocate(sizeof(iovec) + size));
+        iov->iov_base = static_cast<std::byte*>(iov->iov_base) + sizeof(iovec);
+        iov->iov_len = size;
+        return iov;
+    }
+
+    auto deallocate_small(iovec* iov) noexcept -> void {
+        _small_pool.deallocate(iov, iov->iov_len + sizeof(iovec));
+    }
 
     static auto size_to_class(size_t size) noexcept -> uint8_t {
         if (size <= kMinSize) return 0;
@@ -56,6 +80,11 @@ private:
     struct alignas(64) buffer_2k   { iovec _iov{}; std::array<uint8_t, 2048> _data{}; };
     struct alignas(64) buffer_4k   { iovec _iov{}; std::array<uint8_t, 4096> _data{}; };
 
+    // char small_pool_upstream[1024 * 1024]; // 1 МБ
+    // std::pmr::monotonic_buffer_resource upstream {small_pool_upstream, sizeof(small_pool_upstream)};
+
+    // std::pmr::unsynchronized_pool_resource   _small_pool {&upstream};
+    std::pmr::unsynchronized_pool_resource   _small_pool;
     nukes::dynamic::reg_freelist<buffer_128> _pool_128;
     nukes::dynamic::reg_freelist<buffer_256> _pool_256;
     nukes::dynamic::reg_freelist<buffer_512> _pool_512;

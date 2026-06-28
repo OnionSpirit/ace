@@ -106,7 +106,6 @@ namespace ace::services {
 
         static thread_local core::tools::queue<kernel_entity> _submission_buffer;
         static thread_local core::tools::iovec_allocator _iovec_alloc;
-        static thread_local std::pmr::unsynchronized_pool_resource _msg_iov_pool;
 
         static bool ping();
 
@@ -268,6 +267,14 @@ namespace ace::services {
             _iovec_alloc.deallocate(iov);
         }
 
+        static auto iovec_pool_allocate(size_t len) noexcept -> iovec* {
+            return _iovec_alloc.allocate_as<iovec>(len);
+        }
+
+        static auto iovec_pool_deallocate(iovec* iov, size_t len) noexcept -> void {
+            _iovec_alloc.deallocate_as(iov, sizeof(iovec) * len);
+        }
+
         static auto iovec_alloc() noexcept -> core::tools::iovec_allocator& { return _iovec_alloc; }
 
     };
@@ -313,7 +320,6 @@ namespace ace::services {
     };
 
     inline thread_local core::tools::iovec_allocator kernel_controller::_iovec_alloc {};
-    inline thread_local std::pmr::unsynchronized_pool_resource kernel_controller::_msg_iov_pool {};
 
     inline thread_local io_uring_params kernel_controller::_ring_params {};
     inline thread_local io_uring kernel_controller::_ring {};

@@ -668,12 +668,7 @@ public:                                                                         
             if (_hdr.msg_iov) return nullptr;
             // NOTE: Getting tail buffer
             const auto tail_buf = _chunk_list_end;
-            // NOTE: Checking if new data fits into tail buf
-            if (tail_buf and (_tail_capacity - tail_buf->iov_len) > len) {
-                const auto ret = static_cast<char*>(tail_buf->iov_base) + tail_buf->iov_len + control_hdr_len;
-                tail_buf->iov_len = tail_buf->iov_len + len;
-                return ret;
-            }
+
             // NOTE: Allocating buffer
             const auto buf = allocate_buf(len, true);
             if (not buf) return nullptr;
@@ -909,10 +904,7 @@ public:                                                                         
             if (_hdr.msg_iov)
                 return &_hdr;
 
-            _hdr.msg_iov =
-                static_cast<iovec*>(
-                    services::kernel_controller::_msg_iov_pool.allocate(sizeof(iovec) * _hdr.msg_iovlen)
-                );
+            _hdr.msg_iov = services::kernel_controller::iovec_pool_allocate(_hdr.msg_iovlen);
 
             for (int i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
                 _hdr.msg_iov[i].iov_base = static_cast<char*>(current->iov_base) + control_hdr_len;
@@ -926,7 +918,7 @@ public:                                                                         
          * @brief Drops local @c msghdr control metadata. Allows to reassemble without clear
          */
         void disassemble() {
-            services::kernel_controller::_msg_iov_pool.deallocate(_hdr.msg_iov, sizeof(iovec) * _hdr.msg_iovlen);
+            services::kernel_controller::iovec_pool_deallocate(_hdr.msg_iov, _hdr.msg_iovlen);
             _hdr.msg_iov = nullptr;
         }
 

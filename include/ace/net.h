@@ -625,22 +625,20 @@ namespace ace::net {
         -> recvmsg_query { return recvmsg_query{_fd, msg, flags}; }
 
         [[nodiscard]] auto recv(io::buffer& buff, const int flags = 0) const
-        -> recvmsg_query { return recvmsg_query{_fd, buff.header(), flags}; }
+        -> recvmsg_query { return recvmsg_query{_fd, buff.assemble(), flags}; }
 
         [[nodiscard]] auto recv_buf(const int flags = 0) const
         -> promise<std::expected<io::buffer, int>> {
             static constexpr int buf_len = core::tools::iovec_allocator::kMinSize - io::buffer::control_hdr_len;
 
             io::buffer buf {};
-            buf.extend(buf_len);
-            auto [data, _] = buf.tail_chunk();
+            auto data = buf.reserve(buf_len);
 
             int bytes_read = co_await recv_query(_fd, data, buf_len, flags);
             if (bytes_read < 1) co_return std::unexpected(-bytes_read);
 
             while (bytes_read == buf_len) {
-                buf.extend(buf_len);
-                std::tie(data, _) = buf.tail_chunk();
+                data = buf.reserve(buf_len);
                 bytes_read = co_await recv_query(_fd, data, buf_len, flags);
                 if (bytes_read < 1) co_return std::unexpected(-bytes_read);
             }

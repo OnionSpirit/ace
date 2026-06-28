@@ -27,15 +27,15 @@ struct iovec_allocator {
 
     iovec_allocator() = default;
 
-    [[nodiscard]] auto allocate(size_t size) noexcept -> iovec* {
-        uint8_t sc = size_to_class(size);
+    [[nodiscard]] auto allocate(size_t size) const noexcept -> iovec* {
+        const uint8_t sc = size_to_class(size);
         if (sc > 5) return nullptr;
         return _capture_table[sc](_pool_ptrs[sc]);
     }
 
-    auto deallocate(iovec* iov) noexcept -> void {
+    auto deallocate(iovec* iov) const noexcept -> void {
         if (!iov) return;
-        uint8_t sc = size_to_class(iov->iov_len);
+        const uint8_t sc = size_to_class(iov->iov_len);
         if (sc > 5) return;
         iov->iov_len = 0;
         _release_table[sc](_pool_ptrs[sc], iov);

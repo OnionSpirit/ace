@@ -618,15 +618,14 @@ public:                                                                         
 
     class ace::io::buffer {
 
-        msghdr      _hdr {
+        msghdr _hdr {
             .msg_iov = nullptr,
             .msg_iovlen = 0
         };
-
-        iovec*      _chunk_list_end   = nullptr;
-        iovec*      _chunk_list_begin = nullptr;
-        unsigned    _tail_capacity = 0;
-        bool        _terminated = false;
+        iovec*           _chunk_list_end   = nullptr;
+        iovec*           _chunk_list_begin = nullptr;
+        unsigned         _tail_capacity    = 0;
+        bool             _control_on_heap  = false;
 
         iovec* allocate_buf(const size_t len, const bool is_tail) {
             // NOTE: Allocating and subscribing new buff to chunk set
@@ -672,6 +671,8 @@ public:                                                                         
          * @return ptr to the preallocated memory at the buffer tail
          */
         void* memtail(const size_t len) {
+            // NOTE: Forbidding modification after assembling
+            if (_hdr.msg_iov) return nullptr;
             // NOTE: Getting tail buffer
             const auto tail_buf = _chunk_list_end;
             // NOTE: Checking if new data fits into tail buf
@@ -698,6 +699,8 @@ public:                                                                         
          * @return ptr to the preallocated memory at the buffer head
          */
         void* memhead(const size_t len) {
+            // NOTE: Forbidding modification after assembling
+            if (_hdr.msg_iov) return nullptr;
             // NOTE: Getting tail buffer
             const auto tail_buf = _chunk_list_end;
 
@@ -792,8 +795,8 @@ public:                                                                         
             b._chunk_list_end = nullptr;
             _tail_capacity = b._tail_capacity;
             b._tail_capacity = 0;
-            _terminated = b._terminated;
-            b._terminated = false;
+            _control_on_heap = b._control_on_heap;
+            b._control_on_heap = false;
         }
 
         buffer& operator=(buffer&& b) noexcept {
@@ -805,8 +808,8 @@ public:                                                                         
             b._chunk_list_end = nullptr;
             _tail_capacity = b._tail_capacity;
             b._tail_capacity = 0;
-            _terminated = b._terminated;
-            b._terminated = false;
+            _control_on_heap = b._control_on_heap;
+            b._control_on_heap = false;
             return *this;
         }
 
@@ -881,72 +884,27 @@ public:                                                                         
         }
 
         /**
-         * @brief Applies C-string termination to the buffer content
-         */
-        void term_str() {
-            if (_terminated) return;
-            if (const auto mem = memtail(1)) {
-                *static_cast<char*>(mem) = '\0';
-                _terminated = true;
-            }
-        }
-
-        /**
          * @brief Reserve space in the buffer
          * @param [in] len extension size
-         * @warning Next append will always use last extension chunk
          * @return @c msghdr with @c iovec set
          */
-        msghdr* extend(const std::size_t len) {
-            // NOTE: Allocating buffer
-            const auto buf = allocate_buf(len, true);
-            if (not buf) return nullptr;
-
-            // NOTE: Preparing new buf set
-            auto* iovecs = new iovec[_hdr.msg_iovlen + 1]{};
-
-            // NOTE: Copying prev data
-            for (int i =0; i < _hdr.msg_iovlen; ++i)
-                iovecs[i] = _hdr.msg_iov[i];
-
-            // NOTE: Initializing list with buf or appending it to the list
-            if (not _chunk_list_end)
-                init_buf_list(buf);
-            else
-                append_buf_list(buf);
-
-            // NOTE: Setting new page in the back of a list
-            iovecs[_hdr.msg_iovlen - 1].iov_base = static_cast<char*>(buf->iov_base) + control_hdr_len;
-            iovecs[_hdr.msg_iovlen - 1].iov_len = buf->iov_len;
-
-            // NOTE: Erasing prev set
-            delete [] _hdr.msg_iov;
-
-            _hdr.msg_iov = iovecs;
-            return &_hdr;
-        }
-
-        std::pair<void*, std::size_t> tail_chunk() const {
-            if (not _chunk_list_end) return std::pair(nullptr, 0);
-            return std::pair {
-                static_cast<char*>(_chunk_list_end->iov_base) + control_hdr_len,
-                _chunk_list_end->iov_len - control_hdr_len
-            };
-        }
+        void* reserve(const std::size_t len) { return memtail(len); }
 
         /**
-         * @return buffer's @c msghdr*
-         */
-        msghdr* header() { return &_hdr; }
-
-        /**
-         * @brief Assembles buffer into @c msghdr
-         * @return Pointer to @c msghdr
+         * @brief Assembles buffer into @c msghdr.
+         *
+         * Assemble actually applies once before @c drop_control(), @c clear(), @c clone() operations
+         * @warning @c msghdr* lifetime is equal to @c ace::io::buffer lifetime
+         * @return Pointer to local @c msghdr entity
          */
         msghdr* assemble() {
-            if (_hdr.msg_iov) return &_hdr;
+            if (_hdr.msg_iov)
+                return &_hdr;
+
             auto* iovecs = new iovec[_hdr.msg_iovlen];
+            _control_on_heap = true;
             const iovec* current = _chunk_list_begin;
+
             for (int i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
                 iovecs[i].iov_base = static_cast<char*>(current->iov_base) + control_hdr_len;
                 iovecs[i].iov_len = current->iov_len;
@@ -956,18 +914,102 @@ public:                                                                         
             return &_hdr;
         }
 
+        /**
+         * @brief Assembles buffer into @c msghdr. Using external buffer to store
+         *
+         * Assemble actually applies once before @c drop_control(), @c clear(), @c clone() operations
+         * @warning @c msghdr* lifetime is equal to @c ace::io::buffer lifetime
+         * @return Pointer to local @c msghdr entity
+         */
+        template <std::size_t len_v>
+        msghdr* assemble(std::array<iovec, len_v>& external_buf) {
+            if (_hdr.msg_iov)
+                return &_hdr;
+
+            // NOTE: Guard if data doesn't fit into provided buf
+            if (len_v < _hdr.msg_iovlen)
+                return nullptr;
+
+            auto* iovecs = external_buf.data();
+            const iovec* current = _chunk_list_begin;
+
+            for (int i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
+                iovecs[i].iov_base = static_cast<char*>(current->iov_base) + control_hdr_len;
+                iovecs[i].iov_len = current->iov_len;
+                current = *static_cast<iovec**>(current->iov_base);
+            }
+            _hdr.msg_iov = iovecs;
+            return &_hdr;
+        }
+
+        /**
+         * @brief Assembles buffer into @c msghdr. Using external buffer to store
+         *
+         * Assemble actually applies once before @c drop_control(), @c clear(), @c clone() operations
+         * @warning @c msghdr* lifetime is equal to @c ace::io::buffer lifetime
+         * @return Pointer to local @c msghdr entity
+         */
+        template <std::size_t len_v>
+        msghdr* assemble(iovec* iovecs) {
+            if (_hdr.msg_iov)
+                return &_hdr;
+
+            // NOTE: Guard if data doesn't fit into provided buf
+            if (len_v < _hdr.msg_iovlen)
+                return nullptr;
+
+            const iovec* current = _chunk_list_begin;
+
+            for (int i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
+                iovecs[i].iov_base = static_cast<char*>(current->iov_base) + control_hdr_len;
+                iovecs[i].iov_len = current->iov_len;
+                current = *static_cast<iovec**>(current->iov_base);
+            }
+            _hdr.msg_iov = iovecs;
+            return &_hdr;
+        }
+
+        /**
+         * @brief Drops local @c msghdr control metadata. Allows to reassemble without clear
+         */
+        void drop_control() {
+            if (_control_on_heap)
+                delete [] _hdr.msg_iov;
+            _hdr.msg_iov = nullptr;
+            _control_on_heap = false;
+        }
+
+        /**
+         * @brief Clones current buffer data to a brand-new instance of buffer
+         * @return Buffer instance with data copy
+         */
+        [[nodiscard]] buffer clone() const {
+            buffer cl;
+            const iovec* current = _chunk_list_begin;
+            while (current not_eq nullptr) {
+                const std::byte* data = static_cast<std::byte*>(current->iov_base) + control_hdr_len;
+                cl.append( data, data + current->iov_len);
+                current = *static_cast<iovec**>(current->iov_base);
+            }
+            return std::forward<buffer>(cl);
+        }
+
+        /**
+         * @brief Clears and releases all resources
+         */
         void clear() {
             iovec* current = _chunk_list_begin;
             while (current not_eq nullptr) {
                 const auto next = *static_cast<iovec**>(current->iov_base);
+                current->iov_len += control_hdr_len;
                 services::kernel_controller::iovec_deallocate(current);
                 current = next;
             }
             _chunk_list_begin = nullptr;
             _chunk_list_end = nullptr;
             _tail_capacity = 0;
-            _terminated = false;
-            delete [] _hdr.msg_iov;
+            if (_control_on_heap)
+                delete [] _hdr.msg_iov;
             _hdr.msg_iov = nullptr;
             _hdr.msg_iovlen = 0;
         }
@@ -1121,15 +1163,13 @@ public:                                                                         
             static constexpr int buf_len = core::tools::iovec_allocator::kMinSize - buffer::control_hdr_len;
 
             buffer buf {};
-            buf.extend(buf_len);
-            auto [data, _] = buf.tail_chunk();
+            auto data = buf.reserve(buf_len);
 
             int bytes_read = co_await input_action(data, buf_len);
             if (bytes_read < 1) co_return std::unexpected(-bytes_read);
 
             while (bytes_read == buf_len) {
-                buf.extend(buf_len);
-                std::tie(data, _) = buf.tail_chunk();
+                data = buf.reserve(buf_len);
                 bytes_read = co_await input_action(data, buf_len);
                 if (bytes_read < 1) co_return std::unexpected(-bytes_read);
             }

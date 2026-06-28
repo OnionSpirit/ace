@@ -104,12 +104,12 @@ namespace ace::io {
     /**
      * @brief Customisation point for converting between I/O entity types.
      *
-     * @details Specialisations of @c io_caster define how to:
+     * @details Specializations of @c io::caster define how to:
      *  - @c from_entity() — create the target entity from a source entity
      *    (extracting FD and closed flag).
-     *  - @c as_link() — cast the entity to a derived @c io_link type.
+     *  - @c as_link() — cast the entity to an @c io::link derived type.
      *
-     * @tparam T  Target entity type (specialised by derived types).
+     * @tparam T  Target entity type (specialized by derived types).
      */
     template <typename T>
     struct caster {

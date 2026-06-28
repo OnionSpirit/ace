@@ -1103,7 +1103,7 @@ public:                                                                         
         }
 
         async<std::expected<buffer, int>> read_buf(const int flags = 0) {
-            static constexpr int buf_len = core::tools::iovec_allocator::kMinSize - buffer::control_hdr_len;
+            static constexpr int buf_len = 64;
 
             buffer buf {};
             auto data = buf.reserve(buf_len);

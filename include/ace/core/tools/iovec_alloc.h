@@ -22,30 +22,38 @@ namespace ace::core::tools {
 
 struct iovec_allocator {
 
-    static constexpr size_t kMinSize = 128;
     static constexpr size_t kMaxSize = 4096;
 
     iovec_allocator() = default;
 
     // NOTE: Allocates requested size and puts it into the iovec struct
-    [[nodiscard]] auto allocate(size_t size) noexcept -> iovec* {
-        const uint8_t sc = size_to_class(size);
-        // if (sc == 0) return allocate_small(size);
-        if (sc > 5) return nullptr;
-        return _capture_table[sc](_pool_ptrs[sc]);
+    [[nodiscard]] auto allocate(size_t size) -> iovec* {
+
+        iovec* iov = nullptr;
+        void* mem = nullptr;
+
+        if (size > kMaxSize) mem = malloc(sizeof(iovec) + size);
+        else mem = _small_pool.allocate(sizeof(iovec) + size);
+        if (mem == nullptr) throw std::bad_alloc();
+
+        iov = static_cast<iovec*>(mem);
+        iov->iov_base = static_cast<std::byte*>(mem) + sizeof(iovec);
+        iov->iov_len = size;
+
+        return iov;
     }
 
-    auto deallocate(iovec* iov) noexcept -> void {
+    auto deallocate(iovec* iov) -> void {
         if (!iov) return;
-        const uint8_t sc = size_to_class(iov->iov_len);
-        // if (sc == 0) return deallocate_small(iov);
-        if (sc > 5) return;
+        if (iov->iov_len > kMaxSize)
+            return delete iov;
+        _small_pool.deallocate(iov, iov->iov_len + sizeof(iovec));
         iov->iov_len = 0;
-        _release_table[sc](_pool_ptrs[sc], iov);
     }
 
     template <typename data_t>
     [[nodiscard]] auto allocate_as(size_t len = 1) noexcept -> data_t* {
+        if ((sizeof(data_t) * len) > kMaxSize) return nullptr;
         auto data = static_cast<data_t*>(_small_pool.allocate(sizeof(data_t) * len));
         return data;
     }
@@ -56,83 +64,11 @@ struct iovec_allocator {
 
 private:
 
-    [[nodiscard]] auto allocate_small(size_t size) noexcept -> iovec* {
-        auto iov = static_cast<iovec*>(_small_pool.allocate(sizeof(iovec) + size));
-        iov->iov_base = static_cast<std::byte*>(iov->iov_base) + sizeof(iovec);
-        iov->iov_len = size;
-        return iov;
-    }
-
-    auto deallocate_small(iovec* iov) noexcept -> void {
-        _small_pool.deallocate(iov, iov->iov_len + sizeof(iovec));
-    }
-
-    static auto size_to_class(size_t size) noexcept -> uint8_t {
-        if (size <= kMinSize) return 0;
-        auto cls = static_cast<uint8_t>(std::bit_width(size - 1) - 7);
-        return cls > 5 ? 6 : cls;
-    }
-
-    struct alignas(64) buffer_128  { iovec _iov{}; std::array<uint8_t, 128>  _data{}; };
-    struct alignas(64) buffer_256  { iovec _iov{}; std::array<uint8_t, 256>  _data{}; };
-    struct alignas(64) buffer_512  { iovec _iov{}; std::array<uint8_t, 512>  _data{}; };
-    struct alignas(64) buffer_1k   { iovec _iov{}; std::array<uint8_t, 1024> _data{}; };
-    struct alignas(64) buffer_2k   { iovec _iov{}; std::array<uint8_t, 2048> _data{}; };
-    struct alignas(64) buffer_4k   { iovec _iov{}; std::array<uint8_t, 4096> _data{}; };
-
     // char small_pool_upstream[1024 * 1024]; // 1 МБ
     // std::pmr::monotonic_buffer_resource upstream {small_pool_upstream, sizeof(small_pool_upstream)};
 
     // std::pmr::unsynchronized_pool_resource   _small_pool {&upstream};
     std::pmr::unsynchronized_pool_resource   _small_pool;
-    nukes::dynamic::reg_freelist<buffer_128> _pool_128;
-    nukes::dynamic::reg_freelist<buffer_256> _pool_256;
-    nukes::dynamic::reg_freelist<buffer_512> _pool_512;
-    nukes::dynamic::reg_freelist<buffer_1k>  _pool_1k;
-    nukes::dynamic::reg_freelist<buffer_2k>  _pool_2k;
-    nukes::dynamic::reg_freelist<buffer_4k>  _pool_4k;
-
-    using capture_fn_t = iovec* (*)(void*);
-    using release_fn_t = bool   (*)(void*, void*);
-
-    template <typename BufT, size_t DataSize>
-    static iovec* _capture_impl(void* pool) {
-        auto& p = *static_cast<nukes::dynamic::reg_freelist<BufT>*>(pool);
-        BufT* ptr = nullptr;
-        if (!p.capture(ptr)) return nullptr;
-        ptr->_iov.iov_base = ptr->_data.data();
-        ptr->_iov.iov_len  = DataSize;
-        return &ptr->_iov;
-    }
-
-    template <typename BufT>
-    static bool _release_impl(void* pool, void* node) {
-        auto& p = *static_cast<nukes::dynamic::reg_freelist<BufT>*>(pool);
-        return p.raw_sync(node);
-    }
-
-    static constexpr capture_fn_t _capture_table[6] = {
-        &_capture_impl<buffer_128, 128>,
-        &_capture_impl<buffer_256, 256>,
-        &_capture_impl<buffer_512, 512>,
-        &_capture_impl<buffer_1k,  1024>,
-        &_capture_impl<buffer_2k,  2048>,
-        &_capture_impl<buffer_4k,  4096>,
-    };
-
-    static constexpr release_fn_t _release_table[6] = {
-        &_release_impl<buffer_128>,
-        &_release_impl<buffer_256>,
-        &_release_impl<buffer_512>,
-        &_release_impl<buffer_1k>,
-        &_release_impl<buffer_2k>,
-        &_release_impl<buffer_4k>,
-    };
-
-    void* _pool_ptrs[6] = {
-        &_pool_128, &_pool_256, &_pool_512,
-        &_pool_1k,  &_pool_2k,  &_pool_4k,
-    };
 };
 
 } // namespace ace::core::tools

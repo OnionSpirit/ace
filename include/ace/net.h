@@ -629,7 +629,7 @@ namespace ace::net {
 
         [[nodiscard]] auto recv_buf(const int flags = 0) const
         -> promise<std::expected<io::buffer, int>> {
-            static constexpr int buf_len = core::tools::iovec_allocator::kMinSize - io::buffer::control_hdr_len;
+            static constexpr int buf_len = 64;
 
             io::buffer buf {};
             auto data = buf.reserve(buf_len);

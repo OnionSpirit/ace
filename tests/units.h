@@ -366,6 +366,8 @@ inline ace::task socket_abuser_zc() {
     for (int i = 1; i < 6; ++i) {
         ace::io::buffer buf;
         buf.append("Echo message {}", i);
+        iovec iov;
+        buf.assemble(&iov);
         if (co_await connection.send(buf) == EXIT_SUCCESS)
             ace::console::println("Client [zc] sent: '{}'", buf.as<std::string>());
     }

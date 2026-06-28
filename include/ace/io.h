@@ -881,9 +881,19 @@ public:                                                                         
         void* reserve(const std::size_t len) { return memtail(len); }
 
         /**
-         * @brief Assembles buffer into @c msghdr.
+         * @brief Assembles buffer into @c msghdr .
          *
-         * Assemble actually applies once before @c drop_control(), @c clear(), @c clone() operations
+         * @c assemble(...) actually has effect once before @c drop_control(),
+         * @c clear(), @c clone() operations.
+         *
+         * - If you use @c io::buffer with @c ace::io interfaces then manual usage of this function overload has no point.
+         *
+         * - Allocates a control buffer of @c iovec on the heap with same len as inner chunk list.
+         *
+         * - Memory size of @c iovec message buffer is much less than actual size of all listed chunks.
+         *
+         * - Whole chunk list would be provided into the @c iovec message buffer.
+         *
          * @warning @c msghdr* lifetime is equal to @c ace::io::buffer lifetime
          * @return Pointer to local @c msghdr entity
          */
@@ -905,9 +915,19 @@ public:                                                                         
         }
 
         /**
-         * @brief Assembles buffer into @c msghdr. Using external buffer to store
+         * @brief Assembles buffer into @c msghdr . Using external buffer to store @c iovec message buffer of the @c msghdr
          *
-         * Assemble actually applies once before @c drop_control(), @c clear(), @c clone() operations
+         * @c assemble(...) actually has effect once before @c drop_control(),
+         * @c clear(), @c clone() operations.
+         *
+         * - Manual usage of this function is recommended only for optimization cases.
+         * Use it if external memory management might be more efficient,
+         * then heap allocation of an @c iovec message buffer.
+         *
+         * - Memory size of @c iovec message buffer is much less than actual size of all listed chunks.
+         *
+         * - Whole chunk list would be provided into the @c iovec message buffer.
+         *
          * @warning @c msghdr* lifetime is equal to @c ace::io::buffer lifetime
          * @return Pointer to local @c msghdr entity
          */
@@ -933,19 +953,28 @@ public:                                                                         
         }
 
         /**
-         * @brief Assembles buffer into @c msghdr. Using external buffer to store
+         * @brief Assembles buffer into @c msghdr . Using external buffer to store @c iovec message buffer of the @c msghdr
          *
-         * Assemble actually applies once before @c drop_control(), @c clear(), @c clone() operations
+         * @c assemble(...) actually has effect once before @c drop_control(),
+         * @c clear(), @c clone() operations.
+         *
+         * - Manual usage of this function is recommended only for optimization cases.
+         * Use it if external memory management might be more efficient,
+         * then heap allocation of an @c iovec message buffer.
+         *
+         * - Memory size of @c iovec message buffer is much less than actual size of all listed chunks.
+         *
+         * - Whole chunk list would be provided into the @c iovec message buffer.
+         *
          * @warning @c msghdr* lifetime is equal to @c ace::io::buffer lifetime
          * @return Pointer to local @c msghdr entity
          */
-        template <std::size_t len_v>
-        msghdr* assemble(iovec* iovecs) {
+        msghdr* assemble(iovec* iovecs, const std::size_t len = -1) {
             if (_hdr.msg_iov)
                 return &_hdr;
 
-            // NOTE: Guard if data doesn't fit into provided buf
-            if (len_v < _hdr.msg_iovlen)
+            // NOTE: Guard if chunk list doesn't fit into provided buf len
+            if (len < _hdr.msg_iovlen)
                 return nullptr;
 
             const iovec* current = _chunk_list_begin;

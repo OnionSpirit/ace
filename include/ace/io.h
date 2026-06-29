@@ -268,7 +268,7 @@ public:                                                                         
         };
 
         static void basic_fail_handler(const int res, const std::span<const char>& user_data) {
-            throw std::runtime_error(std::format("io operation failed: {}\nuser data: {}", strerror(-res), user_data));
+            throw std::runtime_error(std::format("io operation failed: {}\nuser data: {}", strerror(-res), std::string{user_data.data()}));
         }
 
         static void(*fail_cb_handler)(int, const std::span<const char>&); ///< Fail handler for commands errors handling

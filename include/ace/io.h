@@ -795,7 +795,7 @@ public:                                                                         
          * @warning Disassembles buffer
          * @return Buffer instance with data copy
          */
-        [[nodiscard]] buffer clone() {
+        [[nodiscard]] buffer clone() const {
             buffer cl;
             const iovec* current = _chunk_list_begin;
             while (current not_eq nullptr) {

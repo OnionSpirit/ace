@@ -35,12 +35,12 @@ namespace ace {
 
         console() = default;
 
-        static io::reactive_link _input;
-        static io::reactive_link _output;
+        static io::slink _input;
+        static io::slink _output;
 
     public:
 
-        [[nodiscard]] static async<std::expected<io::buffer, int>> input() {
+        [[nodiscard]] static async<io::input_t> input() {
             co_return co_await _input->read_buf();
         }
 
@@ -85,18 +85,18 @@ namespace ace {
             return out;
         }
 
-        static auto input_link(io::reactive_link link = _input) {
+        static auto input_link(io::slink link = _input) {
             return _input = std::move(link);
         };
 
-        static auto output_link(io::reactive_link link = _output) {
+        static auto output_link(io::slink link = _output) {
             return _output = std::move(link);
         };
 
     };
 
-    inline io::reactive_link console::_input = stdin_link();
-    inline io::reactive_link console::_output = stdout_link();
+    inline io::slink console::_input = stdin_link();
+    inline io::slink console::_output = stdout_link();
 
 }
 

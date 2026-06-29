@@ -629,7 +629,7 @@ namespace ace::net {
         -> recvmsg_query { return recvmsg_query{_fd, buff.assemble(), flags}; }
 
         [[nodiscard]] auto recv_buf(const int flags = 0) const
-        -> promise<std::expected<io::buffer, int>> {
+        -> promise<io::input_t> {
             static constexpr int buf_len = 64;
 
             io::buffer buf {};

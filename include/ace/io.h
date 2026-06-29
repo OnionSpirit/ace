@@ -92,6 +92,11 @@ namespace ace::io {
     struct close_query;
 
     /**
+     * @brief Thin wrapper for msghdr handling and processing
+     */
+    class buffer;
+
+    /**
      * @brief RAII guard that asynchronously closes an FD on destruction.
      *
      * @details When the guard goes out of scope, it submits an async close
@@ -173,10 +178,11 @@ namespace ace::io {
      */
     class link;
 
-    /**
-     * @brief Thin wrapper for msghdr handling and processing
-     */
-    class buffer;
+    /// @brief Return type for input operations
+    using input_t = std::expected<buffer, int>;
+
+    /// @brief Shared link type
+    using slink = std::shared_ptr<link>;
 
 }
 
@@ -1176,7 +1182,7 @@ public:                                                                         
             co_return co_await input_action(reinterpret_cast<void*>(buf.data()), buf.size_bytes());
         }
 
-        async<std::expected<buffer, int>> read_buf(const int flags = 0) {
+        async<io::input_t> read_buf(const int flags = 0) {
             static constexpr int buf_len = 64;
 
             buffer buf {};
@@ -1207,10 +1213,6 @@ public:                                                                         
 
         guard _guard {_fd, _is_closed};
     };
-
-    namespace ace::io {
-        using reactive_link = std::shared_ptr<io::link>;
-    }
 
 
 // ====================================- io::buffer::as<...> specialisations -====================================

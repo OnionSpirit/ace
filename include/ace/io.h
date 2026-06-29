@@ -980,6 +980,8 @@ public:                                                                         
         }
 
         ~buffer() { clear(); }
+
+        friend class ace::io::link;
     };
 
 
@@ -1062,6 +1064,11 @@ public:                                                                         
             output_action(buff);
         }
 
+        void writeln(const buffer& buf) {
+            write(buf);
+            output_action("\n");
+        }
+
         template <class... Args>
         void write(std::format_string<Args...>&& fmt, Args&&... args) {
             const std::string buff = std::format(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
@@ -1096,6 +1103,16 @@ public:                                                                         
         auto write(const std::span<data_t, len_v>& buf) {
             const auto buff = std::span<const char>(buf.data(), buf.size_bytes());
             output_action(buff);
+        }
+
+        void write(const buffer& buf) {
+            const iovec* current = buf._chunk_list_begin;
+            while (current not_eq nullptr) {
+                const auto next = *static_cast<iovec**>(current->iov_base);
+                write(static_cast<std::byte*>(current->iov_base) + buffer::control_hdr_len,
+                    static_cast<std::byte*>(current->iov_base) + buffer::control_hdr_len + current->iov_len);
+                current = next;
+            }
         }
 
         ACE_AWAIT_NODISCARD async<int> read(void *buf, const size_t len, const int flags = 0) {

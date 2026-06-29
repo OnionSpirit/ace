@@ -298,7 +298,7 @@ namespace ace::net {
             // NOTE: Doing it manually for cases when classic 'runner::run()' is unused
             auto* runner_identity = core::runner::get().as<runner_pool_t>();
             // NOTE: Pushing data to slot, and setting identity for kernelic
-            if (io::hanged::command* cmd; runner_identity and io::hanged::_command_pool.capture(cmd)) [[likely]]
+            if (io::hanged::command* cmd {}; runner_identity and io::hanged::_command_pool.capture(cmd)) [[likely]]
             {
                 cmd->_runner_identity = runner_identity;
                 cmd->_buffer = std::move(buff);
@@ -309,7 +309,7 @@ namespace ace::net {
             // NOTE: If can not get slot or identity not found -> using busy behavior
             else
             {
-                const auto* assembled = cmd->_buffer.assemble();
+                const auto* assembled = buff.assemble();
                 if (::sendmsg(_fd, assembled, 0) < 0 and io::hanged::fail_cb_handler)
                     io::hanged::fail_cb_handler(errno, "io_connection_link busy-send failure");
             }

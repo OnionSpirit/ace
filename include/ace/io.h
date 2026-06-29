@@ -786,6 +786,8 @@ public:                                                                         
             b._hdr = msghdr{};
             _chunk_list_begin = b._chunk_list_begin;
             b._chunk_list_begin = nullptr;
+            _chunk_list_pre_end = b._chunk_list_pre_end;
+            b._chunk_list_pre_end = nullptr;
             _chunk_list_end = b._chunk_list_end;
             b._chunk_list_end = nullptr;
         }
@@ -795,6 +797,8 @@ public:                                                                         
             b._hdr = msghdr{};
             _chunk_list_begin = b._chunk_list_begin;
             b._chunk_list_begin = nullptr;
+            _chunk_list_pre_end = b._chunk_list_pre_end;
+            b._chunk_list_pre_end = nullptr;
             _chunk_list_end = b._chunk_list_end;
             b._chunk_list_end = nullptr;
             return *this;
@@ -879,7 +883,7 @@ public:                                                                         
 
         /**
          * @brief Shrinks tail chunk to a provided len
-         * @param len new len for tail chunk (without control header)
+         * @param [in] len new len for the tail chunk (last appended or expanded memory)
          */
         void shape(const std::size_t len) {
             if (not _chunk_list_end) return;
@@ -970,6 +974,7 @@ public:                                                                         
                 current = next;
             }
             _chunk_list_begin = nullptr;
+            _chunk_list_pre_end = nullptr;
             _chunk_list_end = nullptr;
             _hdr.msg_iovlen = 0;
         }

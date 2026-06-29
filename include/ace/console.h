@@ -57,8 +57,8 @@ namespace ace {
             _output->writeln("");
         }
 
-        static void println(const io::buffer&& buf) {
-            _output->writeln(std::forward<const io::buffer>(buf));
+        static void println(io::buffer&& buf) {
+            _output->writeln(std::forward<io::buffer>(buf));
         }
 
         template <class... Args>
@@ -70,8 +70,8 @@ namespace ace {
             _output->write(std::forward<const std::string_view>(str));
         }
 
-        static void print(const io::buffer&& buf) {
-            _output->write(std::forward<const io::buffer>(buf));
+        static void print(io::buffer&& buf) {
+            _output->write(std::forward<io::buffer>(buf));
         }
 
         // NOTE: I/O File links for stdio. Marked closed to not actually close this descriptors by RAII

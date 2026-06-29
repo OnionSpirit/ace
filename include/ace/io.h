@@ -235,52 +235,6 @@ public:                                                                         
     ~class() override = default;
 
 
-    /**
-     * @brief Fire-and-forget I/O command system.
-     *
-     * @details Provides a thread-local pool of @c command objects for
-     * dispatching @c io_uring operations outside of coroutine context.
-     * This is used by @c io_guard to close FDs asynchronously even
-     * when the destructor runs outside @c runner::run().
-     */
-    struct ace::io::hanged {
-
-        /**
-         * @brief A single fire-and-forget I/O command.
-         *
-         * @details Each @c command wraps an @c io_uring operation.  On
-         * completion, @c on_result() calls @c raw_sync() to return the
-         * command to the pool.  Errors are handled by the global
-         * @c fail_cb_handler.
-         */
-        struct command : services::kernel_observer {
-
-            std::vector<uint8_t> _buffer {};
-            std::span<const char> _user_data {};
-
-            void on_result(const int res) override {
-                if (res < 0 and fail_cb_handler)
-                    fail_cb_handler(res, _user_data);
-                _command_pool.raw_sync(this);
-            }
-
-            ~command() override = default;
-        };
-
-        static void basic_fail_handler(const int res, const std::span<const char>& user_data) {
-            throw std::runtime_error(std::format("io operation failed: {}\nuser data: {}", strerror(-res), std::string{user_data.data()}));
-        }
-
-        static void(*fail_cb_handler)(int, const std::span<const char>&); ///< Fail handler for commands errors handling
-
-        static thread_local nukes::dynamic::reg_freelist<command> _command_pool; ///< Pool of command to start hanged processing wo @c co_await usage
-    };
-
-    inline thread_local nukes::dynamic::reg_freelist<ace::io::hanged::command> ace::io::hanged::_command_pool {};
-
-    inline void(*ace::io::hanged::fail_cb_handler)(int, const std::span<const char>&) = basic_fail_handler;
-
-
     template <typename query_core_t>
     struct ace::io::query : core::traits::future_traits<query_core_t>, services::kernel_observer {
 
@@ -432,128 +386,6 @@ public:                                                                         
         }
 
         [[nodiscard]] int await_resume() const { return _res; }
-    };
-
-
-    /**
-     * @brief Simple RAII guard that ensures an FD is asynchronously closed.
-     *
-     * @details Constructed with a reference to the FD and closed flag.  On
-     * destruction, if the FD is still valid and not already closed, it
-     * submits an async @c close() via @c io_hanged or falls back to
-     * scheduling a close task on the dispatcher.
-     */
-    struct ace::io::guard final {
-        guard() = delete;
-        explicit guard(const int& fd, const bool& closed)
-            : _fd(fd)
-            , _closed(closed) {}
-
-        const int& _fd;
-        const bool& _closed;
-
-        static task pending_close(const int fd) noexcept {
-            if (const int res = co_await close_query{fd}; res < 0)
-                std::cerr << strerror(res) << std::endl;
-        }
-
-        ~guard() noexcept {
-            if (_fd < 0 or _closed) return;
-            // NOTE: Trying to get current runner.
-            // NOTE: Doing it manually for cases when classic 'runner::run()' is unused
-            auto* runner_identity = core::runner::get().as<runner_pool_t>();
-            // NOTE: Pushing data to slot, and setting identity for kernelic
-            if (io::hanged::command* cmd; runner_identity and io::hanged::_command_pool.capture(cmd)) [[likely]]
-            {
-                cmd->_runner_identity = runner_identity;
-                if (not services::kernel_controller::close(cmd, _fd) and hanged::fail_cb_handler)
-                    hanged::fail_cb_handler(EAGAIN, "FD guard failure"); // Maybe EIO?
-            }
-            // NOTE: If can not get slot or identity not found -> using busy behavior
-            else schedule(pending_close(_fd));
-        }
-    };
-
-
-    /**
-     * @brief CRTP base for I/O entities — owners of a file descriptor with RAII lifecycle.
-     *
-     * @details Provides move semantics, @c extract(), async @c close(), and
-     * the @c consume() static factory.  An @c io_guard member ensures the FD
-     * is closed on destruction.
-     *
-     * @tparam entity_t  Derived entity type.
-     */
-    template <typename entity_t>
-    struct ace::io::entity {
-
-        entity()
-            : _fd(-1)
-            , _is_closed(true) {}
-
-        entity(const int fd, const bool is_closed)
-            : _fd(fd)
-            , _is_closed(is_closed) { };
-
-        // NOTE: This method is made to never forget to move ownership
-        template<typename entry_t>
-        static entity_t consume(entry_t& io) noexcept {
-            auto [fd, is_closed] = io.extract();
-            if (fd < 0) is_closed = true;
-            return caster<entity_t>::from_entity(fd, is_closed, std::move(io));
-        }
-
-        entity(entity&& io) noexcept {
-            _fd = io._fd;
-            _is_closed = io._is_closed;
-            io._fd = -1;
-            io._is_closed = true;
-        }
-
-        entity& operator=(entity&& io) noexcept {
-            _fd = io._fd;
-            _is_closed = io._is_closed;
-            io._fd = -1;
-            io._is_closed = true;
-            return *this;
-        }
-
-        /**
-         * @brief Checks FD state
-         *
-         * If FD is closed or @c io_entity is invalid returns @c true, @c false otherwise
-         */
-        [[nodiscard]] auto is_closed() const
-            -> bool { return _is_closed; }
-
-        /**
-         * @brief Extracts all data from @c io_entity object and invalidates it
-         * @return A tuple of FD, @c is_closed() result and set of underlying params
-         */
-        [[nodiscard]] auto extract() {
-            return std::tuple {
-                std::exchange(_fd, -1),
-                std::exchange(_is_closed, true)
-            };
-        }
-
-        /**
-         * @brief Closes file descriptor asynchronously
-         * @return @c close_query future object that shall be processed via @c co_await operator
-         */
-        [[nodiscard]] auto close()
-            -> io::close_query { _is_closed = true; return io::close_query{_fd}; }
-
-        virtual ~entity() = default;
-
-    protected:
-
-        int  _fd;                      ///< Socket file descriptor
-        bool _is_closed;               ///< Socket closed flag
-
-    private:
-
-        guard _guard {_fd, _is_closed};
     };
 
 
@@ -1006,6 +838,174 @@ public:                                                                         
 
 
     /**
+     * @brief Fire-and-forget I/O command system.
+     *
+     * @details Provides a thread-local pool of @c command objects for
+     * dispatching @c io_uring operations outside of coroutine context.
+     * This is used by @c io_guard to close FDs asynchronously even
+     * when the destructor runs outside @c runner::run().
+     */
+    struct ace::io::hanged {
+
+        /**
+         * @brief A single fire-and-forget I/O command.
+         *
+         * @details Each @c command wraps an @c io_uring operation.  On
+         * completion, @c on_result() calls @c raw_sync() to return the
+         * command to the pool.  Errors are handled by the global
+         * @c fail_cb_handler.
+         */
+        struct command : services::kernel_observer {
+
+            buffer _buffer {};
+            std::span<const char> _user_data {};
+
+            void on_result(const int res) override {
+                if (res < 0 and fail_cb_handler)
+                    fail_cb_handler(res, _user_data);
+                _command_pool.raw_sync(this);
+            }
+
+            ~command() override = default;
+        };
+
+        static void basic_fail_handler(const int res, const std::span<const char>& user_data) {
+            throw std::runtime_error(std::format("io operation failed: {}\nuser data: {}", strerror(-res), std::string{user_data.data()}));
+        }
+
+        static void(*fail_cb_handler)(int, const std::span<const char>&); ///< Fail handler for commands errors handling
+
+        static thread_local nukes::dynamic::reg_freelist<command> _command_pool; ///< Pool of command to start hanged processing wo @c co_await usage
+    };
+
+    inline thread_local nukes::dynamic::reg_freelist<ace::io::hanged::command> ace::io::hanged::_command_pool {};
+
+    inline void(*ace::io::hanged::fail_cb_handler)(int, const std::span<const char>&) = basic_fail_handler;
+
+
+    /**
+     * @brief Simple RAII guard that ensures an FD is asynchronously closed.
+     *
+     * @details Constructed with a reference to the FD and closed flag.  On
+     * destruction, if the FD is still valid and not already closed, it
+     * submits an async @c close() via @c io_hanged or falls back to
+     * scheduling a close task on the dispatcher.
+     */
+    struct ace::io::guard final {
+        guard() = delete;
+        explicit guard(const int& fd, const bool& closed)
+            : _fd(fd)
+            , _closed(closed) {}
+
+        const int& _fd;
+        const bool& _closed;
+
+        static task pending_close(const int fd) noexcept {
+            if (const int res = co_await close_query{fd}; res < 0)
+                std::cerr << strerror(res) << std::endl;
+        }
+
+        ~guard() noexcept {
+            if (_fd < 0 or _closed) return;
+            // NOTE: Trying to get current runner.
+            // NOTE: Doing it manually for cases when classic 'runner::run()' is unused
+            auto* runner_identity = core::runner::get().as<runner_pool_t>();
+            // NOTE: Pushing data to slot, and setting identity for kernelic
+            if (io::hanged::command* cmd; runner_identity and io::hanged::_command_pool.capture(cmd)) [[likely]]
+            {
+                cmd->_runner_identity = runner_identity;
+                if (not services::kernel_controller::close(cmd, _fd) and hanged::fail_cb_handler)
+                    hanged::fail_cb_handler(EAGAIN, "FD guard failure"); // Maybe EIO?
+            }
+            // NOTE: If can not get slot or identity not found -> using busy behavior
+            else schedule(pending_close(_fd));
+        }
+    };
+
+
+    /**
+     * @brief CRTP base for I/O entities — owners of a file descriptor with RAII lifecycle.
+     *
+     * @details Provides move semantics, @c extract(), async @c close(), and
+     * the @c consume() static factory.  An @c io_guard member ensures the FD
+     * is closed on destruction.
+     *
+     * @tparam entity_t  Derived entity type.
+     */
+    template <typename entity_t>
+    struct ace::io::entity {
+
+        entity()
+            : _fd(-1)
+            , _is_closed(true) {}
+
+        entity(const int fd, const bool is_closed)
+            : _fd(fd)
+            , _is_closed(is_closed) { };
+
+        // NOTE: This method is made to never forget to move ownership
+        template<typename entry_t>
+        static entity_t consume(entry_t& io) noexcept {
+            auto [fd, is_closed] = io.extract();
+            if (fd < 0) is_closed = true;
+            return caster<entity_t>::from_entity(fd, is_closed, std::move(io));
+        }
+
+        entity(entity&& io) noexcept {
+            _fd = io._fd;
+            _is_closed = io._is_closed;
+            io._fd = -1;
+            io._is_closed = true;
+        }
+
+        entity& operator=(entity&& io) noexcept {
+            _fd = io._fd;
+            _is_closed = io._is_closed;
+            io._fd = -1;
+            io._is_closed = true;
+            return *this;
+        }
+
+        /**
+         * @brief Checks FD state
+         *
+         * If FD is closed or @c io_entity is invalid returns @c true, @c false otherwise
+         */
+        [[nodiscard]] auto is_closed() const
+            -> bool { return _is_closed; }
+
+        /**
+         * @brief Extracts all data from @c io_entity object and invalidates it
+         * @return A tuple of FD, @c is_closed() result and set of underlying params
+         */
+        [[nodiscard]] auto extract() {
+            return std::tuple {
+                std::exchange(_fd, -1),
+                std::exchange(_is_closed, true)
+            };
+        }
+
+        /**
+         * @brief Closes file descriptor asynchronously
+         * @return @c close_query future object that shall be processed via @c co_await operator
+         */
+        [[nodiscard]] auto close()
+            -> io::close_query { _is_closed = true; return io::close_query{_fd}; }
+
+        virtual ~entity() = default;
+
+    protected:
+
+        int  _fd;                      ///< Socket file descriptor
+        bool _is_closed;               ///< Socket closed flag
+
+    private:
+
+        guard _guard {_fd, _is_closed};
+    };
+
+
+    /**
      * @brief Common base for higher-level I/O abstractions.
      *
      * @details Owns an FD and an optional @c any data payload.  Provides
@@ -1021,7 +1021,7 @@ public:                                                                         
          * @brief Writing function
          * @param [in] buff data to write
          */
-        virtual void output_action(std::span<const char> buff) = 0;
+        virtual void output_action(buffer&& buff) = 0;
 
         /**
          * @brief Reading function
@@ -1075,63 +1075,69 @@ public:                                                                         
 
         template <class... Args>
         void writeln(std::format_string<Args...>&& fmt, Args&&... args) {
-            const std::string buff = std::format(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...) + '\n';
-            output_action(buff);
+            buffer buff {};
+            buff.append(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            buff.append("\n");
+            output_action(std::forward<buffer>(buff));
         }
 
         void writeln(const std::string_view&& str) {
-            const std::string buff = std::string(std::forward<const std::string_view>(str)) + '\n';
-            output_action(buff);
+            buffer buff {};
+            buff.append(std::forward<const std::string_view>(str));
+            buff.append("\n");
+            output_action(std::forward<buffer>(buff));
         }
 
-        void writeln(const buffer& buf) {
-            write(buf);
-            output_action("\n");
+        void writeln(buffer&& buf) {
+            buf.append("\n");
+            output_action(std::forward<buffer>(buf));
         }
 
         template <class... Args>
         void write(std::format_string<Args...>&& fmt, Args&&... args) {
-            const std::string buff = std::format(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
-            output_action(buff);
+            buffer buff {};
+            buff.append(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+            output_action(std::forward<buffer>(buff));
         }
 
         void write(const std::string_view&& str) {
-            output_action(std::forward<const std::string_view>(str));
+            buffer buff {};
+            buff.append(std::forward<const std::string_view>(str));
+            output_action(std::forward<buffer>(buff));
         }
 
         void write(const void *first, const void* last) {
-            const auto buff = std::span(static_cast<const char*>(first), static_cast<const char*>(last));
-            output_action(buff);
+            buffer buff {};
+            buff.append(first, last);
+            output_action(std::forward<buffer>(buff));
         }
 
         template <typename data_t>
         requires std::is_pod_v<data_t>
         auto write(const std::vector<data_t>& buf) {
-            const auto buff = std::span<const char>(buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)));
-            output_action(buff);
+            buffer buff {};
+            buff.append(buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)));
+            output_action(std::forward<buffer>(buff));
         }
 
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         auto write(const std::array<data_t, len_v>& buf) {
-            const auto buff = std::span<const char>(buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)));
-            output_action(buff);
+            buffer buff {};
+            buff.append(buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)));
+            output_action(std::forward<buffer>(buff));
         }
 
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         auto write(const std::span<data_t, len_v>& buf) {
-            const auto buff = std::span<const char>(buf.data(), buf.size_bytes());
-            output_action(buff);
+            buffer buff {};
+            buff.append(buf.data(), buf.data() + buf.size_bytes());
+            output_action(std::forward<buffer>(buff));
         }
 
-        void write(const buffer& buf) {
-            const iovec* current = buf._chunk_list_begin;
-            while (current not_eq nullptr) {
-                write(static_cast<std::byte*>(current->iov_base) + buffer::control_hdr_len,
-                    static_cast<std::byte*>(current->iov_base) + buffer::control_hdr_len + current->iov_len);
-                current = *static_cast<iovec**>(current->iov_base);
-            }
+        void write(buffer&& buf) {
+            output_action(std::forward<buffer>(buf));
         }
 
         ACE_AWAIT_NODISCARD async<int> read(void *buf, const size_t len, const int flags = 0) {

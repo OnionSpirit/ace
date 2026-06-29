@@ -256,6 +256,10 @@ namespace ace::services {
             return submit(io_uring_prep_write, observer, fd, buf, nbytes, offset);
         }
 
+        static bool writev(kernel_observer* observer, const int fd, const iovec *vec, const unsigned len, const uint64_t offset, const int flags) {
+            return submit(io_uring_prep_writev2, observer, fd, vec, len, offset, flags);
+        }
+
         // ── iovec allocator ───────────────────────────────────────────
 
         static auto iovec_allocate(size_t size) noexcept -> iovec* {

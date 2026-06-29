@@ -57,7 +57,7 @@ namespace ace::fs {
 
     protected:
 
-        void output_action(const std::span<const char> buff) override {
+        void output_action(io::buffer&& buff) override {
             // NOTE: Trying to get current runner.
             // NOTE: Doing it manually for cases when classic 'runner::run()' is unused
             auto* runner_identity = core::runner::get().as<runner_pool_t>();
@@ -65,15 +65,17 @@ namespace ace::fs {
             if (io::hanged::command* cmd; runner_identity and io::hanged::_command_pool.capture(cmd)) [[likely]]
             {
                 cmd->_runner_identity = runner_identity;
-                cmd->_buffer.assign(buff.begin(), buff.end());
-                if (not services::kernel_controller::write(cmd, _fd,
-                    cmd->_buffer.data(), cmd->_buffer.size(), 0) and io::hanged::fail_cb_handler)
+                cmd->_buffer = std::move(buff);
+                const auto* assembled = cmd->_buffer.assemble();
+                if (not services::kernel_controller::writev(cmd, _fd,
+                    assembled->msg_iov, assembled->msg_iovlen, 0, 0) and io::hanged::fail_cb_handler)
                     io::hanged::fail_cb_handler(EAGAIN, "file_link lazy-write failure"); // Maybe EIO?
             }
             // NOTE: If can not get slot or identity not found -> using busy behavior
             else
             {
-                if (::write(_fd, buff.data(), buff.size()) < 0 and io::hanged::fail_cb_handler)
+                const auto* assembled = buff.assemble();
+                if (::writev(_fd, assembled->msg_iov, static_cast<int>(assembled->msg_iovlen)) < 0 and io::hanged::fail_cb_handler)
                     io::hanged::fail_cb_handler(errno, "file_link busy-write failure");
             }
         };

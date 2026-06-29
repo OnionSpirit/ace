@@ -270,7 +270,7 @@ inline ace::task cutex_spawner_permanent(ace::futures::channel_dyn<ace::core::ru
 
 inline ace::task socket_abuser() {
 
-    auto bind_entry = co_await ace::net::io_socket_tcp();
+    auto bind_entry = co_await ace::net::socket_tcp();
     if (not bind_entry) {
         std::cerr << bind_entry.error() << std::endl;
         ace::terminate();
@@ -302,7 +302,7 @@ inline ace::task socket_abuser() {
 
 inline ace::task socket_listener() {
 
-    auto bind_entry = co_await ace::net::io_socket_tcp();
+    auto bind_entry = co_await ace::net::socket_tcp();
     if (not bind_entry) {
         std::cerr << bind_entry.error() << std::endl;
         ace::terminate();
@@ -342,7 +342,7 @@ inline ace::task socket_listener() {
 
 inline ace::task socket_abuser_zc() {
 
-    auto bind_entry = co_await ace::net::io_socket_tcp();
+    auto bind_entry = co_await ace::net::socket_tcp();
     if (not bind_entry) {
         std::cerr << bind_entry.error() << std::endl;
         ace::terminate();
@@ -375,7 +375,7 @@ inline ace::task socket_abuser_zc() {
 
 inline ace::task socket_listener_zc() {
 
-    auto bind_entry = co_await ace::net::io_socket_tcp();
+    auto bind_entry = co_await ace::net::socket_tcp();
     if (not bind_entry) {
         std::cerr << bind_entry.error() << std::endl;
         ace::terminate();
@@ -416,7 +416,7 @@ inline ace::task socket_listener_zc() {
 
 inline ace::task tcp_echo_client() {
 
-    auto bind_entry = co_await ace::net::io_socket_tcp();
+    auto bind_entry = co_await ace::net::socket_tcp();
     if (not bind_entry) {
         ace::console::println("[ CLIENT ERROR ] - {}", bind_entry.error());
         co_return;
@@ -453,7 +453,7 @@ inline ace::task tcp_echo_client() {
 
 inline ace::task tcp_echo_server() {
 
-    auto bind_entry = co_await ace::net::io_socket_tcp();
+    auto bind_entry = co_await ace::net::socket_tcp();
     if (not bind_entry) {
         ace::console::println("[ SERVER ERROR ] - {}", bind_entry.error());
         co_return;

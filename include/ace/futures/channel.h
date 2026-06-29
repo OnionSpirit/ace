@@ -409,7 +409,7 @@ ACE_FUTURE_CHANNEL_MEMBER(ace::promise<>) pending_push(data_t&& data) {
 ACE_FUTURE_CHANNEL_META
 ACE_FUTURE_CHANNEL_SPACE pull_impl
 ACE_FUTURE_CHANNEL_SPACE pull() {
-    return std::forward<pull_impl>(pull_impl{&_waiters, &_container});
+    return pull_impl{&_waiters, &_container};
 }
 
 

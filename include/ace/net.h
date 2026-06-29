@@ -58,14 +58,14 @@ namespace ace::net {
      * @tparam derived_t Derived net entity
      */
     template <typename derived_t>
-    struct io_net_entity : io::entity<derived_t> {
+    struct net_entity : io::entity<derived_t> {
 
         mutable sockaddr_in _self_sin {};
         mutable sockaddr_in _peer_sin {};
 
-        io_net_entity() = default;
+        net_entity() = default;
 
-        io_net_entity(io_net_entity&& io) noexcept {
+        net_entity(net_entity&& io) noexcept {
             io::entity<derived_t>::_fd = io._fd;
             io::entity<derived_t>::_is_closed = io._is_closed;
             _self_sin = io._self_sin;
@@ -74,19 +74,19 @@ namespace ace::net {
             io._is_closed = true;
         }
 
-        io_net_entity(int fd, bool is_closed) {
+        net_entity(int fd, bool is_closed) {
             io::entity<derived_t>::_fd = fd;
             io::entity<derived_t>::_is_closed = is_closed;
         }
 
-        io_net_entity(int fd, bool is_closed, const sockaddr_in self_sin, const sockaddr_in peer_sin) {
+        net_entity(int fd, bool is_closed, const sockaddr_in self_sin, const sockaddr_in peer_sin) {
             io::entity<derived_t>::_fd = fd;
             io::entity<derived_t>::_is_closed = is_closed;
             _self_sin = self_sin;
             _peer_sin = peer_sin;
         }
 
-        io_net_entity& operator =(io_net_entity&& io) noexcept {
+        net_entity& operator =(net_entity&& io) noexcept {
             io::entity<derived_t>::_fd = io._fd;
             io::entity<derived_t>::_is_closed = io._is_closed;
             _self_sin = io._self_sin;
@@ -101,7 +101,7 @@ namespace ace::net {
 // NOTE: Importing names and base typename
 #define IMPORT_IO_NET_ENTITY_ENV(class)                                         \
     IMPORT_IO_ENTITY_ENV(class)                                                 \
-    using io_net_entity_t = io_net_entity<class>;                               \
+    using io_net_entity_t = net_entity<class>;                                  \
     using io_net_entity_t::_peer_sin;                                           \
     using io_net_entity_t::_self_sin;
 
@@ -119,7 +119,7 @@ namespace ace::net {
      * @tparam io_net_entity_t Net entity type
      */
     template <is_net_entity io_net_entity_t>
-    struct io_net_entity_caster {
+    struct net_entity_caster {
 
         template <is_net_entity net_entity_t>
         static auto from_entity(int fd, bool is_closed, net_entity_t&& entity) {
@@ -159,75 +159,75 @@ namespace ace::net {
 
 
     /**
-     * @brief @c io_link implementation for connected sockets.
+     * @brief @c io::link implementation for connected sockets.
      *
      * @details Implements @c output_action() via async @c send() (with
      * fallback to blocking @c ::send()) and @c input_action() via async
      * @c send_query (which maps to @c io_uring recv).
      */
-    struct io_connection_link;
+    struct connection_link;
 
     /**
-     * @brief An @c io_entity class to represent connection socket
+     * @brief An @c io::entity class to represent connection socket
      *
-     * Turns out from the @c io_stream_mode_entity, @c io_mapping_entity
-     * or @c io_transport_entity @c [ is_connected = false ]
+     * Turns out from the @c stream_mode_entity, @c socket_entity
+     * or @c transport_entity @c [ is_connected = false ]
      * as a result of processing its member @c connect(...)
-     * or the result of @c io_listener.accept(...) via @c co_await
+     * or the result of @c listener.accept(...) via @c co_await
      */
     template <int domain_v, transport_entity_state connection_state_v = e_indirect>
-    struct io_transport_entity;
+    struct transport_entity;
 
     /**
-     * @brief An @c io_entity class to represent listen socket
+     * @brief An @c io::entity class to represent listen socket
      *
-     * Turns out from the @c io_stream_mode_entity as a result of processing its member @c listen()
+     * Turns out from the @c stream_mode_entity as a result of processing its member @c listen()
      * via @c co_await
      */
     template <int domain_v>
-    struct io_listener_entity;
+    struct listener_entity;
 
     /**
-     * @brief An @c io_entity class to represent socket mode selection [ @b Listener | @b Connection ]
+     * @brief An @c io::entity class to represent socket mode selection [ @b Listener | @b Connection ]
      *
-     * Turns out from the @c io_mapping_entity only for the @b SOCK_STREAM socket type
+     * Turns out from the @c socket_entity only for the @b SOCK_STREAM socket type
      * as a result of processing its member @c bind(...) via @c co_await
      */
     template <int domain_v, int type_v>
-    struct io_stream_mode_entity;
+    struct stream_mode_entity;
 
     /**
-     * @brief An @c io_entity class to represent waiting for @b binding or @b pending @b connection state
+     * @brief An @c io::entity class to represent waiting for @b binding or @b pending @b connection state
      *
-     * Turns out from @c io_socket_entity as a result of processing it via @c co_await
+     * Turns out from @c socket_query as a result of processing it via @c co_await
      */
     template <int domain_v, int type_v>
-    struct io_mapping_entity;
+    struct socket_entity;
 
     /**
-     * @brief An @b io_entity for socket creation. Also, supports aliasing
+     * @brief An @b io::entity for socket creation. Also, supports aliasing
      * @tparam domain_v Communication domain
      * @tparam type_v Communication semantics
      * @tparam protocol_v Particular socket protocol
      */
     template <int domain_v, int type_v, int protocol_v>
-    struct io_socket;
+    struct socket;
 
 
 // ================================- ALIASES -================================
 
 
-    typedef io_listener_entity<2> io_listener;
+    typedef listener_entity<2> listener;
 
-    typedef io_transport_entity<2, e_indirect> io_net_interface;
-    typedef io_transport_entity<2, e_connected> io_connection;
+    typedef transport_entity<2, e_indirect> net_interface;
+    typedef transport_entity<2, e_connected> connection;
 
-    using io_socket_raw      = io_socket<AF_INET , SOCK_RAW   , IPPROTO_RAW>;
-    using io_socket_raw_v6   = io_socket<AF_INET6, SOCK_RAW   , IPPROTO_RAW>;
-    using io_socket_tcp      = io_socket<AF_INET , SOCK_STREAM, IPPROTO_TCP>;
-    using io_socket_tcp_v6   = io_socket<AF_INET6, SOCK_STREAM, IPPROTO_TCP>;
-    using io_socket_udp      = io_socket<AF_INET , SOCK_DGRAM , IPPROTO_UDP>;
-    using io_socket_udp_v6   = io_socket<AF_INET6, SOCK_DGRAM , IPPROTO_UDP>;
+    using socket_raw      = socket<AF_INET , SOCK_RAW   , IPPROTO_RAW>;
+    using socket_raw_v6   = socket<AF_INET6, SOCK_RAW   , IPPROTO_RAW>;
+    using socket_tcp      = socket<AF_INET , SOCK_STREAM, IPPROTO_TCP>;
+    using socket_tcp_v6   = socket<AF_INET6, SOCK_STREAM, IPPROTO_TCP>;
+    using socket_udp      = socket<AF_INET , SOCK_DGRAM , IPPROTO_UDP>;
+    using socket_udp_v6   = socket<AF_INET6, SOCK_DGRAM , IPPROTO_UDP>;
 
 }
 
@@ -238,7 +238,7 @@ namespace ace::net {
 
         connect_query() = delete;
 
-        typedef io_transport_entity<domain_v, e_connected> io_transport_entity_t;
+        typedef transport_entity<domain_v, e_connected> io_transport_entity_t;
 
         explicit connect_query(entity_t&& entity, const sockaddr* addr, const socklen_t addrlen)
             : io_query_t(entity._fd)
@@ -286,9 +286,9 @@ namespace ace::net {
     };
 
 
-    struct ace::net::io_connection_link : io::link {
+    struct ace::net::connection_link : io::link {
 
-        IMPORT_IO_LINK_ENV(io_connection_link);
+        IMPORT_IO_LINK_ENV(connection_link);
         IMPORT_IO_LINK_FABRICATION;
 
     protected:
@@ -327,7 +327,7 @@ namespace ace::net {
 
     public:
 
-        io_connection_link() = default;
+        connection_link() = default;
 
     };
 
@@ -339,14 +339,14 @@ namespace ace::net {
      * @base @c io_transport_entity caster specialization for fabricating it from another io_net_entities
      */
     template<int domain_v, ace::net::transport_entity_state connection_state_v>
-    struct ace::io::caster<ace::net::io_transport_entity<domain_v, connection_state_v>>
-        : net::io_net_entity_caster<net::io_transport_entity<domain_v, connection_state_v>> {
-        using net::io_net_entity_caster<net::io_transport_entity<domain_v, connection_state_v>>::from_entity;
+    struct ace::io::caster<ace::net::transport_entity<domain_v, connection_state_v>>
+        : net::net_entity_caster<net::transport_entity<domain_v, connection_state_v>> {
+        using net::net_entity_caster<net::transport_entity<domain_v, connection_state_v>>::from_entity;
 
         template <net::is_net_entity net_entity_t>
         static auto as_link(const int fd, const bool is_closed, net_entity_t&& entity)
         requires (connection_state_v == net::e_connected) {
-            return net::io_connection_link { fd, is_closed, std::forward<net_entity_t>(entity) };
+            return net::connection_link { fd, is_closed, std::forward<net_entity_t>(entity) };
         }
     };
 
@@ -355,9 +355,9 @@ namespace ace::net {
      * @base @c io_listener_entity caster specialization for fabricating it from another io_net_entities
      */
     template<int domain_v>
-    struct ace::io::caster<ace::net::io_listener_entity<domain_v>>
-        : net::io_net_entity_caster<net::io_listener_entity<domain_v>> {
-        using net::io_net_entity_caster<net::io_listener_entity<domain_v>>::from_entity;
+    struct ace::io::caster<ace::net::listener_entity<domain_v>>
+        : net::net_entity_caster<net::listener_entity<domain_v>> {
+        using net::net_entity_caster<net::listener_entity<domain_v>>::from_entity;
     };
 
 
@@ -365,9 +365,9 @@ namespace ace::net {
      * @base @c io_stream_mode_entity caster specialization for fabricating it from another io_net_entities
      */
     template<int domain_v, int type_v>
-    struct ace::io::caster<ace::net::io_stream_mode_entity<domain_v, type_v>>
-        : net::io_net_entity_caster<net::io_stream_mode_entity<domain_v, type_v>> {
-        using net::io_net_entity_caster<net::io_stream_mode_entity<domain_v, type_v>>::from_entity;
+    struct ace::io::caster<ace::net::stream_mode_entity<domain_v, type_v>>
+        : net::net_entity_caster<net::stream_mode_entity<domain_v, type_v>> {
+        using net::net_entity_caster<net::stream_mode_entity<domain_v, type_v>>::from_entity;
     };
 
 
@@ -375,9 +375,9 @@ namespace ace::net {
      * @base @c io_mapping_entity caster specialization for fabricating it from another io_net_entities
      */
     template<int domain_v, int type_v>
-    struct ace::io::caster<ace::net::io_mapping_entity<domain_v, type_v>>
-        : net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>> {
-        using net::io_net_entity_caster<net::io_mapping_entity<domain_v, type_v>>::from_entity;
+    struct ace::io::caster<ace::net::socket_entity<domain_v, type_v>>
+        : net::net_entity_caster<net::socket_entity<domain_v, type_v>> {
+        using net::net_entity_caster<net::socket_entity<domain_v, type_v>>::from_entity;
     };
 
 
@@ -385,17 +385,17 @@ namespace ace::net {
 
 
     template <int domain_v, ace::net::transport_entity_state connection_state_v>
-    struct ace::net::io_transport_entity : io_net_entity<io_transport_entity<domain_v, connection_state_v>> {
+    struct ace::net::transport_entity : net_entity<transport_entity<domain_v, connection_state_v>> {
 
-        IMPORT_IO_NET_ENTITY_ENV(io_transport_entity)
+        IMPORT_IO_NET_ENTITY_ENV(transport_entity)
         IMPORT_IO_NET_ENTITY_FABRICATION
 
-        io_transport_entity() = default;
+        transport_entity() = default;
 
-        using connect_query_t = connect_query<io_transport_entity, domain_v>;
+        using connect_query_t = connect_query<transport_entity, domain_v>;
         friend connect_query_t;
 
-        io_transport_entity& operator =(io_transport_entity&& io) noexcept {
+        transport_entity& operator =(transport_entity&& io) noexcept {
             io_net_entity_t::_fd = io._fd;
             io_net_entity_t::_is_closed = io._is_closed;
             _self_sin = io._self_sin;
@@ -653,14 +653,14 @@ namespace ace::net {
 
 
     template <int domain_v>
-    struct ace::net::io_listener_entity : io_net_entity<io_listener_entity<domain_v>> {
+    struct ace::net::listener_entity : net_entity<listener_entity<domain_v>> {
 
-        IMPORT_IO_NET_ENTITY_ENV(io_listener_entity);
+        IMPORT_IO_NET_ENTITY_ENV(listener_entity);
         IMPORT_IO_NET_ENTITY_FABRICATION
 
-        io_listener_entity() = default;
+        listener_entity() = default;
 
-        friend io::caster<io_listener_entity>;
+        friend io::caster<listener_entity>;
 
         struct accept_query : io::query<accept_query> {
 
@@ -668,9 +668,9 @@ namespace ace::net {
 
             accept_query() = delete;
 
-            typedef io_transport_entity<domain_v, e_connected> io_transport_entity_t;
+            typedef transport_entity<domain_v, e_connected> io_transport_entity_t;
 
-            explicit accept_query(const io_listener_entity* entity, sockaddr* addr, socklen_t* addrlen, const int flags = 0)
+            explicit accept_query(const listener_entity* entity, sockaddr* addr, socklen_t* addrlen, const int flags = 0)
                 : io_query_t(entity->_fd)
                 , _entity(entity)
                 , _addr(addr)
@@ -689,7 +689,7 @@ namespace ace::net {
                 return io_transport_entity_t {_res, true};
             }
 
-            const io_listener_entity* _entity;
+            const listener_entity* _entity;
             sockaddr* _addr;
             socklen_t* _addrlen;
             const int _flags;
@@ -724,14 +724,14 @@ namespace ace::net {
 
 
     template <int domain_v, int type_v>
-    struct ace::net::io_stream_mode_entity : io_net_entity<io_stream_mode_entity<domain_v, type_v>> {
+    struct ace::net::stream_mode_entity : net_entity<stream_mode_entity<domain_v, type_v>> {
 
-        IMPORT_IO_NET_ENTITY_ENV(io_stream_mode_entity)
+        IMPORT_IO_NET_ENTITY_ENV(stream_mode_entity)
         IMPORT_IO_NET_ENTITY_FABRICATION
 
-        io_stream_mode_entity() : io_entity_t() {};
+        stream_mode_entity() : io_entity_t() {};
 
-        typedef io_listener_entity<domain_v> io_listener_entity_t;
+        typedef listener_entity<domain_v> io_listener_entity_t;
 
         struct listen_query : io::query<listen_query> {
 
@@ -739,7 +739,7 @@ namespace ace::net {
 
             listen_query() = delete;
 
-            explicit listen_query(io_stream_mode_entity&& entity, const int backlog)
+            explicit listen_query(stream_mode_entity&& entity, const int backlog)
                 : io_query_t(entity._fd)
                 , _entity(entity)
                 , _backlog(backlog) {}
@@ -752,7 +752,7 @@ namespace ace::net {
                 return io_listener_entity_t::consume(_entity);
             }
 
-            io_stream_mode_entity& _entity;
+            stream_mode_entity& _entity;
             const int _backlog;
         };
 
@@ -765,7 +765,7 @@ namespace ace::net {
             return listen_query{ std::move(*this), backlog};
         }
 
-        using connect_query_t = connect_query<io_stream_mode_entity, domain_v>;
+        using connect_query_t = connect_query<stream_mode_entity, domain_v>;
         friend connect_query_t;
 
         /**
@@ -800,14 +800,14 @@ namespace ace::net {
 
 
     template <int domain_v, int type_v>
-    struct ace::net::io_mapping_entity : io_net_entity<io_mapping_entity<domain_v, type_v>> {
+    struct ace::net::socket_entity : net_entity<socket_entity<domain_v, type_v>> {
 
-        IMPORT_IO_NET_ENTITY_ENV(io_mapping_entity)
+        IMPORT_IO_NET_ENTITY_ENV(socket_entity)
         IMPORT_IO_NET_ENTITY_FABRICATION
 
-        io_mapping_entity() : io_entity_t() {};
+        socket_entity() : io_entity_t() {};
 
-        explicit io_mapping_entity(const int fd) {
+        explicit socket_entity(const int fd) {
             io_entity_t::_fd = fd;
             if (io_entity_t::_fd > -1) io_entity_t::_is_closed = false;
         }
@@ -818,11 +818,11 @@ namespace ace::net {
 
             bind_query() = delete;
 
-            typedef io_transport_entity<domain_v, e_indirect> io_transport_entity_t;
+            typedef transport_entity<domain_v, e_indirect> io_transport_entity_t;
 
-            typedef io_stream_mode_entity<domain_v, type_v> io_stream_mode_entity_t;
+            typedef stream_mode_entity<domain_v, type_v> io_stream_mode_entity_t;
 
-            explicit bind_query(io_mapping_entity&& entity, sockaddr* addr, const socklen_t addrlen)
+            explicit bind_query(socket_entity&& entity, sockaddr* addr, const socklen_t addrlen)
                 : io_query_t(entity._fd)
                 , _entity(entity)
                 , _addr(addr)
@@ -848,7 +848,7 @@ namespace ace::net {
                 }
             }
 
-            io_mapping_entity& _entity;
+            socket_entity& _entity;
             sockaddr* _addr;
             const socklen_t _addrlen;
         };
@@ -881,7 +881,7 @@ namespace ace::net {
             return bind_query { std::move(*this), reinterpret_cast<sockaddr*>(&_self_sin), sizeof(sockaddr_in)};
         }
 
-        using connect_query_t = connect_query<io_mapping_entity, domain_v>;
+        using connect_query_t = connect_query<socket_entity, domain_v>;
         friend connect_query_t;
 
         /**
@@ -916,14 +916,14 @@ namespace ace::net {
 
 
     template <int domain_v, int type_v, int protocol_v>
-    struct ace::net::io_socket : io::query<io_socket<domain_v, type_v, protocol_v>> {
+    struct ace::net::socket : io::query<socket<domain_v, type_v, protocol_v>> {
 
-        IMPORT_IO_QUERY_ENV(io_socket)
+        IMPORT_IO_QUERY_ENV(socket)
 
         /**
          * @param [in] flags currently unused
          */
-        explicit io_socket(const int flags = 0)
+        explicit socket(const int flags = 0)
             // NOTE: There is no socket but need supress defaulted '-1' errcode
             : io_query_t(0)
             , _flags(flags) {}
@@ -933,8 +933,8 @@ namespace ace::net {
             return true;
         }
 
-        [[nodiscard]] io_mapping_entity<domain_v, type_v> await_resume() const {
-            return io_mapping_entity<domain_v, type_v>{_res};
+        [[nodiscard]] socket_entity<domain_v, type_v> await_resume() const {
+            return socket_entity<domain_v, type_v>{_res};
         }
 
         const int _flags;

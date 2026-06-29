@@ -452,6 +452,7 @@ public:                                                                         
 
         iovec*           _chunk_list_pre_end = nullptr;
         iovec*           _chunk_list_begin   = nullptr;
+        std::size_t      _total_len          = 0;
 
 
         iovec* allocate_buf(const size_t len) {
@@ -463,10 +464,12 @@ public:                                                                         
             if (not buf) return nullptr;
 
             buf->iov_len = len;
+            _total_len += len;
             return buf;
         }
 
-        static void deallocate_buf(iovec* buf) {
+        void deallocate_buf(iovec* buf) {
+            _total_len -= buf->iov_len;
             buf->iov_len += control_hdr_len;
             services::kernel_controller::iovec_deallocate(buf);
         }
@@ -622,6 +625,8 @@ public:                                                                         
             b._chunk_list_pre_end = nullptr;
             _chunk_list_end = b._chunk_list_end;
             b._chunk_list_end = nullptr;
+            _total_len = b._total_len;
+            b._total_len = 0;
         }
 
         buffer& operator=(buffer&& b) noexcept {
@@ -633,6 +638,8 @@ public:                                                                         
             b._chunk_list_pre_end = nullptr;
             _chunk_list_end = b._chunk_list_end;
             b._chunk_list_end = nullptr;
+            _total_len = b._total_len;
+            b._total_len = 0;
             return *this;
         }
 
@@ -809,7 +816,10 @@ public:                                                                         
             _chunk_list_pre_end = nullptr;
             _chunk_list_end = nullptr;
             _hdr.msg_iovlen = 0;
+            _total_len = 0;
         }
+
+        [[nodiscard]] std::size_t len() const { return _total_len; }
 
         ~buffer() { clear(); }
 

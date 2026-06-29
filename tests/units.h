@@ -367,7 +367,7 @@ inline ace::task socket_abuser_zc() {
         ace::io::buffer buf;
         buf.append("Echo message {}", i);
         if (co_await connection.send(buf) == EXIT_SUCCESS)
-            ace::console::println("Client [zc] sent: '{}'", buf.as<std::string>());
+            ace::console::println("Client [zc] sent: '{}'", buf);
     }
 
     co_return;
@@ -405,7 +405,7 @@ inline ace::task socket_listener_zc() {
 
     for (int i = 0; i < 5; ++i) {
         if (auto buf = co_await connection.recv_buf())
-            ace::console::println("Server [zc] received: '{}'", buf.value().as<std::string>());
+            ace::console::println("Server [zc] received: '{}'", buf.value());
         else
             ace::console::println("Server [zc] failed. error: {}", strerror(buf.error()));
     }
@@ -445,7 +445,7 @@ inline ace::task tcp_echo_client() {
         if (not input)
             ace::console::println("[ CLIENT ERROR ] : {}", strerror(input.error()));
         else if (co_await connection.send(input.value()))
-            ace::console::println("[ CLIENT SENT ] : {}", input.value().as<std::string>());
+            ace::console::println("[ CLIENT SENT ] : {}", input.value());
     }
 
     co_return;

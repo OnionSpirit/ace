@@ -713,7 +713,7 @@ public:                                                                         
 
         template <void* (buffer::*mem_selector)(std::size_t), class... Args>
         bool emplace(std::format_string<Args...>&& fmt, Args&&... args) {
-            const size_t len = std::formatted_size(fmt, args...);
+            const size_t len = std::formatted_size(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
             if (auto mem = static_cast<char*>((this->*mem_selector)(len))) {
                 std::format_to_n(mem, len, std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
                 return true;
@@ -982,6 +982,26 @@ public:                                                                         
         ~buffer() { clear(); }
 
         friend class ace::io::link;
+        friend class std::formatter<buffer>;
+    };
+
+
+    template <>
+    struct std::formatter<ace::io::buffer> {
+        constexpr auto parse(std::format_parse_context& ctx) {
+            return ctx.begin();
+        }
+
+        auto format(const ace::io::buffer& buf, std::format_context& ctx) const {
+            auto out_buf = ctx.out();
+            const iovec* current = buf._chunk_list_begin;
+            while (current not_eq nullptr) {
+                char* data = static_cast<char*>(current->iov_base) + ace::io::buffer::control_hdr_len;
+                out_buf = std::copy_n(data, current->iov_len, out_buf);
+                current = *static_cast<iovec**>(current->iov_base);
+            }
+            return out_buf;
+        }
     };
 
 
@@ -1108,10 +1128,9 @@ public:                                                                         
         void write(const buffer& buf) {
             const iovec* current = buf._chunk_list_begin;
             while (current not_eq nullptr) {
-                const auto next = *static_cast<iovec**>(current->iov_base);
                 write(static_cast<std::byte*>(current->iov_base) + buffer::control_hdr_len,
                     static_cast<std::byte*>(current->iov_base) + buffer::control_hdr_len + current->iov_len);
-                current = next;
+                current = *static_cast<iovec**>(current->iov_base);
             }
         }
 

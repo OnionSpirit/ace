@@ -64,11 +64,23 @@ struct iovec_allocator {
 
 private:
 
-    // char small_pool_upstream[1024 * 1024]; // 1 МБ
-    // std::pmr::monotonic_buffer_resource upstream {small_pool_upstream, sizeof(small_pool_upstream)};
+    struct memory_controller : std::pmr::memory_resource {
 
-    // std::pmr::unsynchronized_pool_resource   _small_pool {&upstream};
-    std::pmr::unsynchronized_pool_resource   _small_pool;
+        void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+            return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+        }
+
+        void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override {
+            (void)p; (void)bytes; (void)alignment;
+        }
+
+        [[nodiscard]] bool do_is_equal(const memory_resource& other) const noexcept override {
+            return this == &other;
+        }
+    };
+
+    memory_controller                        _controller;
+    std::pmr::unsynchronized_pool_resource   _small_pool {&_controller};
 };
 
 } // namespace ace::core::tools

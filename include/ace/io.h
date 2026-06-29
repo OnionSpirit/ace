@@ -1223,7 +1223,7 @@ public:                                                                         
         std::string str;
         const iovec* current = _chunk_list_begin;
         for (int i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
-            str.append(static_cast<char*>(current->iov_base) + control_hdr_len);
+            str.append(static_cast<char*>(current->iov_base) + control_hdr_len, current->iov_len);
             current = *static_cast<iovec**>(current->iov_base);
         }
         return str;

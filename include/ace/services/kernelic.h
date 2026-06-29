@@ -30,7 +30,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <memory_resource>
 #include <liburing.h>
 
 #include "ace/core/traits/vortex.h"

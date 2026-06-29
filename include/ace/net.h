@@ -632,16 +632,19 @@ namespace ace::net {
             static constexpr int buf_len = 64;
 
             io::buffer buf {};
-            auto data = buf.reserve(buf_len);
+            auto data = buf.expand(buf_len);
 
             int bytes_read = co_await recv_query(_fd, data, buf_len, flags);
             if (bytes_read < 1) co_return std::unexpected(-bytes_read);
 
             while (bytes_read == buf_len) {
-                data = buf.reserve(buf_len);
+                data = buf.expand(buf_len);
                 bytes_read = co_await recv_query(_fd, data, buf_len, flags);
                 if (bytes_read < 1) co_return std::unexpected(-bytes_read);
             }
+
+            if (bytes_read < buf_len)
+                buf.shape(bytes_read);
 
             co_return std::forward<io::buffer>(buf);
         }

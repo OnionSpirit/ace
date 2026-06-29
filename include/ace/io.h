@@ -608,19 +608,21 @@ public:                                                                         
 
     class ace::io::buffer {
 
+        ACE_CACHE_LINE(0)
+
         msghdr _hdr {
             .msg_iov = nullptr,
             .msg_iovlen = 0
         };
-        iovec*           _chunk_list_end   = nullptr;
+        iovec*           _chunk_list_end     = nullptr;
 
-        ACE_CACHE_LINE(0)
+        ACE_CACHE_LINE(1)
 
-        iovec*           _chunk_list_begin = nullptr;
-        std::size_t      _tail_capacity    = 0;
+        iovec*           _chunk_list_pre_end = nullptr;
+        iovec*           _chunk_list_begin   = nullptr;
 
 
-        iovec* allocate_buf(const size_t len, const bool is_tail) {
+        iovec* allocate_buf(const size_t len) {
             // NOTE: Allocating and subscribing new buff to chunk set
             const auto buf = services::kernel_controller::iovec_allocate(len + control_hdr_len);
             auto** new_control_hdr = static_cast<iovec**>(buf->iov_base);
@@ -628,11 +630,13 @@ public:                                                                         
 
             if (not buf) return nullptr;
 
-            // NOTE: Saving tail buf capacity
-            if (is_tail)
-                _tail_capacity = buf->iov_len - control_hdr_len;
             buf->iov_len = len;
             return buf;
+        }
+
+        static void deallocate_buf(iovec* buf) {
+            buf->iov_len += control_hdr_len;
+            services::kernel_controller::iovec_deallocate(buf);
         }
 
         void init_buf_list(iovec* buf) {
@@ -643,6 +647,7 @@ public:                                                                         
         void append_buf_list(iovec* buf) {
             auto** old_control_hdr = static_cast<iovec**>(_chunk_list_end->iov_base);
             *old_control_hdr = buf;
+            _chunk_list_pre_end = _chunk_list_end;
             _chunk_list_end = buf;
             ++_hdr.msg_iovlen;
         }
@@ -650,6 +655,8 @@ public:                                                                         
         void prepend_buf_list(iovec* buf) {
             auto** new_control_hdr = static_cast<iovec**>(buf->iov_base);
             *new_control_hdr = _chunk_list_begin;
+            if (not _chunk_list_pre_end)
+                _chunk_list_pre_end = _chunk_list_begin;
             _chunk_list_begin = buf;
             ++_hdr.msg_iovlen;
         }
@@ -670,7 +677,7 @@ public:                                                                         
             const auto tail_buf = _chunk_list_end;
 
             // NOTE: Allocating buffer
-            const auto buf = allocate_buf(len, true);
+            const auto buf = allocate_buf(len);
             if (not buf) return nullptr;
 
             // NOTE: Initializing list with buf or appending it to the list
@@ -693,7 +700,7 @@ public:                                                                         
             const auto tail_buf = _chunk_list_end;
 
             // NOTE: Allocating buffer
-            const auto buf = allocate_buf(len, false);
+            const auto buf = allocate_buf(len);
             if (not buf) return nullptr;
 
             // NOTE: Initializing list with buf or prepending it to the list
@@ -771,11 +778,6 @@ public:                                                                         
 
         buffer() = default;
 
-        buffer(const std::size_t len) {
-            if (iovec* buf = allocate_buf(len, true))
-                init_buf_list(buf);
-        }
-
         buffer(const buffer&) = delete;
         buffer& operator=(const buffer&) = delete;
 
@@ -786,8 +788,6 @@ public:                                                                         
             b._chunk_list_begin = nullptr;
             _chunk_list_end = b._chunk_list_end;
             b._chunk_list_end = nullptr;
-            _tail_capacity = b._tail_capacity;
-            b._tail_capacity = 0;
         }
 
         buffer& operator=(buffer&& b) noexcept {
@@ -797,8 +797,6 @@ public:                                                                         
             b._chunk_list_begin = nullptr;
             _chunk_list_end = b._chunk_list_end;
             b._chunk_list_end = nullptr;
-            _tail_capacity = b._tail_capacity;
-            b._tail_capacity = 0;
             return *this;
         }
 
@@ -873,11 +871,32 @@ public:                                                                         
         }
 
         /**
-         * @brief Reserve space in the buffer
+         * @brief Reserve space in the buffer. Main purpose is to get memory to read to
          * @param [in] len extension size
-         * @return @c msghdr with @c iovec set
+         * @return memory pointer to the added part
          */
-        void* reserve(const std::size_t len) { return memtail(len); }
+        void* expand(const std::size_t len) { return memtail(len); }
+
+        /**
+         * @brief Shrinks tail chunk to a provided len
+         * @param len new len for tail chunk (without control header)
+         */
+        void shape(const std::size_t len) {
+            if (not _chunk_list_end) return;
+            auto* new_tail = allocate_buf(len);
+            memcpy(new_tail->iov_base, _chunk_list_end->iov_base, len + control_hdr_len);
+            // NOTE: Prepend or append done then use this case
+            if (_chunk_list_pre_end) {
+                *static_cast<iovec**>(_chunk_list_pre_end->iov_base) = new_tail;
+                deallocate_buf(_chunk_list_end);
+                _chunk_list_end = new_tail;
+            }
+            // NOTE: There was single buffer then replacing it
+            else {
+                deallocate_buf(_chunk_list_end);
+                _chunk_list_begin = _chunk_list_end = new_tail;
+            }
+        }
 
         /**
          * @brief Assembles buffer into @c msghdr .
@@ -947,13 +966,11 @@ public:                                                                         
             iovec* current = _chunk_list_begin;
             while (current not_eq nullptr) {
                 const auto next = *static_cast<iovec**>(current->iov_base);
-                current->iov_len += control_hdr_len;
-                services::kernel_controller::iovec_deallocate(current);
+                deallocate_buf(current);
                 current = next;
             }
             _chunk_list_begin = nullptr;
             _chunk_list_end = nullptr;
-            _tail_capacity = 0;
             _hdr.msg_iovlen = 0;
         }
 
@@ -1106,16 +1123,19 @@ public:                                                                         
             static constexpr int buf_len = 64;
 
             buffer buf {};
-            auto data = buf.reserve(buf_len);
+            auto data = buf.expand(buf_len);
 
             int bytes_read = co_await input_action(data, buf_len);
             if (bytes_read < 1) co_return std::unexpected(-bytes_read);
 
             while (bytes_read == buf_len) {
-                data = buf.reserve(buf_len);
+                data = buf.expand(buf_len);
                 bytes_read = co_await input_action(data, buf_len);
                 if (bytes_read < 1) co_return std::unexpected(-bytes_read);
             }
+
+            if (bytes_read < buf_len)
+                buf.shape(bytes_read);
 
             co_return std::forward<buffer>(buf);
         }

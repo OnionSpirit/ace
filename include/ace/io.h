@@ -553,6 +553,7 @@ public:                                                                         
         }
 
         template <void* (buffer::*mem_selector)(std::size_t), class... Args>
+        requires (sizeof...(Args) > 0)
         bool emplace(std::format_string<Args...>&& fmt, Args&&... args) {
             const size_t len = std::formatted_size(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
             if (auto mem = static_cast<char*>((this->*mem_selector)(len))) {
@@ -680,6 +681,12 @@ public:                                                                         
         requires std::is_pod_v<data_t>
         bool append(const std::span<data_t, len_v>& buf) {
             return emplace<&buffer::memtail>(std::forward<const std::span<data_t, len_v>>(buf));
+        }
+
+        template <class... Args>
+        bool appendln(Args&&... args) {
+            return emplace<&buffer::memtail>(std::forward<Args>(args)...)
+                and emplace<&buffer::memtail>("\n");
         }
 
         template <class... Args>

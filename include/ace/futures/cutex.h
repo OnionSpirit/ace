@@ -269,7 +269,8 @@ struct ACE_FUTURE_CUTEX_FUTURE_SPACE cutex_conductor : conductor_handler_t {
         : _cutex(cutex_) {};
 
     node_t* forward_node(node_t* node) override {
-        auto n = nukes::details::nodes::cast_node(node);
+        using namespace nukes::details::nodes;
+        auto n = cast_node<dyn_node>(node);
         _cutex->_waiters.push_node(n);
         return nullptr;
     }

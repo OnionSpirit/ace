@@ -30,7 +30,11 @@
 #define ACE_FUTURE_CHANNEL_H
 
 #include <nukes/dynamic/mpmc_queue.h>
+#include <nukes/dynamic/mpsc_queue.h>
+#include <nukes/dynamic/regular_queue.h>
+#include <nukes/bounded/mpsc_queue.h>
 #include <nukes/bounded/mpmc_queue.h>
+#include <nukes/bounded/spsc_queue.h>
 
 #include <ace/core/traits/future.h>
 #include <ace/core/runner.h>
@@ -48,6 +52,13 @@ namespace ace::futures {
         e_dynamic
     };
 
+    enum class access_mode {
+        // e_regular,
+        e_spsc,
+        e_mpsc,
+        e_mpmc,
+    };
+
 /**
  * @brief Lock-free MPMC channel with configurable allocation policy.
  *
@@ -63,28 +74,56 @@ template
 <
     typename data_t,
 
-    size_t data_buffer_size_v = 1ul,
+    allocation_type data_allocation_v = allocation_type::e_dynamic,
 
-    allocation_type data_allocation_v = allocation_type::e_dynamic
+    access_mode access_mode_v = access_mode::e_mpmc,
+
+    size_t data_buffer_size_v = 1ul
 >
 class channel {
 
     template <typename storage_entity_t, allocation_type allocation_v, size_t buff_len_v>
     static auto consteval define_storage() {
-        if constexpr (allocation_v == allocation_type::e_dynamic)
-            return nukes::dynamic::mpmc_queue<storage_entity_t>{};
-        if constexpr (allocation_v == allocation_type::e_static)
-            return nukes::bounded::mpmc_queue<storage_entity_t, buff_len_v>{};
-        if constexpr (allocation_v == allocation_type::e_on_init)
-            return nukes::bounded::mpmc_queue<storage_entity_t>{};
+        if constexpr (allocation_v == allocation_type::e_dynamic) {
+            if constexpr (access_mode_v == access_mode::e_mpmc)
+                return nukes::dynamic::mpmc_queue<storage_entity_t>{};
+            if constexpr (access_mode_v == access_mode::e_mpsc or access_mode_v == access_mode::e_spsc)
+                return nukes::dynamic::mpsc_queue<storage_entity_t>{};
+            // if constexpr (access_mode_v == access_mode::e_regular)
+            //     return nukes::dynamic::reg_queue<storage_entity_t>{};
+        } else if constexpr (allocation_v == allocation_type::e_static) {
+            if constexpr (access_mode_v == access_mode::e_mpmc)
+                return nukes::bounded::mpmc_queue<storage_entity_t, buff_len_v>{};
+            if constexpr (access_mode_v == access_mode::e_mpsc)
+                return nukes::bounded::mpsc_queue<storage_entity_t, buff_len_v>{};
+            if constexpr (access_mode_v == access_mode::e_spsc)
+                return nukes::bounded::spsc_queue<storage_entity_t, buff_len_v>{};
+            // if constexpr (access_mode_v == access_mode::e_regular)
+            //     return nukes::dynamic::reg_queue<storage_entity_t>{};
+        } else if constexpr (allocation_v == allocation_type::e_on_init) {
+            if constexpr (access_mode_v == access_mode::e_mpmc)
+                return nukes::bounded::mpmc_queue<storage_entity_t>{};
+            if constexpr (access_mode_v == access_mode::e_mpsc)
+                return nukes::bounded::mpsc_queue<storage_entity_t>{};
+            if constexpr (access_mode_v == access_mode::e_spsc)
+                return nukes::bounded::spsc_queue<storage_entity_t>{};
+            // if constexpr (access_mode_v == access_mode::e_regular)
+            //     return nukes::dynamic::reg_queue<storage_entity_t>{};
+        }
     }
 
     static auto consteval define_data_storage() {
         return define_storage<data_t, data_allocation_v, data_buffer_size_v>();
     }
 
+    static auto consteval define_waiters_storage() {
+        return define_storage<task, allocation_type::e_dynamic, data_buffer_size_v>();
+    }
+
     typedef std::decay_t<decltype(define_data_storage())> data_storage_t;
-    typedef nukes::dynamic::mpmc_queue<task> waiters_storage_t;
+    typedef std::decay_t<decltype(define_waiters_storage())> waiters_storage_t;
+
+    typedef waiters_storage_t::node_t waiters_pool_node_t;
 
     class pull_impl;
     friend pull_impl;
@@ -167,118 +206,24 @@ public:
     ACE_AWAIT_NODISCARD task operator >> (data_t&& data) { data = std::move(co_await pull()); }
 };
 
-/**
- * @brief Single-threaded channel backed by @c std::queue (non-lock-free).
- *
- * @details Intended for use within a single runner where lock-free guarantees
- * are not needed.  Uses @c reg_queue for waiters (no dynamic allocation).
- *
- * @tparam data_t  Storable data type.
- */
-template<typename data_t>
-class channel_st {
-
-    class pull_impl;
-    friend pull_impl;
-
-    struct channel_conductor;
-    friend channel_conductor;
-
-    void notify();
-
-    typedef std::queue<data_t> data_storage_t;
-    typedef nukes::dynamic::reg_queue<task> waiters_storage_t;
-
-public:
-
-    data_storage_t _container  {}; ///< Storage of transmitting data
-    waiters_storage_t _waiters {}; ///< Storage of waiting contexts
-
-    channel_st() = default;
-
-    explicit operator bool() const { return empty(); };
-
-    /**
-     * @brief The function pushes data to the channel
-     * @param data data to push
-     * @return False if inner buffer overflowed
-     */
-    bool push(data_t& data);
-
-    /**
-     * @brief The function pushes data to the channel
-     * @param data data to push
-     * @return False if inner buffer overflowed
-     */
-    bool push(data_t&& data);
-
-    /**
-     * @brief The function pushes data to the channel with waiting for a vacant spot in the data queue
-     * @param data data to push
-     */
-    promise<> pending_push(data_t data);
-
-    /**
-     * @brief The function pushes data to the channel with waiting for a vacant spot in the data queue
-     * @param data data to push
-     */
-    promise<> pending_push(data_t&& data);
-
-    /**
-     * @details Checks if channel is empty
-     * @return @b True if channel is empty, @b False otherwise
-     */
-    [[nodiscard]] bool empty() { return _container.empty(); }
-
-    /**
-     * @details Represents async operation of gaining data from the channel.
-     * @return Returns instance of future pull object,
-     * that can be processed with @b co_await
-     */
-    ACE_AWAIT_NODISCARD pull_impl pull();
-
-    /**
-     * @details @b push method alternative interface
-     * @param data Data to push
-     */
-    void operator << (data_t& data) { push(std::forward<data_t&>(data)); }
-
-    /**
-     * @details @b push method alternative interface
-     * @param data Data to push
-     */
-    void operator << (data_t&& data) { push(std::move(data)); }
-
-    /**
-     * @details @b pull method alternative interface
-     * @param data Data to pull
-     */
-    ACE_AWAIT_NODISCARD task operator >> (data_t& data) { data = co_await pull(); }
-
-    /**
-     * @details @b pull method alternative interface
-     * @param data Data to pull
-     */
-    ACE_AWAIT_NODISCARD task operator >> (data_t&& data) { data = std::move(co_await pull()); }
-};
-
 
 /**
  * @brief Static Channel with bounded amount of waiters
  */
-template <typename Type, size_t DataBufferSize = 1ul>
-using channel_static = channel
+template <typename Type, access_mode access_mode_v = access_mode::e_mpmc, size_t DataBufferSize = 1ul>
+using bounded_channel = channel
 <
     Type,
-    DataBufferSize,
-    allocation_type::e_static
+    allocation_type::e_static,
+    access_mode_v,
+    DataBufferSize
 >;
 
 /**
  * @brief Dynamic Channel with bounded amount of waiters
  */
-template <typename Type>
-using channel_dyn = channel<Type>;
+template <typename Type, access_mode access_mode_v = access_mode::e_mpmc>
+using dyn_channel = channel<Type, allocation_type::e_dynamic, access_mode_v>;
 
 
 } // namespace ace::futures
@@ -288,12 +233,13 @@ using channel_dyn = channel<Type>;
 #define ACE_FUTURE_CHANNEL_META                        \
 template<                                              \
     typename data_t,                                   \
-    size_t data_buffer_size_v,                         \
-    ace::futures::allocation_type data_allocation_v    \
+    ace::futures::allocation_type data_allocation_v,   \
+    ace::futures::access_mode access_mode_v,           \
+    size_t data_buffer_size_v                          \
 >
 
 #define ACE_FUTURE_CHANNEL_SPACE \
-ace::futures::channel<data_t, data_buffer_size_v, data_allocation_v>::
+ace::futures::channel<data_t, data_allocation_v, access_mode_v, data_buffer_size_v>::
 
 #define ACE_FUTURE_CHANNEL_MEMBER(returnT) \
 ACE_FUTURE_CHANNEL_META returnT ACE_FUTURE_CHANNEL_SPACE
@@ -335,8 +281,13 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_conductor : conductor_handler_t {
     explicit channel_conductor(waiters_storage_t* waiters) : _waiters(waiters) {};
 
     node_t* forward_node(node_t* node) override {
-        auto* n = nukes::details::nodes::cast_node(node);
-        _waiters->push_node(n);
+        using namespace nukes::details::nodes;
+        // if constexpr (access_mode_v == access_mode::e_regular)
+        //     _waiters->push_node(node);
+        // else {
+            auto* n = cast_node<dyn_node>(node);
+            _waiters->push_node(n);
+        // }
         return nullptr;
     }
 
@@ -425,146 +376,6 @@ ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::await_suspend(auto ctx) {
     return false;
 }
 
-#define ACE_FUTURE_CHANNEL_ST_META template <typename data_t>
-
-#define ACE_FUTURE_CHANNEL_ST_SPACE \
-ace::futures::channel_st<data_t>::
-
-#define ACE_FUTURE_CHANNEL_ST_MEMBER(returnT) \
-ACE_FUTURE_CHANNEL_ST_META returnT ACE_FUTURE_CHANNEL_ST_SPACE
-
-ACE_FUTURE_CHANNEL_ST_META
-class ACE_FUTURE_CHANNEL_ST_SPACE pull_impl : public core::traits::busy_future_traits<pull_impl> {
-
-    data_t _output_data{};
-
-public:
-
-    IMPORT_BUSY_FUTURE_ENV(pull_impl)
-
-    pull_impl() =delete;
-
-    pull_impl(waiters_storage_t* waiters, data_storage_t* container)
-            : _waiters(waiters), _container(container) {};
-
-    waiters_storage_t* _waiters;
-
-    data_storage_t* _container;
-
-    bool await_ready() override;
-
-    bool await_suspend(auto ctx);
-
-    auto await_resume() { return std::forward<data_t>(_output_data); }
-
-    ~pull_impl() override = default;
-};
-
-
-ACE_FUTURE_CHANNEL_ST_META
-struct ACE_FUTURE_CHANNEL_ST_SPACE channel_conductor : conductor_handler_t {
-
-    channel_conductor() = delete;
-
-    explicit channel_conductor(waiters_storage_t* waiters) : _waiters(waiters) {};
-
-    node_t* forward_node(node_t* node) override {
-        _waiters->push_node(node);
-        return nullptr;
-    }
-
-    void cancel() override {
-        // NOTE: Reattaching all tasks because mpmc-queue doesn't allow ejection.
-        // NOTE: Target canceled task will be marked as detached and Runner will drop it
-        // TODO: Batch read needed
-        auto* node = _waiters->pop_node();
-        while (node)
-            core::runner::reattach(node);
-    }
-
-    ~channel_conductor() override = default;
-
-    waiters_storage_t* _waiters;
-};
-
-
-ACE_FUTURE_CHANNEL_ST_MEMBER(void) notify() {
-    if (auto* node = _waiters.pop_node(); node) [[likely]]
-        core::runner::reattach(node);
-}
-
-
-ACE_FUTURE_CHANNEL_ST_MEMBER(bool) push(data_t& data) {
-    _container.push(std::forward<data_t&>(data));
-    notify();
-    return true;
-}
-
-
-ACE_FUTURE_CHANNEL_ST_MEMBER(bool) push(data_t&& data) {
-    static constexpr bool is_move_only {
-        (std::is_move_constructible_v<data_t> or std::is_move_assignable_v<data_t>)
-        and not
-        (std::is_copy_constructible_v<data_t> or std::is_copy_assignable_v<data_t>)
-    };
-    if constexpr (is_move_only) {
-        if (_container.push(std::forward<data_t&&>(data))) [[likely]] {
-            notify();
-            return true;
-        }
-    } else {
-        if (data_t instance {std::forward<data_t>(data)}; _container.push(instance)) [[likely]] {
-            notify();
-            return true;
-        }
-    }
-    return false;
-}
-
-ACE_FUTURE_CHANNEL_ST_MEMBER(ace::promise<>) pending_push(data_t data) {
-    while (not _container.push(std::forward<data_t>(data))) [[unlikely]]
-        co_await suspend();
-    notify();
-    co_return;
-}
-
-
-ACE_FUTURE_CHANNEL_ST_MEMBER(ace::promise<>) pending_push(data_t&& data) {
-    while (not _container.push(std::forward<data_t>(data))) [[unlikely]]
-        co_await suspend();
-    notify();
-    co_return;
-}
-
-
-ACE_FUTURE_CHANNEL_ST_META
-ACE_FUTURE_CHANNEL_ST_SPACE pull_impl
-ACE_FUTURE_CHANNEL_ST_SPACE pull() {
-    return std::forward<pull_impl>(pull_impl{&_waiters, &_container});
-}
-
-
-ACE_FUTURE_CHANNEL_ST_MEMBER(bool) pull_impl::await_ready() {
-    if (not _container->empty()) {
-        _output_data = std::move(_container->front());
-        _container->pop();
-        return true;
-    }
-    return false;
-}
-
-ACE_FUTURE_CHANNEL_ST_MEMBER(bool) pull_impl::await_suspend(auto ctx) {
-    if (_container->empty()) {
-        ctx.promise()._runner_conductor = channel_conductor{_waiters};
-        return true;
-    }
-    _output_data = std::move(_container->front());
-    _container->pop();
-    return false;
-}
-
 #undef ACE_FUTURE_CHANNEL_META
 #undef ACE_FUTURE_CHANNEL_SPACE
-#undef ACE_FUTURE_CHANNEL_ST_META
-#undef ACE_FUTURE_CHANNEL_ST_SPACE
 #endif // ACE_FUTURE_CHANNEL_H

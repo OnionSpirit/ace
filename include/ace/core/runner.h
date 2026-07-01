@@ -247,6 +247,7 @@ namespace ace::core {
 
 
     inline void runner::reattach(pool_node_ptr& node, const runner* local_runner_ptr) {
+        using namespace nukes::details::nodes;
         const auto* target_runner_ptr = node->_data._coroutine.promise()._runner.as<runner>();
         if (not node or not node->_data.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach' idle context" };
@@ -259,7 +260,7 @@ namespace ace::core {
             local_runner_ptr->_pool.push_node(node);
             node = nullptr;
         } else {
-            auto* n = nukes::details::nodes::cast_node(node);
+            auto* n = cast_node<dyn_node>(node);
             target_runner_ptr->_interthread_pool.push_node(n);
             node = nullptr;
         }
@@ -268,6 +269,7 @@ namespace ace::core {
 
     inline void runner::reattach(insert_node_ptr& node, const runner* local_runner_ptr) {
         const auto* target_runner_ptr = node->_data._coroutine.promise()._runner.as<runner>();
+        using namespace nukes::details::nodes;
         if (not node or not node->_data.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach' idle context" };
         if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
@@ -276,7 +278,7 @@ namespace ace::core {
                 "which are not running at the 'ace::core::runner'"
             };
         if (local_runner_ptr == target_runner_ptr) {
-            auto* n = nukes::details::nodes::cast_node(node);
+            auto* n = cast_node<dyn_reg_node>(node);
             local_runner_ptr->_pool.push_node(n);
             node = nullptr;
         } else {
@@ -305,6 +307,7 @@ namespace ace::core {
 
     inline void runner::reattach_front(pool_node_ptr& node, const runner* local_runner_ptr) {
         const auto* target_runner_ptr = node->_data._coroutine.promise()._runner.as<runner>();
+        using namespace nukes::details::nodes;
         if (not node or not node->_data.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach_front' idle context" };
         if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
@@ -317,7 +320,7 @@ namespace ace::core {
             local_runner_ptr->_pool.push_node_front(node);
             node = nullptr;
         } else {
-            auto* n = nukes::details::nodes::cast_node(node);
+            auto* n = cast_node<dyn_node>(node);
             target_runner_ptr->_interthread_pool.push_node(n);
             node = nullptr;
         }
@@ -326,6 +329,7 @@ namespace ace::core {
 
     inline void runner::reattach_front(insert_node_ptr& node, const runner* local_runner_ptr) {
         const auto* target_runner_ptr = node->_data._coroutine.promise()._runner.as<runner>();
+        using namespace nukes::details::nodes;
         if (not node or not node->_data.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach_front' idle context" };
         if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
@@ -335,7 +339,7 @@ namespace ace::core {
             };
         if (local_runner_ptr == target_runner_ptr) {
             node->_data.prefetch();
-            auto* n = nukes::details::nodes::cast_node(node);
+            auto* n = cast_node<dyn_reg_node>(node);
             local_runner_ptr->_pool.push_node_front(n);
             node = nullptr;
         } else {
@@ -368,6 +372,7 @@ namespace ace::core {
 
 
     inline bool runner::yank() noexcept {
+        using namespace nukes::details::nodes;
 
         promise_lifecycle touch_result = e_executed;
         pool_node_ptr task_node = _pool.pop_node();
@@ -375,7 +380,7 @@ namespace ace::core {
         // NOTE: Pulling from interthread pool if task is empty
         if (not task_node) [[unlikely]] {
             if (const auto interthread_node = _interthread_pool.pop_node())
-                task_node = cast_node(interthread_node);
+                task_node = cast_node<dyn_reg_node>(interthread_node);
             // NOTE: If there is no regular tasks then processing services
             else return yank_vortex();
         }
@@ -473,6 +478,7 @@ namespace ace::core {
 
 
     inline bool runner::run() noexcept {
+        using namespace nukes::details::nodes;
         int i = 0;
         current_runner_ptr = this;
         for (constexpr int yank_limit = 128; i < yank_limit and yank(); ++i) {
@@ -482,7 +488,7 @@ namespace ace::core {
                 // TODO: Use batch pop instead of the loop
                 while ((interthread_node = _interthread_pool.pop_node())) {
                     // NOTE: Fetching task from interthread insert queue
-                    auto placing_node = cast_node(interthread_node);
+                    auto placing_node = cast_node<dyn_reg_node>(interthread_node);
                     _pool.push_node(placing_node);
                 }
             }

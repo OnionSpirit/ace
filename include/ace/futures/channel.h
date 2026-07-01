@@ -53,7 +53,7 @@ namespace ace::futures {
     };
 
     enum class access_mode {
-        // e_regular,
+        e_regular,
         e_spsc,
         e_mpsc,
         e_mpmc,
@@ -89,8 +89,8 @@ class channel {
                 return nukes::dynamic::mpmc_queue<storage_entity_t>{};
             if constexpr (access_mode_v == access_mode::e_mpsc or access_mode_v == access_mode::e_spsc)
                 return nukes::dynamic::mpsc_queue<storage_entity_t>{};
-            // if constexpr (access_mode_v == access_mode::e_regular)
-            //     return nukes::dynamic::reg_queue<storage_entity_t>{};
+            if constexpr (access_mode_v == access_mode::e_regular)
+                return nukes::dynamic::reg_queue<storage_entity_t>{};
         } else if constexpr (allocation_v == allocation_type::e_static) {
             if constexpr (access_mode_v == access_mode::e_mpmc)
                 return nukes::bounded::mpmc_queue<storage_entity_t, buff_len_v>{};
@@ -98,8 +98,8 @@ class channel {
                 return nukes::bounded::mpsc_queue<storage_entity_t, buff_len_v>{};
             if constexpr (access_mode_v == access_mode::e_spsc)
                 return nukes::bounded::spsc_queue<storage_entity_t, buff_len_v>{};
-            // if constexpr (access_mode_v == access_mode::e_regular)
-            //     return nukes::dynamic::reg_queue<storage_entity_t>{};
+            if constexpr (access_mode_v == access_mode::e_regular)
+                return nukes::dynamic::reg_queue<storage_entity_t>{};
         } else if constexpr (allocation_v == allocation_type::e_on_init) {
             if constexpr (access_mode_v == access_mode::e_mpmc)
                 return nukes::bounded::mpmc_queue<storage_entity_t>{};
@@ -206,24 +206,61 @@ public:
     ACE_AWAIT_NODISCARD task operator >> (data_t&& data) { data = std::move(co_await pull()); }
 };
 
+namespace tunnel::bounded {
 
-/**
- * @brief Static Channel with bounded amount of waiters
- */
-template <typename Type, access_mode access_mode_v = access_mode::e_mpmc, size_t DataBufferSize = 1ul>
-using bounded_channel = channel
-<
-    Type,
-    allocation_type::e_static,
-    access_mode_v,
-    DataBufferSize
->;
+    /**
+     * @brief Bounded size Channel for thread local usage
+     */
+    template <typename Type, size_t DataBufferSize = 1ul>
+    using local = channel<Type, allocation_type::e_static, access_mode::e_regular, DataBufferSize>;
 
-/**
- * @brief Dynamic Channel with bounded amount of waiters
- */
-template <typename Type, access_mode access_mode_v = access_mode::e_mpmc>
-using dyn_channel = channel<Type, allocation_type::e_dynamic, access_mode_v>;
+    /**
+     * @brief Bounded size Channel for one thread to another thread usage
+     */
+    template <typename Type, size_t DataBufferSize = 1ul>
+    using bridge = channel<Type, allocation_type::e_static, access_mode::e_spsc, DataBufferSize>;
+
+    /**
+     * @brief Bounded size Channel for many threads to single thread usage
+     */
+    template <typename Type, size_t DataBufferSize = 1ul>
+    using funnel = channel<Type, allocation_type::e_static, access_mode::e_mpsc, DataBufferSize>;
+
+    /**
+     * @brief Bounded size Channel for many to many threads usage
+     */
+    template <typename Type, size_t DataBufferSize = 1ul>
+    using bus = channel<Type, allocation_type::e_static, access_mode::e_mpmc, DataBufferSize>;
+
+}
+
+namespace tunnel::dyn {
+
+    /**
+     * @brief Dynamic Channel for thread local usage
+     */
+    template <typename Type>
+    using local = channel<Type, allocation_type::e_dynamic, access_mode::e_regular>;
+
+    /**
+     * @brief Dynamic Channel for one thread to another thread usage
+     */
+    template <typename Type>
+    using bridge = channel<Type, allocation_type::e_dynamic, access_mode::e_spsc>;
+
+    /**
+     * @brief Dynamic Channel for many threads to single thread usage
+     */
+    template <typename Type>
+    using funnel = channel<Type, allocation_type::e_dynamic, access_mode::e_mpsc>;
+
+    /**
+     * @brief Dynamic Channel for many to many threads usage
+     */
+    template <typename Type>
+    using bus = channel<Type, allocation_type::e_dynamic, access_mode::e_mpmc>;
+
+}
 
 
 } // namespace ace::futures

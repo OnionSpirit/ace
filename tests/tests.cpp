@@ -58,7 +58,7 @@ TEST(futures, do_dynamic_channel_on_runner_test) {
 
 TEST(futures, do_timer_on_runner_test) {
 
-    ace::futures::dyn_channel<int> _channel {};
+    ace::futures::tunnel::dyn::bus<int> _channel {};
 
     // NOTE: Spawning waiters with different duration and waited time count return
     ace::schedule(timer_waiter_valued(501ms, _channel));
@@ -94,7 +94,7 @@ TEST(futures, do_timer_on_runner_test) {
 }
 
 TEST(futures, do_expire_on_runner_test) {
-    ace::futures::dyn_channel<ace::services::timepoint_t> _channel {};
+    ace::futures::tunnel::dyn::bus<ace::services::timepoint_t> _channel {};
 
     const auto now = ace::services::clock::current_time();
     // NOTE: Spawning waiters with different duration and waited time count return
@@ -178,7 +178,7 @@ TEST(futures, do_timer_on_runner_parallel_test) {
     ace::cfg::g_config._runners_amount = 4;
     ace::reload();
 
-    ace::futures::dyn_channel<long> channel_ {};
+    ace::futures::tunnel::dyn::bus<long> channel_ {};
 
     constexpr long sets_count = 1000000;
     constexpr long max_in_set = 500;
@@ -226,7 +226,7 @@ TEST(futures, do_timer_on_runner_parallel_test) {
 }
 
 TEST(commands, check_spawn_command) {
-    ace::futures::dyn_channel<ace::core::runner*> channel_ {};
+    ace::futures::tunnel::dyn::bus<ace::core::runner*> channel_ {};
     ace::schedule(spawner(channel_));
     ace::run();
     ASSERT_TRUE(ace::empty());
@@ -242,7 +242,7 @@ TEST(commands, check_spawn_command) {
 }
 
 TEST(commands, check_spawn_post) {
-    ace::futures::dyn_channel<int> channel_ {};
+    ace::futures::tunnel::dyn::bus<int> channel_ {};
     ace::schedule(imposter(channel_));
     ace::run();
     ASSERT_TRUE(ace::empty());
@@ -260,7 +260,7 @@ TEST(commands, check_spawn_post) {
 }
 
 TEST(commands, check_composed_output) {
-    ace::futures::dyn_channel<int> channel_ {};
+    ace::futures::tunnel::dyn::bus<int> channel_ {};
     ace::schedule(composed_output(channel_));
     ace::run();
     ASSERT_TRUE(ace::empty());
@@ -278,7 +278,7 @@ TEST(commands, check_composed_output) {
 }
 
 TEST(commands, check_spawn_and_join) {
-    ace::futures::dyn_channel<ace::core::runner*> channel_ {};
+    ace::futures::tunnel::dyn::bus<ace::core::runner*> channel_ {};
     ace::schedule(join_spawner(channel_));
     ace::run();
     ASSERT_TRUE(ace::empty());
@@ -295,7 +295,7 @@ TEST(commands, check_spawn_and_join) {
 
 TEST(commands, check_cancel) {
     const auto start_time = std::chrono::steady_clock::now();
-    ace::futures::dyn_channel<ace::core::runner*> channel_ {};
+    ace::futures::tunnel::dyn::bus<ace::core::runner*> channel_ {};
     ace::schedule(spawner_cancel(channel_));
     ace::run();
     ASSERT_TRUE(ace::empty());
@@ -311,7 +311,7 @@ TEST(commands, check_cancel) {
 
 TEST(commands, check_join_after_cancel) {
     const auto start_time = std::chrono::steady_clock::now();
-    ace::futures::dyn_channel<ace::core::runner*> channel_ {};
+    ace::futures::tunnel::dyn::bus<ace::core::runner*> channel_ {};
     ace::schedule(spawner_join_canceled(channel_));
     ace::run();
     ASSERT_TRUE(ace::empty());
@@ -333,7 +333,7 @@ TEST(commands, check_cutex_cancel_after_capture) {
     const auto start_time = std::chrono::steady_clock::now();
 
     // NOTE: Scheduling spawner-canceler and parallel cutex user
-    ace::futures::dyn_channel<ace::core::runner*> channel_ {};
+    ace::futures::tunnel::dyn::bus<ace::core::runner*> channel_ {};
     ace::cutex cutx_;
     ace::schedule(cutex_parallel(channel_, cutx_));
     ace::schedule(cutex_spawner(channel_, cutx_));
@@ -377,7 +377,7 @@ TEST(commands, check_cutex_cancel_before_capture) {
     const auto start_time = std::chrono::steady_clock::now();
 
     // NOTE: Scheduling spawner-canceler and parallel cutex user
-    ace::futures::dyn_channel<ace::core::runner*> channel_ {};
+    ace::futures::tunnel::dyn::bus<ace::core::runner*> channel_ {};
     ace::cutex cutx_;
     ace::schedule(cutex_parallel(channel_, cutx_));
     ace::schedule(cutex_spawner_permanent(channel_, cutx_));

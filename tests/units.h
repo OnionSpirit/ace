@@ -71,11 +71,11 @@ struct channel_abuser {
     }
 
 
-    ace::futures::dyn_channel<std::string> _channel {};
+    ace::futures::tunnel::dyn::bus<std::string> _channel {};
 };
 
 template<typename Rep, typename Period>
-ace::task timer_waiter(std::chrono::duration<Rep, Period> wait_time, ace::futures::dyn_channel<long>& ch) {
+ace::task timer_waiter(std::chrono::duration<Rep, Period> wait_time, ace::futures::tunnel::dyn::bus<long>& ch) {
     const auto start = ace::services::clock::current_time();
     co_await ace::futures::timeout(wait_time);
     const auto end = ace::services::clock::current_time();
@@ -84,7 +84,7 @@ ace::task timer_waiter(std::chrono::duration<Rep, Period> wait_time, ace::future
 }
 
 template<typename Rep, typename Period>
-ace::task timer_waiter_valued(std::chrono::duration<Rep, Period> wait_time, ace::futures::dyn_channel<int>& ch) {
+ace::task timer_waiter_valued(std::chrono::duration<Rep, Period> wait_time, ace::futures::tunnel::dyn::bus<int>& ch) {
     ace::console::println("Timeout launched for: {}", wait_time);
     co_await ace::futures::timeout(wait_time);
     ace::console::println("Timeout released after: {}", wait_time);
@@ -101,7 +101,7 @@ inline auto fancy(ace::services::timepoint_t tp) {
     };
 }
 
-inline ace::task expire_waiter_valued(ace::services::timepoint_t wait_time, ace::futures::dyn_channel<ace::services::timepoint_t>& ch) {
+inline ace::task expire_waiter_valued(ace::services::timepoint_t wait_time, ace::futures::tunnel::dyn::bus<ace::services::timepoint_t>& ch) {
     ace::console::println("Expires at: {}", fancy(wait_time));
     co_await ace::futures::expire(wait_time);
     ace::console::println("Expired at: {}", fancy(wait_time));
@@ -110,14 +110,14 @@ inline ace::task expire_waiter_valued(ace::services::timepoint_t wait_time, ace:
 }
 
 template <typename channel_t>
-ace::task channel_fetcher(ace::futures::dyn_channel<channel_t>& ch, std::vector<channel_t>& output) {
+ace::task channel_fetcher(ace::futures::tunnel::dyn::bus<channel_t>& ch, std::vector<channel_t>& output) {
     std::vector<channel_t> res {};
     while (not ch.empty()) { res.emplace_back(co_await ch.pull()); }
     output = res;
     co_return;
 }
 
-inline ace::task to_spawn(ace::futures::dyn_channel<ace::core::runner*>& output) {
+inline ace::task to_spawn(ace::futures::tunnel::dyn::bus<ace::core::runner*>& output) {
     auto curr_runner = co_await ace::get_runner();
     co_await ace::futures::timeout(100ms);
     ace::console::println("'spawned' runned out");
@@ -125,7 +125,7 @@ inline ace::task to_spawn(ace::futures::dyn_channel<ace::core::runner*>& output)
     co_return;
 }
 
-inline ace::task spawner(ace::futures::dyn_channel<ace::core::runner*>& output) {
+inline ace::task spawner(ace::futures::tunnel::dyn::bus<ace::core::runner*>& output) {
     auto curr_runner = co_await ace::get_runner();
     output << curr_runner;
     const auto handle = co_await ace::spawn(to_spawn(output));
@@ -136,7 +136,7 @@ inline ace::task spawner(ace::futures::dyn_channel<ace::core::runner*>& output) 
     ace::console::println("'spawned' done!!!");
 }
 
-inline ace::task join_spawner(ace::futures::dyn_channel<ace::core::runner*>& output) {
+inline ace::task join_spawner(ace::futures::tunnel::dyn::bus<ace::core::runner*>& output) {
     auto curr_runner = co_await ace::get_runner();
     output << curr_runner;
     auto handle = co_await ace::spawn(to_spawn(output));
@@ -145,7 +145,7 @@ inline ace::task join_spawner(ace::futures::dyn_channel<ace::core::runner*>& out
     else ace::console::println("'spawned' broken!!!");
 }
 
-inline ace::promise<> to_spawn_nested(ace::futures::dyn_channel<ace::core::runner*>& output) {
+inline ace::promise<> to_spawn_nested(ace::futures::tunnel::dyn::bus<ace::core::runner*>& output) {
     const auto wd = tool::lifetime("'parallel-nested'");
     ace::console::print("'parallel-nested' started\n");
     co_await ace::futures::timeout(1000ms);
@@ -154,7 +154,7 @@ inline ace::promise<> to_spawn_nested(ace::futures::dyn_channel<ace::core::runne
     co_return;
 }
 
-inline ace::task to_spawn_cancel(ace::futures::dyn_channel<ace::core::runner*>& output) {
+inline ace::task to_spawn_cancel(ace::futures::tunnel::dyn::bus<ace::core::runner*>& output) {
     const auto wd = tool::lifetime("'parallel'");
     ace::console::print("'parallel' started\n");
     co_await to_spawn_nested(output);
@@ -164,7 +164,7 @@ inline ace::task to_spawn_cancel(ace::futures::dyn_channel<ace::core::runner*>& 
     co_return;
 }
 
-inline ace::task spawner_cancel(ace::futures::dyn_channel<ace::core::runner*>& output) {
+inline ace::task spawner_cancel(ace::futures::tunnel::dyn::bus<ace::core::runner*>& output) {
     ace::console::println("'spawner' started");
     auto handle = co_await ace::spawn(to_spawn_cancel(output));
     co_await ace::futures::timeout(100ms);
@@ -174,7 +174,7 @@ inline ace::task spawner_cancel(ace::futures::dyn_channel<ace::core::runner*>& o
     ace::console::println("'spawner' finished");
 }
 
-inline ace::task spawner_join_canceled(ace::futures::dyn_channel<ace::core::runner*>& output) {
+inline ace::task spawner_join_canceled(ace::futures::tunnel::dyn::bus<ace::core::runner*>& output) {
     ace::console::println("'spawner' started");
     auto handle = co_await ace::spawn(to_spawn_cancel(output));
     co_await ace::futures::timeout(100ms);
@@ -207,7 +207,7 @@ ace::task sleeper(std::chrono::duration<Rep, Period> wait_time) {
 }
 
 
-inline ace::task cutex_parallel(ace::futures::dyn_channel<ace::core::runner*>& output, ace::cutex& cut) {
+inline ace::task cutex_parallel(ace::futures::tunnel::dyn::bus<ace::core::runner*>& output, ace::cutex& cut) {
     ace::console::println("'cutex_parallel' started");
     const auto wd = tool::lifetime("'cutex_parallel'");
     ace::guard crx(cut);
@@ -217,7 +217,7 @@ inline ace::task cutex_parallel(ace::futures::dyn_channel<ace::core::runner*>& o
     ace::console::println("{} finished", wd.mark());
 }
 
-inline ace::task cutex_carry(ace::futures::dyn_channel<ace::core::runner*>& output, ace::cutex& cut) {
+inline ace::task cutex_carry(ace::futures::tunnel::dyn::bus<ace::core::runner*>& output, ace::cutex& cut) {
     ace::console::println("'cutex_carry' started");
     const auto wd = tool::lifetime("'cutex_carry'");
     ace::guard crx(cut);
@@ -228,7 +228,7 @@ inline ace::task cutex_carry(ace::futures::dyn_channel<ace::core::runner*>& outp
     ace::console::println("{} finished", wd.mark());
 }
 
-inline ace::task cutex_checker(ace::futures::dyn_channel<ace::core::runner*>& output, ace::cutex& cut) {
+inline ace::task cutex_checker(ace::futures::tunnel::dyn::bus<ace::core::runner*>& output, ace::cutex& cut) {
     ace::guard crx(cut);
     co_await crx.capture();
     ace::console::println("'cutex_checker' captured cutex");
@@ -236,7 +236,7 @@ inline ace::task cutex_checker(ace::futures::dyn_channel<ace::core::runner*>& ou
     ace::console::println("'cutex_checker' finished");
 }
 
-inline ace::task cutex_spawner(ace::futures::dyn_channel<ace::core::runner*>& output, ace::cutex& cut) {
+inline ace::task cutex_spawner(ace::futures::tunnel::dyn::bus<ace::core::runner*>& output, ace::cutex& cut) {
     ace::console::println("'cutex_spawner' started");
     co_await ace::futures::timeout(10ms);
     auto handle = co_await ace::spawn(cutex_carry(output, cut));
@@ -252,7 +252,7 @@ inline ace::task cutex_spawner(ace::futures::dyn_channel<ace::core::runner*>& ou
     ace::console::println("'cutex_spawner' finished");
 }
 
-inline ace::task cutex_spawner_permanent(ace::futures::dyn_channel<ace::core::runner*>& output, ace::cutex& cut) {
+inline ace::task cutex_spawner_permanent(ace::futures::tunnel::dyn::bus<ace::core::runner*>& output, ace::cutex& cut) {
     ace::console::println("'cutex_spawner_permanent' started");
     co_await ace::futures::timeout(10ms);
     auto handle = co_await ace::spawn(cutex_carry(output, cut));
@@ -506,13 +506,13 @@ inline ace::task timer_and_timer() {
     co_return;
 }
 
-inline ace::task spawn_post(int idx, ace::futures::dyn_channel<int>& ch) {
+inline ace::task spawn_post(int idx, ace::futures::tunnel::dyn::bus<int>& ch) {
     ace::console::println("Placing {} to channel", idx);
     ch << idx;
     co_return;
 }
 
-inline ace::task imposter(ace::futures::dyn_channel<int>& ch) {
+inline ace::task imposter(ace::futures::tunnel::dyn::bus<int>& ch) {
     // NOTE: Spawns parallel and joins all
     auto res = co_await (
                 (co_await ace::spawn(spawn_post(1, ch))).join()
@@ -533,7 +533,7 @@ inline ace::task imposter(ace::futures::dyn_channel<int>& ch) {
     co_return;
 }
 
-inline ace::promise<int> pusher(int idx, ace::futures::dyn_channel<int>& ch) {
+inline ace::promise<int> pusher(int idx, ace::futures::tunnel::dyn::bus<int>& ch) {
     ch << idx;
     co_return idx;
 }
@@ -551,7 +551,7 @@ inline void congrats() {
     ace::console::println("Pipe finished");
 }
 
-inline ace::task composed_output(ace::futures::dyn_channel<int>& ch) {
+inline ace::task composed_output(ace::futures::tunnel::dyn::bus<int>& ch) {
     // NOTE: Starting parallel pipes
     co_await (
             pusher(1, ch) >> printer >> congrats

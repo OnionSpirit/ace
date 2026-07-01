@@ -1,4 +1,4 @@
 [wrap-git]
 directory = nukes
 url = https://github.com/OnionSpirit/nukes.git
-revision = refactor
+revision = main

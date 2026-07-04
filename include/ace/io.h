@@ -814,6 +814,15 @@ public:                                                                         
             return std::forward<buffer>(cl);
         }
 
+        template <typename addr_t>
+        void set_msg_name(addr_t& addr) { _hdr.msg_name = &addr; _hdr.msg_namelen = sizeof(addr_t); }
+
+        void set_msg_control(void* ptr) { _hdr.msg_control = ptr; }
+
+        void set_msg_controllen(size_t len) { _hdr.msg_controllen = len; }
+
+        void set_msg_flags(int flags) { _hdr.msg_flags = flags; }
+
         /**
          * @brief Clears and releases all resources
          */
@@ -829,6 +838,11 @@ public:                                                                         
             _chunk_list_pre_end = nullptr;
             _chunk_list_end = nullptr;
             _hdr.msg_iovlen = 0;
+            _hdr.msg_name = nullptr;
+            _hdr.msg_namelen = 0;
+            _hdr.msg_control = nullptr;
+            _hdr.msg_controllen = 0;
+            _hdr.msg_flags = 0;
             _total_len = 0;
         }
 

@@ -486,6 +486,10 @@ namespace ace::core {
                 yank_vortex();
                 insert_node_ptr interthread_node;
                 // TODO: Use batch pop instead of the loop
+                // auto interthread_batch = _interthread_pool.pop_batch();
+                // auto head = cast_node<dyn_reg_node>(interthread_batch.get_head());
+                // auto tail = cast_node<dyn_reg_node>(interthread_batch.get_tail());
+                // _pool.push_list(head, tail);
                 while ((interthread_node = _interthread_pool.pop_node())) {
                     // NOTE: Fetching task from interthread insert queue
                     auto placing_node = cast_node<dyn_reg_node>(interthread_node);

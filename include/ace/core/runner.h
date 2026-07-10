@@ -210,6 +210,8 @@ namespace ace::core {
         [[nodiscard]] bool empty() const noexcept {
             return _pool.empty() and _vortex_pool.empty() and _interthread_pool.empty();
         };
+
+        void fetch_interthread() const noexcept;
     };
 
     inline runner::runner(runner &&t) noexcept {
@@ -379,10 +381,11 @@ namespace ace::core {
 
         // NOTE: Pulling from interthread pool if task is empty
         if (not task_node) [[unlikely]] {
-            if (const auto interthread_node = _interthread_pool.pop_node())
-                task_node = cast_node<dyn_reg_node>(interthread_node);
+            fetch_interthread();
+            task_node = _pool.pop_node();
             // NOTE: If there is no regular tasks then processing services
-            else return yank_vortex();
+            if (not task_node) [[unlikely]]
+                return yank_vortex();
         }
 
         // NOTE: Prefetching next task frame
@@ -478,29 +481,37 @@ namespace ace::core {
 
 
     inline bool runner::run() noexcept {
-        using namespace nukes::details::nodes;
         int i = 0;
         current_runner_ptr = this;
         for (constexpr int yank_limit = 128; i < yank_limit and yank(); ++i) {
             if (i % 16 == 0) {
                 yank_vortex();
-                insert_node_ptr interthread_node;
-                // TODO: Use batch pop instead of the loop
-                // auto interthread_batch = _interthread_pool.pop_batch();
-                // auto head = cast_node<dyn_reg_node>(interthread_batch.get_head());
-                // auto tail = cast_node<dyn_reg_node>(interthread_batch.get_tail());
-                // _pool.push_list(head, tail);
-                while ((interthread_node = _interthread_pool.pop_node())) {
-                    // NOTE: Fetching task from interthread insert queue
-                    auto placing_node = cast_node<dyn_reg_node>(interthread_node);
-                    _pool.push_node(placing_node);
-                }
+                fetch_interthread();
             }
         }
         current_runner_ptr = nullptr;
         return i not_eq 0 or yank_vortex();
     }
 
+    inline void runner::fetch_interthread() const noexcept {
+        using namespace nukes::details::nodes;
+
+        // auto interthread_batch = _interthread_pool.pop_batch();
+        // _pool.push_batch(interthread_batch);
+        //
+        // if (insert_node_ptr interthread_node; (interthread_node = _interthread_pool.pop_node())) {
+        //     // NOTE: Fetching task from interthread insert queue
+        //     auto placing_node = cast_node<dyn_reg_node>(interthread_node);
+        //     _pool.push_node(placing_node);
+        // }
+
+        insert_node_ptr interthread_node;
+        while ((interthread_node = _interthread_pool.pop_node())) {
+            // NOTE: Fetching task from interthread insert queue
+            auto placing_node = cast_node<dyn_reg_node>(interthread_node);
+            _pool.push_node(placing_node);
+        }
+    }
 } // end namespace ace::core
 
 

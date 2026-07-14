@@ -55,19 +55,29 @@ namespace ace::core {
         typedef runner_pool_t::node_t *pool_node_ptr;
         typedef insert_pool_t::node_t *insert_node_ptr;
 
+        using batch_t = nukes::details::batch<
+            insert_pool_t::node_t,
+            nukes::dynamic::mpsc_queue<task>::dyn_mpsc_iter,
+            nukes::dynamic::mpsc_queue<task>
+        >;
+
+        using batch_iterator_t = batch_t::iterator_t;
+
         ACE_CACHE_LINE(0)
 
-        mutable runner_pool_t        _pool{}; ///< Pool of the assigned tasks
+        mutable runner_pool_t           _pool               {}; ///< Pool of the assigned tasks
+        tools::moving_average           _quants             {}; ///< Average amount of the time quants for the run operation call
 
         ACE_CACHE_LINE(1)
 
-        mutable nukes::dynamic::mpsc_queue<task> _interthread_pool{}; ///< Pool for the interthread insertion
+        runner_pool_t                   _vortex_pool        {};
+        std::optional<batch_iterator_t> _batch_it           {};
+        std::optional<batch_iterator_t> _batch_end          {};
+        long                            _tasks_amount       {};
 
-        ACE_CACHE_LINE(4)
+        ACE_CACHE_LINE(3)
 
-        tools::moving_average       _quants       {}; ///< Average amount of the time quants for the run operation call
-        long                        _tasks_amount {};
-        runner_pool_t               _vortex_pool  {};
+        mutable insert_pool_t           _interthread_pool   {}; ///< Pool for the interthread insertion
 
         static thread_local cast_ptr current_runner_ptr;
 
@@ -211,7 +221,9 @@ namespace ace::core {
             return _pool.empty() and _vortex_pool.empty() and _interthread_pool.empty();
         };
 
-        void fetch_interthread() const noexcept;
+        void fetch_interthread() noexcept;
+
+        pool_node_ptr fetch_task_node();
     };
 
     inline runner::runner(runner &&t) noexcept {
@@ -377,15 +389,11 @@ namespace ace::core {
         using namespace nukes::details::nodes;
 
         promise_lifecycle touch_result = e_executed;
-        pool_node_ptr task_node = _pool.pop_node();
+        pool_node_ptr task_node = fetch_task_node();
 
         // NOTE: Pulling from interthread pool if task is empty
         if (not task_node) [[unlikely]] {
-            fetch_interthread();
-            task_node = _pool.pop_node();
-            // NOTE: If there is no regular tasks then processing services
-            if (not task_node) [[unlikely]]
-                return yank_vortex();
+            return yank_vortex();
         }
 
         // NOTE: Prefetching next task frame
@@ -493,23 +501,35 @@ namespace ace::core {
         return i not_eq 0 or yank_vortex();
     }
 
-    inline void runner::fetch_interthread() const noexcept {
-        using namespace nukes::details::nodes;
+    inline runner::pool_node_ptr runner::fetch_task_node() {
+        if (not (_batch_it and _batch_end))
+            fetch_interthread();
+        if (_batch_it and _batch_end) {
+            const auto it = ++_batch_it.value();
+            // NOTE: Reset batch vars if batch is ended
+            if (_batch_it.value() == _batch_end.value()) {
+                _batch_it.reset();
+                _batch_end.reset();
+            }
+            // NOTE: Representing batch data as pool node
+            if (pool_node_ptr pool_node; _pool._mempool.capture(pool_node)) {
+                pool_node->_data = std::move(*it);
+                return pool_node;
+            }
+            throw std::runtime_error {"Can not capture node to propagate task"};
+        }
+        const auto ret = _pool.pop_node();
+        return ret;
+    }
 
-        // auto interthread_batch = _interthread_pool.pop_batch();
-        // _pool.push_batch(interthread_batch);
-        //
-        // if (insert_node_ptr interthread_node; (interthread_node = _interthread_pool.pop_node())) {
-        //     // NOTE: Fetching task from interthread insert queue
-        //     auto placing_node = cast_node<dyn_reg_node>(interthread_node);
-        //     _pool.push_node(placing_node);
-        // }
-
-        insert_node_ptr interthread_node;
-        while ((interthread_node = _interthread_pool.pop_node())) {
-            // NOTE: Fetching task from interthread insert queue
-            auto placing_node = cast_node<dyn_reg_node>(interthread_node);
-            _pool.push_node(placing_node);
+    inline void runner::fetch_interthread() noexcept {
+        if (_batch_it and _batch_end) return;
+        auto fetched_batch = _interthread_pool.pop_batch();
+        _batch_it = fetched_batch.begin();
+        _batch_end = fetched_batch.end();
+        if (_batch_it == _batch_end) {
+            _batch_it.reset();
+            _batch_end.reset();
         }
     }
 } // end namespace ace::core

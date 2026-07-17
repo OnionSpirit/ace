@@ -218,8 +218,6 @@ namespace ace::core {
         };
 
         pool_node_ptr fetch_task_node();
-
-        void fetch_interthread();
     };
 
     inline runner::runner(runner &&t) noexcept {
@@ -387,15 +385,13 @@ namespace ace::core {
         promise_lifecycle touch_result = e_executed;
         pool_node_ptr task_node = fetch_task_node();
 
-        // NOTE: Pulling from interthread pool if task is empty
-        if (not task_node) [[unlikely]] {
+        // NOTE: If can not pull task
+        if (not task_node) [[unlikely]]
             return yank_vortex();
-        }
 
         // NOTE: Prefetching next task frame
-        if (const auto head = _pool.inspect_head()) [[likely]] {
+        if (const auto head = _pool.inspect_head()) [[likely]]
             head->_data.prefetch();
-        }
 
         // NOTE: Proceeding async
         task_node->_data.awake(&touch_result);
@@ -490,7 +486,9 @@ namespace ace::core {
         for (constexpr int yank_limit = 128; i < yank_limit and yank(); ++i) {
             if (i % 16 == 0) {
                 yank_vortex();
-                fetch_interthread();
+                // NOTE: Trying to switch to interthread pool
+                if (_pull_source not_eq pull_source::e_interthread_pool and not _interthread_pool.empty())
+                    _pull_source = pull_source::e_interthread_pool;
             }
         }
         current_runner_ptr = nullptr;
@@ -498,41 +496,28 @@ namespace ace::core {
     }
 
     inline runner::pool_node_ptr runner::fetch_task_node() {
-        pool_node_ptr ret {nullptr};
+        using namespace nukes::details::nodes;
+        pool_node_ptr pool_node {nullptr};
         // NOTE: Trying to fetch from local pool
         if (_pull_source == pull_source::e_local_pool) {
-            ret = _pool.pop_node();
+            pool_node = _pool.pop_node();
             // NOTE: In case when cannot fetch then switching to interthread pool
-            if (not ret)
+            if (not pool_node)
                 _pull_source = pull_source::e_interthread_pool;
         }
         // NOTE: Trying to fetch from interthread pool
         if (_pull_source == pull_source::e_interthread_pool) {
+            if (const auto inter_node = _interthread_pool.pop_node()) {
+                // NOTE: Trying to share node with interthread pool
+                if (_pool._mempool.capture(pool_node))
+                    _interthread_pool._mempool.raw_sync(pool_node);
+                pool_node = cast_node<dyn_reg_node>(inter_node);
+            }
             // NOTE: In case when cannot fetch then switching to local pool
-            if (task interthread_task; not _interthread_pool.pop(interthread_task))
+            else
                 _pull_source = pull_source::e_local_pool;
-
-            // NOTE: Putting interthread task into pool node
-            else if (_pool._mempool.capture(ret))
-                ret->_data = std::move(interthread_task);
-
-            else throw std::runtime_error {"Can not capture node to propagate task"};
         }
-        return ret;
-    }
-
-    inline void runner::fetch_interthread() {
-        if (_pull_source == pull_source::e_interthread_pool) return;
-        if (task interthread_task; _interthread_pool.pop(interthread_task)) {
-            pool_node_ptr pool_node {nullptr};
-            _pull_source = pull_source::e_interthread_pool;
-            // NOTE: Putting interthread task into pool node
-            if (not _pool._mempool.capture(pool_node))
-                throw std::runtime_error {"Can not capture node to propagate task"};
-
-            pool_node->_data = std::move(interthread_task);
-            _pool.push_node(pool_node);
-        }
+        return pool_node;
     }
 } // end namespace ace::core
 

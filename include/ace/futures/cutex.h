@@ -55,17 +55,18 @@ namespace ace::futures {
 
     /**
      * @brief Internal implementation of the cutex locking future.
-     *
-     * @details @c cutex_future is the awaitable returned by @c cutex::capture().
+     * @c cutex_future is the awaitable returned by @c cutex::capture().
      * It is separated from @c cutex itself to enforce RAII discipline through
      * the @c proxy wrapper.
+     *
+     * @b resumeType - @c void
      *
      * @see ace::futures::cutex
      */
     class ACE_AWAIT_NODISCARD cutex_future : public core::traits::future_traits<cutex_future> {
 
-        struct cutex_conductor;
-        friend cutex_conductor;
+        struct cutex_router;
+        friend cutex_router;
 
     public:
 
@@ -261,18 +262,15 @@ ace::futures::cutex_future::
 returnT ACE_FUTURE_CUTEX_FUTURE_SPACE
 
 
-struct ACE_FUTURE_CUTEX_FUTURE_SPACE cutex_conductor : conductor_handler_t {
+struct ACE_FUTURE_CUTEX_FUTURE_SPACE cutex_router : runner_router {
 
-    cutex_conductor() = delete;
+    cutex_router() = delete;
 
-    explicit cutex_conductor(cutex_future* cutex_)
+    explicit cutex_router(cutex_future* cutex_)
         : _cutex(cutex_) {};
 
-    node_t* forward_node(node_t* node) override {
-        using namespace nukes::details::nodes;
-        auto n = cast_node<dyn_node>(node);
-        _cutex->_waiters.push_node(n);
-        return nullptr;
+    void redirect(omni_node node) override {
+        _cutex->_waiters.push_node(node);
     }
 
     // NOTE: Tasks is resuming with wiped conductor.
@@ -285,7 +283,7 @@ struct ACE_FUTURE_CUTEX_FUTURE_SPACE cutex_conductor : conductor_handler_t {
     // NOTE: But Im not sure that mpsc or mpmc would stay consistent
     void cancel() override {  }
 
-    ~cutex_conductor() override = default;
+    ~cutex_router() override = default;
 
     cutex_future* _cutex;
 };
@@ -340,7 +338,7 @@ pending_notify() noexcept {
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 await_suspend(auto coroutine) {
     // NOTE: Setting conductor for dispatch to the cutex waiters queue
-    coroutine.promise()._runner_conductor = cutex_conductor{this};
+    coroutine.promise()._runner_router = cutex_router{this};
     return true;
 }
 

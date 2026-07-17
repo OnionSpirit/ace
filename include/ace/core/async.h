@@ -9,8 +9,8 @@
  *  - Inherits from @c busy_future_traits<async> so that it can be directly
  *    @c co_await-ed from another coroutine (nested coroutines).
  *  - Owns its @c std::coroutine_handle and destroys it on destruction.
- *  - Carries a @c runner_conductor_slot_t that futures use to redirect the
- *    async into their own waiting structures (conductor pattern).
+ *  - Carries a @c runner_router_slot_t that futures use to redirect the
+ *    async into their own waiting structures (router pattern).
  *  - Can expose a @c control_block_handle via @c observe() for external
  *    join / cancel operations.
  *
@@ -41,7 +41,9 @@
 #include "ace/core/traits/promise.h"
 #include "ace/core/tools/macro.h"
 #include "ace/core/control.h"
-#include "ace/core/traits/conduction.h"
+#include "ace/core/traits/routing.h"
+#include "nukes/dynamic/mpsc_queue.h"
+#include "tools/omniptr.h"
 
 
 // TODO: Move yield operation to generator,
@@ -49,44 +51,7 @@
 // so it can be used in a for loop
 namespace ace::core {
 
-    /**
-     * @brief Type-erased pointer with templated static-cast access.
-     *
-     * @details Stores a @c void* and provides @c as<T>() for casting to a
-     * concrete type and @c addr_of<T>() for obtaining a pointer-to-pointer.
-     * Used throughout ACE to store runner pool pointers and conductor
-     * references in a type-safe manner without virtual dispatch.
-     *
-     * Move and copy are defaulted — the stored pointer is simply transferred.
-     */
-    struct cast_ptr {
-
-        void* _ptr = nullptr;
-
-        cast_ptr(void* ptr = nullptr) : _ptr{ptr} { };
-
-        template <typename T>
-        cast_ptr(T* ptr) : _ptr{ptr} { };
-
-        cast_ptr (const cast_ptr & p) = default;
-
-        cast_ptr (cast_ptr&& p) = default;
-
-        cast_ptr& operator=(const cast_ptr & p) = default;
-
-        cast_ptr& operator=(cast_ptr&& p) = default;
-
-        cast_ptr& operator=(void* ptr) { _ptr = ptr; return *this; }
-
-        explicit operator bool() const noexcept { return _ptr not_eq nullptr; }
-
-        template <typename T>
-        [[nodiscard]] auto as() const { return static_cast<T*>(_ptr); }
-
-        template <typename T>
-        auto addr_of() { return reinterpret_cast<T**>(&_ptr); }
-
-    };
+    struct runner;
 
     /**
      * @brief Core coroutine async type.
@@ -114,12 +79,20 @@ namespace ace::core {
 
         struct promise_type;
 
-        typedef std::coroutine_handle<promise_type> coroutine_t;             ///< Type of the underlying coroutine handle.
-        typedef nukes::dynamic::reg_queue<async<>> runner_pool_t;          ///< Queue type used as the runner's task pool.
-        typedef traits::runner_conductor_handle<async<>> runner_conductor; ///< Abstract conductor interface for this async type.
-
-        /// @brief In-place storage slot for a conductor object.
-        typedef traits::conductor_slot<runner_conductor> runner_conductor_slot_t;
+        /// @brief Type of the underlying coroutine handle.
+        typedef std::coroutine_handle<promise_type>                            coroutine_t;
+        /// @brief Queue type used as the runner's task pool.
+        typedef nukes::dynamic::reg_queue<async<>>                             runner_pool_t;
+        /// @brief Queue type used as the runner's task pool.
+        typedef nukes::dynamic::mpsc_queue<async<>>                            insert_pool_t;
+        /// @brief Secured void* for any nodes
+        typedef tools::omniptr<runner_pool_t::node_t, insert_pool_t::node_t>   omni_node;
+        /// @brief Secured void* for runner and it's pool
+        typedef tools::omniptr<runner, runner_pool_t>                          omni_runner;
+        /// @brief Abstract router interface for this async type.
+        typedef traits::runner_router_handle<omni_node>                        runner_router;
+        /// @brief In-place storage slot for a router object.
+        typedef traits::router_slot<runner_router>                             runner_router_slot_t;
 
         coroutine_t _coroutine; ///< Underlying coroutine handle.  Null after move.
 
@@ -127,14 +100,7 @@ namespace ace::core {
         /// if @c async<...> is constructed out of runner context
         static runner_pool_t* get_current_pool() noexcept;
 
-        void setup_runner() {
-            // TODO: Why not? But but not works
-            // if constexpr (std::same_as<promise_rule_t, permanent>)
-            //     if (not _coroutine.promise()._runner_pool)
-            //         _coroutine.promise()._runner_pool = get_current_pool();
-        }
-
-        async() { setup_runner(); }
+        async() = default;
 
         /**
          * @brief Move constructor.  Transfers ownership of the coroutine handle.
@@ -143,7 +109,6 @@ namespace ace::core {
         async(async && ctx) noexcept {
             _coroutine = std::forward<coroutine_t>(ctx._coroutine);
             ctx._coroutine = nullptr;
-            setup_runner();
         };
 
         /**
@@ -154,7 +119,6 @@ namespace ace::core {
         async &operator=(async && ctx)  noexcept {
             _coroutine = std::forward<coroutine_t>(ctx._coroutine);
             ctx._coroutine = nullptr;
-            setup_runner();
             return *this;
         };
 
@@ -166,7 +130,9 @@ namespace ace::core {
          * @details Used internally by @c promise_type::get_return_object().
          * @param handler  Coroutine handle to take ownership of.
          */
-        explicit async(coroutine_t &&handler) : _coroutine{handler} { setup_runner(); };
+        explicit async(coroutine_t &&handler) : _coroutine{handler} {
+            _coroutine.promise().setup_control_block(_coroutine);
+        };
 
         /**
          * @brief Check whether the coroutine is exist.
@@ -190,6 +156,12 @@ namespace ace::core {
         ~async() override {
             if (_coroutine) {
                 release_waiters();
+                // NOTE: Canceling task if it is destructed incomplete
+                if constexpr (not std::same_as<promise_rule_t, automaton>)
+                    if (_coroutine.promise()._runner_router) [[likely]] {
+                        _coroutine.promise()._runner_router->cancel();
+                        _coroutine.promise()._runner_router.release();
+                    }
                 _coroutine.destroy();
             }
         };
@@ -197,10 +169,10 @@ namespace ace::core {
         /**
          * @brief Release the currently-held future and clear the busy-future pointer.
          * @details Called by the runner before resuming a async that was
-         * previously forwarded by a conductor.
+         * previously forwarded by a router.
          */
         void release_future() {
-            _coroutine.promise()._runner_conductor.release();
+            _coroutine.promise()._runner_router.release();
             _coroutine.promise()._busy_future = nullptr;
         }
 
@@ -211,15 +183,14 @@ namespace ace::core {
          * @return @c true if the runner may resume this async.
          */
         bool is_resumable() {
-            return (not _coroutine.promise()._busy_future or _coroutine.promise()._busy_future->await_ready())
-                    and _coroutine.promise()._runner;
+            return not _coroutine.promise()._busy_future or _coroutine.promise()._busy_future->await_ready();
         }
 
         /**
          * @brief Create a @c control_block_handle that allows external
          *        join / cancel operations on this coroutine.
          * @details Lazily initializes the control block and the internal
-         * @c async_conductor.  Safe to call multiple times; subsequent calls
+         * @c async_router.  Safe to call multiple times; subsequent calls
          * return handles that share the same underlying block.
          * @return A new @c control_block_handle with an incremented weak ref-count.
          * @note The async must not have been moved away before calling @c observe().
@@ -237,10 +208,11 @@ namespace ace::core {
          */
         void release_waiters() {
             if (_coroutine.promise()._waiters) {
-                async<> waiter;
-                while (_coroutine.promise()._waiters->pop(waiter)) {
-                    waiter.release_future();
-                    waiter._coroutine.promise()._runner.as<runner_pool_t>()->push(std::move(waiter));
+                omni_node waiter = _coroutine.promise()._waiters->pop_node();
+                while (waiter and waiter->_data.is_exist()) {
+                    waiter->_data.release_future();
+                    waiter->_data._coroutine.promise()._runner.as<runner_pool_t>()->push_node(waiter);
+                    waiter = _coroutine.promise()._waiters->pop_node();
                 }
             }
         }
@@ -267,37 +239,37 @@ namespace ace::core {
             }
         }
 
-        class async_conductor : public traits::control_conductor_handle {
+        class async_router : public traits::control_router_handle {
 
             void* _address { nullptr };
 
         public:
 
-            async_conductor() = default;
+            async_router() = default;
 
-            explicit async_conductor(const coroutine_t& coroutine)
+            explicit async_router(const coroutine_t& coroutine)
                 : _address(coroutine.address()) {}
 
             void cancel() noexcept override {
                 if (not _address) [[unlikely]] return;
                 auto handle = coroutine_t::from_address(_address);
-                if (handle and handle.promise()._runner_conductor) [[likely]] {
-                    handle.promise()._runner_conductor->cancel();
-                    handle.promise()._runner_conductor.release();
+                if (handle and handle.promise()._runner_router) [[likely]] {
+                    handle.promise()._runner_router->cancel();
+                    handle.promise()._runner_router.release();
                 }
                 handle.promise().status(e_detached);
             }
 
-            bool forward(void* undefined_waiter) noexcept override {
+            bool redirect(void* undefined_waiter) noexcept override {
                 if (not _address or not undefined_waiter) [[unlikely]] return false;
                 auto handle = coroutine_t::from_address(_address);
-                auto* waiter = static_cast<async<>*>(undefined_waiter);
+                auto waiter = omni_node(undefined_waiter);
                 handle.promise()._waiters = std::make_shared<runner_pool_t>();
-                handle.promise()._waiters->push(std::forward<async<>>(*waiter));
+                handle.promise()._waiters->push_node(std::forward<omni_node>(waiter));
                 return true;
             }
 
-            ~async_conductor() override = default;
+            ~async_router() override = default;
         };
 
         /**
@@ -309,10 +281,10 @@ namespace ace::core {
          *
          *  | Field | Type | Purpose |
          *  |---|---|---|
-         *  | @c _runner_conductor | @c runner_conductor_slot_t | In-place storage for the active conductor. |
+         *  | @c _runner_router | @c runner_router_slot_t | In-place storage for the active router. |
          *  | @c _runner_pool | @c runner_pool_t* | Pointer to the owning runner's task queue. |
          *  | @c _waiters | @c shared_ptr<runner_pool_t> | Queue of asyncs waiting for this one to finish. |
-         *  | @c _self_conductor | @c optional<async_conductor> | Conductor installed into the control block. |
+         *  | @c _self_router | @c optional<async_router> | Router installed into the control block. |
          *  | @c _roaming | @c bool | When @c true the balancer may migrate the task to another runner. |
          *  | @c _polling | @c bool | When @c true the runner holds it in low priority task pool. |
          */
@@ -329,7 +301,9 @@ namespace ace::core {
              * @return @c std::suspend_always for @c ace::async (lazy), or
              *         @c std::suspend_never for @c ace::promise (eager).
              */
-            [[nodiscard]] auto initial_suspend() const noexcept {
+            [[nodiscard]] auto initial_suspend() noexcept {
+                // NOTE: Fetching runner ptr
+                _runner = get_current_pool();
                 return promise_rule_t::action();
             }
 
@@ -384,7 +358,7 @@ namespace ace::core {
              * @brief Lazily initialise the control block for external observation.
              *
              * @details Retrieves the @c control_block prefix allocated before
-             * this promise, constructs a @c async_conductor, and links them so
+             * this promise, constructs a @c async_router, and links them so
              * that @c control_block_handle::cancel() / @c forward() work.
              *
              * Only available for lazy (@c differed) coroutines because eager
@@ -395,40 +369,40 @@ namespace ace::core {
              * @param self  Handle to the owning coroutine.
              */
             template <typename promise_t>
-            requires std::same_as<differed, promise_rule_t>
             void setup_control_block(const std::coroutine_handle<promise_t>& self) {
+                if (_block) return;
                 // NOTE: Getting control block address
                 _block = control_block::get_block_from_address(self.address());
-                // NOTE: Initiating promise conductor
-                _self_conductor = async_conductor(self);
-                // NOTE: Passing reference of the inited conductor to the control block
-                _block->_control_conductor = &_self_conductor.value();
+                // NOTE: Initiating promise router
+                _self_router = async_router(self);
+                // NOTE: Passing reference of the inited router to the control block
+                _block->_control_router = &_self_router.value();
             }
 
             /**
-             * @brief Construct a @c async_conductor and return a pointer to it.
-             * @details Used when a control conductor is needed without attaching
+             * @brief Construct a @c async_router and return a pointer to it.
+             * @details Used when a control router is needed without attaching
              * it to the control block immediately.
              * @tparam promise_t  Promise type of the coroutine handle.
              * @param self  Handle to the owning coroutine.
-             * @return Pointer to the newly created conductor (lifetime tied to
-             *         @c _self_conductor).
+             * @return Pointer to the newly created router (lifetime tied to
+             *         @c _self_router).
              */
             template <typename promise_t>
-            traits::control_conductor_handle* get_promise_conductor(const std::coroutine_handle<promise_t>& self) {
-                // NOTE: Initiating promise conductor
-                _self_conductor = async_conductor(self);
-                return &_self_conductor.value();
+            traits::control_router_handle* get_promise_router(const std::coroutine_handle<promise_t>& self) {
+                // NOTE: Initiating promise router
+                _self_router = async_router(self);
+                return &_self_router.value();
             }
 
             // NOTE: Order of the following variables is optimized. DO NOT SWAP THEM!!!
 
-            runner_conductor_slot_t _runner_conductor {};  ///< In-place conductor slot.  Set by the awaited future; read by the runner.
-            cast_ptr _runner {nullptr};                    ///< Pointer to the owning runner's MPSC task queue.  Set by @c runner::attach().
+            runner_router_slot_t   _runner_router {};        ///< In-place router slot.  Set by the awaited future; read by the runner.
+            omni_runner            _runner {nullptr};     ///< Pointer to the owning runner's MPSC task queue.  Set by @c runner::attach().
             std::shared_ptr<runner_pool_t> _waiters;
-            // NOTE: Conductor to manage promise on suspended state.
+            // NOTE: Router to manage promise on suspended state.
             // NOTE: Context owns only one promise. Extra slot object is unnecessary
-            std::optional<async_conductor> _self_conductor;
+            std::optional<async_router> _self_router;
             bool _roaming { false };
             bool _polling { false };
         };
@@ -457,7 +431,7 @@ namespace ace::core {
          * @brief C++20 awaitable protocol — suspend the outer coroutine.
          * @details On the first call (status @c e_inited), propagates the runner
          * pool pointer from the outer promise.  In all cases, steals the
-         * conductor slot from the inner promise so the runner can find it.
+         * router slot from the inner promise so the runner can find it.
          * @tparam promiseT  Promise type of the outer coroutine.
          * @param outer      Handle to the outer (calling) coroutine.
          * @return @c false if the inner coroutine finished synchronously (outer
@@ -466,14 +440,10 @@ namespace ace::core {
         template<typename promiseT>
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
             // NOTE: Secure if _runner_pool is null
-            if (not _coroutine.promise()._runner)
-                _coroutine.promise()._runner = outer.promise()._runner;
-            // NOTE: Extra call of await_ready fore differed async because it was skipped by idle runner pool ptr
-            if (_coroutine.promise().status() == e_inited)
-                if (await_ready()) return false;
+            _coroutine.promise()._runner = outer.promise()._runner;
             // NOTE: No extra checks needed, because function would be called once before suspending.
-            // NOTE: Just coping conductor ptr. Outer task will destroy conductor before current promise stack
-            outer.promise()._runner_conductor << _coroutine.promise()._runner_conductor;
+            // NOTE: Just coping router ptr. Outer task will destroy router before current promise stack
+            outer.promise()._runner_router << _coroutine.promise()._runner_router;
             return true;
         }
 
@@ -554,8 +524,17 @@ namespace ace {
     // NOTE: Type of a pool for runner [Relates 'async' and 'runner']
     typedef task::runner_pool_t runner_pool_t;
 
-    // NOTE: Type of a conductor handler for runner and future objects [Relates 'future' and 'runner']
-    typedef task::runner_conductor conductor_handler_t;
+    // NOTE: Type of a pool for task insertion [Relates 'async' and 'runner']
+    typedef task::insert_pool_t insert_pool_t;
+
+    // NOTE: Common transfer entity for the async task
+    typedef task::omni_node omni_node;
+
+    // NOTE: Unified runner access ptr
+    typedef task::omni_runner omni_runner;
+
+    // NOTE: Type of a router handler for runner and future objects [Relates 'future' and 'runner']
+    typedef task::runner_router runner_router;
 
     // NOTE: Type alias for std standard type
     typedef std::suspend_always suspend;

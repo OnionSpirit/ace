@@ -230,10 +230,13 @@ inline ace::task cutex_carry(ace::futures::tunnel::dyn::bus<ace::core::runner*>&
 
 inline ace::task cutex_checker(ace::futures::tunnel::dyn::bus<ace::core::runner*>& output, ace::cutex& cut) {
     ace::guard crx(cut);
-    co_await crx.capture();
-    ace::console::println("'cutex_checker' captured cutex");
-    output << co_await ace::get_runner();
-    ace::console::println("'cutex_checker' finished");
+    if (co_await (crx.capture() or ace::futures::timeout(50ms)) == 0) {
+        ace::console::println("'cutex_checker' captured cutex");
+        output << co_await ace::get_runner();
+        ace::console::println("'cutex_checker' finished");
+        co_return;
+    }
+    ace::console::println("'cutex_checker' can't capture cutex. FAILED");
 }
 
 inline ace::task cutex_spawner(ace::futures::tunnel::dyn::bus<ace::core::runner*>& output, ace::cutex& cut) {

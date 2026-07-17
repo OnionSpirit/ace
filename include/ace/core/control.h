@@ -32,7 +32,7 @@
 #include <atomic>
 #include <cstddef>
 
-#include "ace/core/traits/conduction.h"
+#include "ace/core/traits/routing.h"
 #include "ace/core/tools/macro.h"
 
 namespace ace::core {
@@ -58,7 +58,7 @@ namespace ace::core {
      *
      * @details Allocated immediately before the promise in memory by
      * @c promise_traits::operator new.  Stores the reference counts and an
-     * optional pointer to a @c control_conductor_handle that enables external
+     * optional pointer to a @c control_router_handle that enables external
      * join / cancel operations.
      *
      * All static methods accept a raw @c void* pointing to @b either the
@@ -69,7 +69,7 @@ namespace ace::core {
 
         uint64_t _weak_refcount {1};                                      ///< Number of watchers (handles). Initial value: 1 (the block itself).
         uint64_t _strong_refcount {1};                                    ///< Number of owners (always the coroutine frame). Initial value: 1.
-        traits::control_conductor_handle* _control_conductor { nullptr }; ///< Optional conductor for external join/cancel; set by @c setup_control_block().
+        traits::control_router_handle* _control_router { nullptr };       ///< Optional router for external join/cancel; set by @c setup_control_block().
         uint32_t _frame_size {1};                                         ///< Coroutine frame size, including control block. Non-zero value means stack is exist, 0 otherwise
         promise_lifecycle _status { e_inited };                           ///< Flag that shows that Coroutines completed without cancellation
 
@@ -191,13 +191,13 @@ namespace ace::core {
 
         /**
          * @brief Request cancellation of the associated coroutine.
-         * @details Calls @c control_conductor->cancel(), then releases this handle.
+         * @details Calls @c control_router->cancel(), then releases this handle.
          * No-op if the handle is idle or the coroutine has already finished.
          */
         void cancel() {
-            if (is_idle() or not _block->_control_conductor or done()) [[unlikely]]
+            if (is_idle() or not _block->_control_router or done()) [[unlikely]]
                 return;
-            _block->_control_conductor->cancel();
+            _block->_control_router->cancel();
             release();
         }
 
@@ -225,13 +225,13 @@ namespace ace::core {
         /**
          * @brief Register a waiter async to be notified when the coroutine finishes.
          * @param waiter  Pointer to the @c ace::task async to register.
-         * @return @c true if the waiter was accepted by the conductor.
+         * @return @c true if the waiter was accepted by the router.
          */
         bool forward(void* waiter) const {
             if (not _block) [[unlikely]] return false;
-            if (done() or not _block->_control_conductor or waiter == nullptr) [[unlikely]]
+            if (done() or not _block->_control_router or waiter == nullptr) [[unlikely]]
                 return false;
-            return _block->_control_conductor->forward(waiter);
+            return _block->_control_router->redirect(waiter);
         }
     };
 

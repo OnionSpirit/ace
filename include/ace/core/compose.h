@@ -71,8 +71,8 @@ namespace ace::core {
 
         IMPORT_FUTURE_ENV(or_await);
 
-        struct or_await_conductor;
-        friend or_await_conductor;
+        struct or_await_router;
+        friend or_await_router;
 
         typedef meta::resume_type<l_future_t> l_future_ret_t;
         typedef meta::resume_type<r_future_t> r_future_ret_t;
@@ -95,7 +95,7 @@ namespace ace::core {
 
         typedef decltype(define_return_type()) return_t;
 
-        std::optional<task> _waiter;
+        omni_node _waiter;
         l_future_t& _l_future;
         r_future_t& _r_future;
         std::optional<async_handle> _l_future_observer;
@@ -118,7 +118,7 @@ namespace ace::core {
                 opposite_observer->cancel();
 
             if (_waiter)
-                runner::reattach(std::move(_waiter.value()));
+                runner::reattach(_waiter);
 
             // NOTE: Setting finished operand ID if both operands are void awaitable
             if constexpr (std::same_as<int, return_t>)
@@ -152,8 +152,8 @@ namespace ace::core {
 
         IMPORT_FUTURE_ENV(and_await);
 
-        struct and_await_conductor;
-        friend and_await_conductor;
+        struct and_await_router;
+        friend and_await_router;
 
         typedef meta::resume_type<l_future_t> l_future_ret_t;
         typedef meta::resume_type<r_future_t> r_future_ret_t;
@@ -176,7 +176,7 @@ namespace ace::core {
 
         typedef decltype(define_return_type()) return_t;
 
-        task _waiter;
+        omni_node _waiter;
         l_future_t& _l_future;
         r_future_t& _r_future;
         std::optional<async_handle> _l_future_observer;
@@ -201,7 +201,7 @@ namespace ace::core {
                     co_await opposite_observer->join();
 
             if constexpr (observer_idx == 1)
-                runner::reattach(std::move(_waiter));
+                runner::reattach(_waiter);
         };
 
         bool await_suspend(auto);
@@ -231,8 +231,8 @@ namespace ace::core {
 
         IMPORT_FUTURE_ENV(or_await_composed);
 
-        struct or_await_composed_conductor;
-        friend or_await_composed_conductor;
+        struct or_await_composed_router;
+        friend or_await_composed_router;
 
         static constexpr int futures_amount = sizeof...(future_ts);
         static constexpr int top_observer_idx = futures_amount - 1;
@@ -251,7 +251,7 @@ namespace ace::core {
 
         typedef decltype(define_return_type()) return_t;
 
-        task _waiter;
+        omni_node _waiter;
         std::tuple<future_ts&...> _futures;
         std::array<std::optional<async_handle>, sizeof...(future_ts)> _observers;
         return_t _result;
@@ -272,8 +272,8 @@ namespace ace::core {
                     _observers[i]->cancel();
             }
 
-            if (_waiter)
-                runner::reattach(std::move(_waiter));
+            if (_waiter and _waiter->_data)
+                runner::reattach(_waiter);
 
             // NOTE: Setting finished operand ID if both operands are void awaitable
             if constexpr (std::same_as<int, return_t>)
@@ -302,8 +302,8 @@ namespace ace::core {
 
         IMPORT_FUTURE_ENV(and_await_composed);
 
-        struct and_await_composed_conductor;
-        friend and_await_composed_conductor;
+        struct and_await_composed_router;
+        friend and_await_composed_router;
 
         static constexpr int futures_amount = sizeof...(future_ts);
         static constexpr int top_observer_idx = futures_amount - 1;
@@ -322,7 +322,7 @@ namespace ace::core {
 
         typedef decltype(define_return_type()) return_t;
 
-        task _waiter;
+        omni_node _waiter;
         std::tuple<future_ts&...> _futures;
         std::array<std::optional<async_handle>, sizeof...(future_ts)> _observers;
         return_t _result;
@@ -346,7 +346,7 @@ namespace ace::core {
             }
 
             if constexpr (observer_idx == top_observer_idx)
-                runner::reattach(std::move(_waiter));
+                runner::reattach(_waiter);
         };
 
         bool await_suspend(auto);
@@ -470,22 +470,22 @@ namespace ace::core {
 
 ACE_COMPOSE_AWAIT_FUTURE_META
 /**
- * @brief Conductor for @c or_await — stores the waiting task until the race resolves.
+ * @brief Router for @c or_await — stores the waiting task until the race resolves.
  *
  * @details When @c forward() is called by the runner, the caller is saved in
  * @c _or_await->_waiter.  When an observer finishes, it calls
  * @c runner::reattach() on the stored waiter.  @c cancel() propagates
  * cancellation to both observer tasks.
  */
-struct ACE_OR_AWAIT_FUTURE_SPACE or_await_conductor final : conductor_handler_t {
+struct ACE_OR_AWAIT_FUTURE_SPACE or_await_router final : runner_router {
 
-    or_await_conductor() = delete;
+    or_await_router() = delete;
 
-    explicit or_await_conductor(or_await* or_await_)
+    explicit or_await_router(or_await* or_await_)
         : _or_await(or_await_) {};
 
-    void forward(task&& ctx) override {
-        _or_await->_waiter = std::move(ctx);
+    void redirect(omni_node node) override {
+        _or_await->_waiter = node;
     }
 
     void cancel() override {
@@ -493,7 +493,7 @@ struct ACE_OR_AWAIT_FUTURE_SPACE or_await_conductor final : conductor_handler_t 
         _or_await->_r_future_observer->cancel();
     }
 
-    ~or_await_conductor() override = default;
+    ~or_await_router() override = default;
 
     or_await* _or_await;
 };
@@ -513,28 +513,28 @@ await_suspend(auto external_coro) {
     runner_ptr->attach_front(std::forward<task>(_l_observer));
     _r_observer._coroutine.promise()._roaming = external_coro.promise()._roaming = false;
     runner_ptr->attach_front(std::forward<task>(_r_observer));
-    // NOTE: Setting conductor for external waiter
-    external_coro.promise()._runner_conductor = or_await_conductor {this};
+    // NOTE: Setting router for external waiter
+    external_coro.promise()._runner_router = or_await_router {this};
     return true;
 }
 
 
 ACE_COMPOSE_AWAIT_FUTURE_META
 /**
- * @brief Conductor for @c and_await — stores the waiting task until both futures finish.
+ * @brief Router for @c and_await — stores the waiting task until both futures finish.
  *
- * @details Similar to @c or_await_conductor but the stored waiter is only
+ * @details Similar to @c or_await_router but the stored waiter is only
  * re-attached after both observer tasks have completed.
  */
-struct ACE_AND_AWAIT_FUTURE_SPACE and_await_conductor final : conductor_handler_t {
+struct ACE_AND_AWAIT_FUTURE_SPACE and_await_router final : runner_router {
 
-    and_await_conductor() = delete;
+    and_await_router() = delete;
 
-    explicit and_await_conductor(and_await* and_await_)
+    explicit and_await_router(and_await* and_await_)
         : _and_await(and_await_) {};
 
-    void forward(task&& ctx) override {
-        _and_await->_waiter = std::move(ctx);
+    void redirect(omni_node node) override {
+        _and_await->_waiter = node;
     }
 
     void cancel() override {
@@ -542,7 +542,7 @@ struct ACE_AND_AWAIT_FUTURE_SPACE and_await_conductor final : conductor_handler_
         _and_await->_r_future_observer->cancel();
     }
 
-    ~and_await_conductor() override = default;
+    ~and_await_router() override = default;
 
     and_await* _and_await;
 };
@@ -562,25 +562,25 @@ await_suspend(auto external_coro) {
     runner_ptr->attach_front(std::forward<task>(_l_observer));
     _r_observer._coroutine.promise()._roaming = external_coro.promise()._roaming = false;
     runner_ptr->attach_front(std::forward<task>(_r_observer));
-    // NOTE: Setting conductor for external waiter
-    external_coro.promise()._runner_conductor = and_await_conductor {this};
+    // NOTE: Setting router for external waiter
+    external_coro.promise()._runner_router = and_await_router {this};
     return true;
 }
 
 ACE_COMPOSE_AWAIT_COMPOSED_FUTURE_META
 /**
- * @brief Conductor for variadic @c and_await_composed.
- * @see and_await_conductor
+ * @brief Router for variadic @c and_await_composed.
+ * @see and_await_router
  */
-struct ACE_AND_AWAIT_COMPOSED_FUTURE_SPACE and_await_composed_conductor final : conductor_handler_t {
+struct ACE_AND_AWAIT_COMPOSED_FUTURE_SPACE and_await_composed_router final : runner_router {
 
-    and_await_composed_conductor() = delete;
+    and_await_composed_router() = delete;
 
-    explicit and_await_composed_conductor(and_await_composed* and_await_composed_)
+    explicit and_await_composed_router(and_await_composed* and_await_composed_)
         : _and_await_composed(and_await_composed_) {};
 
-    void forward(task&& ctx) override {
-        _and_await_composed->_waiter = std::move(ctx);
+    void redirect(omni_node node) override {
+        _and_await_composed->_waiter = node;
     }
 
     void cancel() override {
@@ -589,7 +589,7 @@ struct ACE_AND_AWAIT_COMPOSED_FUTURE_SPACE and_await_composed_conductor final : 
         }
     }
 
-    ~and_await_composed_conductor() override = default;
+    ~and_await_composed_router() override = default;
 
     and_await_composed* _and_await_composed;
 };
@@ -609,25 +609,25 @@ await_suspend(auto external_coro) {
             runner_ptr->attach_front(std::forward<task>(observer_inst));
         }());
     }(std::make_index_sequence<sizeof...(future_ts)>{});
-    // NOTE: Setting conductor for external waiter
-    external_coro.promise()._runner_conductor = and_await_composed_conductor{this};
+    // NOTE: Setting router for external waiter
+    external_coro.promise()._runner_router = and_await_composed_router{this};
     return true;
 }
 
 ACE_COMPOSE_AWAIT_COMPOSED_FUTURE_META
 /**
- * @brief Conductor for variadic @c or_await_composed.
- * @see or_await_conductor
+ * @brief Router for variadic @c or_await_composed.
+ * @see or_await_router
  */
-struct ACE_OR_AWAIT_COMPOSED_FUTURE_SPACE or_await_composed_conductor final : conductor_handler_t {
+struct ACE_OR_AWAIT_COMPOSED_FUTURE_SPACE or_await_composed_router final : runner_router {
 
-    or_await_composed_conductor() = delete;
+    or_await_composed_router() = delete;
 
-    explicit or_await_composed_conductor(or_await_composed* or_await_composed_)
+    explicit or_await_composed_router(or_await_composed* or_await_composed_)
         : _or_await_composed(or_await_composed_) {};
 
-    void forward(task&& ctx) override {
-        _or_await_composed->_waiter = std::move(ctx);
+    void redirect(omni_node node) override {
+        _or_await_composed->_waiter = node;
     }
 
     void cancel() override {
@@ -636,7 +636,7 @@ struct ACE_OR_AWAIT_COMPOSED_FUTURE_SPACE or_await_composed_conductor final : co
         }
     }
 
-    ~or_await_composed_conductor() override = default;
+    ~or_await_composed_router() override = default;
 
     or_await_composed* _or_await_composed;
 };
@@ -656,8 +656,8 @@ await_suspend(auto external_coro) {
             runner_ptr->attach_front(std::forward<task>(observer_inst));
         }());
     }(std::make_index_sequence<sizeof...(future_ts)>{});
-    // NOTE: Setting conductor for external waiter
-    external_coro.promise()._runner_conductor = or_await_composed_conductor{this};
+    // NOTE: Setting router for external waiter
+    external_coro.promise()._runner_router = or_await_composed_router{this};
     return true;
 }
 

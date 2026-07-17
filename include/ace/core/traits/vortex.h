@@ -137,7 +137,7 @@ namespace ace::core::traits {
             }
         }
 
-        static derived_t& touch_impl(cast_ptr rnr = nullptr) noexcept {
+        static derived_t& touch_impl(omni_runner rnr = nullptr) noexcept {
             if constexpr (spawn_mode_v == vortex_spawn_mode::e_thread_shared) {
                 static derived_t instance {};
                 if (instance.detach_get()) instance.respawn(rnr.as<runner>());
@@ -152,11 +152,11 @@ namespace ace::core::traits {
     public:
 
         // NOTE: Gets vortex instance and respawns service if needed
-        static derived_t& touch(cast_ptr rnr = nullptr) noexcept
+        static derived_t& touch(const omni_runner rnr = nullptr) noexcept
         requires (spawn_mode_v == vortex_spawn_mode::e_thread_shared) { return touch_impl(rnr); }
 
         // NOTE: Gets vortex instance and respawns service if needed
-        static derived_t& touch(cast_ptr rnr) noexcept
+        static derived_t& touch(const omni_runner rnr) noexcept
         requires (spawn_mode_v == vortex_spawn_mode::e_thread_local) { return touch_impl(rnr); }
 
         // NOTE: Gets vortex instance to inspect

@@ -223,7 +223,7 @@ sequenceDiagram
     Task->>Future: co_await future
     Future->>Promise: install conductor_slot
     Task-->>Runner: suspended, await_suspend returns true
-    Runner->>Promise: check _runner_conductor
+    Runner->>Promise: check _runner_router
     Runner->>Future: conductor.forward(task)
     Future->>Queue: enqueue task
     Note over Queue,Runner: Later, when future is ready...
@@ -235,7 +235,7 @@ sequenceDiagram
 
 | Type | Purpose |
 |---|---|
-| `runner_conductor_handle<C>` | Forwards task to a future's waiting queue |
+| `runner_router_handle<C>` | Forwards task to a future's waiting queue |
 | `control_conductor_handle` | Manages external control (join/cancel) for promises |
 
 ---
@@ -492,7 +492,7 @@ Memory layout of a coroutine frame:
 ```
 ┌────────────────────────────────────┬──────────────────────┬─────────────────────┐
 │  control_block  (32 bytes)         │  promise_type        │  coroutine frame    │
-│  _weak_refcount                    │  _runner_conductor   │  local variables    │
+│  _weak_refcount                    │  _runner_router   │  local variables    │
 │  _strong_refcount                  │  _runner_pool        │  ...                │
 │  _control_conductor                │  _waiters            │                     │
 │  _exists                           │  _status             │                     │
@@ -917,8 +917,8 @@ Open `docs/doxygen/html/index.html` in a browser.
 | Namespace | Key types / functions |
 |---|---|
 | `ace` | `async<T>` `promise<T>` `task` `cutex` `guard`<br>`schedule()` `spawn()` `post()` `run()` `reload()` `interrupt()` `terminate()` `empty()` `reset_signal()` |
-| `ace::core` | `async<T,R>` `dispatcher` `runner` `control_block` `control_block_handle`<br>`cast_ptr` `io_entity` `io_link` `io_query` `io_guard` `any` |
-| `ace::core::traits` | `future_traits` `busy_future_traits` `promise_traits` `promise_return_traits`<br>`runner_conductor_handle` `control_conductor_handle` `conductor_slot` `vortex_traits` |
+| `ace::core` | `async<T,R>` `dispatcher` `runner` `control_block` `control_block_handle`<br>`omni_runner` `io_entity` `io_link` `io_query` `io_guard` `any` |
+| `ace::core::traits` | `future_traits` `busy_future_traits` `promise_traits` `promise_return_traits`<br>`runner_router_handle` `control_conductor_handle` `conductor_slot` `vortex_traits` |
 | `ace::core::services` | `clock` (multi_dial time wheel) `kernel_controller` (io_uring vortex) |
 | `ace::core::tools` | `queue` `q_node` `slab_mempool` `moving_average` `id_allocator` `lifetime` |
 | `ace::core::meta` | `is_future` `is_busy_future` `is_awaitable` `resume_type` `replace_type`<br>`unique_tuple_t` `tuple_to_variant_t` |

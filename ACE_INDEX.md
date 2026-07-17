@@ -84,7 +84,7 @@ ace::task work() {
 - `yield_value(v)` — сохраняет значение, `status = e_executed_with_value`
 - `unhandled_exception()` — `status = e_failed`, вывод в stderr
 - `operator new(size_t)` — аллоцирует `control_block` перед promise
-- Поля: `_runner_conductor`, `_runner`, `_waiters`, `_self_conductor`, `_roaming`, `_polling`
+- Поля: `_runner_router`, `_runner`, `_waiters`, `_self_conductor`, `_roaming`, `_polling`
 
 ### async:: методы
 
@@ -672,7 +672,7 @@ In-place storage для одного conductor'а (размер `ACE_CONDUCTOR_M
 | `release()` | Уничтожить conductor |
 | `get()` | `conductor_handle_t*` |
 
-### runner_conductor_handle (`conduction.h:50`)
+### runner_router_handle (`conduction.h:50`)
 
 Абстрактный проводник для пересылки задач из раннера:
 - `forward(async&&)` — переслать задачу
@@ -783,7 +783,7 @@ RAII debug tracer: логирует конструирование/разруш�
 | `futures/polling.h` | `polling(bool)` — флаг низкого приоритета |
 | `core/services/kernelic.h` | `kernel_controller` (io_uring vortex), `kernel_observer`, все `io_uring_prep_*` |
 | `core/services/clock.h` | `clock` vortex, `multi_dial` (временное колесо), `clock::subscribe()`, `clock::ping()` |
-| `core/traits/conduction.h` | `runner_conductor_handle`, `control_conductor_handle`, `conductor_slot` |
+| `core/traits/conduction.h` | `runner_router_handle`, `control_conductor_handle`, `conductor_slot` |
 | `core/traits/future.h` | `future_traits`, `busy_future_traits`, concepts (`is_future`, `is_awaitable`), type traits |
 | `core/traits/promise.h` | `permanent`, `differed`, `promise_traits`, `promise_return_traits` |
 | `core/traits/vortex.h` | `vortex_traits` CRTP для фоновых сервисов |

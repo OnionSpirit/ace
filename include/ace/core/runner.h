@@ -17,7 +17,7 @@
  * 1. @c attach()/@c attach_front() — sets @c _runner_pool on the promise
  *    and enqueues the task.
  * 2. @c yank() — pops a task, calls @c awake(), and decides whether to
- *    re-queue, release, or forward via conductor.
+ *    re-queue, release, or forward via router.
  * 3. @c reattach() — returns a task to its owning runner (used by futures
  *    to wake a suspended coroutine).
  *
@@ -73,9 +73,9 @@ namespace ace::core {
 
         ACE_CACHE_LINE(2)
 
-        mutable insert_pool_t           _interthread_pool   {}; ///< Pool for the interthread insertion
+        mutable insert_pool_t           _insert_pool   {}; ///< Pool for the interthread insertion
 
-        static thread_local cast_ptr current_runner_ptr;
+        static thread_local omni_runner current_runner_ptr;
 
         runner() = default;
 
@@ -96,49 +96,35 @@ namespace ace::core {
          * @warning Returns nullptr if @c runner::run() is not in action
          * @return This thread runner ptr
          */
-        static cast_ptr get() { return current_runner_ptr; }
-
-        /**
-         * @brief Returns task into source @c runner
-         * @param ctx Task to be reattached into @c runner
-         * @param local_runner_ptr Runner that requests reattach operation
-         */
-        static void reattach(task &&ctx, const runner* local_runner_ptr = current_runner_ptr.as<runner>());
+        static omni_runner get() { return current_runner_ptr; }
 
         /**
          * @brief Returns task node into source @c runner
          * @param node Task node to be reattached into @c runner
          * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach(pool_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr.as<runner>());
+        static void reattach(omni_node& node, const omni_runner local_runner_ptr = current_runner_ptr);
 
         /**
          * @brief Returns task node into source @c runner
          * @param node Task node to be reattached into @c runner
          * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach(insert_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr.as<runner>());
-
-        /**
-         * @brief Returns task into source @c runner
-         * @param ctx Task to be reattached into @c runner
-         * @param local_runner_ptr Runner that requests reattach operation
-         */
-        static void reattach_front(task &&ctx, const runner* local_runner_ptr = current_runner_ptr.as<runner>());
+        static void reattach(omni_node&& node, const omni_runner local_runner_ptr = current_runner_ptr);
 
         /**
          * @brief Returns task node into source @c runner
-         * @param node Task node to be reattached into @c runner
+         * @param node Task node to be reattached into a front of the @c runner pool
          * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach_front(pool_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr.as<runner>());
+        static void reattach_front(omni_node& node, const omni_runner local_runner_ptr = current_runner_ptr);
 
         /**
          * @brief Returns task node into source @c runner
-         * @param node Task node to be reattached into @c runner
+         * @param node Task node to be reattached into a front of the @c runner pool
          * @param local_runner_ptr Runner that requests reattach operation
          */
-        static void reattach_front(insert_node_ptr& node, const runner* local_runner_ptr = current_runner_ptr.as<runner>());
+        static void reattach_front(omni_node&& node, const omni_runner local_runner_ptr = current_runner_ptr);
 
         /**
          * @details Calculates runner's velocity
@@ -199,7 +185,7 @@ namespace ace::core {
          * @return void
          */
         template <typename async_return_t, typename async_rule_t>
-        void attach(async<async_return_t, async_rule_t> &&new_task) noexcept;
+        void attach(async<async_return_t, async_rule_t> &&new_task);
 
         /**
          * @details Function to attach task to the runner
@@ -207,23 +193,41 @@ namespace ace::core {
          * @return void
          */
         template <typename async_return_t, typename async_rule_t>
-        void attach_front(async<async_return_t, async_rule_t> &&new_task) noexcept;
+        void attach_front(async<async_return_t, async_rule_t> &&new_task);
 
         /**
          * @details Checks if any Tasks stored in the runner
          * @return @b true if empty, @b false otherwise
          */
         [[nodiscard]] bool empty() const noexcept {
-            return _pool.empty() and _vortex_pool.empty() and _interthread_pool.empty();
+            return _pool.empty() and _vortex_pool.empty() and _insert_pool.empty();
         };
 
-        pool_node_ptr fetch_task_node();
+        omni_node fetch_task_node();
+
+    private:
+
+        /**
+         * @brief Returns task node into source @c runner
+         * @param node Task node to be reattached into @c runner
+         * @param local_runner_ptr Runner that requests reattach operation
+         */
+        static void reattach_impl(omni_node& node, const omni_runner local_runner_ptr);
+
+        /**
+         * @brief Returns task node into source @c runner
+         * @param node Task node to be reattached into a front of the @c runner pool
+         * @param local_runner_ptr Runner that requests reattach operation
+         */
+        static void reattach_front_impl(omni_node& node, const omni_runner local_runner_ptr);
+
     };
+
 
     inline runner::runner(runner &&t) noexcept {
         this->_pool = std::move(t._pool);
         this->_quants = std::move(t._quants);
-        this->_interthread_pool = std::move(t._interthread_pool);
+        this->_insert_pool = std::move(t._insert_pool);
         this->_tasks_amount = t._tasks_amount;
         t._tasks_amount = 0;
     };
@@ -231,93 +235,35 @@ namespace ace::core {
     inline runner& runner::operator=(runner &&t) noexcept {
         this->_pool = std::move(t._pool);
         this->_quants = std::move(t._quants);
-        this->_interthread_pool = std::move(t._interthread_pool);
+        this->_insert_pool = std::move(t._insert_pool);
         this->_tasks_amount = t._tasks_amount;
         t._tasks_amount = 0;
         return *this;
     };
 
 
-    inline void runner::reattach(task&& ctx, const runner* local_runner_ptr) {
-        const auto* target_runner_ptr = ctx._coroutine.promise()._runner.as<runner>();
-        if (not ctx.is_exist()) [[unlikely]]
+    inline void runner::reattach_impl(omni_node& node, const omni_runner local_runner_ptr) {
+        using namespace nukes::details::nodes;
+        if (not node or not node->_data.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach' idle context" };
+        const omni_runner target_runner_ptr = node->_data._coroutine.promise()._runner;
         if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
             throw std::logic_error {
                 "'reattach' operation can't be applied to 'ace::core::async<...>'s "
                 "which are not running at the 'ace::core::runner'"
             };
         if (local_runner_ptr == target_runner_ptr)
-            local_runner_ptr->_pool.push(std::move(ctx));
-        else
-            target_runner_ptr->_interthread_pool.push(std::move(ctx));
-    }
-
-
-    inline void runner::reattach(pool_node_ptr& node, const runner* local_runner_ptr) {
-        using namespace nukes::details::nodes;
-        const auto* target_runner_ptr = node->_data._coroutine.promise()._runner.as<runner>();
-        if (not node or not node->_data.is_exist()) [[unlikely]]
-            throw std::runtime_error { "trying to 'reattach' idle context" };
-        if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
-            throw std::logic_error {
-                "'reattach' operation can't be applied to 'ace::core::async<...>'s "
-                "which are not running at the 'ace::core::runner'"
-            };
-        if (local_runner_ptr == target_runner_ptr) {
             local_runner_ptr->_pool.push_node(node);
-            node = nullptr;
-        } else {
-            auto* n = cast_node<dyn_node>(node);
-            target_runner_ptr->_interthread_pool.push_node(n);
-            node = nullptr;
-        }
+        else
+            target_runner_ptr->_insert_pool.push_node(node);
     }
 
 
-    inline void runner::reattach(insert_node_ptr& node, const runner* local_runner_ptr) {
-        const auto* target_runner_ptr = node->_data._coroutine.promise()._runner.as<runner>();
-        using namespace nukes::details::nodes;
-        if (not node or not node->_data.is_exist()) [[unlikely]]
-            throw std::runtime_error { "trying to 'reattach' idle context" };
-        if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
-            throw std::logic_error {
-                "'reattach' operation can't be applied to 'ace::core::async<...>'s "
-                "which are not running at the 'ace::core::runner'"
-            };
-        if (local_runner_ptr == target_runner_ptr) {
-            auto* n = cast_node<dyn_reg_node>(node);
-            local_runner_ptr->_pool.push_node(n);
-            node = nullptr;
-        } else {
-            target_runner_ptr->_interthread_pool.push_node(node);
-            node = nullptr;
-        }
-    }
-
-
-    inline void runner::reattach_front(task&& ctx, const runner* local_runner_ptr) {
-        const auto* target_runner_ptr = ctx._coroutine.promise()._runner.as<runner>();
-        if (not ctx.is_exist()) [[unlikely]]
-            throw std::runtime_error { "trying to 'reattach_front' idle context" };
-        if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
-            throw std::logic_error {
-                "'reattach_front' operation can't be applied to 'ace::core::async<...>'s "
-                "which are not running at the 'ace::core::runner'"
-            };
-        if (local_runner_ptr == target_runner_ptr) {
-            ctx.prefetch();
-            local_runner_ptr->_pool.push_front(std::move(ctx));
-        } else
-            target_runner_ptr->_interthread_pool.push(std::move(ctx));
-    }
-
-
-    inline void runner::reattach_front(pool_node_ptr& node, const runner* local_runner_ptr) {
-        const auto* target_runner_ptr = node->_data._coroutine.promise()._runner.as<runner>();
+    inline void runner::reattach_front_impl(omni_node& node, const omni_runner local_runner_ptr) {
         using namespace nukes::details::nodes;
         if (not node or not node->_data.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach_front' idle context" };
+        const omni_runner target_runner_ptr = node->_data._coroutine.promise()._runner;
         if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
             throw std::logic_error {
                 "'reattach_front' operation can't be applied to 'ace::core::async<...>'s "
@@ -326,50 +272,49 @@ namespace ace::core {
         if (local_runner_ptr == target_runner_ptr) {
             node->_data.prefetch();
             local_runner_ptr->_pool.push_node_front(node);
-            node = nullptr;
-        } else {
-            auto* n = cast_node<dyn_node>(node);
-            target_runner_ptr->_interthread_pool.push_node(n);
-            node = nullptr;
-        }
+        } else
+            target_runner_ptr->_insert_pool.push_node(node);
     }
 
 
-    inline void runner::reattach_front(insert_node_ptr& node, const runner* local_runner_ptr) {
-        const auto* target_runner_ptr = node->_data._coroutine.promise()._runner.as<runner>();
-        using namespace nukes::details::nodes;
-        if (not node or not node->_data.is_exist()) [[unlikely]]
-            throw std::runtime_error { "trying to 'reattach_front' idle context" };
-        if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
-            throw std::logic_error {
-                "'reattach_front' operation can't be applied to 'ace::core::async<...>'s "
-                "which are not running at the 'ace::core::runner'"
-            };
-        if (local_runner_ptr == target_runner_ptr) {
-            node->_data.prefetch();
-            auto* n = cast_node<dyn_reg_node>(node);
-            local_runner_ptr->_pool.push_node_front(n);
-            node = nullptr;
-        } else {
-            target_runner_ptr->_interthread_pool.push_node(node);
-            node = nullptr;
+    inline void runner::reattach(omni_node& node, const omni_runner local_runner_ptr) {
+        reattach_impl(node, local_runner_ptr);
+        node.reset();
+    }
+
+    inline void runner::reattach(omni_node&& node, const omni_runner local_runner_ptr) {
+        reattach_impl(node, local_runner_ptr);
+    }
+
+    inline void runner::reattach_front(omni_node& node, const omni_runner local_runner_ptr) {
+        reattach_front_impl(node, local_runner_ptr);
+        node.reset();
+    }
+
+    inline void runner::reattach_front(omni_node&& node, const omni_runner local_runner_ptr) {
+        reattach_front_impl(node, local_runner_ptr);
+    }
+
+
+    template <typename async_return_t, typename async_rule_t>
+    void runner::attach(async<async_return_t, async_rule_t> &&new_task) {
+        ++_tasks_amount;
+        new_task._coroutine.promise()._runner = &_pool;
+        if (insert_node_ptr new_node; _insert_pool._mempool.capture(new_node)) {
+            new_node->_data = std::move(new_task);
+            reattach(new_node, this);
         }
     }
 
 
     template <typename async_return_t, typename async_rule_t>
-    void runner::attach(async<async_return_t, async_rule_t> &&new_task) noexcept {
+    void runner::attach_front(async<async_return_t, async_rule_t> &&new_task) {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner = &_pool;
-        reattach(std::move(new_task), this);
-    }
-
-
-    template <typename async_return_t, typename async_rule_t>
-    void runner::attach_front(async<async_return_t, async_rule_t> &&new_task) noexcept {
-        ++_tasks_amount;
-        new_task._coroutine.promise()._runner = &_pool;
-        reattach_front(std::move(new_task), this);
+        if (pool_node_ptr new_node; _pool._mempool.capture(new_node)) {
+            new_node->_data = std::move(new_task);
+            reattach_front(new_node, this);
+        }
     }
 
 
@@ -383,10 +328,10 @@ namespace ace::core {
         using namespace nukes::details::nodes;
 
         promise_lifecycle touch_result = e_executed;
-        pool_node_ptr task_node = fetch_task_node();
+        omni_node task_unit = fetch_task_node();
 
         // NOTE: If can not pull task
-        if (not task_node) [[unlikely]]
+        if (not task_unit) [[unlikely]]
             return yank_vortex();
 
         // NOTE: Prefetching next task frame
@@ -394,36 +339,37 @@ namespace ace::core {
             head->_data.prefetch();
 
         // NOTE: Proceeding async
-        task_node->_data.awake(&touch_result);
+        task_unit->_data.awake(&touch_result);
 
         // NOTE: Checking if async can be resumed
         const bool is_resumable {
-            task_node->_data
+            task_unit->_data
             and touch_result not_eq e_failed
             and touch_result not_eq e_finished
             and touch_result not_eq e_detached
         };
 
-        // NOTE: Checking if the async shall be forwarded via passed conductor
-        const bool is_conducted {
-            is_resumable
-            and task_node->_data._coroutine.promise()._runner_conductor
-        };
+        // NOTE: If task is idle, releasing its node.
+        if (not is_resumable) {
+            _insert_pool.release_node(task_unit);
+            --_tasks_amount;
+            return true;
+        }
 
-        // NOTE: Decision if node shall be released or pushed back
-        const bool is_idle = not is_resumable or is_conducted;
+        // NOTE: Forwarding the async via passed router if needed
+        if (task_unit->_data._coroutine.promise()._runner_router) [[likely]] {
+            task_unit->_data._coroutine.promise()._runner_router->redirect(task_unit);
+            return true;
+        }
 
-        // NOTE: Forwarding via conductor if needed
-        if (is_conducted) [[likely]]
-            task_node = task_node->_data._coroutine.promise()._runner_conductor->forward_node(task_node);
+        // NOTE: If task is a service unit then placing it to the vortex pool
+        if (task_unit->_data._coroutine.promise()._polling) {
+            _vortex_pool.push_node(task_unit);
+            return true;
+        }
 
-        if (not is_resumable) [[unlikely]] --_tasks_amount;
-
-        // NOTE: If task is idle, releasing it's node. Else returning it back to the local pool
-        if (is_idle and task_node) _pool.release_node(task_node);
-        else if (task_node and not task_node->_data._coroutine.promise()._polling) _pool.push_node(task_node);
-        else if (task_node) _vortex_pool.push_node(task_node);
-
+        // NOTE: Returning task back to the local pool on this step
+        _pool.push_node(task_unit);
         return true;
     }
 
@@ -431,42 +377,37 @@ namespace ace::core {
     inline bool runner::yank_vortex() noexcept {
 
         promise_lifecycle touch_result = e_executed;
-        pool_node_ptr vortex_node = _vortex_pool.pop_node();
+        omni_node vortex_unit = _vortex_pool.pop_node();
 
         // NOTE: If node is empty breaking
-        if (not vortex_node) [[unlikely]] return false;
+        if (not vortex_unit) [[unlikely]] return false;
 
         // NOTE: Proceeding async
-        vortex_node->_data.awake(&touch_result);
+        vortex_unit->_data.awake(&touch_result);
 
         // NOTE: Checking if async can be resumed
         const bool is_resumable {
-            vortex_node->_data
+            vortex_unit->_data
             and touch_result not_eq e_failed
             and touch_result not_eq e_finished
             and touch_result not_eq e_detached
         };
 
-        // NOTE: Checking if the async shall be forwarded via passed conductor
-        const bool is_conducted {
-            is_resumable
-            and vortex_node->_data._coroutine.promise()._runner_conductor
-        };
+        // NOTE: If task is idle, releasing its node.
+        if (not is_resumable) {
+            _insert_pool.release_node(vortex_unit);
+            --_tasks_amount;
+            return true;
+        }
 
-        // NOTE: Decision if node shall be released or pushed back
-        const bool is_idle = not is_resumable or is_conducted;
+        // NOTE: Forwarding the async via passed router if needed
+        if (vortex_unit->_data._coroutine.promise()._runner_router) [[likely]] {
+            vortex_unit->_data._coroutine.promise()._runner_router->redirect(vortex_unit);
+            return true;
+        }
 
-        // NOTE: Forwarding via conductor if needed
-        if (is_conducted) [[likely]]
-            vortex_node = vortex_node->_data._coroutine.promise()._runner_conductor->forward_node(vortex_node);
-
-        if (not is_resumable) [[unlikely]] --_tasks_amount;
-
-        // NOTE: If task is idle, releasing it's node. Else returning it back to the local pool
-        if (is_idle and vortex_node) _vortex_pool.release_node(vortex_node);
-        else if (vortex_node and vortex_node->_data._coroutine.promise()._polling) _vortex_pool.push_node(vortex_node);
-        else if (vortex_node) _pool.push_node(vortex_node);
-
+        // NOTE: Returning task back to the local pool on this step
+        _vortex_pool.push_node(vortex_unit);
         return true;
     }
 
@@ -487,7 +428,7 @@ namespace ace::core {
             if (i % 16 == 0) {
                 yank_vortex();
                 // NOTE: Trying to switch to interthread pool
-                if (_pull_source not_eq pull_source::e_interthread_pool and not _interthread_pool.empty())
+                if (_pull_source not_eq pull_source::e_interthread_pool and not _insert_pool.empty())
                     _pull_source = pull_source::e_interthread_pool;
             }
         }
@@ -495,40 +436,33 @@ namespace ace::core {
         return i not_eq 0 or yank_vortex();
     }
 
-    inline runner::pool_node_ptr runner::fetch_task_node() {
+    inline omni_node runner::fetch_task_node() {
         using namespace nukes::details::nodes;
-        pool_node_ptr pool_node {nullptr};
+        omni_node task_unit {};
         // NOTE: Trying to fetch from local pool
         if (_pull_source == pull_source::e_local_pool) {
-            pool_node = _pool.pop_node();
+            task_unit = _pool.pop_node();
             // NOTE: In case when cannot fetch then switching to interthread pool
-            if (not pool_node)
+            if (not task_unit)
                 _pull_source = pull_source::e_interthread_pool;
         }
         // NOTE: Trying to fetch from interthread pool
         if (_pull_source == pull_source::e_interthread_pool) {
-            if (const auto inter_node = _interthread_pool.pop_node()) {
-                // NOTE: Trying to share node with interthread pool
-                if (_pool._mempool.capture(pool_node))
-                    _interthread_pool._mempool.raw_sync(pool_node);
-                pool_node = cast_node<dyn_reg_node>(inter_node);
-            }
+            task_unit = _insert_pool.pop_node();
             // NOTE: In case when cannot fetch then switching to local pool
-            else
+            if (not task_unit)
                 _pull_source = pull_source::e_local_pool;
         }
-        return pool_node;
+        return task_unit;
     }
 } // end namespace ace::core
 
 
-inline thread_local ace::core::cast_ptr ace::core::runner::current_runner_ptr {};
+inline thread_local ace::omni_runner ace::core::runner::current_runner_ptr {};
 
 template<typename returnT, ace::core::is_promise_rule promise_rule_t>
 inline auto ace::core::async<returnT, promise_rule_t>::get_current_pool() noexcept
--> ace::core::async<returnT, promise_rule_t>::runner_pool_t* {
-    return runner::get().as<runner_pool_t>();
-}
+-> runner_pool_t* { return runner::get(); }
 
 //==============================DEFINITIONS==================================
 

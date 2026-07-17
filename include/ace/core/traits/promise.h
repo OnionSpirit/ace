@@ -51,6 +51,18 @@ namespace ace::core {
     };
 
     /**
+     * @brief Eager suspension policy — coroutine starts executing immediately.
+     *
+     * @details Used by @c ace::promise<T>. @c initial_suspend() returns
+     * @c std::suspend_never, so the coroutine body runs as soon as the
+     * return object is constructed.
+     */
+    struct automaton : promise_rule_traits {
+        /// @brief Returns @c std::suspend_never — no suspension at creation.
+        consteval static auto action() noexcept { return std::suspend_never{}; };
+    };
+
+    /**
      * @brief Lazy suspension policy — coroutine suspends at creation.
      *
      * @details Used by @c ace::async<T>. @c initial_suspend() returns
@@ -232,7 +244,7 @@ namespace ace::core::traits {
         /**
          * @brief @c await_transform for lvalue-ref futures (@c is_future concept).
          * @details Resets @c _busy_future because a regular future takes over
-         * forwarding control via the conductor mechanism.
+         * forwarding control via the router mechanism.
          * @tparam futureT  A type satisfying @c ace::core::misc::dispatch::is_future.
          * @param future    The future to await.
          * @return          The same lvalue reference.

@@ -128,8 +128,8 @@ class channel {
     class pull_impl;
     friend pull_impl;
 
-    struct channel_conductor;
-    friend channel_conductor;
+    struct channel_router;
+    friend channel_router;
 
     void notify();
 
@@ -311,21 +311,19 @@ public:
 
 
 ACE_FUTURE_CHANNEL_META
-struct ACE_FUTURE_CHANNEL_SPACE channel_conductor : conductor_handler_t {
+struct ACE_FUTURE_CHANNEL_SPACE channel_router : runner_router {
 
-    channel_conductor() = delete;
+    channel_router() = delete;
 
-    explicit channel_conductor(waiters_storage_t* waiters) : _waiters(waiters) {};
+    explicit channel_router(waiters_storage_t* waiters) : _waiters(waiters) {};
 
-    node_t* forward_node(node_t* node) override {
+    void redirect(omni_node node) override {
         using namespace nukes::details::nodes;
         // if constexpr (access_mode_v == access_mode::e_regular)
         //     _waiters->push_node(node);
         // else {
-            auto* n = cast_node<dyn_node>(node);
-            _waiters->push_node(n);
+            _waiters->push_node(node);
         // }
-        return nullptr;
     }
 
     void cancel() override {
@@ -337,7 +335,7 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_conductor : conductor_handler_t {
             core::runner::reattach(node);
     }
 
-    ~channel_conductor() override = default;
+    ~channel_router() override = default;
 
     waiters_storage_t* _waiters;
 };
@@ -407,7 +405,7 @@ ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::await_ready() {
 
 ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::await_suspend(auto ctx) {
     if (not _container->pop(_output_data)) {
-        ctx.promise()._runner_conductor = channel_conductor{_waiters};
+        ctx.promise()._runner_router = channel_router{_waiters};
         return true;
     }
     return false;

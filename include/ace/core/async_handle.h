@@ -134,7 +134,7 @@ namespace ace::core {
 
     };
 
-    struct join_handler::join_handler_conductor final : conductor_handler_t {
+    struct join_handler::join_handler_conductor final : runner_router {
 
         control_block_handle _handle;
 
@@ -142,7 +142,7 @@ namespace ace::core {
 
         explicit join_handler_conductor(const control_block_handle& handle) : _handle{handle} {}
 
-        void forward(task&& ctx) override { _handle.forward(&ctx); }
+        void redirect(const omni_node node) override { _handle.forward(node); }
 
         // TODO: Finish later
         void cancel() override {  }
@@ -175,7 +175,7 @@ join() noexcept -> join_handler& { return *static_cast<join_handler*>(this); }
 
 ACE_FUTURE_JOIN_HANDLER_FUTURE_MEMBER(template<typename promise_u> bool)
 await_suspend(std::coroutine_handle<promise_u> outer) {
-    outer.promise()._runner_conductor = join_handler_conductor{_handle};
+    outer.promise()._runner_router = join_handler_conductor{_handle};
     return true;
 }
 

@@ -32,7 +32,7 @@ namespace ace::futures {
      */
     struct ACE_AWAIT_NODISCARD get_runner : core::traits::future_traits<get_runner> {
 
-        core::cast_ptr _ptr {}; ///< Pointer filled in by @c await_suspend.
+        omni_runner _ptr {}; ///< Pointer filled in by @c await_suspend.
 
         IMPORT_FUTURE_ENV(get_runner)
 
@@ -42,7 +42,7 @@ namespace ace::futures {
          * @return Always @c false — no suspension.
          */
         bool await_suspend(auto coroutine) {
-            _ptr = coroutine.promise()._runner.template addr_of<runner_pool_t>();
+            _ptr = coroutine.promise()._runner;
             return true;
         }
 
@@ -51,8 +51,8 @@ namespace ace::futures {
          * @return Pointer to the current @c ace::core::runner, or @c nullptr
          *         if the coroutine has no associated runner yet.
          */
-        [[nodiscard]] core::runner* await_resume() const {
-            return *_ptr.as<core::runner*>();
+        [[nodiscard]] core::runner* await_resume() {
+            return _ptr;
         }
     };
 

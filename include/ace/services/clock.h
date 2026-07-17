@@ -76,7 +76,7 @@ namespace ace::services {
      */
     struct clock_record {
         duration_t _duration {};
-        task _context;
+        omni_node _context {};
 
         clock_record() = default;
 
@@ -86,18 +86,18 @@ namespace ace::services {
 
         clock_record(clock_record&& clk_rec) noexcept {
             this->_duration = clk_rec._duration;
-            this->_context = std::move(clk_rec._context);
+            this->_context = clk_rec._context;
         };
 
         clock_record& operator=(clock_record&& clk_rec) noexcept {
             this->_duration = clk_rec._duration;
-            this->_context = std::move(clk_rec._context);
+            this->_context = clk_rec._context;
             return *this;
         };
 
-        clock_record(task&& ctx, const duration_t dur)
+        clock_record(const omni_node node, const duration_t dur)
             : _duration(dur)
-            , _context(std::forward<task>(ctx)) {}
+            , _context(node) {}
 
         static thread_local core::tools::slab_mempool<clock_record> _clock_record_mempool;
     };
@@ -121,7 +121,7 @@ namespace ace::services {
          * @warning May cause cross-runner roaming in future updates
          */
         static void release_record(clock_record&& record) {
-            core::runner::reattach(std::move(record._context));
+            core::runner::reattach(record._context);
         }
 
         /**
@@ -129,7 +129,7 @@ namespace ace::services {
          * @param [in] allowed_releases Max allowed releases
          * @return Amount of released records
          */
-        int release_slot(int allowed_releases) {
+        int release_slot(const int allowed_releases) {
 
             int released =0;
 
@@ -200,14 +200,14 @@ namespace ace::services {
 
         /**
          * @brief Injects async to the dial. Slot will be selected by duration
-         * @param [in] ctx Context to await
+         * @param [in] node Context to await
          * @param [in] dur Duration of awaiting
          * @return Injected node ptr
          */
-        clock_node* inject_raw(task&& ctx, duration_t dur) {
+        clock_node* inject_raw(omni_node node, duration_t dur) {
             const auto arrow_offset = (dur / _tick_duration) % _tick_count;
             const auto arrow = (_arrow + arrow_offset) % _tick_count;
-            return _dial.at(arrow)._records.enqueue(std::forward<clock_record>({std::forward<task>(ctx), dur}));
+            return _dial.at(arrow)._records.enqueue(std::forward<clock_record>({node, dur}));
         }
 
         /**
@@ -230,12 +230,12 @@ namespace ace::services {
          * @param [in] passed_ticks — The number of ticks passed. Also, the target number of arrow steps.
          * @return The number of completed arrow steps.
          */
-        std::size_t release_ticks(std::size_t passed_ticks) {
+        std::size_t release_ticks(const std::size_t passed_ticks) {
 
             std::size_t arrow_offset = 0;
 
             while (arrow_offset < passed_ticks and *_release_counter > 0) {
-                auto arrow = (_arrow + arrow_offset) % _tick_count;
+                const auto arrow = (_arrow + arrow_offset) % _tick_count;
                 *_release_counter -= _dial[arrow].release_slot(*_release_counter);
 
                 if (not _dial[arrow].empty()) [[unlikely]]
@@ -404,20 +404,20 @@ namespace ace::services {
 
         /**
          * @brief Subscribes async to dial by passed current duration
-         * @param [in] ctx async to subscribe
+         * @param [in] node async to subscribe
          * @param [in] dur subscription duration
          * @return Injected node ptr
          */
-        clock_node* subscribe(task&& ctx, duration_t dur) {
+        clock_node* subscribe(omni_node node, duration_t dur) {
 
             const auto idx = select_dial(dur);
 
             if (not idx) [[unlikely]] {
-                core::runner::reattach(std::move(ctx));
+                core::runner::reattach(node);
                 return nullptr;
             }
             ++_total_records;
-            return _dials[idx.value()].inject_raw(std::forward<task>(ctx), dur);
+            return _dials[idx.value()].inject_raw(node, dur);
         };
 
         /**
@@ -469,8 +469,8 @@ namespace ace::services {
 
         static auto detach(clock_node* node) { inspect()._multi_dial.detach_record(node); }
 
-        [[nodiscard]] static clock_node* subscribe(task&& ctx, const duration_t dur) {
-            return touch(ctx._coroutine.promise()._runner.as<runner_pool_t>())._multi_dial.subscribe(std::forward<task>(ctx), dur);
+        [[nodiscard]] static clock_node* subscribe(omni_node node, const duration_t dur) {
+            return touch(node->_data._coroutine.promise()._runner.as<runner_pool_t>())._multi_dial.subscribe(node, dur);
         };
 
         static bool ping() {

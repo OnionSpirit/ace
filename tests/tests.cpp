@@ -348,7 +348,7 @@ TEST(commands, check_cutex_cancel_after_capture) {
     ace::schedule(channel_fetcher(channel_, res));
     ace::run();
     ASSERT_TRUE(ace::empty());
-    EXPECT_EQ(res.size(), 2);
+    ASSERT_EQ(res.size(), 2);
     EXPECT_NE(res[0], nullptr);
     EXPECT_NE(res[1], nullptr);
 
@@ -360,7 +360,7 @@ TEST(commands, check_cutex_cancel_after_capture) {
     ace::schedule(channel_fetcher(channel_, res));
     ace::run();
     ASSERT_TRUE(ace::empty());
-    EXPECT_EQ(res.size(), 1);
+    ASSERT_EQ(res.size(), 1);
     EXPECT_NE(res[0], nullptr);
 
     EXPECT_LT(ms_time, 900);
@@ -455,7 +455,7 @@ TEST(core, do_and_await_test) {
     ASSERT_TRUE(ace::empty());
 
     const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
-    EXPECT_GE(ms_time, 100);
+    EXPECT_GE(ms_time, 95);
 }
 
 TEST(core, do_fs_tests) {

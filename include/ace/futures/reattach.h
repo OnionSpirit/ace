@@ -29,7 +29,7 @@ namespace ace::futures {
     /**
      * @brief Awaitable that migrates the current coroutine to a target runner.
      *
-     * @details Constructed with either a @c runner* or a @c cast_ptr
+     * @details Constructed with either a @c runner* or a @c omni_runner
      * (runner pool pointer).  When @c co_await-ed, installs a
      * @c reattach_conductor into the promise so the current runner forwards
      * the task to the target runner's queue.
@@ -41,8 +41,8 @@ namespace ace::futures {
 
         core::runner* _new_runner {};
 
-        struct reattach_conductor;
-        friend struct reattach_conductor;
+        struct reattach_router;
+        friend struct reattach_router;
 
     public:
 
@@ -52,8 +52,8 @@ namespace ace::futures {
         reattach(const reattach&) = delete;
         reattach& operator=(const reattach&) = delete;
 
-        explicit reattach(core::cast_ptr new_pool)
-            : _new_runner(new_pool.as<core::runner>()) {}
+        explicit reattach(omni_runner new_pool)
+            : _new_runner(new_pool) {}
 
         explicit reattach(core::runner* new_runner)
             : _new_runner(new_runner) {}
@@ -80,25 +80,26 @@ ace::futures::reattach::
 rtype ACE_FUTURE_REATTACH_SPACE
 
 
-struct ACE_FUTURE_REATTACH_SPACE reattach_conductor : conductor_handler_t {
+struct ACE_FUTURE_REATTACH_SPACE reattach_router : runner_router {
 
-    reattach_conductor() = delete;
+    reattach_router() = delete;
 
-    explicit reattach_conductor(core::runner* rnr)
+    explicit reattach_router(core::runner* rnr)
         : target_runner(rnr) {};
 
-    void forward(task&& ctx) override {
-        target_runner->attach(std::forward<task>(ctx));
+    void redirect(omni_node node) override {
+        node->_data._coroutine.promise()._runner = target_runner;
+        core::runner::reattach(node);
     }
 
-    ~reattach_conductor() override = default;
+    ~reattach_router() override = default;
 
     core::runner* target_runner {};
 };
 
 ACE_FUTURE_REATTACH_MEMBER(bool)
 await_suspend(auto coroutine) {
-    coroutine.promise()._conductor = reattach_conductor{_new_runner};
+    coroutine.promise()._conductor = reattach_router{_new_runner};
     return true;
 }
 

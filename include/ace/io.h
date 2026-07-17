@@ -259,15 +259,15 @@ public:                                                                         
          * re-attached by @c on_result().  @c cancel() submits a cancellation
          * request to @c kernel_controller.
          */
-        struct io_socket_query_conductor : conductor_handler_t {
+        struct query_router : runner_router {
 
-            io_socket_query_conductor() = delete;
+            query_router() = delete;
 
-            explicit io_socket_query_conductor(query* query_)
+            explicit query_router(query* query_)
                 : _query(query_) {};
 
-            void forward(task&& ctx) override {
-                _query->_waiter = std::move(ctx);
+            void redirect(omni_node node) override {
+                _query->_waiter = node;
             }
 
             void cancel() override {
@@ -275,15 +275,15 @@ public:                                                                         
                 services::kernel_controller::cancel(_query, 0);
             }
 
-            ~io_socket_query_conductor() override = default;
+            ~query_router() override = default;
 
             query* _query;
         };
 
-        task       _waiter;               ///< Awaited task storage
-        int        _res       = INT_MIN;  ///< IO_URING operation result
-        const int  _fd;                   ///< FD to interact with
-        bool       _is_silent = false;    ///< Mark to detach and not suspend
+        omni_node _waiter;               ///< Awaited task storage
+        int       _res       = INT_MIN;  ///< IO_URING operation result
+        const int _fd;                   ///< FD to interact with
+        bool      _is_silent = false;    ///< Mark to detach and not suspend
 
         bool await_ready() override { return false; };
 
@@ -296,7 +296,7 @@ public:                                                                         
                 throw std::logic_error("Trying to make query on idle 'io_entry' [Query object type: "
                     + std::string{typeid(query_core_t).name()} + "]");
             if (static_cast<query_core_t*>(this)->setup_query(this) and not _is_silent) {
-                coroutine.promise()._runner_conductor = io_socket_query_conductor{this};
+                coroutine.promise()._runner_router = query_router{this};
                 return true;
             }
             return false;
@@ -305,7 +305,7 @@ public:                                                                         
         void on_result(const int res) override {
             _res = res;
             if (_waiter)
-                core::runner::reattach(std::move(_waiter));
+                core::runner::reattach(_waiter);
         }
 
         ~query() override = default;

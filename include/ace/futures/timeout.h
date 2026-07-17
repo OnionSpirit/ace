@@ -52,8 +52,8 @@ class ACE_AWAIT_NODISCARD timeout : public core::traits::future_traits<timeout> 
 
     services::duration_t _duration; ///< Suspension duration in milliseconds.
 
-    struct timeout_conductor;
-    friend timeout_conductor;
+    struct timeout_router;
+    friend timeout_router;
 
 public:
 
@@ -119,15 +119,15 @@ ace::futures::timeout::
 #define ACE_FUTURE_TIMEOUT_MEMBER(returnT) \
 returnT ACE_FUTURE_TIMEOUT_SPACE
 
-struct ACE_FUTURE_TIMEOUT_SPACE timeout_conductor : conductor_handler_t {
+struct ACE_FUTURE_TIMEOUT_SPACE timeout_router : runner_router {
 
-    timeout_conductor() = delete;
+    timeout_router() = delete;
 
-    explicit timeout_conductor(timeout* timeout_)
+    explicit timeout_router(timeout* timeout_)
         : _timeout(timeout_) {};
 
-    void forward(task&& ctx) override {
-        _injected_node = services::clock::subscribe(std::move(ctx), _timeout->_duration);
+    void redirect(const omni_node node) override {
+        _injected_node = services::clock::subscribe(node, _timeout->_duration);
     }
 
     void cancel() override {
@@ -135,7 +135,7 @@ struct ACE_FUTURE_TIMEOUT_SPACE timeout_conductor : conductor_handler_t {
             services::clock::detach(_injected_node);
     }
 
-    ~timeout_conductor() override = default;
+    ~timeout_router() override = default;
 
     services::clock_node* _injected_node = nullptr;
     timeout* const _timeout;
@@ -144,7 +144,7 @@ struct ACE_FUTURE_TIMEOUT_SPACE timeout_conductor : conductor_handler_t {
 
 ACE_FUTURE_TIMEOUT_MEMBER(bool)
 await_suspend(auto coroutine) {
-    coroutine.promise()._runner_conductor = timeout_conductor{this};
+    coroutine.promise()._runner_router = timeout_router{this};
     return true;
 }
 

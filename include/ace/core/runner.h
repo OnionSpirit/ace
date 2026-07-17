@@ -55,13 +55,10 @@ namespace ace::core {
         typedef runner_pool_t::node_t *pool_node_ptr;
         typedef insert_pool_t::node_t *insert_node_ptr;
 
-        using batch_t = nukes::details::batch<
-            insert_pool_t::node_t,
-            nukes::dynamic::mpsc_queue<task>::dyn_mpsc_iter,
-            nukes::dynamic::mpsc_queue<task>
-        >;
-
-        using batch_iterator_t = batch_t::iterator_t;
+        enum class pull_source : uint8_t {
+            e_local_pool,
+            e_interthread_pool,
+        };
 
         ACE_CACHE_LINE(0)
 
@@ -71,11 +68,10 @@ namespace ace::core {
         ACE_CACHE_LINE(1)
 
         runner_pool_t                   _vortex_pool        {};
-        std::optional<batch_iterator_t> _batch_it           {};
-        std::optional<batch_iterator_t> _batch_end          {};
         long                            _tasks_amount       {};
+        pull_source                     _pull_source        { pull_source::e_local_pool };
 
-        ACE_CACHE_LINE(3)
+        ACE_CACHE_LINE(2)
 
         mutable insert_pool_t           _interthread_pool   {}; ///< Pool for the interthread insertion
 
@@ -221,9 +217,9 @@ namespace ace::core {
             return _pool.empty() and _vortex_pool.empty() and _interthread_pool.empty();
         };
 
-        void fetch_interthread() noexcept;
-
         pool_node_ptr fetch_task_node();
+
+        void fetch_interthread();
     };
 
     inline runner::runner(runner &&t) noexcept {
@@ -502,34 +498,40 @@ namespace ace::core {
     }
 
     inline runner::pool_node_ptr runner::fetch_task_node() {
-        if (not (_batch_it and _batch_end))
-            fetch_interthread();
-        if (_batch_it and _batch_end) {
-            const auto it = ++_batch_it.value();
-            // NOTE: Reset batch vars if batch is ended
-            if (_batch_it.value() == _batch_end.value()) {
-                _batch_it.reset();
-                _batch_end.reset();
-            }
-            // NOTE: Representing batch data as pool node
-            if (pool_node_ptr pool_node; _pool._mempool.capture(pool_node)) {
-                pool_node->_data = std::move(*it);
-                return pool_node;
-            }
-            throw std::runtime_error {"Can not capture node to propagate task"};
+        pool_node_ptr ret {nullptr};
+        // NOTE: Trying to fetch from local pool
+        if (_pull_source == pull_source::e_local_pool) {
+            ret = _pool.pop_node();
+            // NOTE: In case when cannot fetch then switching to interthread pool
+            if (not ret)
+                _pull_source = pull_source::e_interthread_pool;
         }
-        const auto ret = _pool.pop_node();
+        // NOTE: Trying to fetch from interthread pool
+        if (_pull_source == pull_source::e_interthread_pool) {
+            // NOTE: In case when cannot fetch then switching to local pool
+            if (task interthread_task; not _interthread_pool.pop(interthread_task))
+                _pull_source = pull_source::e_local_pool;
+
+            // NOTE: Putting interthread task into pool node
+            else if (_pool._mempool.capture(ret))
+                ret->_data = std::move(interthread_task);
+
+            else throw std::runtime_error {"Can not capture node to propagate task"};
+        }
         return ret;
     }
 
-    inline void runner::fetch_interthread() noexcept {
-        if (_batch_it and _batch_end) return;
-        auto fetched_batch = _interthread_pool.pop_batch();
-        _batch_it = fetched_batch.begin();
-        _batch_end = fetched_batch.end();
-        if (_batch_it == _batch_end) {
-            _batch_it.reset();
-            _batch_end.reset();
+    inline void runner::fetch_interthread() {
+        if (_pull_source == pull_source::e_interthread_pool) return;
+        if (task interthread_task; _interthread_pool.pop(interthread_task)) {
+            pool_node_ptr pool_node {nullptr};
+            _pull_source = pull_source::e_interthread_pool;
+            // NOTE: Putting interthread task into pool node
+            if (not _pool._mempool.capture(pool_node))
+                throw std::runtime_error {"Can not capture node to propagate task"};
+
+            pool_node->_data = std::move(interthread_task);
+            _pool.push_node(pool_node);
         }
     }
 } // end namespace ace::core

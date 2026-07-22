@@ -156,8 +156,10 @@ namespace ace::core {
         control_block* _block { nullptr };
 
         void release() {
-            if (control_block::unwatch(_block))
-                delete _block;
+            if (control_block::unwatch(_block)) {
+                _block->~control_block();
+                ::operator delete(_block);
+            }
             _block = nullptr;
         }
 

@@ -325,8 +325,10 @@ namespace ace::core::traits {
          */
         void operator delete(void* mem_ptr) noexcept {
             // NOTE: Trying to disown, and if it's untracked do delete
-            if (void* base_ptr = control_block::get_block_from_address(mem_ptr); control_block::disown(base_ptr))
-                delete static_cast<control_block*>(base_ptr);
+            if (control_block* block = control_block::get_block_from_address(mem_ptr); control_block::disown(block)) {
+                block->~control_block();
+                ::operator delete(block);
+            }
         }
 
         /**

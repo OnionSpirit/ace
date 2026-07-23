@@ -294,7 +294,15 @@ namespace ace::core {
 
             promise_type() = default;
 
-            ~promise_type() = default;
+            /**
+             * @details Decrements the strong reference count of the control
+             * block (if any) before suspending.
+             *
+             * The coroutine frame is not
+             * destroyed here; the runner or owning @c async destructor does
+             * that.
+             */
+            ~promise_type() { if (_block) control_block::disown(_block); };
 
             /**
              * @brief C++20 protocol — initial suspension point.
@@ -309,16 +317,10 @@ namespace ace::core {
 
             /**
              * @brief C++20 protocol — final suspension point.
-             * @details Decrements the strong reference count of the control
-             * block (if any) before suspending.  The coroutine frame is not
-             * destroyed here; the runner or owning @c async destructor does
-             * that.
              * @return @c std::suspend_always — coroutine frame is kept alive
              *         until explicitly destroyed.
              */
-            auto final_suspend() const noexcept {
-                // NOTE: Decreasing strong counter on finish
-                if (_block) control_block::disown(_block);
+            static auto final_suspend() noexcept {
                 return std::suspend_always{};
             }
 

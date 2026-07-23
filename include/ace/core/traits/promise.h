@@ -311,10 +311,11 @@ namespace ace::core::traits {
          * @return Pointer to the promise area (after the control block).
          */
         void* operator new(size_t mem_size) noexcept {
-            const auto ptr = static_cast<uint8_t*>(::operator new(mem_size + control_block_size));
+            const auto frame_size = mem_size + control_block_size;
+            const auto ptr = static_cast<uint8_t*>(::operator new(frame_size));
             void* mem_ptr = ptr + control_block_size;
             new (ptr) control_block();
-            static_cast<control_block*>(mem_ptr)->_frame_size = mem_size + control_block_size;
+            static_cast<control_block*>(mem_ptr)->_frame_size = frame_size;
             return mem_ptr;
         }
 
@@ -326,8 +327,26 @@ namespace ace::core::traits {
         void operator delete(void* mem_ptr) noexcept {
             // NOTE: Trying to disown, and if it's untracked do delete
             if (control_block* block = control_block::get_block_from_address(mem_ptr); control_block::disown(block)) {
+                // NOTE: Using true frame size with control block
+                const auto mem_size = block->_frame_size;
                 block->~control_block();
-                ::operator delete(block);
+                ::operator delete(block, mem_size);
+            }
+        }
+
+        /**
+         * @brief Custom deallocator.  Decrements the control-block strong
+         * reference count and frees the whole allocation only when untracked.
+         * @param mem_ptr  Pointer to the promise area.
+         * @param mem_size Memory size of the promise frame
+         */
+        void operator delete(void* mem_ptr, size_t mem_size) noexcept {
+            // NOTE: Trying to disown, and if it's untracked do delete
+            if (control_block* block = control_block::get_block_from_address(mem_ptr); control_block::is_untracked(block)) {
+                // NOTE: Using true frame size with control block
+                mem_size = block->_frame_size;
+                block->~control_block();
+                ::operator delete(block, mem_size);
             }
         }
 

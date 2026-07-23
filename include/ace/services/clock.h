@@ -35,8 +35,8 @@
 #include <complex>
 #include <list>
 
-#include "ace/core/traits/vortex.h"
 #include "ace/core/async.h"
+#include "ace/core/traits/vortex.h"
 #include "ace/core/tools/queue.h"
 
 namespace ace::services {
@@ -446,7 +446,11 @@ namespace ace::services {
             return _stopped = _total_records == 0;
         }
 
-        void detach_record(clock_node* node) { _total_records -= (node->remove() & 0b1); }
+        void detach_record(clock_node* node) {
+            // NOTE: Pushing context back to the runner. It is already marked as canceled
+            core::runner::reattach(node->data()->_context);
+            _total_records -= (node->remove() & 0b1);
+        }
 
     };
 

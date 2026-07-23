@@ -131,8 +131,10 @@ struct ACE_FUTURE_TIMEOUT_SPACE timeout_router : runner_router {
     }
 
     void cancel() override {
-        if (_injected_node)
+        if (_injected_node) {
             services::clock::detach(_injected_node);
+            _injected_node = nullptr;
+        }
     }
 
     ~timeout_router() override = default;

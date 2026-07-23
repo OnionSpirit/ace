@@ -7,7 +7,7 @@
 ### Ключевые отличия от системного мьютекса:
 - **Без системных вызовов**: не использует `mutex`, `futex` или другие примитивы ОС
 - **Полностью асинхронный**: интегрируется с фреймворком диспетчеризации ACE
-- **Избегает busy-polling**: использует очередь ожидающих задач и conductor pattern для эффективной диспетчеризации
+- **Избегает busy-polling**: использует очередь ожидающих задач и router pattern для эффективной диспетчеризации
 - **Future-based API**: работает через `co_await` для асинхронного захвата
 - **Многопоточная поддержка**: при использовании с несколькими runner'ами
 
@@ -50,9 +50,9 @@ bool _rescheduling { false };                     // Флаг режима пе�
 
 **`bool await_suspend(auto coroutine)`**
 - Вызывается при приостановке корутина
-- **Критично**: устанавливает conductor для корутина, чтобы он мог быть перемещен из runner'а в очередь cutex'а вместо того, чтобы остаться в runner'е
+- **Критично**: устанавливает router для корутина, чтобы он мог быть перемещен из runner'а в очередь cutex'а вместо того, чтобы остаться в runner'е
 - Сохраняет `_runner_pool` из обещания первого пришедшего корутина (для оптимизации переноса)
-- Возвращает `true` (всегда приостанавливает, так как conductor будет обрабатывать дальнейшие события)
+- Возвращает `true` (всегда приостанавливает, так как router будет обрабатывать дальнейшие события)
 
 **`bool notify() noexcept`**
 - Пробует пробудить одного ожидающего корутина из очереди
@@ -61,7 +61,7 @@ bool _rescheduling { false };                     // Флаг режима пе�
   - Если корутин **не поддерживает roaming** (не может перемещаться между runner'ами): сохраняет его runner_pool
   - Если корутин **поддерживает roaming**: назначает ему текущий `_runner_pool`
 - Если rescheduling **отключен**: оставляет runner_pool как есть
-- Вызывает `waiter.release_future()` для отключения conductor
+- Вызывает `waiter.release_future()` для отключения router
 - Возвращает корутин в runner через `core::runner::reattach()`
 - Возвращает `true` если корутин был успешно пробужден, `false` если очередь пуста
 
@@ -135,13 +135,13 @@ ace::cutex my_cutex;
 
 ---
 
-### 2.4 `cutex_conductor` — Диспетчер без busy-polling
+### 2.4 `cutex_router` — Диспетчер без busy-polling
 
-Реализует `conductor_handler_t` интерфейс и интегрируется с runner'ом.
+Реализует `router_handler_t` интерфейс и интегрируется с runner'ом.
 
 #### Определение:
 ```cpp
-struct cutex_conductor : conductor_handler_t {
+struct cutex_router : router_handler_t {
     cutex_future* _cutex;
     
     void forward(task&& ctx) override {
@@ -150,17 +150,17 @@ struct cutex_conductor : conductor_handler_t {
     }
     
     void cancel() override { /* TODO */ }
-    ~cutex_conductor() override = default;
+    ~cutex_router() override = default;
 };
 ```
 
 #### Механизм работы:
 
-1. **Установка conductor'а**: когда корутин приостанавливается в `await_suspend()`, в его обещание (`promise`) устанавливается `cutex_conductor{this}`
+1. **Установка router'а**: когда корутин приостанавливается в `await_suspend()`, в его обещание (`promise`) устанавливается `cutex_router{this}`
 
 2. **Диспетчеризация runner'ом**: runner регулярно проверяет (`yank()`):
-   - Если в обещании корутина установлен conductor
-   - Если да — вместо добавления обратно в runner пул, передает корутин conductor'у через `forward()`
+   - Если в обещании корутина установлен router
+   - Если да — вместо добавления обратно в runner пул, передает корутин router'у через `forward()`
 
 3. **Результат**: корутин попадает в `_waiters` очередь cutex'а, а не в runner пул (нет busy-polling, нет напрасных попыток резюме)
 
@@ -183,12 +183,12 @@ try_lock() проверяет _users.load(acq_rel)
     ↓
 await_suspend(coroutine) вызывается
     ├─ Сохраняет runner_pool в _runner_pool (если еще не сохранен)
-    ├─ Создает и устанавливает cutex_conductor в promise._future_conductor
+    ├─ Создает и устанавливает cutex_router в promise._future_router
     └─ Возвращает true (корутин приостанавливается)
     ↓
-Runner обнаруживает conductor в promise
+Runner обнаруживает router в promise
     ├─ Вместо добавления обратно в runner пул
-    └─ Вызывает conductor.forward() → корутин добавляется в _waiters
+    └─ Вызывает router.forward() → корутин добавляется в _waiters
     ↓
 Корутин находится в _waiters, ждет пробуждения
 ```
@@ -230,7 +230,7 @@ await_resume() вызывается (пусто)
 **Проблема**:
 - Поток A владеет cutex
 - Поток B пробует захватить, но неудачен в `try_lock()`
-- Поток B вызывает `await_suspend()` и создает conductor
+- Поток B вызывает `await_suspend()` и создает router
 - **ОС прерывает поток B перед тем, как он попадет в `_waiters.push()`**
 - Поток A вызывает `sync()` → `notify()` → проверяет `_waiters.pop()` → **очередь пуста!**
 - **Результат**: Поток B навеки заблокирован, ждет в `_waiters`, но никто его не пробуждает
@@ -268,12 +268,12 @@ await_resume() вызывается (пусто)
 ### 4.4 Scenario — "Nested Co_await Suspension"
 
 **Проблема**:
-- Корутин приостановлен в `await_suspend()`, но promise содержит conductor
-- Если есть nested future, conductor должен пройти вверх по цепочке
+- Корутин приостановлен в `await_suspend()`, но promise содержит router
+- Если есть nested future, router должен пройти вверх по цепочке
 
 **Решение**:
-- В C++20 `await_suspend()` может передать conductor вверх через `outer.promise()._future_conductor << ...`
-- ACE фреймворк поддерживает `conductor_carry` для передачи conductors между уровнями
+- В C++20 `await_suspend()` может передать router вверх через `outer.promise()._future_router << ...`
+- ACE фреймворк поддерживает `router_carry` для передачи routers между уровнями
 
 ---
 
@@ -293,9 +293,9 @@ await_resume() вызывается (пусто)
 
 Runner регулярно вызывает `yank()` на каждом корутине:
 1. `awake()` пытается резюме корутин
-2. Если в `promise._future_conductor` установлен conductor:
+2. Если в `promise._future_router` установлен router:
    - Вместо добавления обратно в runner пул
-   - Вызывает `conductor.forward(coroutine)`
+   - Вызывает `router.forward(coroutine)`
 3. Это критично для избежания busy-polling
 
 ### 5.3 Взаимодействие с Dispatcher
@@ -314,11 +314,11 @@ schedule(pending_notify());  // Планирует корутину в глоб�
 1. **Захват и освобождение**:
    - ✅ Корректно работает `try_lock()` с атомарными операциями
    - ✅ `await_ready()` возвращает правильный результат
-   - ✅ `await_suspend()` правильно настраивает conductor
+   - ✅ `await_suspend()` правильно настраивает router
    - ✅ `sync()` правильно освобождает и пробуждает
 
 2. **Очередь ожидающих**:
-   - ✅ Корутины корректно добавляются в `_waiters` через conductor
+   - ✅ Корутины корректно добавляются в `_waiters` через router
    - ✅ `notify()` пробуждает корутины в порядке FIFO
    - ✅ Нет потерь или дупликатов при многопоточности
 
@@ -340,7 +340,7 @@ schedule(pending_notify());  // Планирует корутину в глоб�
 
 1. **Производительность**:
    - ✅ Нет syscall'ов
-   - ✅ Нет busy-polling (conductor диспетчеризирует)
+   - ✅ Нет busy-polling (router диспетчеризирует)
    - ✅ Минимальные atomic операции
    - ✅ Нет malloc/free при стандартном использовании (используй nukes::roaming_mpsc_queue)
 
@@ -351,7 +351,7 @@ schedule(pending_notify());  // Планирует корутину в глоб�
 
 3. **Интеграция**:
    - ✅ Совместимо с future_traits интерфейсом
-   - ✅ Совместимо с conductor_handler_t интерфейсом
+   - ✅ Совместимо с router_handler_t интерфейсом
    - ✅ Использует task, runner_pool_t правильно
 
 ---
@@ -410,7 +410,7 @@ schedule(pending_notify());  // Планирует корутину в глоб�
    - Наследует `future_traits<cutex_future>`
    - Члены: `_users`, `_waiters`, `_runner_pool`, `_rescheduling`
    - Методы: `try_lock()`, `notify()`, `pending_notify()`, `await_ready()`, `await_suspend()`, `await_resume()`
-   - Вложенный `struct cutex_conductor`
+   - Вложенный `struct cutex_router`
 
 2. **Класс `cutex`**:
    - Наследует `cutex_future` (protected)
@@ -448,8 +448,8 @@ std::atomic<int> _users;  // Не bool!
 - Используй `int` (не `uint64_t`) чтобы избежать переполнения на вычитание
 - Значение 0 = свободен, N > 0 = занят
 
-### 3. Conductor для диспетчеризации
-- Критичная часть — conductor **перенаправляет** корутин из runner'а в cutex
+### 3. Router для диспетчеризации
+- Критичная часть — router **перенаправляет** корутин из runner'а в cutex
 - Это избегает busy-polling: runner не будет напрасно пробовать резюме заблокированный корутин
 
 ### 4. Цепочка пробуждений через pending_notify()
@@ -526,7 +526,7 @@ ace::run();
 ### Используемые типы:
 - `future_traits<T>` — base для future объектов (include/ace/futures/future.h)
 - `task` — тип корутины в фреймворке (include/ace/coroutines/context.h)
-- `conductor_handler_t` — интерфейс для диспетчеров (include/ace/coroutines/conductor.h)
+- `router_handler_t` — интерфейс для диспетчеров (include/ace/coroutines/router.h)
 - `runner_pool_t` — тип пула runner'а (include/ace/coroutines/context.h)
 - `nukes::dynamic::roaming_mpsc_queue<T>` — MPSC очередь (из внешней библиотеки nukes)
 

@@ -4,8 +4,8 @@
  *
  * @details @c ace::futures::reattach is @c co_await-ed to transfer the calling
  * coroutine from its current runner to a specified target runner.  The transfer
- * occurs via a @c reattach_conductor: the runner forwards the task, and the
- * conductor calls @c target_runner->attach().
+ * occurs via a @c reattach_router: the runner forwards the task, and the
+ * router calls @c target_runner->attach().
  *
  * Usage:
  * @code{.cpp}
@@ -31,7 +31,7 @@ namespace ace::futures {
      *
      * @details Constructed with either a @c runner* or a @c omni_runner
      * (runner pool pointer).  When @c co_await-ed, installs a
-     * @c reattach_conductor into the promise so the current runner forwards
+     * @c reattach_router into the promise so the current runner forwards
      * the task to the target runner's queue.
      *
      * @note If the target runner is @c nullptr, @c await_ready() returns
@@ -99,7 +99,7 @@ struct ACE_FUTURE_REATTACH_SPACE reattach_router : runner_router {
 
 ACE_FUTURE_REATTACH_MEMBER(bool)
 await_suspend(auto coroutine) {
-    coroutine.promise()._conductor = reattach_router{_new_runner};
+    coroutine.promise()._runner_router = reattach_router{_new_runner};
     return true;
 }
 

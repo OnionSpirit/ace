@@ -158,7 +158,7 @@ namespace ace::core {
                 release_waiters();
                 // NOTE: Canceling task if it is destructed incomplete
                 if constexpr (not std::same_as<promise_rule_t, automaton>)
-                    if (_coroutine.promise()._runner_router) [[likely]] {
+                    if (_coroutine.promise()._runner_router) {
                         _coroutine.promise()._runner_router->cancel();
                         _coroutine.promise()._runner_router.release();
                     }
@@ -177,13 +177,22 @@ namespace ace::core {
         }
 
         /**
+         * @brief Release the currently-held future router.
+         * @details Called by the runner at reattach operation
+         */
+        void release_router() {
+            _coroutine.promise()._runner_router.release();
+        }
+
+        /**
          * @brief Check whether the async is ready to be resumed by the runner.
          * @details Returns @c true if no busy future is pending, or if the
          * pending busy future has become ready (@c await_ready() returns @c true).
          * @return @c true if the runner may resume this async.
          */
         bool is_resumable() {
-            return not _coroutine.promise()._busy_future or _coroutine.promise()._busy_future->await_ready();
+            return (not _coroutine.promise()._busy_future or _coroutine.promise()._busy_future->await_ready())
+                and not _coroutine.promise()._runner_router;
         }
 
         /**
@@ -209,7 +218,7 @@ namespace ace::core {
         void release_waiters() {
             if (_coroutine.promise()._waiters) {
                 omni_node waiter = _coroutine.promise()._waiters->pop_node();
-                while (waiter and waiter->_data._coroutine) {
+                while (waiter.operator bool() and waiter->_data.is_exist()) {
                     waiter->_data.release_future();
                     waiter->_data._coroutine.promise()._runner.as<runner_pool_t>()->push_node(waiter);
                     waiter = _coroutine.promise()._waiters->pop_node();
@@ -415,8 +424,6 @@ namespace ace::core {
 
         /**
          * @brief C++20 awaitable protocol — check if coroutine is already done.
-         * @details Forces @c await_suspend processing on first call (when status
-         * is @c e_inited) so the runner pool pointer can be propagated.
          * @return @c true if the coroutine has finished and the outer coroutine
          *         should not suspend.
          */

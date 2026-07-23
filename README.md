@@ -15,7 +15,7 @@
 - [Core Concepts](#core-concepts)
   - [Coroutine Types](#1-coroutine-types-asynct-and-promiset)
   - [Execution Pipeline](#2-execution-pipeline)
-  - [Conductor Pattern](#3-conductor-pattern)
+  - [Router Pattern](#3-router-pattern)
   - [Futures and Synchronization](#4-futures-and-synchronization)
   - [Time Wheel Scheduler](#5-time-wheel-scheduler)
   - [Control Blocks](#6-control-blocks-and-external-handles)
@@ -54,7 +54,7 @@
 | **core**            | Runtime engine: `runner`, `dispatcher`, `async`, `compose` |
 | **core/tools**      | Utilities: `queue`, `macro`, `moving_average`, `id_alloc`  |
 | **core/services**   | Vortex background services: `clock` (time wheel), `kernelic` (io_uring) |
-| **core/traits**     | Traits to define framework-compatible units: `future`, `promise`, `conduction`, `vortex` |
+| **core/traits**     | Traits to define framework-compatible units: `future`, `promise`, `routing`, `vortex` |
 | **futures**         | Synchronization & commands: `channel`, `cutex`, `timeout`, `spawn`, `post`, `reattach`, `roaming`, `polling`, `get_runner` |
 | **ace/ (top-level)**| Public API: `ace.h`, I/O: `io.h`, FS: `fs.h`, Net: `net.h`, Console: `console.h` |
 
@@ -189,7 +189,7 @@ flowchart LR
         D --> E["runner::run()\nup to 128 tasks/call"]
         E --> F{"runner::yank()\nawake task"}
         F -->|"finished / failed / detached"| G["release node"]
-        F -->|"conductor set"| H["conductor::forward()\nmove to future queue"]
+        F -->|"router set"| H["router::forward()\nmove to future queue"]
         F -->|"still resumable"| E
     end
 ```
@@ -207,9 +207,9 @@ ace::run();             // blocks until all tasks finish
 
 ---
 
-### 3. Conductor Pattern
+### 3. Router Pattern
 
-The **conductor** is the mechanism that decouples task forwarding from the runner. When a coroutine suspends inside a `co_await future`, the future installs a conductor into the coroutine's promise. The runner then calls `conductor::forward()` instead of re-queuing the task.
+The **router** is the mechanism that decouples task forwarding from the runner. When a coroutine suspends inside a `co_await future`, the future installs a router into the coroutine's promise. The runner then calls `router::forward()` instead of re-queuing the task.
 
 ```mermaid
 sequenceDiagram
@@ -221,22 +221,22 @@ sequenceDiagram
 
     Runner->>Task: awake() — resume coroutine
     Task->>Future: co_await future
-    Future->>Promise: install conductor_slot
+    Future->>Promise: install router_slot
     Task-->>Runner: suspended, await_suspend returns true
     Runner->>Promise: check _runner_router
-    Runner->>Future: conductor.forward(task)
+    Runner->>Future: router.forward(task)
     Future->>Queue: enqueue task
     Note over Queue,Runner: Later, when future is ready...
     Queue->>Runner: runner::reattach(task)
     Runner->>Task: awake() — resume again
 ```
 
-**Two conductor types:**
+**Two router types:**
 
 | Type | Purpose |
 |---|---|
 | `runner_router_handle<C>` | Forwards task to a future's waiting queue |
-| `control_conductor_handle` | Manages external control (join/cancel) for promises |
+| `control_router_handle` | Manages external control (join/cancel) for promises |
 
 ---
 
@@ -301,7 +301,7 @@ The **cutex** is a cooperative mutex with **zero kernel involvement** on the fas
 
 **Fast path (no contention)** — `try_lock()` does `fetch_add(1)` on `_users`. If the previous value was 0, the lock is yours. No suspension, no syscall.
 
-**Slow path (contended)** — if `try_lock()` fails, the waiting task is moved into `_waiters` queue via the conductor. When the owner calls `sync()`, it does `fetch_sub(1)` and pops the next waiter, reattaching it to its runner.
+**Slow path (contended)** — if `try_lock()` fails, the waiting task is moved into `_waiters` queue via the router. When the owner calls `sync()`, it does `fetch_sub(1)` and pops the next waiter, reattaching it to its runner.
 
 **Deadlock recovery** — a rare race can strand a waiter: OS preempts task B between `try_lock()` fail and enqueue → task A calls `sync()` → queue empty → task B resumes, enqueues, stuck forever. `pending_notify()` detects this by retrying while `_users > 0`.
 
@@ -315,7 +315,7 @@ The **cutex** is a cooperative mutex with **zero kernel involvement** on the fas
     └─────────────────┘                   │ → wake waiter   │
     │ result > 0      │                   └─────────────────┘
     │ → await_suspend │                   │ users == 0      │
-    │ → conductor     │                   │ → no waiters    │
+    │ → router     │                   │ → no waiters    │
     │ → _waiters.push │                   │ → pending check │
     └─────────────────┘                   └─────────────────┘
 ```
@@ -460,7 +460,7 @@ classDiagram
     class control_block {
         +uint64_t _weak_refcount
         +uint64_t _strong_refcount
-        +control_conductor_handle* _control_conductor
+        +control_router_handle* _control_router
         +bool _exists
         +disown(void*)$ bool
         +watch(void*)$ bool
@@ -494,7 +494,7 @@ Memory layout of a coroutine frame:
 │  control_block  (32 bytes)         │  promise_type        │  coroutine frame    │
 │  _weak_refcount                    │  _runner_router   │  local variables    │
 │  _strong_refcount                  │  _runner_pool        │  ...                │
-│  _control_conductor                │  _waiters            │                     │
+│  _control_router                │  _waiters            │                     │
 │  _exists                           │  _status             │                     │
 └────────────────────────────────────┴──────────────────────┴─────────────────────┘
  ▲                                    ▲
@@ -918,7 +918,7 @@ Open `docs/doxygen/html/index.html` in a browser.
 |---|---|
 | `ace` | `async<T>` `promise<T>` `task` `cutex` `guard`<br>`schedule()` `spawn()` `post()` `run()` `reload()` `interrupt()` `terminate()` `empty()` `reset_signal()` |
 | `ace::core` | `async<T,R>` `dispatcher` `runner` `control_block` `control_block_handle`<br>`omni_runner` `io_entity` `io_link` `io_query` `io_guard` `any` |
-| `ace::core::traits` | `future_traits` `busy_future_traits` `promise_traits` `promise_return_traits`<br>`runner_router_handle` `control_conductor_handle` `conductor_slot` `vortex_traits` |
+| `ace::core::traits` | `future_traits` `busy_future_traits` `promise_traits` `promise_return_traits`<br>`runner_router_handle` `control_router_handle` `router_slot` `vortex_traits` |
 | `ace::core::services` | `clock` (multi_dial time wheel) `kernel_controller` (io_uring vortex) |
 | `ace::core::tools` | `queue` `q_node` `slab_mempool` `moving_average` `id_allocator` `lifetime` |
 | `ace::core::meta` | `is_future` `is_busy_future` `is_awaitable` `resume_type` `replace_type`<br>`unique_tuple_t` `tuple_to_variant_t` |

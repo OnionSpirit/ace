@@ -8,9 +8,9 @@
  * ### How it works
  *
  * 1. @c co_await timeout(dur) calls @c await_suspend().
- * 2. A @c timeout_conductor is placed in the promise's conductor slot.
- * 3. The runner sees the conductor and calls @c conductor.forward(task).
- * 4. The conductor calls @c clock::subscribe(task, dur) which inserts the
+ * 2. A @c timeout_router is placed in the promise's router slot.
+ * 3. The runner sees the router and calls @c router.forward(task).
+ * 4. The router calls @c clock::subscribe(task, dur) which inserts the
  *    task into the time wheel.
  * 5. When @c dur elapses the clock's @c ping() releases the task back to its
  *    runner via @c runner::reattach().
@@ -74,7 +74,7 @@ public:
     timeout() = default;
 
     /**
-     * @brief C++20 awaitable protocol — install the @c timeout_conductor.
+     * @brief C++20 awaitable protocol — install the @c timeout_router.
      * @param coroutine  Handle to the suspending coroutine's promise.
      * @return Always @c true — the coroutine always suspends.
      */

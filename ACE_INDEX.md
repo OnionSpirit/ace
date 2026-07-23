@@ -16,7 +16,7 @@
 12. [I/O слой: io_query, io_entity, io_link](#io-слой)
 13. [io_uring (kernel_controller)](#io_uring)
 14. [Clock: иерархическое колесо времени](#clock)
-15. [Conductor: проводники futures](#conductor)
+15. [Router: проводники futures](#router)
 16. [Promise traits и память](#promise-traits)
 17. [Tools: queue, id_alloc, moving_average](#tools)
 18. [Важные ограничения и паттерны](#ограничения)
@@ -84,7 +84,7 @@ ace::task work() {
 - `yield_value(v)` — сохраняет значение, `status = e_executed_with_value`
 - `unhandled_exception()` — `status = e_failed`, вывод в stderr
 - `operator new(size_t)` — аллоцирует `control_block` перед promise
-- Поля: `_runner_router`, `_runner`, `_waiters`, `_self_conductor`, `_roaming`, `_polling`
+- Поля: `_runner_router`, `_runner`, `_waiters`, `_self_router`, `_roaming`, `_polling`
 
 ### async:: методы
 
@@ -293,7 +293,7 @@ auto deadline = clock::current_time() + 2s;
 co_await ace::futures::expire(deadline);   // абсолютный
 ```
 
-**Внутреннее устройство:** `timeout_conductor` помещает задачу в `clock::subscribe()` (иерархическое колесо времени). Когда время истекает, `clock::ping()` возвращает задачу через `runner::reattach()`.
+**Внутреннее устройство:** `timeout_router` помещает задачу в `clock::subscribe()` (иерархическое колесо времени). Когда время истекает, `clock::ping()` возвращает задачу через `runner::reattach()`.
 
 ### Гонка recv с таймаутом
 
@@ -658,28 +658,28 @@ Thread-local vortex. Каждый раннер имеет свой экземп�
 
 ---
 
-## Conductor
+## Router
 
-### conductor_slot (`core/traits/conduction.h:139`)
+### router_slot (`core/traits/routing.h:139`)
 
-In-place storage для одного conductor'а (размер `ACE_CONDUCTOR_MEM_SIZE` = cache_line - bus_size).
+In-place storage для одного router'а (размер `ACE_ROUTER_MEM_SIZE` = cache_line - bus_size).
 
 | Метод | Назначение |
 |-------|-----------|
-| `operator=(const conductor_t&)` | Placement new копия |
-| `operator=(conductor_t&&)` | Placement new move |
+| `operator=(const router_t&)` | Placement new копия |
+| `operator=(router_t&&)` | Placement new move |
 | `operator<<(carry_t&)` | Украсть указатель из другого слота |
-| `release()` | Уничтожить conductor |
-| `get()` | `conductor_handle_t*` |
+| `release()` | Уничтожить router |
+| `get()` | `router_handle_t*` |
 
-### runner_router_handle (`conduction.h:50`)
+### runner_router_handle (`routing.h:50`)
 
 Абстрактный проводник для пересылки задач из раннера:
 - `forward(async&&)` — переслать задачу
 - `forward_node(node_t*)` — переслать узел
 - `cancel()` — отменить
 
-### control_conductor_handle (`conduction.h:98`)
+### control_router_handle (`routing.h:98`)
 
 Абстрактный проводник для control-block join/cancel:
 - `forward(void* waiter)` — пробудить ожидающего
@@ -702,7 +702,7 @@ In-place storage для одного conductor'а (размер `ACE_CONDUCTOR_M
 
 | Метод | Назначение |
 |-------|-----------|
-| `await_transform(futureT&)` | 4 перегрузки: conductor-based (clears bus_future) и busy-polling (sets bus_future) |
+| `await_transform(futureT&)` | 4 перегрузки: router-based (clears bus_future) и busy-polling (sets bus_future) |
 | `operator new(size_t)` | Аллокация control_block + promise |
 | `operator delete(void*)` | disown control block |
 | `setup_trace()` | Выделить trace ID |
@@ -783,13 +783,13 @@ RAII debug tracer: логирует конструирование/разруш�
 | `futures/polling.h` | `polling(bool)` — флаг низкого приоритета |
 | `core/services/kernelic.h` | `kernel_controller` (io_uring vortex), `kernel_observer`, все `io_uring_prep_*` |
 | `core/services/clock.h` | `clock` vortex, `multi_dial` (временное колесо), `clock::subscribe()`, `clock::ping()` |
-| `core/traits/conduction.h` | `runner_router_handle`, `control_conductor_handle`, `conductor_slot` |
+| `core/traits/routing.h` | `runner_router_handle`, `control_router_handle`, `router_slot` |
 | `core/traits/future.h` | `future_traits`, `busy_future_traits`, concepts (`is_future`, `is_awaitable`), type traits |
 | `core/traits/promise.h` | `permanent`, `differed`, `promise_traits`, `promise_return_traits` |
 | `core/traits/vortex.h` | `vortex_traits` CRTP для фоновых сервисов |
 | `core/tools/queue.h` | `queue<T>`, `q_node<T>`, `slab_mempool<T>` |
 | `core/tools/id_alloc.h` | `id_allocator`, `async_id_allocator` |
-| `core/tools/macro.h` | `ACE_CACHE_LINE_SIZE`, `ACE_CONDUCTOR_MEM_SIZE`, `ACE_AWAIT_NODISCARD` |
+| `core/tools/macro.h` | `ACE_CACHE_LINE_SIZE`, `ACE_ROUTER_MEM_SIZE`, `ACE_AWAIT_NODISCARD` |
 | `core/tools/moving_average.h` | `moving_average` (sliding window) |
 | `core/tools/lifetime.h` | `lifetime` (RAII debug tracer) |
 

@@ -18,9 +18,9 @@ namespace ace::core::tools {
         omniptr(const omniptr& p) { _ptr = p._ptr; }
 
         // ReSharper disable once CppNonExplicitConvertingConstructor
-        omniptr(omniptr&& p)  noexcept { _ptr = p._ptr; p._ptr = nullptr; }
+        omniptr(omniptr&& p) noexcept { _ptr = p._ptr; p._ptr = nullptr; }
 
-        omniptr& operator=(const omniptr& p) { _ptr = p._ptr; return *this; }
+        omniptr& operator=(const omniptr& p) = default;
 
         omniptr& operator=(omniptr&& p)  noexcept {
             _ptr = p._ptr;

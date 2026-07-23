@@ -168,12 +168,6 @@ namespace ace::core {
         };
 
         /**
-         * @brief Ejects task from runner
-         * @return Optional of ejected task
-         */
-        std::optional<task> eject() noexcept;
-
-        /**
          * @details Resumes tasks from the ready task pool until it is empty, or limit (1024) reached.
          * @return @b true if runner made some tasks, @b false otherwise
          */
@@ -252,6 +246,7 @@ namespace ace::core {
                 "'reattach' operation can't be applied to 'ace::core::async<...>'s "
                 "which are not running at the 'ace::core::runner'"
             };
+        node->_data.release_router();
         if (local_runner_ptr == target_runner_ptr)
             local_runner_ptr->_pool.push_node(node);
         else
@@ -269,6 +264,7 @@ namespace ace::core {
                 "'reattach_front' operation can't be applied to 'ace::core::async<...>'s "
                 "which are not running at the 'ace::core::runner'"
             };
+        node->_data.release_router();
         if (local_runner_ptr == target_runner_ptr) {
             node->_data.prefetch();
             local_runner_ptr->_pool.push_node_front(node);
@@ -409,15 +405,6 @@ namespace ace::core {
         // NOTE: Returning task back to the local pool on this step
         _vortex_pool.push_node(vortex_unit);
         return true;
-    }
-
-
-    inline std::optional<task> runner::eject() noexcept {
-        if (task ejective; _pool.pop(ejective)) [[likely]] {
-            --_tasks_amount;
-            return ejective;
-        }
-        return std::nullopt;
     }
 
 

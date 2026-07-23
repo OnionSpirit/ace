@@ -10,7 +10,7 @@
  * is 0, the lock is acquired immediately — no suspension, no kernel call.
  *
  * ### Slow path (contended)
- * If @c try_lock() fails, @c await_suspend() installs a @c cutex_conductor into
+ * If @c try_lock() fails, @c await_suspend() installs a @c cutex_router into
  * the caller's promise.  The runner forwards the task into @c _waiters.  When
  * the current owner calls @c sync(), it does a @c fetch_sub(1) and calls
  * @c notify() which pops the next waiter and reattaches it to its runner.
@@ -121,7 +121,7 @@ namespace ace::futures {
 
         /**
          * @brief C++20 awaitable protocol — suspend and enqueue for wakeup.
-         * @details Installs a @c cutex_conductor so the runner forwards the
+         * @details Installs a @c cutex_router so the runner forwards the
          * calling context into @c _waiters.
          * @param coroutine  Handle to the suspending coroutine's promise.
          * @return Always @c true (always suspends on the slow path).
@@ -273,7 +273,7 @@ struct ACE_FUTURE_CUTEX_FUTURE_SPACE cutex_router : runner_router {
         _cutex->_waiters.push_node(node);
     }
 
-    // NOTE: Tasks is resuming with wiped conductor.
+    // NOTE: Tasks is resuming with wiped router.
     // NOTE: Placing into waiters queue is moving operation and also wont affect async handler inner state.
     // NOTE: So we can cancel it by task handler
     // NOTE: If task has handlers it means that task is thread local with canceling task.
@@ -337,7 +337,7 @@ pending_notify() noexcept {
 
 ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
 await_suspend(auto coroutine) {
-    // NOTE: Setting conductor for dispatch to the cutex waiters queue
+    // NOTE: Setting router for dispatch to the cutex waiters queue
     coroutine.promise()._runner_router = cutex_router{this};
     return true;
 }

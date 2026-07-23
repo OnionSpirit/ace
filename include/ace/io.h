@@ -252,7 +252,7 @@ public:                                                                         
         }
 
         /**
-         * @brief Conductor that stores the waiting task until the I/O operation completes.
+         * @brief Router that stores the waiting task until the I/O operation completes.
          *
          * @details Installed into the awaiting coroutine's promise by
          * @c await_suspend().  @c forward() saves the task, which is later
@@ -781,7 +781,7 @@ public:                                                                         
 
             _hdr.msg_iov = services::kernel_controller::iovec_pool_allocate(_hdr.msg_iovlen);
 
-            for (int i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
+            for (size_t i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
                 _hdr.msg_iov[i].iov_base = static_cast<char*>(current->iov_base) + control_hdr_len;
                 _hdr.msg_iov[i].iov_len = current->iov_len;
                 current = *static_cast<iovec**>(current->iov_base);
@@ -1243,7 +1243,7 @@ public:                                                                         
     inline std::string ace::io::buffer::as<std::string>() const {
         std::string str;
         const iovec* current = _chunk_list_begin;
-        for (int i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
+        for (size_t i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
             str.append(static_cast<char*>(current->iov_base) + control_hdr_len, current->iov_len);
             current = *static_cast<iovec**>(current->iov_base);
         }
@@ -1254,8 +1254,8 @@ public:                                                                         
     inline std::vector<std::byte> ace::io::buffer::as<std::vector<std::byte>>() const {
         std::vector<std::byte> buf;
         const iovec* current = _chunk_list_begin;
-        for (int i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
-            for (int j = 0; j < current->iov_len; ++j)
+        for (size_t i =0; i < _hdr.msg_iovlen and current not_eq nullptr; ++i) {
+            for (size_t j = 0; j < current->iov_len; ++j)
                 buf.push_back(
                     std::forward<std::byte>(
                         static_cast<std::byte*>(current->iov_base)[j + control_hdr_len]

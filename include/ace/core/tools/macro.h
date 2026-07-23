@@ -9,7 +9,7 @@
  * | Macro | Value | Purpose |
  * |---|---|---|
  * | @c ACE_BUS_SIZE | @c sizeof(std::size_t) | Native pointer/word size. Used for @c alignas on small fields. |
- * | @c ACE_CONDUCTOR_MEM_SIZE | cache line − bus size | Maximum byte size for a conductor in a @c conductor_slot. |
+ * | @c ACE_ROUTER_MEM_SIZE | cache line − bus size | Maximum byte size for a router in a @c router_slot. |
  * | @c ACE_CACHE_LINE_SIZE | @c hardware_constructive_interference_size | CPU cache line size. |
  * | @c ACE_CACHE_LINE(n) | zero-size struct | Inserts a named cache-line padding marker at position @c n. |
  */
@@ -19,9 +19,9 @@
 /// @brief Native word size (bytes).  Used as @c alignas value for small fields.
 #define ACE_BUS_SIZE sizeof(std::size_t)
 
-#ifndef ACE_CONDUCTOR_MEM_SIZE
-/// @brief Maximum byte size for a concrete conductor stored in a @c conductor_slot.
-/// @details Derived so that a @c conductor_slot including its pointer fits within
+#ifndef ACE_ROUTER_MEM_SIZE
+/// @brief Maximum byte size for a concrete router stored in a @c router_slot.
+/// @details Derived so that a @c router_slot including its pointer fits within
 /// one cache line.
 #define ACE_ROUTER_MEM_SIZE std::hardware_constructive_interference_size - ACE_BUS_SIZE
 #endif

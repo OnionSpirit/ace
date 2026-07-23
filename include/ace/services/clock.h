@@ -19,13 +19,13 @@
  * ### How timeouts work
  *
  * 1. @c co_await timeout(500ms) creates a @c timeout future.
- * 2. @c await_suspend() installs a @c timeout_conductor.
- * 3. The runner calls @c conductor.forward(task) → @c clock::subscribe(task, 500ms).
+ * 2. @c await_suspend() installs a @c timeout_router.
+ * 3. The runner calls @c router.forward(task) → @c clock::subscribe(task, 500ms).
  * 4. @c multi_dial::subscribe() selects a dial level and inserts the task.
  * 5. When 500ms elapses, @c clock::ping() → @c multi_dial::release() pops
  *    the task and calls @c runner::reattach().
  *
- * @mermaid{ graph LR; Timeout[\"timeout(dur)\"]-->Conductor[\"timeout_conductor\"]; Conductor-->Subscribe[\"clock::subscribe\"]; Subscribe-->MultiDial[\"multi_dial\"]; MultiDial-->Slot[\"time_slot\"]; clock_ping[\"clock::ping()\"]-->Release[\"multi_dial::release\"]; Release-->Reattach[\"runner::reattach\"]; }
+ * @mermaid{ graph LR; Timeout[\"timeout(dur)\"]-->Router[\"timeout_router\"]; Router-->Subscribe[\"clock::subscribe\"]; Subscribe-->MultiDial[\"multi_dial\"]; MultiDial-->Slot[\"time_slot\"]; clock_ping[\"clock::ping()\"]-->Release[\"multi_dial::release\"]; Release-->Reattach[\"runner::reattach\"]; }
  *
  * @see ace::futures::timeout, ace::core::traits::vortex_traits
  */

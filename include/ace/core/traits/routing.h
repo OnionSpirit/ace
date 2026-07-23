@@ -1,5 +1,5 @@
 /**
- * @file conduction.h
+ * @file routing.h
  * @brief Router interfaces and the @c router_slot in-place storage.
  *
  * @details The <b>router pattern</b> is the primary mechanism by which ACE

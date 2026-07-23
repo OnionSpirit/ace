@@ -135,7 +135,7 @@ namespace ace::core::meta {
          );
 
     /**
-     * @brief ACE future concept (conductor-based suspension).
+     * @brief ACE future concept (router-based suspension).
      *
      * @details A type satisfies @c is_future if it:
      *  1. Exposes a nested @c future_traits_t alias.
@@ -144,7 +144,7 @@ namespace ace::core::meta {
      *  3. Satisfies @c is_awaitable.
      *
      * When @c promise_traits::await_transform() detects this concept, it clears
-     * @c _busy_future so the runner uses the conductor for forwarding.
+     * @c _busy_future so the runner uses the router for forwarding.
      *
      * @tparam futureT   Type to check.
      * @tparam promiseT  Promise type of the enclosing coroutine.
@@ -166,7 +166,7 @@ namespace ace::core::meta {
      *
      * When @c promise_traits::await_transform() detects this concept, it stores
      * a pointer in @c _busy_future.  The runner calls @c await_ready() repeatedly
-     * before deciding to re-queue the task, avoiding a full conductor round-trip
+     * before deciding to re-queue the task, avoiding a full router round-trip
      * for fast operations (e.g., channel pull when data is already available).
      *
      * @tparam futureT   Type to check.
@@ -179,9 +179,9 @@ namespace ace::core::meta {
     and is_awaitable<futureT, promiseT>;
 
     /**
-     * @brief ACE commonized future concept (active polling or conductor-based suspensions).
+     * @brief ACE commonized future concept (active polling or router-based suspensions).
      *
-     * @details Detects both @b active @b polling @c busy_future and @b conductor-based @c future
+     * @details Detects both @b active @b polling @c busy_future and @b router-based @c future
      *
      * @tparam futureT   Type to check.
      * @tparam promiseT  Promise type of the enclosing coroutine.
@@ -190,7 +190,7 @@ namespace ace::core::meta {
     concept is_any_future_accurate = is_busy_future_accurate<futureT, promiseT> or is_future_accurate<futureT, promiseT>;
 
     /**
-     * @brief ACE future concept (conductor-based suspension).
+     * @brief ACE future concept (router-based suspension).
      *
      * @details A type satisfies @c is_future if it:
      *  1. Exposes a nested @c future_traits_t alias.
@@ -198,7 +198,7 @@ namespace ace::core::meta {
      *     @c ace::futures::future_traits<Derived>).
      *
      * When @c promise_traits::await_transform() detects this concept, it clears
-     * @c _busy_future so the runner uses the conductor for forwarding.
+     * @c _busy_future so the runner uses the router for forwarding.
      *
      * @tparam futureT   Type to check.
      */

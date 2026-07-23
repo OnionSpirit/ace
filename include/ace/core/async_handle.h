@@ -35,8 +35,8 @@ namespace ace::core {
      * @brief Awaitable future that suspends the caller until a target coroutine finishes.
      *
      * @details Used internally by @c async_handle::join().  When @c co_await-ed,
-     * a @c join_handler_conductor is placed in the caller's promise.  When the
-     * target coroutine's destructor calls @c release_waiters(), the conductor's
+     * a @c join_handler_router is placed in the caller's promise.  When the
+     * target coroutine's destructor calls @c release_waiters(), the router's
      * @c forward() method enqueues the caller back into the target's waiters
      * queue, which is then drained — waking the caller.
      */
@@ -46,7 +46,7 @@ namespace ace::core {
 
         control_block_handle _handle; ///< Weak reference to the target coroutine's control block.
 
-        struct join_handler_conductor;
+        struct join_handler_router;
 
     public:
 
@@ -72,7 +72,7 @@ namespace ace::core {
 
         /**
          * @brief C++20 awaitable protocol — register as a waiter.
-         * @details Installs a @c join_handler_conductor that will forward this
+         * @details Installs a @c join_handler_router that will forward this
          * async into the target's waiters queue when the target finishes.
          * @tparam promise_u  Promise type of the outer (waiting) coroutine.
          * @param outer       Handle to the outer coroutine.
@@ -134,20 +134,20 @@ namespace ace::core {
 
     };
 
-    struct join_handler::join_handler_conductor final : runner_router {
+    struct join_handler::join_handler_router final : runner_router {
 
         control_block_handle _handle;
 
-        join_handler_conductor() = delete;
+        join_handler_router() = delete;
 
-        explicit join_handler_conductor(const control_block_handle& handle) : _handle{handle} {}
+        explicit join_handler_router(const control_block_handle& handle) : _handle{handle} {}
 
         void redirect(const omni_node node) override { _handle.forward(node); }
 
         // TODO: Finish later
         void cancel() override {  }
 
-        ~join_handler_conductor() override = default;
+        ~join_handler_router() override = default;
 
     };
 
@@ -175,7 +175,7 @@ join() noexcept -> join_handler& { return *static_cast<join_handler*>(this); }
 
 ACE_FUTURE_JOIN_HANDLER_FUTURE_MEMBER(template<typename promise_u> bool)
 await_suspend(std::coroutine_handle<promise_u> outer) {
-    outer.promise()._runner_router = join_handler_conductor{_handle};
+    outer.promise()._runner_router = join_handler_router{_handle};
     return true;
 }
 

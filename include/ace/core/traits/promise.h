@@ -326,7 +326,7 @@ namespace ace::core::traits {
          */
         void operator delete(void* mem_ptr) noexcept {
             // NOTE: Trying to disown, and if it's untracked do delete
-            if (control_block* block = control_block::get_block_from_address(mem_ptr); control_block::disown(block)) {
+            if (control_block* block = control_block::get_block_from_address(mem_ptr); control_block::is_untracked(block)) {
                 // NOTE: Using true frame size with control block
                 const auto mem_size = block->_frame_size;
                 block->~control_block();

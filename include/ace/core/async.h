@@ -209,7 +209,7 @@ namespace ace::core {
         void release_waiters() {
             if (_coroutine.promise()._waiters) {
                 omni_node waiter = _coroutine.promise()._waiters->pop_node();
-                while (waiter and waiter->_data.is_exist()) {
+                while (waiter and waiter->_data._coroutine) {
                     waiter->_data.release_future();
                     waiter->_data._coroutine.promise()._runner.as<runner_pool_t>()->push_node(waiter);
                     waiter = _coroutine.promise()._waiters->pop_node();

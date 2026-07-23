@@ -427,9 +427,11 @@ namespace ace::core {
         for (constexpr int yank_limit = 128; i < yank_limit and yank(); ++i) {
             if (i % 16 == 0) {
                 yank_vortex();
-                // NOTE: Trying to switch to interthread pool
-                if (_pull_source not_eq pull_source::e_interthread_pool and not _insert_pool.empty())
+                // NOTE: Trying to switch between pools
+                if (_pull_source == pull_source::e_local_pool and not _insert_pool.empty())
                     _pull_source = pull_source::e_interthread_pool;
+                else if (_pull_source == pull_source::e_interthread_pool and not _pool.empty())
+                    _pull_source = pull_source::e_local_pool;
             }
         }
         current_runner_ptr = nullptr;

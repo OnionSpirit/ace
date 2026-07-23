@@ -14,6 +14,20 @@ namespace ace::core::tools {
         // ReSharper disable once CppNonExplicitConvertingConstructor
         omniptr(void* p) { _ptr = p; }
 
+        // ReSharper disable once CppNonExplicitConvertingConstructor
+        omniptr(const omniptr& p) { _ptr = p._ptr; }
+
+        // ReSharper disable once CppNonExplicitConvertingConstructor
+        omniptr(omniptr&& p)  noexcept { _ptr = p._ptr; p._ptr = nullptr; }
+
+        omniptr& operator=(const omniptr& p) { _ptr = p._ptr; return *this; }
+
+        omniptr& operator=(omniptr&& p)  noexcept {
+            _ptr = p._ptr;
+            p._ptr = nullptr;
+            return *this;
+        }
+
         template <typename expected_t>
         // ReSharper disable once CppNonExplicitConvertingConstructor
         omniptr(expected_t* p) requires is_contained<expected_t, option_t, option_ts...> {

@@ -85,7 +85,7 @@ namespace ace::core {
          * @brief C++20 awaitable protocol — return completion status.
          * @return @c true if the target coroutine has finished.
          */
-        bool await_resume() const { return _handle.done(); }
+        bool await_resume() const { return _handle.finished(); }
     };
 
     /**

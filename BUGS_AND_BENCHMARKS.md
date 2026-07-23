@@ -2,6 +2,25 @@
 
 Дата обновления: 2026-07-23
 
+## Быстрый запуск бенчмарков
+
+```bash
+meson setup build-bench -Dbenchmarks=true
+ninja -C build-bench ace_benchmarks
+./build-bench/ace_benchmarks
+```
+
+Бенчмарки используют Google Benchmark. Опция `-Dbenchmarks=true` добавляет
+wrap-зависимость `google-benchmark` и цель `ace_benchmarks`.
+
+**Структура бенчмарков:**
+
+| Файл | Назначение |
+|------|-----------|
+| `benchmarks/main.cpp` | Google Benchmark entry point |
+| `benchmarks/environment.h` | Fixture-классы и хелперы |
+| `benchmarks/benchmarks.cpp` | Сами бенчмарки (BM1-BM6) |
+
 ---
 
 ## Найденные баги

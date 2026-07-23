@@ -69,7 +69,6 @@ if tests_enabled
 
     test_sources = files(
       'tests/environment.h',
-      'tests/units.h',
       'tests/tests.cpp',
       'tests/main.cpp',
     )
@@ -141,4 +140,52 @@ if tests_enabled
     )
     endforeach
 
+endif
+
+# Benchmarks compilation option
+benchmarks_enabled = get_option('benchmarks')
+
+if benchmarks_enabled
+    message('Benchmarks requested')
+
+    benchmark_dep = dependency('google-benchmark',
+        fallback: ['google-benchmark', 'google_benchmark_dep'],
+        required: true
+    )
+
+    benchmark_sources = files(
+        'benchmarks/environment.h',
+        'benchmarks/benchmarks.cpp',
+        'benchmarks/main.cpp',
+    )
+
+    compiler = meson.get_compiler('cpp')
+    compiler_syntax = compiler.get_argument_syntax()
+
+    benchmark_compile_args = []
+    if compiler_syntax == 'gcc'
+        benchmark_compile_args = ['-std=c++23']
+    elif compiler_syntax == 'clang'
+        benchmark_compile_args = ['-std=c++23', '-flto']
+    endif
+
+    benchmark_executable = executable(
+        'ace_benchmarks',
+        sources: benchmark_sources,
+        cpp_args: benchmark_compile_args,
+        dependencies: [
+            benchmark_dep,
+            ace_dep,
+        ],
+    )
+
+    benchmark(
+        'ace_benchmarks',
+        benchmark_executable,
+        args: [
+            '--benchmark_min_time=0.1s',
+            '--benchmark_color=true',
+            '--benchmark_counters_tabular=true',
+        ]
+    )
 endif

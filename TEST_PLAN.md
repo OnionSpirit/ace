@@ -739,6 +739,9 @@ echo "Report: coverage_report/index.html"
 
 **Итого:** 35 fixture-классов, 175 тестов (было 24, добавлен 151).
 
+**Бенчмарки:** 6 тестов перенесены в `benchmarks/` (см. `BUGS_AND_BENCHMARKS.md`).
+Запуск: `meson setup build-bench -Dbenchmarks=true && ninja -C build-bench ace_benchmarks`
+
 ---
 
 ## Индексация по структуре тестов

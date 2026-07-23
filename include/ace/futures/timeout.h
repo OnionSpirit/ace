@@ -9,9 +9,9 @@
  *
  * 1. @c co_await timeout(dur) calls @c await_suspend().
  * 2. A @c timeout_router is placed in the promise's router slot.
- * 3. The runner sees the router and calls @c router.forward(task).
- * 4. The router calls @c clock::subscribe(task, dur) which inserts the
- *    task into the time wheel.
+ * 3. The runner sees the router and calls @c router.redirect(node).
+ * 4. The router calls @c clock::subscribe(node, dur) which inserts the
+ *    node into the time wheel.
  * 5. When @c dur elapses the clock's @c ping() releases the task back to its
  *    runner via @c runner::reattach().
  *

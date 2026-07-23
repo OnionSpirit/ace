@@ -75,13 +75,13 @@ namespace ace::futures {
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
         std::atomic<long>                           _users            {0};         ///< Number of active users (0 = unlocked).
         nukes::dynamic::roaming_mpsc_queue<task>    _waiters          { };            ///< Tasks waiting to acquire the mutex.
-        bool                                        _rescheduling     {false};        ///< When @c true, released waiters are migrated to @c _runner_pool.
+        bool                                        _rescheduling     {false};        ///< When @c true, released waiters are migrated to current runner's pool.
 
         /**
          * @brief Attempt to wake one waiter from @c _waiters.
          * @details Pops one context from the waiters queue and calls
          * @c runner::reattach().  If @c _rescheduling is set and the waiter
-         * does not support roaming, updates @c _runner_pool from the waiter's
+         * does not support roaming, updates @c _runner from the waiter's
          * runner.
          * @return @c true if a waiter was successfully notified.
          */

@@ -37,7 +37,7 @@ namespace ace::core {
      * @details Used internally by @c async_handle::join().  When @c co_await-ed,
      * a @c join_handler_router is placed in the caller's promise.  When the
      * target coroutine's destructor calls @c release_waiters(), the router's
-     * @c forward() method enqueues the caller back into the target's waiters
+     * @c redirect() method enqueues the caller back into the target's waiters
      * queue, which is then drained — waking the caller.
      */
     class ACE_AWAIT_NODISCARD join_handler : public core::traits::future_traits<join_handler> {

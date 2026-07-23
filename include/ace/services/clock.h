@@ -20,7 +20,7 @@
  *
  * 1. @c co_await timeout(500ms) creates a @c timeout future.
  * 2. @c await_suspend() installs a @c timeout_router.
- * 3. The runner calls @c router.forward(task) → @c clock::subscribe(task, 500ms).
+ * 3. The runner calls @c router.redirect(node) → @c clock::subscribe(node, 500ms).
  * 4. @c multi_dial::subscribe() selects a dial level and inserts the task.
  * 5. When 500ms elapses, @c clock::ping() → @c multi_dial::release() pops
  *    the task and calls @c runner::reattach().

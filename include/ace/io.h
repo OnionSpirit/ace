@@ -255,7 +255,7 @@ public:                                                                         
          * @brief Router that stores the waiting task until the I/O operation completes.
          *
          * @details Installed into the awaiting coroutine's promise by
-         * @c await_suspend().  @c forward() saves the task, which is later
+         * @c await_suspend().  @c redirect() saves the node, which is later
          * re-attached by @c on_result().  @c cancel() submits a cancellation
          * request to @c kernel_controller.
          */

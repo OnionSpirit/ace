@@ -291,7 +291,7 @@ namespace ace::core {
          *  | Field | Type | Purpose |
          *  |---|---|---|
          *  | @c _runner_router | @c runner_router_slot_t | In-place storage for the active router. |
-         *  | @c _runner_pool | @c runner_pool_t* | Pointer to the owning runner's task queue. |
+         *  | @c _runner | @c omni_runner | Pointer to the owning runner / runner pool. |
          *  | @c _waiters | @c shared_ptr<runner_pool_t> | Queue of asyncs waiting for this one to finish. |
          *  | @c _self_router | @c optional<async_router> | Router installed into the control block. |
          *  | @c _roaming | @c bool | When @c true the balancer may migrate the task to another runner. |
@@ -370,7 +370,7 @@ namespace ace::core {
              *
              * @details Retrieves the @c control_block prefix allocated before
              * this promise, constructs a @c async_router, and links them so
-             * that @c control_block_handle::cancel() / @c forward() work.
+             * that @c control_block_handle::cancel() / @c redirect() work.
              *
              * Only available for lazy (@c differed) coroutines because eager
              * coroutines may already be running by the time @c observe() is
@@ -448,7 +448,7 @@ namespace ace::core {
          */
         template<typename promiseT>
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
-            // NOTE: Secure if _runner_pool is null
+            // NOTE: Secure if _runner is null
             _coroutine.promise()._runner = outer.promise()._runner;
             // NOTE: No extra checks needed, because function would be called once before suspending.
             // NOTE: Just coping router ptr. Outer task will destroy router before current promise stack

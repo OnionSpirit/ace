@@ -41,7 +41,7 @@ namespace ace::core::traits {
      *
      * @details Derived routers are created by futures (e.g., @c channel,
      * @c timeout, @c cutex) and stored inside the coroutine's @c router_slot.
-     * The runner calls @c forward() after detecting the slot is occupied.
+     * The runner calls @c redirect() after detecting the slot is occupied.
      *
      * @tparam forwarded_node_t The coroutine async type being forwarded
      *                           (typically @c ace::task).
@@ -80,7 +80,7 @@ namespace ace::core::traits {
      * @details This router is installed into a @c control_block by
      * @c async::setup_control_block() and accessed through
      * @c control_block_handle.  It allows external code to:
-     *  - @c forward(waiter) — register a waiter that will be resumed when the
+     *  - @c redirect(waiter) — register a waiter that will be resumed when the
      *    producer coroutine finishes.
      *  - @c cancel() — request cancellation of the producer coroutine.
      */

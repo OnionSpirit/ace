@@ -472,7 +472,7 @@ ACE_COMPOSE_AWAIT_FUTURE_META
 /**
  * @brief Router for @c or_await — stores the waiting task until the race resolves.
  *
- * @details When @c forward() is called by the runner, the caller is saved in
+ * @details When @c redirect() is called by the runner, the caller is saved in
  * @c _or_await->_waiter.  When an observer finishes, it calls
  * @c runner::reattach() on the stored waiter.  @c cancel() propagates
  * cancellation to both observer tasks.

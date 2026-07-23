@@ -3,21 +3,21 @@
  * @brief Per-thread task runner — the core execution unit of the ACE runtime.
  *
  * @details Each @c runner owns a lock-free MPSC task queue (@c _pool), an
- * inter-thread insertion queue (@c _interthread_pool), and a vortex service
+ * inter-thread insertion queue (@c _insert_pool), and a vortex service
  * pool (@c _vortex_pool).  The dispatcher assigns tasks to runners via
  * @c attach() / @c attach_front().
  *
  * ### Execution loop
  *
  * @c run() processes up to 128 tasks per call (the @c yank_limit).  Every
- * 16 tasks it drains the @c _interthread_pool and processes vortex tasks.
+ * 16 tasks it drains the @c _insert_pool and processes vortex tasks.
  *
  * ### Task lifecycle inside a runner
  *
- * 1. @c attach()/@c attach_front() — sets @c _runner_pool on the promise
+ * 1. @c attach()/@c attach_front() — sets @c _runner on the promise
  *    and enqueues the task.
  * 2. @c yank() — pops a task, calls @c awake(), and decides whether to
- *    re-queue, release, or forward via router.
+ *    re-queue, release, or redirect via router.
  * 3. @c reattach() — returns a task to its owning runner (used by futures
  *    to wake a suspended coroutine).
  *
@@ -42,7 +42,7 @@ namespace ace::core {
      *
      * @details Owns three task queues:
      *  - @c _pool — lock-free MPSC queue for local tasks (fast path).
-     *  - @c _interthread_pool — lock-free MPSC queue for cross-thread inserts.
+     *  - @c _insert_pool — lock-free MPSC queue for cross-thread inserts.
      *  - @c _vortex_pool — queue for low-priority polling tasks (vortex services).
      *
      * Tracks @c _tasks_amount for velocity calculation (used by the balancer

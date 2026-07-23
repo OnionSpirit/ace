@@ -272,7 +272,7 @@ namespace ace::core {
                     _observers[i]->cancel();
             }
 
-            if (_waiter and _waiter->_data)
+            if (_waiter.operator bool() and _waiter->_data.is_exist())
                 runner::reattach(_waiter);
 
             // NOTE: Setting finished operand ID if both operands are void awaitable

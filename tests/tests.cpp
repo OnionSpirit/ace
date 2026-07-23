@@ -2299,8 +2299,7 @@ TEST_F(cross_mechanic_fixture, cancel_spawned_with_timeout) {
 // NOTE: Закомментирован — в редких случаях зависает когда spawned задача
 // находится в channel.pull() на момент cancel(). Channel_router::cancel()
 // не всегда пробуждает задачу корректно при определённом порядке гонки.
-/*
-TEST_F(cross_mechanic_fixture, cancel_spawned_with_channel) {
+TEST_F(cross_mechanic_fixture, DISABLED_cancel_spawned_with_channel) {
     ace::futures::tunnel::dyn::bus<std::string> ch;
     ace::futures::tunnel::dyn::bus<int> result;
     ace::schedule([&ch, &result]() -> ace::task {
@@ -2324,7 +2323,6 @@ TEST_F(cross_mechanic_fixture, cancel_spawned_with_channel) {
     EXPECT_EQ(1, res[0]);
     EXPECT_EQ(1, res[1]);
 }
-*/
 
 // Проверяет что timeout or channel работает как гонка.
 TEST_F(cross_mechanic_fixture, channel_with_timeout) {
@@ -2461,8 +2459,7 @@ TEST_F(cross_mechanic_fixture, multi_runner_cutex_count) {
 // Проверяет что cancel на and-композиции корректно отменяет оба future.
 // NOTE: Закомментирован — and_compose создаёт observer-задачи которые
 // не всегда корректно отменяются при cancel родительской задачи.
-/*
-TEST_F(cross_mechanic_fixture, and_compose_with_cancel) {
+TEST_F(cross_mechanic_fixture, DISABLED_and_compose_with_cancel) {
     ace::futures::tunnel::dyn::bus<int> result;
     ace::schedule([&result]() -> ace::task {
         auto handle = co_await ace::spawn([&result]() -> ace::task {
@@ -2485,13 +2482,11 @@ TEST_F(cross_mechanic_fixture, and_compose_with_cancel) {
     ASSERT_GE(res.size(), 1u);
     EXPECT_EQ(1, res[0]);
 }
-*/
 
 // Проверяет or-композицию из трёх future.
 // NOTE: закомментирован — or_await_composed с 3 future вызывает ошибку
 // конвертации void->bool в compose.h из-за operator-> на omniptr.
-/*
-TEST_F(cross_mechanic_fixture, or_await_composed_3) {
+TEST_F(cross_mechanic_fixture, DISABLED_or_await_composed_3) {
     ace::futures::tunnel::dyn::bus<int> result;
     ace::schedule([&result]() -> ace::task {
         auto res = co_await (
@@ -2508,7 +2503,6 @@ TEST_F(cross_mechanic_fixture, or_await_composed_3) {
     ASSERT_EQ(1u, res.size());
     EXPECT_EQ(1, res[0]);
 }
-*/
 
 // Проверяет spawn + post одновременно.
 TEST_F(cross_mechanic_fixture, spawn_post_interaction) {

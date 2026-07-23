@@ -19,10 +19,10 @@
 namespace tool = ace::core::tools;
 
 // ==========================================================================
-// BaseFixture — shared utilities available to all test fixtures
+// base_fixture — shared utilities available to all test fixtures
 // ==========================================================================
 
-struct BaseFixture : ::testing::Test {
+struct base_fixture : ::testing::Test {
 
     struct once_suspend : ace::core::traits::busy_future_traits<once_suspend> {
         IMPORT_BUSY_FUTURE_ENV(once_suspend)
@@ -70,12 +70,12 @@ struct BaseFixture : ::testing::Test {
 };
 
 // ==========================================================================
-// ContextFixture — low-level coroutine tests (no runner)
+// context_fixture — low-level coroutine tests (no runner)
 // ==========================================================================
 
-struct ContextFixture : BaseFixture {
+struct context_fixture : base_fixture {
     ace::promise<bool> simple_context_test() {
-        BaseFixture::once_suspend tests_future;
+        base_fixture::once_suspend tests_future;
         co_await tests_future;
         ace::console::println("One suspend complete");
         co_return true;
@@ -89,12 +89,12 @@ struct ContextFixture : BaseFixture {
 };
 
 // ==========================================================================
-// ChannelFixture — channel send/receive
+// channel_fixture — channel send/receive
 // ==========================================================================
 
-struct ChannelFixture : BaseFixture {
+struct channel_fixture : base_fixture {
     ace::task channel_sender() {
-        BaseFixture::once_suspend tests_future;
+        base_fixture::once_suspend tests_future;
         co_await tests_future;
         std::string msg = "Ping";
         _channel.push(msg);
@@ -117,10 +117,10 @@ struct ChannelFixture : BaseFixture {
 };
 
 // ==========================================================================
-// TimerFixture — timer / expire / or / and tests
+// timer_fixture — timer / expire / or / and tests
 // ==========================================================================
 
-struct TimerFixture : BaseFixture {
+struct timer_fixture : base_fixture {
     template <typename Rep, typename Period>
     ace::task timer_waiter_valued(std::chrono::duration<Rep, Period> dur,
                                   ace::futures::tunnel::dyn::bus<int>& ch) {
@@ -181,10 +181,10 @@ struct TimerFixture : BaseFixture {
 };
 
 // ==========================================================================
-// TimerParallelFixture — heavy parallel timer test
+// timer_parallel_fixture — heavy parallel timer test
 // ==========================================================================
 
-struct TimerParallelFixture : BaseFixture {
+struct timer_parallel_fixture : base_fixture {
     void SetUp() override {
         ace::cfg::g_config._runners_amount = 4;
         ace::reload();
@@ -209,10 +209,10 @@ struct TimerParallelFixture : BaseFixture {
 };
 
 // ==========================================================================
-// CutexFixture — cutex race + cancel tests (multi-runner)
+// cutex_fixture — cutex race + cancel tests (multi-runner)
 // ==========================================================================
 
-struct CutexFixture : BaseFixture {
+struct cutex_fixture : base_fixture {
     void TearDown() override {
         ace::cfg::g_config._runners_amount = 1;
         ace::reload();
@@ -311,10 +311,10 @@ struct CutexFixture : BaseFixture {
 };
 
 // ==========================================================================
-// SpawnFixture — spawn / post / cancel / join / compose tests
+// spawn_fixture — spawn / post / cancel / join / compose tests
 // ==========================================================================
 
-struct SpawnFixture : BaseFixture {
+struct spawn_fixture : base_fixture {
     // ── spawn / join ──
 
     ace::task to_spawn() {
@@ -452,10 +452,10 @@ struct SpawnFixture : BaseFixture {
 };
 
 // ==========================================================================
-// SocketEchoFixture — TCP echo tests
+// socket_echo_fixture — TCP echo tests
 // ==========================================================================
 
-struct SocketEchoFixture : BaseFixture {
+struct socket_echo_fixture : base_fixture {
     void TearDown() override {
         ace::reset_signal();
     }
@@ -533,10 +533,10 @@ struct SocketEchoFixture : BaseFixture {
 };
 
 // ==========================================================================
-// FsFixture — filesystem test
+// fs_fixture — filesystem test
 // ==========================================================================
 
-struct FsFixture : BaseFixture {
+struct fs_fixture : base_fixture {
     ace::task fs_testing() {
         auto f = ace::fs::file("flexing.txt");
         if (auto f_entity = co_await f.open(O_CREAT | O_WRONLY | O_TRUNC))
@@ -544,5 +544,307 @@ struct FsFixture : BaseFixture {
     }
 };
 
+
+// ==========================================================================
+// queue_fixture — slab_mempool and intrusive queue tests
+// ==========================================================================
+
+struct queue_fixture : ::testing::Test {
+    struct test_payload {
+        int value;
+        explicit test_payload(int v = 0) : value(v) {}
+    };
+
+    tool::slab_mempool<test_payload> _mempool {};
+    tool::queue<test_payload> _queue { _mempool };
+};
+
+// ==========================================================================
+// omniptr_fixture — type-agnostic pointer tests
+// ==========================================================================
+
+struct omniptr_fixture : ::testing::Test {};
+
+// ==========================================================================
+// id_alloc_fixture — lock-free ID allocator tests
+// ==========================================================================
+
+struct id_alloc_fixture : ::testing::Test {};
+
+// ==========================================================================
+// moving_average_fixture — sliding window average tests
+// ==========================================================================
+
+struct moving_average_fixture : ::testing::Test {};
+
+// ==========================================================================
+// future_traits_fixture — compile-time type trait tests
+// ==========================================================================
+
+struct future_traits_fixture : ::testing::Test {};
+
+// ==========================================================================
+// promise_traits_fixture — promise type behavior tests
+// ==========================================================================
+
+struct promise_traits_fixture : base_fixture {
+    ace::promise<int> simple_valued_coroutine() {
+        co_return 42;
+    }
+
+    ace::task simple_void_coroutine() {
+        co_return;
+    }
+};
+
+// ==========================================================================
+// router_slot_fixture — router_slot in-place storage tests
+// ==========================================================================
+
+struct router_slot_fixture : ::testing::Test {
+    // concrete test router for slot operations
+    struct test_router : ace::core::traits::runner_router_handle<ace::omni_node> {
+        bool _was_released = false;
+        bool _was_canceled = false;
+        static int alive_count; // track object lifetime for release tests
+
+        test_router() { ++alive_count; }
+        test_router(const test_router&) { ++alive_count; }
+        test_router(test_router&&) noexcept { ++alive_count; }
+        ~test_router() override { _was_released = true; --alive_count; }
+        static void reset_counter() { alive_count = 0; }
+
+        void redirect(ace::omni_node) override {}
+        void cancel() override { _was_canceled = true; }
+    };
+
+    typedef ace::core::traits::router_slot<ace::core::traits::runner_router_handle<ace::omni_node>> slot_t;
+
+    void TearDown() override {
+        test_router::reset_counter();
+    }
+};
+
+// ==========================================================================
+// signal_fixture — signal handler tests
+// ==========================================================================
+
+struct signal_fixture : base_fixture {};
+
+// ==========================================================================
+// control_block_fixture — control block lifecycle tests
+// ==========================================================================
+
+struct control_block_fixture : ::testing::Test {
+    // mini promise type for control block allocation tests
+    // Использует реальный operator new из promise_traits для аллокации
+    // control_block ПЕРЕД promise (как в production коде).
+    struct mini_promise : ace::core::traits::promise_traits<mini_promise, void> {
+        DECLARE_PROMISE_TRAITS(mini_promise, void)
+        IMPORT_PROMISE_TRAITS_ENV
+
+        mini_promise() = default;
+
+        static auto initial_suspend() noexcept { return std::suspend_always{}; }
+        static auto final_suspend() noexcept { return std::suspend_always{}; }
+        void return_void() {}
+        void unhandled_exception() {}
+
+        auto get_return_object() noexcept {
+            return ace::core::async<void, ace::core::differed>{};
+        }
+    };
+
+    // Вручную аллоцирует control_block + mini_promise в одном буфере
+    // (имитируя operator new из promise_traits).
+    struct allocated_promise {
+        ace::core::control_block* block;
+        mini_promise* promise;
+
+        allocated_promise() {
+            constexpr std::size_t cb = sizeof(ace::core::control_block);
+            constexpr std::size_t pm = sizeof(mini_promise);
+            auto* raw = static_cast<uint8_t*>(::operator new(cb + pm));
+            block = ::new (raw) ace::core::control_block();
+            promise = ::new (raw + cb) mini_promise();
+            promise->_block = block;
+        }
+
+        ~allocated_promise() {
+            promise->~mini_promise();
+            block->~control_block();
+            ::operator delete(block);
+        }
+
+        auto get_handle() { return std::coroutine_handle<mini_promise>::from_promise(*promise); }
+    };
+};
+
+// ==========================================================================
+// runner_fixture — runner task management tests
+// ==========================================================================
+
+struct runner_fixture : base_fixture {
+    ace::task dummy_task() {
+        // задача-заглушка: немедленно завершается без сайд-эффектов
+        co_return;
+    }
+
+    ace::task suspending_task(ace::futures::tunnel::dyn::bus<int>& ch) {
+        // проверяем, что задача корректно обрабатывается раннером
+        // ждём очень короткий таймаут чтобы гарантировать суспендирование
+        co_await ace::futures::timeout(std::chrono::milliseconds(1));
+        ch << 1;
+        co_return;
+    }
+};
+
+// ==========================================================================
+// dispatcher_fixture — dispatcher lifecycle tests
+// ==========================================================================
+
+struct dispatcher_fixture : base_fixture {
+    void TearDown() override {
+        ace::cfg::g_config._runners_amount = 1;
+        ace::reload();
+        ace::reset_signal();
+    }
+
+    ace::task simple_dispatched() {
+        // минимальная задача для диспетчера
+        co_return;
+    }
+};
+
+// ==========================================================================
+// io_buffer_fixture — io::buffer tests
+// ==========================================================================
+
+struct io_buffer_fixture : ::testing::Test {};
+
+// ==========================================================================
+// io_entity_fixture — io::entity + io::guard tests
+// ==========================================================================
+
+struct io_entity_fixture : ::testing::Test {};
+
+// ==========================================================================
+// console_fixture — console output tests
+// ==========================================================================
+
+struct console_fixture : ::testing::Test {};
+
+// ==========================================================================
+// cross_mechanic_fixture — cross-subsystem interaction tests
+// ==========================================================================
+
+struct cross_mechanic_fixture : base_fixture {
+    void TearDown() override {
+        ace::cfg::g_config._runners_amount = 1;
+        ace::reload();
+        ace::reset_signal();
+    }
+
+    void configure_runners(int n) {
+        ace::cfg::g_config._runners_amount = n;
+        ace::reload();
+    }
+};
+
+// ==========================================================================
+// spawn_extra_fixture — extended spawn/post/reattach/roaming/polling tests
+// ==========================================================================
+
+struct spawn_extra_fixture : base_fixture {
+    ace::futures::tunnel::dyn::bus<ace::core::runner*> _runner_channel {};
+
+    ace::task post_checker(ace::futures::tunnel::dyn::bus<int>& ch) {
+        // post task: должна быть обработана раньше spawn task
+        ch << -1;
+        co_return;
+    }
+
+    ace::task spawn_checker(int val, ace::futures::tunnel::dyn::bus<int>& ch) {
+        ch << val;
+        co_return;
+    }
+};
+
+// ==========================================================================
+// compose_extra_fixture — extended compose tests
+// ==========================================================================
+
+struct compose_extra_fixture : base_fixture {
+    ace::promise<int> valued(int v) {
+        co_await ace::futures::timeout(std::chrono::milliseconds(1));
+        co_return v;
+    }
+
+    ace::task voided() {
+        co_await ace::futures::timeout(std::chrono::milliseconds(1));
+        co_return;
+    }
+
+    // composable function for operator>>
+    static int double_it(int v) { return v * 2; }
+
+    static ace::promise<int> double_async(int v) {
+        co_await ace::futures::timeout(std::chrono::milliseconds(1));
+        co_return v * 2;
+    }
+};
+
+// ==========================================================================
+// channel_extra_fixture — extended channel tests
+// ==========================================================================
+
+struct channel_extra_fixture : base_fixture {
+    ace::futures::tunnel::dyn::bus<int> _ch {};
+
+    ace::task pusher(int v) {
+        _ch << v;
+        co_return;
+    }
+};
+
+// ==========================================================================
+// cutex_extra_fixture — extended cutex tests
+// ==========================================================================
+
+struct cutex_extra_fixture : base_fixture {
+    void TearDown() override {
+        ace::cfg::g_config._runners_amount = 1;
+        ace::reload();
+        ace::reset_signal();
+    }
+
+    ace::cutex _cutex {};
+    ace::futures::tunnel::dyn::bus<int> _ch {};
+
+    ace::task cutex_user(int id) {
+        volatile auto g = ace::guard(_cutex);
+        co_await g.capture();
+        _ch << id;
+        g.sync();
+        co_return;
+    }
+};
+
+// ==========================================================================
+// get_runner_fixture — get_runner tests
+// ==========================================================================
+
+struct get_runner_fixture : base_fixture {
+    ace::futures::tunnel::dyn::bus<int> _ch {};
+
+    ace::task runner_gatherer() {
+        auto r = co_await ace::get_runner();
+        _ch << (r != nullptr ? 1 : 0);
+        co_return;
+    }
+};
+
+// Definition of static members declared in fixtures
+inline int router_slot_fixture::test_router::alive_count = 0;
 
 #endif // ENVIRONMENT_H

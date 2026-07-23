@@ -97,10 +97,20 @@ if tests_enabled
 
     message('Arguments for @0@ compiler: '.format(compiler), compile_args)
 
+    coverage_enabled = get_option('coverage')
+    if coverage_enabled
+        message('Coverage mode: --coverage flags added')
+        compile_args += ['--coverage', '-O0', '-g']
+        coverage_link_args = ['--coverage']
+    else
+        coverage_link_args = []
+    endif
+
     test_executable = executable (
         'ace_tests',
         sources: test_sources,
         cpp_args: compile_args,
+        link_args: coverage_link_args,
         dependencies: [
             gtest_dep,
             ace_dep,

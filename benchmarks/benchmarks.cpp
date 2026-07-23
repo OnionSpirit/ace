@@ -176,13 +176,28 @@ static void bm_spawn_cancel(benchmark::State& state) {
 BENCHMARK(bm_spawn_cancel)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM5 — timer_ordering: порядок срабатывания таймеров
+// BM5 — timer_ordering: порядок срабатывания таймеров (проверка clock/multi_dial)
 // ==========================================================================
-// Проверяет что таймеры срабатывают в правильном порядке
-// при разных duration (тест из timer_fixture.do_timer_on_runner_test).
+// Проверяет что таймеры срабатывают в правильном порядке при разных duration.
+// Аналог unit-теста timer_fixture.do_timer_on_runner_test.
 
 static void bm_timer_ordering(benchmark::State& state) {
     using namespace std::chrono_literals;
+
+    // Прогрев clock vortex: первый вызов timeout() инициализирует
+    // clock::touch() → spawn vortex → multi_dial. Без прогрева
+    // первая итерация бенчмарка может иметь другой тайминг из-за
+    // холодного старта инфраструктуры (vortex корутина + io_uring ring).
+    // Почему schedule+run а не прямой вызов: vortex должен работать
+    // в контексте раннера для корректной инициализации.
+    {
+        ace::futures::tunnel::dyn::bus<int> warmup_ch;
+        ace::schedule([&warmup_ch]() -> ace::task {
+            co_await ace::futures::timeout(1ms);
+            co_return;
+        }());
+        ace::run();
+    }
 
     for (auto _ : state) {
         ace::futures::tunnel::dyn::bus<int> ch;
@@ -196,7 +211,6 @@ static void bm_timer_ordering(benchmark::State& state) {
             co_return;
         };
 
-        // Запускаем таймеры от большего к меньшему
         ace::schedule(timer_valued(501ms, ch));
         ace::schedule(timer_valued(500ms, ch));
         ace::schedule(timer_valued(450ms, ch));
@@ -216,30 +230,40 @@ static void bm_timer_ordering(benchmark::State& state) {
 
         ace::run();
         if (not ace::empty()) {
-            state.SkipWithError("Dispatcher not empty");
+            state.SkipWithError("Dispatcher not empty after timers");
+            break;
         }
 
-        // Дренируем и проверяем порядок
+        // Дренируем канал: schedule + run как в оригинальном fetch()
+        // Почему schedule + run а не прямой pull: канал наполняется
+        // асинхронно таймерами; drainer должен выполняться в контексте
+        // раннера чтобы co_await ch.pull() корректно работал.
         std::vector<int> res;
-        {
-            ace::futures::tunnel::dyn::bus<int> tmp;
-            ace::schedule([&]() -> ace::task {
-                while (not ch.empty()) {
-                    int v = 0;
-                    v = co_await ch.pull();
-                    res.push_back(v);
-                }
-                co_return;
-            }());
-            ace::run();
+        ace::schedule([&ch, &res]() -> ace::task {
+            while (not ch.empty()) {
+                int v = co_await ch.pull();
+                res.push_back(v);
+            }
+            co_return;
+        }());
+        ace::run();
+        if (not ace::empty()) {
+            state.SkipWithError("Dispatcher not empty after drain");
+            break;
         }
 
-        // Проверяем что значения не убывают (порядок срабатывания)
-        for (std::size_t i = 1; i < res.size(); ++i) {
-            if (res[i] < res[i - 1]) {
-                state.SkipWithError("Timer ordering violation");
-                break;
+        // Проверяем что значения не убывают
+        // Почему нестрогое неравенство: duration 256 и 250 — оба в одном
+        // слоте dial, порядок их пробуждения не гарантирован для равных квантов.
+        if (res.size() == 16) {
+            for (std::size_t i = 1; i < res.size(); ++i) {
+                if (res[i] < res[i - 1]) {
+                    state.SkipWithError("Timer ordering violation");
+                    break;
+                }
             }
+        } else {
+            state.SkipWithError("Timer count mismatch: expected 16");
         }
     }
 

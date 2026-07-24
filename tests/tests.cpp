@@ -502,12 +502,11 @@ TEST_F(queue_fixture, q_node_remove) {
 TEST_F(queue_fixture, queue_move_constructor) {
     // Почему проверяем move: очередь используется в clock/multi_dial
     // и должна поддерживать перемещение для композиции.
-    // NOTE: move-конструктор queue копирует head/tail но НЕ обнуляет
-    // источник. Это известное поведение (head остаётся у источника).
     _queue.enqueue(test_payload{55});
     tool::queue<test_payload> moved_q(std::move(_queue));
     // Перенесённая очередь содержит элемент
     EXPECT_FALSE(moved_q.empty());
+    EXPECT_TRUE(_queue.empty());
     EXPECT_EQ(55, moved_q.dequeue().value);
     EXPECT_TRUE(moved_q.empty());
 }
@@ -2459,7 +2458,7 @@ TEST_F(cross_mechanic_fixture, multi_runner_cutex_count) {
 // Проверяет что cancel на and-композиции корректно отменяет оба future.
 // NOTE: Закомментирован — and_compose создаёт observer-задачи которые
 // не всегда корректно отменяются при cancel родительской задачи.
-TEST_F(cross_mechanic_fixture, DISABLED_and_compose_with_cancel) {
+TEST_F(cross_mechanic_fixture, and_compose_with_cancel) {
     ace::futures::tunnel::dyn::bus<int> result;
     ace::schedule([&result]() -> ace::task {
         auto handle = co_await ace::spawn([&result]() -> ace::task {

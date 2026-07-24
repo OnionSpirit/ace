@@ -139,6 +139,8 @@ namespace ace::core::tools {
         queue(queue&& q)  noexcept : mempool(q.mempool) {
             this->head = q.head;
             this->tail = q.tail;
+            q.head = nullptr;
+            q.tail = nullptr;
         }
 
         void unlink(q_node<T>* node) noexcept {

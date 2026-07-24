@@ -26,6 +26,7 @@ wrap-зависимость `google-benchmark` и цель `ace_benchmarks`.
 ## Найденные баги
 
 ### B1. `compose.h`: `or_await_composed<3+>` — ошибка void→bool конвертации
+```Исправлено``` - новая сигнатура условия ```if (_waiter.operator bool() and _waiter->_data.is_exist())```
 
 **Файл:** `include/ace/core/compose.h:275`
 
@@ -44,6 +45,7 @@ if (_waiter and _waiter->_data)  // _waiter->_data тип void
 ---
 
 ### B2. `compose.h`: `and_await_composed` — observer-задачи не отменяются при cancel
+```Исправлено``` - всё и так работало
 
 **Файл:** `include/ace/core/compose.h` (and_await_composed observer spawning)
 
@@ -58,6 +60,7 @@ if (_waiter and _waiter->_data)  // _waiter->_data тип void
 ---
 
 ### B3. `omniptr.h`: `operator&()` — const-correctness нарушена
+```Исправлено``` - у метода убран ```const```
 
 **Файл:** `include/ace/core/tools/omniptr.h:73-75`
 
@@ -79,7 +82,8 @@ auto operator&() const {
 
 ---
 
-### B4. `promise.h` / `async_handle.h`: `join()` возвращает false для успешно завершённых void-корутин
+### B4. `promise.h` / `async_handle.h`: `join()` возвращает false для успешно завершённых void-корутин 
+```Исправлено``` - применены исправления
 
 **Файлы:** `include/ace/core/traits/promise.h:167`, `include/ace/core/async_handle.h:88`
 
@@ -102,6 +106,7 @@ auto return_void() {
 ---
 
 ### B5. `queue.h`: `queue::queue(queue&&)` — не обнуляет head/tail источника
+```Исправлено``` - применены исправления
 
 **Файл:** `include/ace/core/tools/queue.h:139-142`
 

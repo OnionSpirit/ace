@@ -70,7 +70,7 @@ namespace ace::core::tools {
             return static_cast<option_t*>(_ptr);
         }
 
-        auto operator&() const { // NOLINT(*-runtime-operator)
+        auto operator&() { // NOLINT(*-runtime-operator)
             return reinterpret_cast<option_t**>(&_ptr);
         }
 

@@ -164,7 +164,10 @@ namespace ace::core::traits {
          * @brief Called by the coroutine machinery when @c co_return (no value) is executed.
          * @return @c std::suspend_never — no suspension.
          */
-        auto return_void() { return std::suspend_never{}; }
+        auto return_void() {
+            _derived->status(e_finished);
+            return std::suspend_never{};
+        }
     };
 
     /**

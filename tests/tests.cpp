@@ -2483,9 +2483,7 @@ TEST_F(cross_mechanic_fixture, and_compose_with_cancel) {
 }
 
 // Проверяет or-композицию из трёх future.
-// NOTE: закомментирован — or_await_composed с 3 future вызывает ошибку
-// конвертации void->bool в compose.h из-за operator-> на omniptr.
-TEST_F(cross_mechanic_fixture, DISABLED_or_await_composed_3) {
+TEST_F(cross_mechanic_fixture, or_await_composed_3) {
     ace::futures::tunnel::dyn::bus<int> result;
     ace::schedule([&result]() -> ace::task {
         auto res = co_await (

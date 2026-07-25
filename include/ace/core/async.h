@@ -430,6 +430,7 @@ namespace ace::core {
         bool await_ready() override {
             if (_coroutine.done()) return true;
             if (is_resumable()) {
+                release_future();
                 _coroutine.resume();
                 return _coroutine.done();
             }
@@ -450,6 +451,10 @@ namespace ace::core {
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
             // NOTE: Secure if _runner is null
             _coroutine.promise()._runner = outer.promise()._runner;
+            // NOTE: Storing local value of roaming into outer
+            outer.promise()._roaming = _coroutine.promise()._roaming;
+            // NOTE: Storing local value of status into outer
+            outer.promise().status(_coroutine.promise().status());
             // NOTE: No extra checks needed, because function would be called once before suspending.
             // NOTE: Just coping router ptr. Outer task will destroy router before current promise stack
             outer.promise()._runner_router << _coroutine.promise()._runner_router;

@@ -34,9 +34,11 @@ namespace ace::futures {
      * @brief Awaitable command that sets the @c _roaming flag on the current promise.
      *
      * @details Non-suspending — @c await_suspend() returns @c false immediately.
+     * @result @c resume_type - current runner pointer
      */
     class ACE_AWAIT_NODISCARD roaming : public core::traits::future_traits<roaming> {
 
+        omni_runner _rnr {};       ///< Current runner
         bool _is_roaming { true }; ///< Target roaming state.
 
     public:
@@ -63,10 +65,11 @@ namespace ace::futures {
          */
         bool await_suspend(auto coroutine) {
             coroutine.promise()._roaming = _is_roaming;
+            _rnr = coroutine.promise()._runner;
             return false;
         }
 
-        static void await_resume() noexcept {} ///< No value produced.
+        auto await_resume() noexcept { return _rnr; }
 
     };
 

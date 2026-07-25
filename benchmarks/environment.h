@@ -78,12 +78,12 @@ struct cutex_fixture : base_fixture {
         reset_runners();
     }
 
-    ace::task racer(const int max, std::string& counter) {
+    ace::task capture_racer(const int max, std::string& counter) {
         ace::guard crx(cutex);
         for (int i = 0; i < max; ++i) {
             co_await crx.capture();
             counter = std::to_string(std::stoi(counter) + 1);
-            crx.sync();
+            crx.release();
         }
         co_return;
     }

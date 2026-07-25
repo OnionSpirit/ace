@@ -922,7 +922,7 @@ Open `docs/doxygen/html/index.html` in a browser.
 | `ace::core::services` | `clock` (multi_dial time wheel) `kernel_controller` (io_uring vortex) |
 | `ace::core::tools` | `queue` `q_node` `slab_mempool` `moving_average` `id_allocator` `lifetime` |
 | `ace::core::meta` | `is_future` `is_busy_future` `is_awaitable` `resume_type` `replace_type`<br>`unique_tuple_t` `tuple_to_variant_t` |
-| `ace::futures` | `channel` `channel_static` `cutex` `cutex_future` `timeout` `expire` `spawn` `post`<br>`async_handle` `join_handler` `reattach` `roaming` `polling` `get_runner` |
+| `ace::futures` | `channel` `channel_static` `cutex` `capture_future` `timeout` `expire` `spawn` `post`<br>`async_handle` `join_handler` `reattach` `roaming` `polling` `get_runner` |
 | `ace::fs` | `file` (io_entity) `file_link` (io_link) |
 | `ace::net` | `io_socket` `io_mapping_entity` `io_stream_mode_entity`<br>`io_listener_entity` `io_transport_entity` `io_connection_link` |
 | `ace::console` | `console` — async stdin/stdout I/O |

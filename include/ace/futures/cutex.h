@@ -12,7 +12,7 @@
  * ### Slow path (contended)
  * If @c try_lock() fails, @c await_suspend() installs a @c cutex_router into
  * the caller's promise.  The runner forwards the task into @c _waiters.  When
- * the current owner calls @c sync(), it does a @c fetch_sub(1) and calls
+ * the current owner calls @c release(), it does a @c fetch_sub(1) and calls
  * @c notify() which pops the next waiter and reattaches it to its runner.
  *
  * ### Deadlock recovery
@@ -29,7 +29,7 @@
  *     auto future = co_await guard->capture();
  *     // --- critical section ---
  *     co_await future;
- *     guard->sync();   // unlock (also called by ~proxy)
+ *     guard->release();   // unlock (also called by ~proxy)
  *     co_return;
  * }
  * @endcode
@@ -37,7 +37,7 @@
  * @warning Always declare the @c ace::guard (i.e., @c cutex::volatile_proxy)
  * as <b>@c volatile</b> to prevent the compiler from eliding its destructor.
  *
- * @see ace::guard, ace::futures::cutex_future, ace::futures::cutex::proxy
+ * @see ace::guard, ace::futures::capture_future, ace::futures::cutex::proxy
  */
 #ifndef ACE_FUTURE_CUTEX_H
 #define ACE_FUTURE_CUTEX_H
@@ -53,29 +53,19 @@
 
 namespace ace::futures {
 
-    /**
-     * @brief Internal implementation of the cutex locking future.
-     * @c cutex_future is the awaitable returned by @c cutex::capture().
-     * It is separated from @c cutex itself to enforce RAII discipline through
-     * the @c proxy wrapper.
-     *
-     * @b resumeType - @c void
-     *
-     * @see ace::futures::cutex
-     */
-    class ACE_AWAIT_NODISCARD cutex_future : public core::traits::future_traits<cutex_future> {
-
-        struct cutex_router;
-        friend cutex_router;
-
-    public:
-
-        IMPORT_FUTURE_ENV(cutex_future)
+    struct cutex_control {
 
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
         std::atomic<long>                           _users            {0};         ///< Number of active users (0 = unlocked).
         nukes::dynamic::roaming_mpsc_queue<task>    _waiters          { };            ///< Tasks waiting to acquire the mutex.
-        bool                                        _rescheduling     {false};        ///< When @c true, released waiters are migrated to current runner's pool.
+
+        /**
+         * @brief Attempt to acquire the mutex without suspending.
+         * @details Atomically increments @c _users.  If the pre-increment value
+         * was 0, the lock is acquired.
+         * @return @c true if the lock was acquired.
+         */
+        bool try_lock() noexcept;
 
         /**
          * @brief Attempt to wake one waiter from @c _waiters.
@@ -97,7 +87,7 @@ namespace ace::futures {
          *  1. Thread @b A owns the cutex.
          *  2. Thread @b B calls @c try_lock() — fails (returns @c false).
          *  3. OS interrupts thread @b B before it enqueues into @c _waiters.
-         *  4. Thread @b A calls @c sync() → @c notify() — queue is empty → no one woken.
+         *  4. Thread @b A calls @c release() → @c notify() — queue is empty → no one woken.
          *  5. Thread @b B resumes and enqueues itself → permanently stuck.
          *
          * @c pending_notify() detects this by retrying @c notify() while
@@ -107,17 +97,42 @@ namespace ace::futures {
          * @return An @c ace::task coroutine that retries notification.
          */
         task pending_notify() noexcept;
+    };
 
-        /**
-         * @brief Attempt to acquire the mutex without suspending.
-         * @details Atomically increments @c _users.  If the pre-increment value
-         * was 0, the lock is acquired.
-         * @return @c true if the lock was acquired.
-         */
-        bool try_lock() noexcept;
+
+    /**
+     * @brief Internal implementation of the cutex locking future.
+     * @c capture_future is the awaitable returned by @c cutex::capture().
+     * It is separated from @c cutex itself to enforce RAII discipline through
+     * the @c proxy wrapper.
+     *
+     * @b resumeType - @c void
+     *
+     * @see ace::futures::cutex
+     */
+    class ACE_AWAIT_NODISCARD capture_future : public core::traits::future_traits<capture_future> {
+
+        struct cutex_router;
+        friend cutex_router;
+
+        cutex_control* _control { nullptr };
+
+    public:
+
+        omni_runner _runner {};
+        bool _roaming { false };
+        bool _roaming_state {};
+
+        IMPORT_FUTURE_ENV(capture_future)
+
+        capture_future() = delete;
+
+        explicit capture_future(cutex_control* control_, const bool roaming = false) noexcept
+            : _control(control_)
+            , _roaming(roaming) {}
 
         /// @brief C++20 awaitable protocol — attempt fast-path acquire.
-        bool await_ready() override { return try_lock(); }
+        bool await_ready() override { return _control->try_lock(); }
 
         /**
          * @brief C++20 awaitable protocol — suspend and enqueue for wakeup.
@@ -130,26 +145,15 @@ namespace ace::futures {
 
         void await_resume() {} ///< No value produced; mutex is already acquired when resumed.
 
-        ~cutex_future() override = default;
+        ~capture_future() override = default;
 
-        /**
-         * @brief Enable or disable rescheduling mode.
-         * @details When @c true, released waiters are migrated to the runner
-         * pool of the task that most recently released the cutex.  This keeps
-         * the critical section on the same CPU for better cache locality.
-         * @param rs  @c true to enable rescheduling.
-         */
-        void set_rescheduling(const bool rs) noexcept { _rescheduling = rs; }
-
-        /// @brief Query the rescheduling mode.
-        [[nodiscard]] bool get_rescheduling() const noexcept { return _rescheduling; }
     };
 
     /**
      * @brief Cooperative Userspace MuTEX — public API wrapper.
      *
      * @details @c cutex is the user-facing type.  It inherits from
-     * @c cutex_future (protected) and exposes only the @c volatile_proxy RAII
+     * @c capture_future (protected) and exposes only the @c volatile_proxy RAII
      * interface to prevent accidental direct @c co_await-ing.
      *
      * @par Usage
@@ -160,42 +164,38 @@ namespace ace::futures {
      *     auto f = co_await g->capture();
      *     // critical section
      *     co_await f;
-     *     g->sync();
+     *     g->release();
      *     co_return;
      * }
      * @endcode
      *
      * @see ace::guard (alias for @c cutex::volatile_proxy)
      */
-    class cutex final : protected cutex_future {
+    class cutex {
 
-        [[nodiscard]] auto capture() noexcept -> cutex_future&;
+        [[nodiscard]] auto capture(bool roaming) noexcept -> capture_future;
 
-        void sync() noexcept;
+        void release() noexcept;
 
-        class proxy;
+        cutex_control _control { };
 
     public:
 
         cutex() = default;
 
+        class proxy;
+
         cutex(const cutex&) = delete; ///< Mutexes are not copyable.
         cutex(cutex&&) = delete;      ///< Mutexes are not movable.
 
-        /// @brief RAII proxy type alias.  Use @c volatile to prevent elision.
-        typedef volatile proxy volatile_proxy;
-
-        ~cutex() override = default;
-
-        using cutex_future::set_rescheduling;
-        using cutex_future::get_rescheduling;
+        ~cutex() = default;
     };
 
     /**
-     * @brief RAII proxy that enforces balanced @c capture() / @c sync() calls.
+     * @brief RAII proxy that enforces balanced @c capture() / @c release() calls.
      *
      * @details The proxy prevents calling @c capture() twice without an
-     * intervening @c sync(), and automatically calls @c sync() on destruction.
+     * intervening @c release(), and automatically calls @c release() on destruction.
      *
      * Declare as @c volatile to prevent the compiler from eliding the destructor:
      * @code{.cpp}
@@ -207,7 +207,10 @@ namespace ace::futures {
     class cutex::proxy {
 
         cutex& _cutex;
-        bool _is_synced { true }; ///< @c true when the mutex is not held.
+        omni_runner _runner {};
+        bool _is_released { true };    ///< @c Equals true when the mutex is not held.
+        bool _is_manual { false };     ///< @c Equals true if requires manual @c release(). @c cutex captured by @c sync()
+        bool _roaming_state { true };  ///< Task @c roaming value before interacting with @c cutex
 
     public:
 
@@ -223,77 +226,128 @@ namespace ace::futures {
 
         /**
          * @brief Acquire the cutex.
-         * @details Returns the underlying @c cutex_future& so the caller can
+         * @details Returns the underlying @c capture_future& so the caller can
          * @c co_await it.  Throws @c std::logic_error if called twice without
-         * an intervening @c sync().
-         * @return Reference to the cutex's @c cutex_future interface.
+         * an intervening @c release().
+         * @return Reference to the cutex's @c capture_future interface.
          * @throws std::logic_error if called while the lock is already held.
          */
-        ACE_AWAIT_NODISCARD auto capture() volatile -> cutex_future& {
-            if (not _is_synced)
-                throw std::logic_error {"cutex 'capture()' before 'sync()'"};
-            _is_synced = false;
-            return _cutex.capture();
+        ACE_AWAIT_NODISCARD auto capture() -> capture_future {
+            if (not _is_released)
+                throw std::logic_error {"duplicated 'capture()/sync()' operation before 'release()'"};
+            _is_released = false;
+            _is_manual = false;
+            return _cutex.capture(false);
+        };
+
+        /**
+         * @brief Acquire the cutex.
+         * @details Under race condition reschedules calling context to the thread that owns @c cutex.
+         * And reschedules it back on @c release()
+         * @return Reference to the cutex's @c capture_future interface.
+         * @warning Using thread local data is forbidden under this type of lock.
+         * Because @c sync() may reschedule calling task to another thread.
+         * Also destructor of the guard will not reattach @c task back to the source thread.
+         * It is recommended to call @c release() manually
+         * @throws std::logic_error if called while the lock is already held.
+         */
+        ACE_AWAIT_NODISCARD auto sync() -> capture_future {
+            if (not _is_released)
+                throw std::logic_error {"duplicated 'capture()/sync()' operation before 'release()'"};
+            _is_released = false;
+            _is_manual = true;
+            // NOTE: Creating capture future
+            auto capt = _cutex.capture(true);
+            // NOTE: Storing original runner and roaming value
+            {
+                _runner = capt._runner;
+                _roaming_state = capt._roaming_state;
+            }
+            return capt;
         };
 
         /**
          * @brief Release the cutex.
          * @details No-op if the lock is not currently held.
          */
-        void sync() volatile noexcept { if (not _is_synced) { _cutex.sync(); _is_synced = true; } };
+        ACE_AWAIT_NODISCARD promise<> release() noexcept {
+            if (not _is_released) {
+                _cutex.release();
+                _is_released = true;
+                _is_manual = false;
+            }
+            // NOTE: Reattaching task to the original runner
+            co_await ace::reattach{_runner};
+            // NOTE: Resetting roaming value to original
+            co_await roaming(_roaming_state);
+            co_return;
+        };
 
-        /// @brief Destructor.  Automatically calls @c sync() if not already synced.
-        ~proxy() { sync(); }
+        /**
+         * @brief Destructor. Automatically calls @c release() if not already released.
+         * @warning Throws logical exception if @c cutex was captured by @c sync() and not released manually
+         */
+        ~proxy() {
+            if (not _is_released) {
+                _cutex.release();
+                if (_is_manual)
+                    throw std::logic_error {"manual 'release()' required on 'sync()' type of lock"};
+            }
+        }
     };
 
 } // end namespace ace::futures
 
 namespace ace {
     using futures::cutex;
-    using guard = cutex::volatile_proxy;
+    using guard = cutex::proxy;
 }
 
 //==============================- DEFINITIONS -==================================
 
-#define ACE_FUTURE_CUTEX_FUTURE_SPACE \
-ace::futures::cutex_future::
+#define ACE_FUTURE_CAPTURE_FUTURE_SPACE \
+ace::futures::capture_future::
 
-#define ACE_FUTURE_CUTEX_FUTURE_MEMBER(returnT) \
-returnT ACE_FUTURE_CUTEX_FUTURE_SPACE
+#define ACE_FUTURE_CAPTURE_FUTURE_MEMBER(returnT) \
+returnT ACE_FUTURE_CAPTURE_FUTURE_SPACE
+
+#define ACE_FUTURE_CUTEX_CORE_SPACE \
+ace::futures::cutex_control::
+
+#define ACE_FUTURE_CUTEX_CONTROL_MEMBER(returnT) \
+returnT ACE_FUTURE_CUTEX_CORE_SPACE
 
 
-struct ACE_FUTURE_CUTEX_FUTURE_SPACE cutex_router : runner_router {
+struct ACE_FUTURE_CAPTURE_FUTURE_SPACE cutex_router : runner_router {
 
     cutex_router() = delete;
 
-    explicit cutex_router(cutex_future* cutex_)
+    explicit cutex_router(capture_future* cutex_)
         : _cutex(cutex_) {};
 
     void redirect(omni_node node) override {
-        _cutex->_waiters.push_node(node);
+        _cutex->_control->_waiters.push_node(node);
     }
 
     // NOTE: Tasks is resuming with wiped router.
     // NOTE: Placing into waiters queue is moving operation and also wont affect async handler inner state.
     // NOTE: So we can cancel it by task handler
     // NOTE: If task has handlers it means that task is thread local with canceling task.
-    // NOTE: No extra sync needed.
-    // NOTE: Cutex can be interacted only via it's RAII proxy, so extra manual 'sync()' not needed.
+    // NOTE: No extra release needed.
+    // NOTE: Cutex can be interacted only via it's RAII proxy, so extra manual 'release()' not needed.
     // NOTE: Maybe... Sometimes... I will add ejecting from mpsc queue by node handle.
     // NOTE: But Im not sure that mpsc or mpmc would stay consistent
     void cancel() override {  }
 
     ~cutex_router() override = default;
 
-    cutex_future* _cutex;
+    capture_future* _cutex;
 };
 
-ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
-try_lock() noexcept {
-    return _users.fetch_add(1, std::memory_order_acq_rel) == 0;
-}
+ACE_FUTURE_CUTEX_CONTROL_MEMBER(bool)
+try_lock() noexcept { return _users.fetch_add(1, std::memory_order_acq_rel) == 0; }
 
-ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
+ACE_FUTURE_CUTEX_CONTROL_MEMBER(bool)
 notify() {
     typedef nukes::dynamic::roaming_mpsc_queue<task>::node_t waiter_node_t;
     waiter_node_t* waiter_node = _waiters.pop_node();
@@ -303,30 +357,23 @@ notify() {
     if (not waiter_node)
         return false;
 
-    // NOTE: Fetching current pool data
-    auto* curr_runner_pool = core::runner::get().as<runner_pool_t>();
-
-    const bool is_pool_same = curr_runner_pool == waiter_node->_data._coroutine.promise()._runner.as<runner_pool_t>();
-
-    const bool is_rescheduling_allowed = _rescheduling and waiter_node->_data._coroutine.promise()._roaming;
-
     // NOTE: Reattaching fast if pool is the same
-    if (is_pool_same)
+    if (core::runner::get() == waiter_node->_data._coroutine.promise()._runner)
         core::runner::reattach_front(waiter_node);
 
     // NOTE: Rescheduling waiter if rescheduling allowed
-    else if (is_rescheduling_allowed) {
-        waiter_node->_data._coroutine.promise()._runner = curr_runner_pool;
+    else if (waiter_node->_data._coroutine.promise()._roaming) {
+        waiter_node->_data._coroutine.promise()._runner = core::runner::get();
         core::runner::reattach_front(waiter_node);
     }
-    // NOTE: Classic threadsafe reattach at the worst case
+    // NOTE: Threadsafe reattach at worst case
     else
         core::runner::reattach(waiter_node);
 
     return true;
 }
 
-ACE_FUTURE_CUTEX_FUTURE_MEMBER(ace::task)
+ACE_FUTURE_CUTEX_CONTROL_MEMBER(ace::task)
 pending_notify() noexcept {
     do {
         if (notify()) co_return;
@@ -335,15 +382,18 @@ pending_notify() noexcept {
     } while (_users.load(std::memory_order_acquire) > 0);
 }
 
-ACE_FUTURE_CUTEX_FUTURE_MEMBER(bool)
+ACE_FUTURE_CAPTURE_FUTURE_MEMBER(bool)
 await_suspend(auto coroutine) {
     // NOTE: Setting router for dispatch to the cutex waiters queue
     coroutine.promise()._runner_router = cutex_router{this};
+    _runner = coroutine.promise()._runner;
+    _roaming_state = coroutine.promise()._roaming;
+    coroutine.promise()._roaming = _roaming;
     return true;
 }
 
-#undef ACE_FUTURE_CUTEX_FUTURE_MEMBER
-#undef ACE_FUTURE_CUTEX_FUTURE_SPACE
+#undef ACE_FUTURE_CAPTURE_FUTURE_MEMBER
+#undef ACE_FUTURE_CAPTURE_FUTURE_SPACE
 
 #define ACE_FUTURE_CUTEX_SPACE \
 ace::futures::cutex::
@@ -352,16 +402,16 @@ ace::futures::cutex::
 returnT ACE_FUTURE_CUTEX_SPACE
 
 
-ACE_FUTURE_CUTEX_MEMBER(ace::futures::cutex_future&)
-capture() noexcept { return *static_cast<cutex_future*>(this); }
+ACE_FUTURE_CUTEX_MEMBER(ace::futures::capture_future)
+capture(const bool roaming) noexcept { return capture_future{&_control, roaming}; }
 
 ACE_FUTURE_CUTEX_MEMBER(void)
-sync() noexcept {
+release() noexcept {
     // NOTE: Subtract users because leaving cutex
     // NOTE: If there are some waiters but fetching is failed
     // NOTE: then scheduling delayed notification
-    if (_users.fetch_sub(1, std::memory_order_acq_rel) > 1 and not notify())
-        schedule(pending_notify());
+    if (_control._users.fetch_sub(1, std::memory_order_acq_rel) > 1 and not _control.notify())
+        schedule(_control.pending_notify());
 }
 
 #undef ACE_FUTURE_CUTEX_MEMBER

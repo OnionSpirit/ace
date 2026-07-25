@@ -201,7 +201,7 @@ echo "Report: coverage_report/index.html"
 | # | Тест | Что проверяет | Статус |
 |---|------|--------------|--------|
 | F1 | `is_awaitable_concept` | `static_assert` на типах: task, promise<> | ✅ |
-| F2 | `is_future_concept` | `static_assert` на future-типах: timeout, cutex_future | ✅ |
+| F2 | `is_future_concept` | `static_assert` на future-типах: timeout, capture_future | ✅ |
 | F3 | `is_busy_future_concept` | `static_assert` на busy future (once_suspend) | ✅ |
 | F4 | `replace_type` | Замена void на monostate, замена не-void без изменений | ✅ |
 | F5 | `unique_tuple` | Удаление дубликатов из tuple | ✅ |

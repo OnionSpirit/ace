@@ -227,13 +227,25 @@ struct cutex_fixture : base_fixture {
 
     // ── race helpers ──
 
-    ace::task racer(const int max, std::string& counter) {
+    ace::task capture_racer(const int max, std::string& counter) {
         ace::guard crx(_cutex);
         for (volatile int i = 0; i < max; i = i + 1) {
             co_await crx.capture();
             counter = std::to_string(std::stoi(counter) + 1);
-            crx.sync();
-            crx.sync(); // no-op check
+            co_await crx.release();
+            co_await crx.release(); // no-op check
+        }
+        co_await crx.capture();
+        ace::console::println("'racer' finished");
+    }
+
+    ace::task sync_racer(const int max, std::string& counter) {
+        ace::guard crx(_cutex);
+        for (volatile int i = 0; i < max; i = i + 1) {
+            co_await crx.sync();
+            counter = std::to_string(std::stoi(counter) + 1);
+            co_await crx.release();
+            co_await crx.release(); // no-op check
         }
         co_await crx.capture();
         ace::console::println("'racer' finished");
@@ -822,10 +834,10 @@ struct cutex_extra_fixture : base_fixture {
     ace::futures::tunnel::dyn::bus<int> _ch {};
 
     ace::task cutex_user(int id) {
-        volatile auto g = ace::guard(_cutex);
+        auto g = ace::guard(_cutex);
         co_await g.capture();
         _ch << id;
-        g.sync();
+        g.release();
         co_return;
     }
 };

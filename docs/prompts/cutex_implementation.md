@@ -15,9 +15,9 @@
 
 ## 2. Архитектурные компоненты
 
-### 2.1 `cutex_future` — Основной future объект
+### 2.1 `capture_future` — Основной future объект
 
-Это base класс, наследующий `future_traits<cutex_future>`, который реализует логику синхронизации мьютекса.
+Это base класс, наследующий `future_traits<capture_future>`, который реализует логику синхронизации мьютекса.
 
 #### Состояние (члены класса):
 
@@ -77,12 +77,12 @@ bool _rescheduling { false };                     // Флаг режима пе�
 
 ### 2.2 `cutex` — Публичный интерфейс
 
-Наследует `cutex_future` и защищает доступ через proxy pattern.
+Наследует `capture_future` и защищает доступ через proxy pattern.
 
 #### Методы:
 
-**`cutex_future& capture() noexcept`**
-- Приватный метод, возвращает reference на себя как на `cutex_future`
+**`capture_future& capture() noexcept`**
+- Приватный метод, возвращает reference на себя как на `capture_future`
 - Позволяет использовать через `co_await`
 - Пример:
   ```cpp
@@ -142,7 +142,7 @@ ace::cutex my_cutex;
 #### Определение:
 ```cpp
 struct cutex_router : router_handler_t {
-    cutex_future* _cutex;
+    capture_future* _cutex;
     
     void forward(task&& ctx) override {
         // Непрерывно пытается добавить в очередь
@@ -406,19 +406,19 @@ schedule(pending_notify());  // Планирует корутину в глоб�
 
 Должен содержать:
 
-1. **Класс `cutex_future`**:
-   - Наследует `future_traits<cutex_future>`
+1. **Класс `capture_future`**:
+   - Наследует `future_traits<capture_future>`
    - Члены: `_users`, `_waiters`, `_runner_pool`, `_rescheduling`
    - Методы: `try_lock()`, `notify()`, `pending_notify()`, `await_ready()`, `await_suspend()`, `await_resume()`
    - Вложенный `struct cutex_router`
 
 2. **Класс `cutex`**:
-   - Наследует `cutex_future` (protected)
+   - Наследует `capture_future` (protected)
    - Методы: `capture()`, `sync()`
    - Вложенный `class proxy`
 
 3. **Макросы для определений** (уже используются в коде):
-   - `#define ACE_FUTURE_CUTEX_FUTURE_SPACE ace::futures::cutex_future::`
+   - `#define ACE_FUTURE_CAPTURE_FUTURE_SPACE ace::futures::capture_future::`
    - `#define ACE_FUTURE_CUTEX_MEMBER(returnT)`
 
 4. **Определения методов** (снаружи класса через макросы)

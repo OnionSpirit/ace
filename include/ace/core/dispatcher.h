@@ -243,7 +243,8 @@ namespace ace {
      * @param rnr       Target runner (nullptr = auto-select).
      */
     inline void schedule(task &&new_task, core::runner *rnr) noexcept {
-        new_task._coroutine.promise()._roaming = true;
+        // TODO: I will return it back when I will create spawn groups
+        // new_task._coroutine.promise()._roaming = true;
         auto& self = core::dispatcher::get_instance();
         if (not rnr) {
             // NOTE: No balancing for single runner

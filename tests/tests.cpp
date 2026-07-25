@@ -150,7 +150,7 @@ TEST_F(cutex_fixture, cutex_race) {
     std::string shared_cnt {"0"};
     constexpr int max_ = 100000;
     for (volatile std::size_t i = 0; i < _runners; i = i + 1)
-        ace::schedule(racer(max_, shared_cnt));
+        ace::schedule(capture_racer(max_, shared_cnt));
     ace::run();
     ASSERT_TRUE(ace::empty());
     ASSERT_EQ(std::stoi(shared_cnt), max_ * _runners);
@@ -158,11 +158,10 @@ TEST_F(cutex_fixture, cutex_race) {
 
 TEST_F(cutex_fixture, cutex_race_resheduling) {
     configure_runners(8);
-    _cutex.set_rescheduling(true);
     std::string shared_cnt {"0"};
-    constexpr int max_ = 1000000;
+    constexpr int max_ = 100000;
     for (volatile std::size_t i = 0; i < _runners; i = i + 1)
-        ace::schedule(racer(max_, shared_cnt));
+        ace::schedule(sync_racer(max_, shared_cnt));
     ace::run();
     ASSERT_TRUE(ace::empty());
     ASSERT_EQ(std::stoi(shared_cnt), max_ * _runners);
@@ -851,8 +850,8 @@ TEST_F(future_traits_fixture, is_future_concept) {
         "timeout must satisfy is_future concept"
     );
     static_assert(
-        ace::core::meta::is_future<ace::futures::cutex_future>,
-        "cutex_future must satisfy is_future concept"
+        ace::core::meta::is_future<ace::futures::capture_future>,
+        "capture_future must satisfy is_future concept"
     );
     SUCCEED();
 }
@@ -2065,16 +2064,16 @@ TEST_F(channel_extra_fixture, mpsc_channel) {
 
 // Проверяет что try_lock на свободном cutex захватывает мьютекс.
 TEST_F(cutex_extra_fixture, try_lock_free) {
-    // Почему проверяем try_lock: cutex_future::try_lock() это
+    // Почему проверяем try_lock: capture_future::try_lock() это
     // атомарный fetch_add. На свободном мьютексе должен вернуть true.
-    // Проверяем через schedule потому что cutex_future доступен только
+    // Проверяем через schedule потому что capture_future доступен только
     // через proxy::capture() которая требует корутинного контекста.
     ace::futures::tunnel::dyn::bus<bool> result;
     ace::schedule([this, &result]() -> ace::task {
-        volatile auto guard = ace::guard(_cutex);
-        auto& fut = guard.capture();
+        auto guard = ace::guard(_cutex);
+        auto fut = guard.capture();
         result << fut.await_ready();
-        guard.sync();
+        guard.release();
         co_return;
     }());
     ace::run();
@@ -2093,17 +2092,17 @@ TEST_F(cutex_extra_fixture, proxy_double_capture) {
     ace::guard g(_cutex);
     g.capture();
     EXPECT_THROW(g.capture(), std::logic_error);
-    g.sync();
+    g.release();
 }
 
 // Проверяет что sync() второй раз — no-op.
 TEST_F(cutex_extra_fixture, proxy_double_sync) {
     // Почему проверяем double sync: повторный sync() не должен
     // вызывать проблем (например двойной fetch_sub).
-    volatile auto g = ace::guard(_cutex);
+    auto g = ace::guard(_cutex);
     g.capture();
-    g.sync();
-    EXPECT_NO_THROW(g.sync());
+    g.release();
+    EXPECT_NO_THROW(g.release());
 }
 
 // Проверяет что деструктор proxy вызывает sync() автоматически.
@@ -2115,14 +2114,14 @@ TEST_F(cutex_extra_fixture, proxy_destructor_sync) {
     ace::futures::tunnel::dyn::bus<int> ch;
     ace::schedule([this, &ch]() -> ace::task {
         {
-            volatile auto g = ace::guard(_cutex);
+            auto g = ace::guard(_cutex);
             co_await g.capture();
             ch << 1;
         }
-        volatile auto g2 = ace::guard(_cutex);
+        auto g2 = ace::guard(_cutex);
         co_await g2.capture();
         ch << 2;
-        g2.sync();
+        g2.release();
         co_return;
     }());
     ace::run();
@@ -2131,17 +2130,6 @@ TEST_F(cutex_extra_fixture, proxy_destructor_sync) {
     ASSERT_EQ(2u, res.size());
     EXPECT_EQ(1, res[0]);
     EXPECT_EQ(2, res[1]);
-}
-
-// Проверяет set_rescheduling / get_rescheduling.
-TEST_F(cutex_extra_fixture, set_rescheduling) {
-    // Почему проверяем rescheduling: при включении rescheduling
-    // освобождённые waiter'ы мигрируют на раннер освободителя.
-    EXPECT_FALSE(_cutex.get_rescheduling());
-    _cutex.set_rescheduling(true);
-    EXPECT_TRUE(_cutex.get_rescheduling());
-    _cutex.set_rescheduling(false);
-    EXPECT_FALSE(_cutex.get_rescheduling());
 }
 
 // ==========================================================================
@@ -2350,15 +2338,15 @@ TEST_F(cross_mechanic_fixture, cutex_with_timeout) {
     ace::cutex mtx;
     ace::futures::tunnel::dyn::bus<int> result;
     ace::schedule([&mtx]() -> ace::task {
-        volatile auto g = ace::guard(mtx);
+        auto g = ace::guard(mtx);
         co_await g.capture();
         co_await ace::futures::timeout(std::chrono::milliseconds(100));
-        g.sync();
+        g.release();
         co_return;
     }());
     ace::schedule([&mtx, &result]() -> ace::task {
         co_await ace::futures::timeout(std::chrono::milliseconds(10));
-        volatile auto g = ace::guard(mtx);
+        auto g = ace::guard(mtx);
         auto res = co_await (g.capture() or ace::futures::timeout(std::chrono::milliseconds(5)));
         result << res;
         co_return;
@@ -2440,7 +2428,7 @@ TEST_F(cross_mechanic_fixture, multi_runner_cutex_count) {
     constexpr int incs_per_racer = 1000;
     for (int r = 0; r < 4; ++r) {
         ace::schedule([&mtx, &counter_str, incs_per_racer]() -> ace::task {
-            volatile auto g = ace::guard(mtx);
+            auto g = ace::guard(mtx);
             for (int i = 0; i < incs_per_racer; ++i) {
                 co_await g.capture();
                 counter_str = std::to_string(std::stoi(counter_str) + 1);

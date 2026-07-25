@@ -7,7 +7,7 @@
 // 8 раннеров, каждый делает N инкрементов под защитой cutex.
 // Счётчик должен быть равен runners * N (атомарность соблюдена).
 
-static void bm_cutex_race(benchmark::State& state) {
+static void bm_cutex_race_capture(benchmark::State& state) {
     const int runners = 8;
     const int ops_per_racer = 100000;
 
@@ -19,10 +19,10 @@ static void bm_cutex_race(benchmark::State& state) {
         // racer: инкрементирует shared_cnt под защитой cutex
         auto racer = [](ace::cutex& mtx, std::string& cnt, int max) -> ace::task {
             ace::guard crx(mtx);
-            for (int i = 0; i < max; ++i) {
+            for (volatile int i = 0; i < max; ++i) {
                 co_await crx.capture();
                 cnt = std::to_string(std::stoi(cnt) + 1);
-                crx.sync();
+                co_await crx.release();
             }
             co_return;
         };
@@ -39,7 +39,7 @@ static void bm_cutex_race(benchmark::State& state) {
 
     state.SetItemsProcessed(state.iterations() * runners * ops_per_racer);
 }
-BENCHMARK(bm_cutex_race)->Unit(benchmark::kMillisecond);
+BENCHMARK(bm_cutex_race_capture)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
 // BM2 — cutex_race_rescheduling: гонка с миграцией waiter-ов
@@ -47,22 +47,21 @@ BENCHMARK(bm_cutex_race)->Unit(benchmark::kMillisecond);
 // Аналогично BM1 но с включённым rescheduling — waiter'ы мигрируют
 // на раннер освободителя для улучшения cache locality.
 
-static void bm_cutex_race_rescheduling(benchmark::State& state) {
+static void bm_cutex_race_sync(benchmark::State& state) {
     const int runners = 8;
     const int ops_per_racer = 100000;
 
     for (auto _ : state) {
         configure_runners(runners);
         ace::cutex mtx;
-        mtx.set_rescheduling(true);
         std::string shared_cnt {"0"};
 
         auto racer = [](ace::cutex& mtx, std::string& cnt, int max) -> ace::task {
             ace::guard crx(mtx);
-            for (int i = 0; i < max; ++i) {
-                co_await crx.capture();
+            for (volatile int i = 0; i < max; ++i) {
+                co_await crx.sync();
                 cnt = std::to_string(std::stoi(cnt) + 1);
-                crx.sync();
+                co_await crx.release();
             }
             co_return;
         };
@@ -79,7 +78,7 @@ static void bm_cutex_race_rescheduling(benchmark::State& state) {
 
     state.SetItemsProcessed(state.iterations() * runners * ops_per_racer);
 }
-BENCHMARK(bm_cutex_race_rescheduling)->Unit(benchmark::kMillisecond);
+BENCHMARK(bm_cutex_race_sync)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
 // BM3 — timer_parallel: массовые таймеры на clock/multi_dial
@@ -287,11 +286,11 @@ static void bm_multi_runner_cutex(benchmark::State& state) {
         std::string counter_str = "0";
 
         auto racer = [](ace::cutex& mtx, std::string& cnt, int max) -> ace::task {
-            volatile auto g = ace::guard(mtx);
+            auto g = ace::guard(mtx);
             for (int i = 0; i < max; ++i) {
                 co_await g.capture();
                 cnt = std::to_string(std::stoi(cnt) + 1);
-                g.sync();
+                g.release();
             }
             co_return;
         };

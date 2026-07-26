@@ -81,6 +81,7 @@ if tests_enabled
     if compiler == 'gcc'
         compile_args = [
             '-std=c++23',
+            '-fno-sanitize-address-use-after-scope',
 #            '-Wno-invalid-offsetof',
 #            '-Mmodules',
 #            '-fconcepts-diagnostics-depth=2'
@@ -99,7 +100,7 @@ if tests_enabled
     coverage_enabled = get_option('coverage')
     if coverage_enabled
         message('Coverage mode: --coverage flags added')
-        compile_args += ['--coverage', '-O0', '-g']
+        compile_args += ['--coverage']
         coverage_link_args = ['--coverage']
     else
         coverage_link_args = []
@@ -114,6 +115,11 @@ if tests_enabled
             gtest_dep,
             ace_dep,
             mimalloc_dep
+        ],
+        override_options: [
+            'debug=true',
+            'optimization=0',
+            'b_sanitize=address',
         ],
     )
 
@@ -136,7 +142,10 @@ if tests_enabled
         '--gtest_color=yes',
         '--gtest_catch_exceptions=0',
         '--gtest_break_on_failure=1'
-      ]
+      ],
+      env: {
+        'ASAN_OPTIONS': 'halt_on_error=0:detect_leaks=0',
+      },
     )
     endforeach
 
@@ -176,6 +185,10 @@ if benchmarks_enabled
         dependencies: [
             benchmark_dep,
             ace_dep,
+        ],
+        override_options: [
+            'debug=false',
+            'optimization=3',
         ],
     )
 

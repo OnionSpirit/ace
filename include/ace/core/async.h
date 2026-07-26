@@ -530,7 +530,7 @@ namespace ace {
 
     // NOTE: Wrapper to spawn and manage coroutines in runner pool
     template <typename async_return_t, core::is_promise_rule async_rule_t>
-    task task_wrap(core::async<async_return_t, async_rule_t>&& some_context) {
+    task task_wrap(core::async<async_return_t, async_rule_t> some_context) {
         co_await some_context;
         co_return;
     }

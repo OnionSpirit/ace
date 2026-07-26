@@ -135,7 +135,7 @@ struct timer_fixture : base_fixture {
 
     template <typename Rep, typename Period>
     ace::task timer_waiter(std::chrono::duration<Rep, Period> dur,
-                           ace::futures::tunnel::dyn::bus<long>& ch) {
+                           ace::futures::tunnel::dyn::bus<int>& ch) {
         const auto start = ace::services::clock::current_time();
         co_await ace::futures::timeout(dur);
         const auto end = ace::services::clock::current_time();
@@ -178,36 +178,13 @@ struct timer_fixture : base_fixture {
             ace::console::println("timeout of promise");
     }
 
-    ace::futures::tunnel::dyn::bus<int> _int_channel {};
-    ace::futures::tunnel::dyn::bus<ace::services::timepoint_t> _tp_channel {};
-};
-
-// ==========================================================================
-// timer_parallel_fixture — heavy parallel timer test
-// ==========================================================================
-
-struct timer_parallel_fixture : base_fixture {
-    void SetUp() override {
-        ace::cfg::g_config._runners_amount = 4;
-        ace::reload();
-    }
-
     void TearDown() override {
         ace::cfg::g_config._runners_amount = 1;
         ace::reload();
     }
 
-    template <typename Rep, typename Period>
-    ace::task timer_waiter(std::chrono::duration<Rep, Period> dur,
-                           ace::futures::tunnel::dyn::bus<long>& ch) {
-        const auto start = ace::services::clock::current_time();
-        co_await ace::futures::timeout(dur);
-        const auto end = ace::services::clock::current_time();
-        ch << (end - start).count();
-        co_return;
-    }
-
-    ace::futures::tunnel::dyn::bus<long> _channel {};
+    ace::futures::tunnel::dyn::bus<int> _int_channel {};
+    ace::futures::tunnel::dyn::bus<ace::services::timepoint_t> _tp_channel {};
 };
 
 // ==========================================================================

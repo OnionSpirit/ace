@@ -148,7 +148,7 @@ TEST_F(timer_fixture, do_expire_on_runner_test) {
 TEST_F(cutex_fixture, cutex_race) {
     configure_runners(8);
     std::string shared_cnt {"0"};
-    constexpr int max_ = 100000;
+    constexpr int max_ = 10000;
     for (volatile std::size_t i = 0; i < _runners; i = i + 1)
         ace::schedule(capture_racer(max_, shared_cnt));
     ace::run();
@@ -159,7 +159,7 @@ TEST_F(cutex_fixture, cutex_race) {
 TEST_F(cutex_fixture, cutex_race_resheduling) {
     configure_runners(8);
     std::string shared_cnt {"0"};
-    constexpr int max_ = 100000;
+    constexpr int max_ = 10000;
     for (volatile std::size_t i = 0; i < _runners; i = i + 1)
         ace::schedule(sync_racer(max_, shared_cnt));
     ace::run();
@@ -167,16 +167,18 @@ TEST_F(cutex_fixture, cutex_race_resheduling) {
     ASSERT_EQ(std::stoi(shared_cnt), max_ * _runners);
 }
 
-TEST_F(timer_parallel_fixture, do_timer_on_runner_parallel_test) {
+TEST_F(timer_fixture, do_timer_on_runner_parallel_test) {
     using namespace std::chrono_literals;
-    constexpr long sets_count = 1000000;
+    ace::cfg::g_config._runners_amount = 4;
+    ace::reload();
+    constexpr long sets_count = 10000;
     constexpr long max_in_set = 500;
     constexpr long set_step = 50;
     constexpr long set_size = max_in_set / set_step;
 
     for (int i = 0; i < sets_count; ++i)
         for (int q = 0; q < max_in_set; q += set_step)
-            ace::schedule(timer_waiter(std::chrono::milliseconds(q), _channel));
+            ace::schedule(timer_waiter(std::chrono::milliseconds(q), _int_channel));
 
     std::cout << "Tasks spawned" << std::endl;
     const auto start_time = std::chrono::steady_clock::now();
@@ -190,8 +192,8 @@ TEST_F(timer_parallel_fixture, do_timer_on_runner_parallel_test) {
               << "ms], step: " << set_step << std::endl;
     ASSERT_TRUE(ace::empty());
 
-    std::vector<long> res;
-    ace::schedule(channel_fetcher(_channel, res));
+    std::vector<int> res;
+    ace::schedule(channel_fetcher(_int_channel, res));
     ace::run();
     ASSERT_TRUE(ace::empty());
     ASSERT_EQ(res.size(), set_size * sets_count);

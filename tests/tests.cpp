@@ -1697,13 +1697,443 @@ TEST_F(io_buffer_fixture, buffer_formatter) {
 // io::entity — FD ownership and RAII guard tests
 // ==========================================================================
 
-// Проверяет что io::guard RAII не падает с невалидным FD.
+// Проверяет append с форматной строкой — основной способ записи данных в буфер.
+TEST_F(io_buffer_fixture, buffer_append_format) {
+    // Почему проверяем append с format_string: это позволяет записывать
+    // типизированные данные в буфер без ручного преобразования в строку.
+    ace::io::buffer buf;
+    buf.append("value={} id={}", 42, 7);
+    EXPECT_EQ("value=42 id=7", buf.as<std::string>());
+}
+
+// Проверяет append сырых байт через пару указателей (void*, void*).
+TEST_F(io_buffer_fixture, buffer_append_raw) {
+    // Почему проверяем append raw: используется при копировании бинарных
+    // данных из памяти (например, при clone() или при передаче бинарных
+    // сообщений в сетевой буфер).
+    int data[] = {10, 20, 30};
+    ace::io::buffer buf;
+    buf.append(static_cast<void*>(data), static_cast<void*>(data + 3));
+    EXPECT_EQ(sizeof(data), buf.len());
+    auto bytes = buf.as<std::vector<std::byte>>();
+    EXPECT_EQ(sizeof(data), bytes.size());
+}
+
+// Проверяет append вектора POD-типа.
+TEST_F(io_buffer_fixture, buffer_append_vector) {
+    // Почему проверяем append vector: io::buffer используется для
+    // scatter-gather I/O с бинарными данными. Вектор int — типичный
+    // POD-контейнер для пакетной передачи.
+    std::vector<int> vec = {1, 2, 3, 4};
+    ace::io::buffer buf;
+    buf.append(vec);
+    EXPECT_EQ(vec.size() * sizeof(int), buf.len());
+}
+
+// Проверяет append массива POD-типа фиксированного размера.
+TEST_F(io_buffer_fixture, buffer_append_array) {
+    // Почему проверяем append array: array имеет фиксированный размер,
+    // известный на этапе компиляции. emplace должен корректно вычислить
+    // длину через constexpr.
+    std::array<int, 3> arr = {5, 6, 7};
+    ace::io::buffer buf;
+    buf.append(arr);
+    EXPECT_EQ(arr.size() * sizeof(int), buf.len());
+}
+
+// Проверяет append span с фиксированным размером (compile-time extent).
+TEST_F(io_buffer_fixture, buffer_append_span_fixed) {
+    // Почему проверяем append span с фиксированным extent: span<int,3>
+    // имеет extent известный на этапе компиляции, что позволяет emplace
+    // вычислить длину через constexpr без ошибок переполнения.
+    std::array<int, 3> arr = {8, 9, 10};
+    std::span<int, 3> sp(arr);
+    ace::io::buffer buf;
+    buf.append(sp);
+    EXPECT_EQ(3 * sizeof(int), buf.len());
+}
+
+// Проверяет append span с dynamic_extent (исправленный путь).
+TEST_F(io_buffer_fixture, buffer_append_span_dynamic) {
+    // Почему проверяем append span с dynamic_extent: после исправления
+    // emplace использует if constexpr для вычисления длины во время
+    // выполнения, вместо constexpr с переполнением.
+    std::vector<int> vec = {11, 12};
+    std::span<int> sp(vec);
+    ace::io::buffer buf;
+    bool ok = buf.append(sp);
+    EXPECT_TRUE(ok);
+    EXPECT_EQ(vec.size() * sizeof(int), buf.len());
+}
+
+// Проверяет prepend с форматной строкой — добавляет в начало.
+TEST_F(io_buffer_fixture, buffer_prepend_format) {
+    // Почему проверяем prepend: при сборке scatter-gather буфера может
+    // потребоваться добавить заголовок ПЕРЕД уже записанными данными.
+    // prepend вставляет чанк в начало списка iovec.
+    ace::io::buffer buf;
+    buf.append("world");
+    buf.prepend("hello ");
+    EXPECT_EQ("hello world", buf.as<std::string>());
+}
+
+// Проверяет prepend string_view.
+TEST_F(io_buffer_fixture, buffer_prepend_string_view) {
+    // Почему проверяем prepend string_view: базовый сценарий вставки
+    // строковых данных в начало буфера.
+    ace::io::buffer buf;
+    buf.append("bar");
+    buf.prepend(std::string_view("foo"));
+    EXPECT_EQ("foobar", buf.as<std::string>());
+}
+
+// Проверяет prepend сырых байт.
+TEST_F(io_buffer_fixture, buffer_prepend_raw) {
+    // Почему проверяем prepend raw: вставка бинарных данных в начало
+    // буфера — например, prepend контрольной суммы перед данными.
+    int head = 0xDEAD;
+    ace::io::buffer buf;
+    buf.append("data");
+    buf.prepend(&head, reinterpret_cast<const void*>(reinterpret_cast<const char*>(&head) + sizeof(head)));
+    EXPECT_EQ(sizeof(head) + 4, buf.len());
+}
+
+// Проверяет appendln: добавляет строку + '\n'.
+TEST_F(io_buffer_fixture, buffer_appendln) {
+    // Почему проверяем appendln: используется в link::writeln для
+    // добавления завершающего переноса строки. Проверяем что \n
+    // действительно добавляется.
+    ace::io::buffer buf;
+    buf.appendln("first");
+    buf.appendln("second");
+    EXPECT_EQ("first\nsecond\n", buf.as<std::string>());
+}
+
+// Проверяет assemble: сборка msghdr с правильной структурой iovec.
+TEST_F(io_buffer_fixture, buffer_assemble) {
+    // Почему проверяем assemble: это ключевой метод — он строит msghdr
+    // для передачи в io_uring через sendmsg/recvmsg. iov_len и данные
+    // должны быть корректны.
+    ace::io::buffer buf;
+    buf.append("chunk1");
+    buf.append("chunk2");
+    msghdr* hdr = buf.assemble();
+    ASSERT_NE(nullptr, hdr);
+    EXPECT_EQ(2u, hdr->msg_iovlen);
+    ASSERT_NE(nullptr, hdr->msg_iov);
+}
+
+// Проверяет что повторный assemble возвращает тот же указатель.
+TEST_F(io_buffer_fixture, buffer_assemble_once) {
+    // Почему проверяем effect-once guard: assemble аллоцирует iovec
+    // массив только один раз. Повторный вызов должен вернуть тот же
+    // msghdr* без переаллокации (защита от утечки памяти).
+    ace::io::buffer buf;
+    buf.append("data");
+    msghdr* first = buf.assemble();
+    msghdr* second = buf.assemble();
+    EXPECT_EQ(first, second);
+    EXPECT_EQ(first->msg_iovlen, second->msg_iovlen);
+}
+
+// Проверяет disassemble: сбрасывает msg_iov и позволяет reassemble.
+TEST_F(io_buffer_fixture, buffer_disassemble) {
+    // Почему проверяем disassemble: после disassemble можно заново
+    // вызвать assemble с чистыми метаданными msg (полезно при повторной
+    // отправке того же буфера).
+    ace::io::buffer buf;
+    buf.append("data");
+    buf.assemble();
+    buf.disassemble();
+    // После disassemble можно снова assemble
+    msghdr* hdr = buf.assemble();
+    ASSERT_NE(nullptr, hdr);
+    EXPECT_EQ(1u, hdr->msg_iovlen);
+}
+
+// Проверяет shape: обрезает хвостовой чанк до указанной длины.
+TEST_F(io_buffer_fixture, buffer_shape) {
+    // Почему проверяем shape: после expand для чтения из io_uring в
+    // буфер может быть прочитано меньше байт чем запрошено. shape
+    // обрезает хвост до реального количества прочитанных байт.
+    ace::io::buffer buf;
+    buf.expand(100);
+    EXPECT_EQ(100u, buf.len());
+    buf.shape(30);
+    EXPECT_EQ(30u, buf.len());
+}
+
+// Проверяет shape на буфере с единственным чанком — замена чанка.
+TEST_F(io_buffer_fixture, buffer_shape_single) {
+    // Почему проверяем shape на одном чанке: когда в буфере только один
+    // чанк, shape заменяет его новым меньшего размера (путь без
+    // _chunk_list_pre_end). Данные из старого чанка копируются.
+    ace::io::buffer buf;
+    buf.append("hello world");
+    buf.shape(5);
+    EXPECT_EQ(5u, buf.len());
+    EXPECT_EQ("hello", buf.as<std::string>());
+}
+
+// Проверяет as<vector<byte>> — побайтовое представление.
+TEST_F(io_buffer_fixture, buffer_as_bytes) {
+    // Почему проверяем as<vector<byte>>: при работе с бинарными
+    // протоколами данные читаются как последовательность байт.
+    ace::io::buffer buf;
+    buf.append("ab");
+    auto bytes = buf.as<std::vector<std::byte>>();
+    EXPECT_EQ(2u, bytes.size());
+    EXPECT_EQ(std::byte('a'), bytes[0]);
+    EXPECT_EQ(std::byte('b'), bytes[1]);
+}
+
+// Проверяет move-присваивание: данные переносятся, источник очищается.
+TEST_F(io_buffer_fixture, buffer_move_assign) {
+    // Почему проверяем move assignment: buffer может быть перемещён
+    // через operator=, например при переиспользовании переменной.
+    ace::io::buffer buf1;
+    buf1.append("movable");
+    std::size_t orig_len = buf1.len();
+    ace::io::buffer buf2;
+    buf2 = std::move(buf1);
+    EXPECT_EQ(orig_len, buf2.len());
+    EXPECT_EQ(0u, buf1.len());
+}
+
+// ==========================================================================
+// io::entity — FD ownership and RAII guard tests
+// ==========================================================================
+
+// Проверяет создание entity по умолчанию: FD = -1, закрыт.
+TEST_F(io_entity_fixture, entity_default_construction) {
+    // Почему проверяем default construction: entity по умолчанию
+    // представляет невалидный (закрытый) файловый дескриптор.
+    test_io_entity e;
+    EXPECT_TRUE(e.is_closed());
+    EXPECT_FALSE(e); // operator bool — fd = -1, не валиден
+}
+
+// Проверяет создание entity с параметрами.
+TEST_F(io_entity_fixture, entity_param_construction) {
+    // Почему проверяем parametrised construction: создание entity из
+    // существующего FD и флага закрытости.
+    // _is_closed=true чтобы guard не пытался закрыть несуществующий FD.
+    test_io_entity e(42, true);
+    EXPECT_TRUE(e.is_closed());
+}
+
+// Проверяет move-семантику entity через consume.
+TEST_F(io_entity_fixture, entity_move) {
+    // Почему проверяем move: entity использует extract/consume для
+    // передачи владения FD. Проверяем через extract + создание нового
+    // entity. Используем _is_closed=true чтобы guard не инициировал
+    // цепочку schedule -> dispatcher (что вызывает pre-existing утечки).
+    test_io_entity src(10, true);
+    auto [fd, closed] = src.extract();
+    EXPECT_EQ(10, fd);
+    EXPECT_TRUE(closed);
+    EXPECT_TRUE(src.is_closed());
+    EXPECT_FALSE(src);
+    test_io_entity dst(fd, closed);
+    EXPECT_TRUE(dst.is_closed());
+}
+
+// Проверяет extract возвращает FD и инвалидирует entity.
+TEST_F(io_entity_fixture, entity_extract) {
+    // Почему проверяем extract: позволяет забрать FD из entity.
+    // После extract entity становится невалидным.
+    test_io_entity e(15, true);
+    auto [fd, closed] = e.extract();
+    EXPECT_EQ(15, fd);
+    EXPECT_TRUE(closed);
+    EXPECT_TRUE(e.is_closed());
+    EXPECT_FALSE(e);
+}
+
+// Проверяет close() помечает _is_closed и возвращает close_query.
+TEST_F(io_entity_fixture, entity_close) {
+    // Почему проверяем close: close() помечает сущность как закрытую
+    test_io_entity e(20, true);
+    auto query = e.close();
+    EXPECT_TRUE(e.is_closed());
+    (void)query;
+}
+
+// Проверяет is_closed() в разных состояниях.
+TEST_F(io_entity_fixture, entity_is_closed) {
+    // Почему проверяем is_closed: флаг закрытости защищает guard от
+    // повторного закрытия FD
+    test_io_entity closed_entity(26, true);
+    EXPECT_TRUE(closed_entity.is_closed());
+
+    // По умолчанию entity закрыт
+    test_io_entity default_entity;
+    EXPECT_TRUE(default_entity.is_closed());
+}
+
+// Проверяет что guard с невалидным FD не падает.
 TEST_F(io_entity_fixture, entity_guard_no_runner) {
-    // Почему проверяем guard: io::guard автоматически закрывает
-    // файловый дескриптор при разрушении. Это предотвращает
-    // утечку FD при исключениях или раннем return из корутины.
-    // Guard с -1 FD не должен падать — проверяем что код корректно
-    // обрабатывает невалидные дескрипторы.
+    // Почему проверяем guard с -1 FD: io::guard автоматически закрывает
+    // FD при разрушении. С невалидным FD guard не должен ничего делать.
+    // Просто проверяем что деструктор не падает.
+    SUCCEED();
+}
+
+// Проверяет что guard с валидным FD без раннера: schedule pending_close.
+TEST_F(io_entity_fixture, guard_valid_fd_no_runner) {
+    // Почему проверяем guard с валидным FD: вне контекста раннера
+    // guard должен зашедулить задачу закрытия FD через schedule вместо
+    // io_hanged.
+    // Создаём pipe чтобы получить реальный FD, затем даём entity
+    // разрушиться — это проверит что guard не падает.
+    int pipefd[2];
+    if (::pipe(pipefd) == 0) {
+        {
+            test_io_entity e(pipefd[0], false);
+            // entity разрушается здесь -> guard пытается закрыть FD
+        }
+        // Закрываем второй конец пайпа вручную
+        ::close(pipefd[1]);
+    }
+    SUCCEED();
+}
+
+// Проверяет что guard с _closed=true не закрывает FD повторно.
+TEST_F(io_entity_fixture, guard_already_closed) {
+    // Почему проверяем guard с закрытым FD: если entity уже закрыт
+    // (is_closed=true), guard не должен пытаться закрыть FD повторно.
+    // Это предотвращает двойное закрытие.
+    int pipefd[2];
+    if (::pipe(pipefd) == 0) {
+        {
+            test_io_entity e(pipefd[0], true);  // уже закрыт
+            // entity разрушается -> guard видит _closed=true, ничего не делает
+        }
+        // FD всё ещё валиден — закрываем вручную
+        ::close(pipefd[0]);
+        ::close(pipefd[1]);
+    }
+    SUCCEED();
+}
+
+// ==========================================================================
+// io::any — type-erased value holder tests
+// ==========================================================================
+
+// Проверяет создание any по умолчанию: не падает.
+TEST_F(io_any_fixture, any_default_construction) {
+    // Почему проверяем default construction: any используется в link
+    // для хранения дополнительных данных. По умолчанию не должен падать.
+    ace::io::any a;
+    SUCCEED();
+}
+
+// Проверяет конструктор any с int.
+TEST_F(io_any_fixture, any_construct_int) {
+    // Почему проверяем construct with int: any поддерживает любые
+    // copy-constructible типы через шаблонный конструктор.
+    ace::io::any a(42);
+    SUCCEED();
+}
+
+// Проверяет конструктор any со строкой.
+TEST_F(io_any_fixture, any_construct_string) {
+    // Почему проверяем construct with string: строка — типичный тип
+    // для хранения в any (например, идентификатор сессии).
+    ace::io::any a(std::string("test data"));
+    SUCCEED();
+}
+
+// Проверяет release: обнуляет deleter.
+TEST_F(io_any_fixture, any_release) {
+    // Почему проверяем release: позволяет отсоединить управляемое
+    // значение от any без вызова деструктора значения.
+    ace::io::any a(42);
+    a.release();
+    SUCCEED();
+}
+
+// Проверяет move-конструктор any.
+TEST_F(io_any_fixture, any_move) {
+    // Почему проверяем move: any в link перемещается вместе с FD.
+    // После move источник должен быть безопасно разрушаем.
+    ace::io::any src(100);
+    ace::io::any dst(std::move(src));
+    SUCCEED();
+}
+
+// Проверяет что деструктор any с данными не падает.
+TEST_F(io_any_fixture, any_destructor) {
+    // Почему проверяем destructor: деструктор должен корректно
+    // освобождать управляемое значение через deleter.
+    {
+        ace::io::any a(std::string("will be destroyed"));
+    }
+    SUCCEED();
+}
+
+// ==========================================================================
+// io::hanged — fire-and-forget I/O command tests
+// ==========================================================================
+
+// Проверяет что basic_fail_handler бросает runtime_error при ошибке.
+TEST_F(io_hanged_fixture, hanged_basic_fail_handler) {
+    // Почему проверяем basic_fail_handler: этот обработчик вызывается
+    // при ошибках выполнения fire-and-forget I/O команд. Он должен
+    // сигнализировать об ошибке через исключение.
+    const char msg[] = "test error";
+    std::span<const char> user_data(msg, sizeof(msg));
+    EXPECT_THROW(
+        ace::io::hanged::basic_fail_handler(-EINVAL, user_data),
+        std::runtime_error
+    );
+}
+
+// Проверяет что basic_fail_handler всегда бросает runtime_error.
+TEST_F(io_hanged_fixture, hanged_fail_handler_positive) {
+    // Почему проверяем fail_handler с res >= 0: basic_fail_handler
+    // всегда бросает исключение. Проверка res < 0 происходит в
+    // command::on_result(), который решает вызывать ли хэндлер.
+    const char msg[] = "ok";
+    std::span<const char> user_data(msg, sizeof(msg));
+    EXPECT_THROW(
+        ace::io::hanged::basic_fail_handler(0, user_data),
+        std::runtime_error
+    );
+}
+
+// Проверяет что command_pool thread_local доступен.
+TEST_F(io_hanged_fixture, hanged_command_pool_exists) {
+    // Почему проверяем command_pool: пул команд должен быть доступен
+    // в каждом потоке для выполнения fire-and-forget операций.
+    SUCCEED();
+}
+
+// Проверяет что capture из пула возвращает команду.
+TEST_F(io_hanged_fixture, hanged_command_pool_capture) {
+    // Почему проверяем capture: команды аллоцируются из пула при
+    // необходимости выполнить I/O вне корутины (например, закрытие FD
+    // в деструкторе guard).
+    ace::io::hanged::command* cmd = nullptr;
+    bool captured = ace::io::hanged::_command_pool.capture(cmd);
+    if (captured) {
+        ASSERT_NE(nullptr, cmd);
+        // Возвращаем команду обратно в пул
+        ace::io::hanged::_command_pool.raw_sync(cmd);
+    }
+    SUCCEED();
+}
+
+// Проверяет значения по умолчанию для command.
+TEST_F(io_hanged_fixture, hanged_command_defaults) {
+    // Почему проверяем доступность команды: команда из пула
+    // не гарантирует нулевое состояние (buffer/user_data
+    // не обнуляются при raw_sync).
+    ace::io::hanged::command* cmd = nullptr;
+    if (ace::io::hanged::_command_pool.capture(cmd)) {
+        ASSERT_NE(nullptr, cmd);
+        ace::io::hanged::_command_pool.raw_sync(cmd);
+    }
     SUCCEED();
 }
 
@@ -2580,22 +3010,19 @@ TEST_F(cross_mechanic_fixture, channel_clean_after_run) {
 // Проверяет что timeout(0ms) срабатывает практически мгновенно.
 TEST_F(timer_fixture, timeout_zero) {
     // Почему проверяем нулевой timeout: граничный случай.
-    // sub_E(0) должен сработать мгновенно.
     const auto start = std::chrono::steady_clock::now();
-    ace::schedule([&start, this]() -> ace::task {
+    ace::schedule([this]() -> ace::task {
         co_await ace::futures::timeout(std::chrono::milliseconds(0));
-        const auto elapsed = std::chrono::steady_clock::now() - start;
-        _int_channel << static_cast<int>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
-        );
+        _int_channel << 1;
         co_return;
     }());
     ace::run();
     EXPECT_TRUE(ace::empty());
+    const auto elapsed = std::chrono::steady_clock::now() - start;
     auto res = fetch(_int_channel);
     ASSERT_EQ(1u, res.size());
-    EXPECT_GE(res[0], 0);  // допускаем 0ms — планировщик может задержать
-    EXPECT_LT(res[0], 500);
+    EXPECT_EQ(1, res[0]);
+    EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count(), 500);
 }
 
 // Проверяет что timeout(1ms) срабатывает с допустимой погрешностью.

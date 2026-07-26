@@ -99,7 +99,7 @@ struct ACE_FUTURE_REATTACH_SPACE reattach_router : runner_router {
 ACE_FUTURE_REATTACH_MEMBER(bool)
 await_suspend(auto coroutine) {
     // NOTE: Do not suspend if current and requested runners is same
-    if (_new_runner == coroutine.promise()._runner)
+    if (_new_runner == coroutine.promise()._runner.template as<core::runner>())
         return false;
     coroutine.promise()._runner_router = reattach_router{_new_runner};
     return true;

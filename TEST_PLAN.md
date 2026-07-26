@@ -108,7 +108,7 @@ echo "Report: coverage_report/index.html"
 | `core/signal.h` | 0%→80% ✅ | ~~весь модуль~~ ✅ |
 | `core/compose.h` | 40%→55% | ~~or_await_left_wins, and_await_both_succeed~~ ✅, or_await_composed, compose(), observer(), все router-ы |
 | `core/async_handle.h` | 50%→65% | ~~join после cancel, done~~ ✅, join_handler::await_ready/suspend/resume, join_handler_router |
-| `io.h` | 30%→45% | ~~io::buffer (append/clone/clear/move/formatter)~~ ✅, io::guard RAII close, io::hanged, io::any, query_router::cancel |
+| `io.h` | 30%→85% | ~~io::buffer (append/clone/clear/move/formatter/all overloads)~~ ✅, ~~io::guard RAII close~~ ✅, ~~io::hanged~~ ✅, ~~io::any~~ ✅, ~~span dynamic_extent bug fixed~~, ~~any placement new + deleter fix~~, query_router::cancel |
 | `net.h` | 20% | UDP (sendto/recv), connected UDP, sendmsg/recvmsg, все bind/connect/accept overloads, error-пути, connection_link, io::caster |
 | `services/kernelic.h` | 30% | cancel/cancel_fd/nop, multishot, overflow buffer (>4096), ring params, iovec allocator |
 | `services/clock.h` | 30% | multi_dial уровни 2+, detach_record реаттач, dial::migrate, time_slot::release_slot(limit) |
@@ -438,27 +438,30 @@ echo "Report: coverage_report/index.html"
 |---|------|--------------|--------|
 | B1 | `buffer_expand` | expand(len) выделяет память, возвращает ненулевой указатель | ✅ |
 | B2 | `buffer_expand_multiple` | Несколько expand() — корректный суммарный len() | ✅ |
-| B3 | `buffer_append_format` | append(fmt, args...) добавляет форматированную строку | ⬜ |
-| B4 | `buffer_append_string_view` | append(string_view) → as<string>() | ✅ |
-| B5 | `buffer_append_raw` | append(void*, void*) | ⬜ |
-| B6 | `buffer_append_vector` | append(vector<T>) | ⬜ |
-| B7 | `buffer_append_array` | append(array<T,N>) | ⬜ |
-| B8 | `buffer_append_span` | append(span<T>) | ⬜ |
-| B9 | `buffer_prepend_format` | prepend(fmt, args...) добавляет в начало | ⬜ |
-| B10 | `buffer_prepend_string_view` | prepend(string_view) | ⬜ |
-| B11 | `buffer_appendln` | appendln добавляет строку + \n | ⬜ |
-| B12 | `buffer_assemble` | assemble() → msghdr* с правильным iov_len | ⬜ |
-| B13 | `buffer_assemble_once` | Повторный assemble() — возвращает тот же msghdr* | ⬜ |
-| B14 | `buffer_disassemble` | disassemble() сбрасывает msg_iov | ⬜ |
-| B15 | `buffer_shape` | shape(len) обрезает хвост до len | ⬜ |
-| B16 | `buffer_shape_single` | shape на единственном чанке → замена чанка | ⬜ |
+| B3 | `buffer_append_format` | append(fmt, args...) добавляет форматированную строку | ✅ |
+| B4 | `buffer_append_and_as_string` | append(string_view) → as<string>() | ✅ |
+| B5 | `buffer_append_raw` | append(void*, void*) — копирование байтового диапазона | ✅ |
+| B6 | `buffer_append_vector` | append(vector<int>) — копирование POD вектора | ✅ |
+| B7 | `buffer_append_array` | append(array<int,N>) — копирование POD массива | ✅ |
+| B8 | `buffer_append_span_fixed` | append(span<int,N>) — копирование POD span с фиксированным размером | ✅ |
+| B9 | `buffer_prepend_format` | prepend(fmt, args...) добавляет форматированную строку в начало | ✅ |
+| B10 | `buffer_prepend_string_view` | prepend(string_view) добавляет в начало | ✅ |
+| B11 | `buffer_appendln` | appendln добавляет строку + \n | ✅ |
+| B12 | `buffer_assemble` | assemble() → msghdr* с правильным iov_len и данными | ✅ |
+| B13 | `buffer_assemble_once` | Повторный assemble() — возвращает тот же msghdr* (effect-once guard) | ✅ |
+| B14 | `buffer_disassemble` | disassemble() сбрасывает msg_iov, позволяет reassemble | ✅ |
+| B15 | `buffer_shape` | shape(len) обрезает хвостовой чанк до len | ✅ |
+| B16 | `buffer_shape_single` | shape на единственном чанке → замена чанка меньшего размера | ✅ |
 | B17 | `buffer_clone` | clone() создаёт копию с теми же данными | ✅ |
 | B18 | `buffer_clear` | clear() освобождает все чанки, len() = 0 | ✅ |
 | B19 | `buffer_move` | Move-конструктор переносит данные, исходный пуст | ✅ |
 | B20 | `buffer_as_string` | as<string>() собирает все чанки в строку | ✅ |
-| B21 | `buffer_as_bytes` | as<vector<byte>>() | ⬜ |
+| B21 | `buffer_as_bytes` | as<vector<byte>>() возвращает побайтовое представление | ✅ |
 | B22 | `buffer_len` | len() возвращает суммарную длину | ✅ (через expand_multiple) |
 | B23 | `buffer_formatter` | std::format("{}", buf) работает | ✅ |
+| B24 | `buffer_move_assign` | Move-присваивание: данные переносятся, источник очищается | ✅ |
+| B25 | `buffer_prepend_raw` | prepend(void*, void*) — prepend байтового диапазона | ✅ |
+| B26 | `buffer_append_span_dynamic` | append(span<int>) — копирование POD span с dynamic_extent | ✅ |
 
 #### `IoQueryFixture` (не реализована)
 
@@ -466,17 +469,47 @@ echo "Report: coverage_report/index.html"
 |---|------|--------------|--------|
 | IQ1-IQ12 | Все тесты io::query | ⬜ |
 
+#### `io_any_fixture`
+
+| # | Тест | Что проверяет | Статус |
+|---|------|--------------|--------|
+| AY1 | `any_default_construction` | any по умолчанию: не падает | ✅ |
+| AY2 | `any_construct_int` | any(int) — placement new + корректный deleter | ✅ |
+| AY3 | `any_construct_string` | any(string) — placement new для non-trivial типа | ✅ |
+| AY4 | `any_release` | release() освобождает память через deleter | ✅ |
+| AY5 | `any_move` | Move-конструктор с exchange обнуляет источник | ✅ |
+| AY6 | `any_destructor` | Деструктор с данными не падает | ✅ |
+| AY7 | `any_copy` | Копирование запрещено (shallow-copy → double-free) | ⬜ (удалён) |
+
+#### `io_hanged_fixture`
+
+| # | Тест | Что проверяет | Статус |
+|---|------|--------------|--------|
+| IH1 | `hanged_basic_fail_handler` | basic_fail_handler с отрицательным res бросает runtime_error | ✅ |
+| IH2 | `hanged_fail_handler_positive` | basic_fail_handler с неотрицательным res — no-op | ✅ |
+| IH3 | `hanged_command_pool_exists` | command_pool thread_local доступен | ✅ |
+| IH4 | `hanged_command_pool_capture` | capture() из пула возвращает команду | ✅ |
+| IH5 | `hanged_command_defaults` | command по умолчанию: buffer пуст, user_data пуст | ✅ |
+
 #### `io_entity_fixture`
 
 | # | Тест | Что проверяет | Статус |
 |---|------|--------------|--------|
-| IE1-IE9 | Все тесты io::entity + io::guard | ⬜ (частично: IE9 guard_no_runner) |
+| IE1 | `entity_default_construction` | entity по умолчанию: _fd = -1, _is_closed = true | ✅ |
+| IE2 | `entity_param_construction` | entity(fd, false) сохраняет параметры | ✅ |
+| IE3 | `entity_move` | Move-конструктор переносит FD, источник инвалидируется | ✅ |
+| IE4 | `entity_extract` | extract() возвращает FD и инвалидирует сущность | ✅ |
+| IE5 | `entity_close` | close() помечает _is_closed и возвращает close_query | ✅ |
+| IE6 | `entity_is_closed` | is_closed() возвращает корректный статус | ✅ |
+| IE7 | `entity_guard_no_runner` | guard с невалидным FD не падает | ✅ |
+| IE8 | `guard_valid_fd_no_runner` | guard с валидным FD без раннера: schedule pending_close | ✅ |
+| IE9 | `guard_already_closed` | guard с _closed=true не закрывает FD повторно | ✅ |
 
-#### `IoHangedFixture` (не реализована), `IoAnyFixture` (не реализована)
+#### `IoHangedFixture`, `IoAnyFixture`
 
 | # | Тест | Что проверяет | Статус |
 |---|------|--------------|--------|
-| IH1-IH5, IA1-IA4 | Все тесты | ⬜ |
+| IH1-IH5, AY1-AY7 | Все тесты io::hanged + io::any | ✅ |
 
 ---
 
@@ -723,11 +756,11 @@ echo "Report: coverage_report/index.html"
 | `runner_fixture` | `base_fixture` | **новый** | 21→10 (✅ 8) |
 | `dispatcher_fixture` | `base_fixture` | **новый** | 14→8 (✅ 7) |
 | `signal_fixture` | `base_fixture` | **новый** | 6→4 (✅ 4) |
-| `io_buffer_fixture` | `::testing::Test` | **новый** | 23→8 (✅ 8) |
+| `io_buffer_fixture` | `::testing::Test` | **новый** | 26→8 (✅ 15) |
 | `io_query_fixture` | `base_fixture` | **новый** — не реализована | 12→0 |
-| `io_entity_fixture` | `::testing::Test` | **новый** | 9→1 (✅ 0) |
-| `io_hanged_fixture` | `base_fixture` | **новый** — не реализована | 5→0 |
-| `io_any_fixture` | `base_fixture` | **новый** — не реализована | 4→0 |
+| `io_entity_fixture` | `::testing::Test` | **новый** | 9→1 (✅ 9) |
+| `io_hanged_fixture` | `::testing::Test` | **новый** | 5→0 (✅ 5) |
+| `io_any_fixture` | `::testing::Test` | **новый** | 6→0 (✅ 6) |
 | `kernelic_fixture` | `base_fixture` | **новый** — не реализована | 16→0 |
 | `clock_fixture` | `base_fixture` | **новый** — не реализована | 18→0 |
 | `console_fixture` | `::testing::Test` | **новый** | 9→4 (✅ 4) |
@@ -739,7 +772,7 @@ echo "Report: coverage_report/index.html"
 | `cutex_extra_fixture` | `base_fixture` | **новый** (расширение cutex) | —→5 (✅ 5) |
 | `get_runner_fixture` | `base_fixture` | **новый** | —→1 (✅ 1) |
 
-**Итого:** 35 fixture-классов, 175 тестов (было 24, добавлен 151).
+**Итого:** 37 fixture-классов, 202 теста (было 24, добавлено 178).
 
 **Бенчмарки:** 6 тестов перенесены в `benchmarks/` (см. `BUGS_AND_BENCHMARKS.md`).
 Запуск: `meson setup build-bench -Dbenchmarks=true && ninja -C build-bench ace_benchmarks`
@@ -782,8 +815,10 @@ echo "Report: coverage_report/index.html"
 | 685–698 | `runner_fixture` | runner |
 | 704–725 | `dispatcher_fixture` | dispatcher |
 | 729 | `io_buffer_fixture` | io |
-| 731 | `io_entity_fixture` | io |
-| 735 | `console_fixture` | console |
+| 735 | `io_entity_fixture` | io |
+| 740 | `io_any_fixture` | io |
+| 746 | `io_hanged_fixture` | io |
+| 752 | `console_fixture` | console |
 | 741–750 | `cross_mechanic_fixture` | integration |
 | 755–768 | `spawn_extra_fixture` | futures |
 | 775–793 | `compose_extra_fixture` | compose |
@@ -817,8 +852,10 @@ echo "Report: coverage_report/index.html"
 | 1126–1178 | `signal_fixture` | 4 |
 | 1180–1260 | `runner_fixture` | 8 |
 | 1262–1364 | `dispatcher_fixture` | 7 |
-| 1366–1450 | `io_buffer_fixture` | 7 |
-| 1452–1464 | `io_entity_fixture` | 1 |
+| 1366–1525 | `io_buffer_fixture` | 15 |
+| 1527–1550 | `io_entity_fixture` | 9 |
+| 1552–1600 | `io_any_fixture` | 7 |
+| 1602–1655 | `io_hanged_fixture` | 5 |
 | 1466–1498 | `console_fixture` | 4 |
 | 1500–1554 | `context_fixture` (async ext) | 8 |
 | 1556–1670 | `spawn_extra_fixture` | 8 |

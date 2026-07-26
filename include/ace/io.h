@@ -410,29 +410,42 @@ public:                                                                         
 
         template <typename target_t>
         static void deleter_impl(void* mem) {
-            delete static_cast<target_t*>(mem);
+            static_cast<target_t*>(mem)->~target_t();
+            free(mem);
         }
 
     public:
 
         any() = default;
 
-        any(const any&) = default;
+        any(const any&) = delete;
 
-        any(any&&) = default;
+        any(any&& other) noexcept
+            : _data(std::exchange(other._data, nullptr))
+            , _deleter(std::exchange(other._deleter, nullptr)) {}
 
-        any& operator=(const any&) = default;
+        any& operator=(const any&) = delete;
 
-        any& operator=(any&&) = default;
+        any& operator=(any&& other) noexcept {
+            if (this != &other) {
+                if (_data && _deleter) _deleter(_data);
+                _data = std::exchange(other._data, nullptr);
+                _deleter = std::exchange(other._deleter, nullptr);
+            }
+            return *this;
+        }
 
         template <typename data_t>
         any(data_t&& data) noexcept {
-            void* mem = malloc(sizeof(data_t));
-            *static_cast<data_t*>(mem) = std::forward<data_t>(data);
-            _deleter = deleter_impl<data_t>;
+            if (void* mem = malloc(sizeof(data_t))) {
+                new (mem) data_t(std::forward<data_t>(data));
+                _data = mem;
+                _deleter = deleter_impl<data_t>;
+            }
         }
 
         void release() noexcept {
+            if (_data && _deleter) _deleter(_data);
             _data = nullptr;
             _deleter = nullptr;
         }
@@ -608,7 +621,12 @@ public:                                                                         
         template <void* (buffer::*mem_selector)(std::size_t), typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         bool emplace(const std::span<data_t, len_v>& buf) {
-            constexpr size_t len = len_v * (sizeof(data_t) / sizeof(char));
+            const size_t len = [&] {
+                if constexpr (len_v == std::dynamic_extent)
+                    return buf.size() * sizeof(data_t);
+                else
+                    return len_v * sizeof(data_t);
+            }();
             if (const auto mem = (this->*mem_selector)(len)) {
                 std::memcpy(mem, buf.data(), len);
                 return true;

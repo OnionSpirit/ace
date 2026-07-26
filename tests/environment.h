@@ -4,6 +4,8 @@
 
 #include <memory>
 #include <cstring>
+#include <span>
+#include <unistd.h>
 #include <gtest/gtest.h>
 #include <ace/ace.h>
 #include <ace/core/compose.h>
@@ -739,6 +741,23 @@ struct io_buffer_fixture : ::testing::Test {};
 // ==========================================================================
 
 struct io_entity_fixture : ::testing::Test {};
+// minimal entity for testing io::entity CRTP mechanics
+struct test_io_entity : ace::io::entity<test_io_entity> {
+    IMPORT_IO_ENTITY_ENV(test_io_entity)
+    IMPORT_IO_ENTITY_FABRICATION
+};
+
+// ==========================================================================
+// io_any_fixture — io::any tests
+// ==========================================================================
+
+struct io_any_fixture : ::testing::Test {};
+
+// ==========================================================================
+// io_hanged_fixture — io::hanged tests
+// ==========================================================================
+
+struct io_hanged_fixture : ::testing::Test {};
 
 // ==========================================================================
 // console_fixture — console output tests

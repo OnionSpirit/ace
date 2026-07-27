@@ -144,7 +144,7 @@ namespace ace::core {
 
         void redirect(const omni_node node) override { _handle.forward(node); }
 
-        // TODO: Finish later
+        // NOTE: Extra cancellation logic doesn't required. Because waiter will be destructed from waiters list
         void cancel() override {  }
 
         ~join_handler_router() override = default;

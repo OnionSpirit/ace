@@ -31,6 +31,7 @@
 #define ACE_ASYNC_H
 
 #include <coroutine>
+#include <cstring>
 #include <expected>
 #include <iostream>
 
@@ -150,8 +151,12 @@ namespace ace::core {
         explicit operator bool() const { return is_exist(); }
 
         /**
-         * @brief Destructor.  Wakes all registered waiters then destroys the
-         *        coroutine frame.
+         * @brief Destructor. Wakes all registered waiters
+         * @details Decrements the strong reference count of the control
+         * block (if any) before suspending.
+         * The coroutine frame is not always
+         * destroyed here; the runner or owning @c async destructor does
+         * that.
          */
         ~async() override {
             if (_coroutine) {
@@ -162,7 +167,9 @@ namespace ace::core {
                         _coroutine.promise()._runner_router->cancel();
                         _coroutine.promise()._runner_router.release();
                     }
-                _coroutine.destroy();
+                // NOTE: Destroying stack only if it is become untracked
+                if (control_block::disown(_coroutine.promise()._block))
+                    _coroutine.destroy();
             }
         };
 
@@ -288,6 +295,12 @@ namespace ace::core {
                 return true;
             }
 
+            void destroy() noexcept override {
+                if (not _address) [[unlikely]] return;
+                auto handle = coroutine_t::from_address(_address);
+                handle.destroy();
+            }
+
             ~async_router() override = default;
         };
 
@@ -313,15 +326,7 @@ namespace ace::core {
 
             promise_type() = default;
 
-            /**
-             * @details Decrements the strong reference count of the control
-             * block (if any) before suspending.
-             *
-             * The coroutine frame is not
-             * destroyed here; the runner or owning @c async destructor does
-             * that.
-             */
-            ~promise_type() { if (_block) control_block::disown(_block); };
+            ~promise_type() = default;
 
             /**
              * @brief C++20 protocol — initial suspension point.

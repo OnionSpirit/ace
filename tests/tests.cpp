@@ -235,8 +235,32 @@ TEST_F(spawn_fixture, check_spawn_command) {
     ASSERT_EQ(res[0], res[1]);
 }
 
-TEST_F(spawn_fixture, check_spawn_post) {
+TEST_F(spawn_fixture, check_post_command) {
     ace::schedule(imposter(_int_channel));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    auto res = fetch(_int_channel);
+    ASSERT_EQ(res.size(), 5);
+    ASSERT_EQ(res[0], 3);
+    ASSERT_EQ(res[1], 1);
+    ASSERT_EQ(res[2], 4);
+    ASSERT_EQ(res[3], 2);
+    ASSERT_EQ(res[4], 5);
+}
+
+TEST_F(spawn_fixture, check_valued_spawn_command) {
+    ace::schedule(valued_spawner());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    auto res = fetch(_runner_channel);
+    ASSERT_EQ(res.size(), 2);
+    ASSERT_NE(res[0], nullptr);
+    ASSERT_NE(res[1], nullptr);
+    ASSERT_EQ(res[0], res[1]);
+}
+
+TEST_F(spawn_fixture, check_valued_post_command) {
+    ace::schedule(valued_imposter(_int_channel));
     ace::run();
     ASSERT_TRUE(ace::empty());
     auto res = fetch(_int_channel);

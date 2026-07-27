@@ -106,6 +106,11 @@ namespace ace::core::traits {
          */
         virtual bool return_value(void*) noexcept = 0;
 
+        /**
+         * @brief manual destroy of the stack frame
+         */
+        virtual void destroy() noexcept = 0;
+
         virtual ~control_router_handle() = default;
     };
 

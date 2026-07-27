@@ -327,6 +327,25 @@ struct spawn_fixture : base_fixture {
         ace::console::println("'spawned' done!!!");
     }
 
+    ace::async<int> valued_to_spawn() {
+        auto curr_runner = co_await ace::get_runner();
+        co_await ace::futures::timeout(100ms);
+        ace::console::println("'spawned' runned out");
+        _runner_channel << curr_runner;
+        co_return 1;
+    }
+
+    ace::task valued_spawner() {
+        auto curr_runner = co_await ace::get_runner();
+        _runner_channel << curr_runner;
+        auto handle = co_await ace::spawn(valued_to_spawn());
+        while (not handle.done()) {
+            ace::console::println("'spawned' not done");
+            co_await ace::futures::timeout(10ms);
+        }
+        ace::console::println("'spawned' done with {}!!!", (co_await handle.join()).value());
+    }
+
     ace::task join_spawner() {
         auto curr_runner = co_await ace::get_runner();
         _runner_channel << curr_runner;
@@ -398,6 +417,28 @@ struct spawn_fixture : base_fixture {
         static_assert(std::same_as<decltype(res), std::tuple<bool, bool, bool, bool>>, "Must be tuple of bools");
         #if defined(__clang__) && __clang_major__ >= 22
             ace::console::println("spawn, post, spawn, post - finished {}", res);
+        #endif
+        ace::console::println("Placing {} to channel", 5);
+        ch << 5;
+        co_return;
+    }
+
+    ace::async<int> valued_spawn_post(int idx, ace::futures::tunnel::dyn::bus<int>& ch) {
+        ace::console::println("Placing {} to channel", idx);
+        ch << idx;
+        co_return idx;
+    }
+
+    ace::task valued_imposter(ace::futures::tunnel::dyn::bus<int>& ch) {
+        auto res = co_await (
+                    (co_await ace::spawn(valued_spawn_post(1, ch))).join()
+                and (co_await ace::post (valued_spawn_post(3, ch))).join()
+                and (co_await ace::spawn(valued_spawn_post(2, ch))).join()
+                and (co_await ace::post (valued_spawn_post(4, ch))).join()
+        );
+        static_assert(std::same_as<decltype(res), std::tuple<std::optional<int>, std::optional<int>, std::optional<int>, std::optional<int>>>, "Must be tuple of std::optional<int>s");
+        #if defined(__clang__) && __clang_major__ >= 22
+                ace::console::println("spawn, post, spawn, post - finished {}", res);
         #endif
         ace::console::println("Placing {} to channel", 5);
         ch << 5;

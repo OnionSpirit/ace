@@ -31,6 +31,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstring>
 
 #include "ace/core/traits/routing.h"
 #include "ace/core/tools/macro.h"
@@ -157,6 +158,7 @@ namespace ace::core {
 
         void release() {
             if (control_block::unwatch(_block)) {
+                _block->_control_router->destroy();
                 _block->~control_block();
                 ::operator delete(_block);
             }

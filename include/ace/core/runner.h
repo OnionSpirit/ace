@@ -173,21 +173,23 @@ namespace ace::core {
          */
         bool run() noexcept;
 
+        // TODO: Add support for automaton in the future
         /**
          * @details Function to attach task to the runner
          * @param new_task Task to be pushed into the runner
          * @return void
          */
-        template <typename async_return_t, typename async_rule_t>
-        void attach(async<async_return_t, async_rule_t> &&new_task);
+        template <typename async_return_t>
+        void attach(async<async_return_t> &&new_task);
 
+        // TODO: Add support for automaton in the future
         /**
          * @details Function to attach task to the runner
          * @param new_task Task to be pushed into the runner
          * @return void
          */
-        template <typename async_return_t, typename async_rule_t>
-        void attach_front(async<async_return_t, async_rule_t> &&new_task);
+        template <typename async_return_t>
+        void attach_front(async<async_return_t> &&new_task);
 
         /**
          * @details Checks if any Tasks stored in the runner
@@ -292,23 +294,29 @@ namespace ace::core {
     }
 
 
-    template <typename async_return_t, typename async_rule_t>
-    void runner::attach(async<async_return_t, async_rule_t> &&new_task) {
+    template <typename async_return_t>
+    void runner::attach(async<async_return_t> &&new_task) {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner = &_pool;
         if (insert_node_ptr new_node; _insert_pool._mempool.capture(new_node)) {
-            new_node->_data = std::move(new_task);
+            if constexpr (std::is_void_v<async_return_t>)
+                new_node->_data = std::move(new_task);
+            else
+                new_node->_data = task_wrap(std::move(new_task));
             reattach(new_node, this);
         }
     }
 
 
-    template <typename async_return_t, typename async_rule_t>
-    void runner::attach_front(async<async_return_t, async_rule_t> &&new_task) {
+    template <typename async_return_t>
+    void runner::attach_front(async<async_return_t> &&new_task) {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner = &_pool;
         if (pool_node_ptr new_node; _pool._mempool.capture(new_node)) {
-            new_node->_data = std::move(new_task);
+            if constexpr (std::is_void_v<async_return_t>)
+                new_node->_data = std::move(new_task);
+            else
+                new_node->_data = task_wrap(std::move(new_task));
             reattach_front(new_node, this);
         }
     }

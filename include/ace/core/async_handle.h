@@ -40,7 +40,8 @@ namespace ace::core {
      * @c redirect() method enqueues the caller back into the target's waiters
      * queue, which is then drained — waking the caller.
      */
-    class ACE_AWAIT_NODISCARD join_handler : public core::traits::future_traits<join_handler> {
+    template <typename resume_t = void>
+    class ACE_AWAIT_NODISCARD join_handler : public traits::future_traits<join_handler<resume_t>> {
 
     protected:
 
@@ -82,6 +83,16 @@ namespace ace::core {
         bool await_suspend(std::coroutine_handle<promise_u> outer);
 
         /**
+         * @brief C++20 awaitable protocol — return result value.
+         * @return @c nullopt if the target coroutine has returned value (not finished).
+         */
+        [[nodiscard]] std::optional<resume_t> await_resume() const requires (not std::is_void_v<resume_t>) {
+            if (resume_t res; _handle.return_value(&res))
+                return res;
+            return std::nullopt;
+        }
+
+        /**
          * @brief C++20 awaitable protocol — return completion status.
          * @return @c true if the target coroutine has finished.
          */
@@ -97,7 +108,8 @@ namespace ace::core {
      * @note @c async_handle is @b not default-constructible.  It must be
      * obtained via @c co_await ace::spawn(...).
      */
-    class ACE_AWAIT_NODISCARD async_handle final : protected join_handler {
+    template <typename resume_t = void>
+    class ACE_AWAIT_NODISCARD async_handle final : protected join_handler<resume_t> {
 
     public:
 
@@ -109,7 +121,7 @@ namespace ace::core {
          * @param handle  Handle to the spawned coroutine's control block.
          */
         explicit async_handle(const control_block_handle& handle)
-            : join_handler(handle) {}
+            : join_handler<resume_t>(handle) {}
 
         /**
          * @brief Return the underlying @c join_handler awaitable.
@@ -117,24 +129,25 @@ namespace ace::core {
          * coroutine until the target finishes.
          * @return Reference to the @c join_handler base.
          */
-        ACE_AWAIT_NODISCARD inline auto join() noexcept -> join_handler&;
+        ACE_AWAIT_NODISCARD inline auto join() noexcept -> join_handler<resume_t>&;
 
         /**
          * @brief Check if the target coroutine has finished.
          * @return @c true if done.
          */
-        [[nodiscard]] bool done() const { return _handle.done(); }
+        [[nodiscard]] bool done() const { return this->_handle.done(); }
 
         /**
          * @brief Cancel the target coroutine.
          * @details Sets the target status to @c e_detached.  The runner will
          * drop the coroutine on the next @c yank().
          */
-        void cancel() { _handle.cancel(); }
+        void cancel() { this->_handle.cancel(); }
 
     };
 
-    struct join_handler::join_handler_router final : runner_router {
+    template <typename resume_t>
+    struct join_handler<resume_t>::join_handler_router final : runner_router {
 
         control_block_handle _handle;
 
@@ -158,20 +171,22 @@ namespace ace::core {
 
 
 #define ACE_FUTURE_ASYNC_HANDLE_SPACE \
-ace::core::async_handle::
+ace::core::async_handle<resume_t>::
 
-#define ACE_FUTURE_ASYNC_HANDLE_MEMBER(returnT) \
+#define ACE_FUTURE_ASYNC_HANDLE_MEMBER(returnT)        \
+template <typename resume_t>                           \
 returnT ACE_FUTURE_ASYNC_HANDLE_SPACE
 
 #define ACE_FUTURE_JOIN_HANDLER_FUTURE_SPACE \
-ace::core::join_handler::
+ace::core::join_handler<resume_t>::
 
 #define ACE_FUTURE_JOIN_HANDLER_FUTURE_MEMBER(returnT) \
+template <typename resume_t>                           \
 returnT ACE_FUTURE_JOIN_HANDLER_FUTURE_SPACE
 
 
 ACE_FUTURE_ASYNC_HANDLE_MEMBER(auto)
-join() noexcept -> join_handler& { return *static_cast<join_handler*>(this); }
+join() noexcept -> join_handler<resume_t>& { return *static_cast<join_handler<resume_t>*>(this); }
 
 ACE_FUTURE_JOIN_HANDLER_FUTURE_MEMBER(template<typename promise_u> bool)
 await_suspend(std::coroutine_handle<promise_u> outer) {

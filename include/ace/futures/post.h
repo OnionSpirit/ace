@@ -37,10 +37,13 @@ namespace ace::futures {
      * @details Constructed by @c ace::post() and consumed by @c co_await.
      * Non-copyable, non-default-constructible.
      */
-    class ACE_AWAIT_NODISCARD post final : public core::traits::future_traits<post> {
+    template <typename resume_t = void>
+    class ACE_AWAIT_NODISCARD post final : public core::traits::future_traits<post<resume_t>> {
 
-        task _task {};                       ///< The task to be posted.
-        core::control_block_handle _handle;  ///< Control block handle obtained before attaching.
+        typedef async<resume_t, core::differed> async_t;
+
+        async_t                     _task {}; ///< The task to be posted.
+        core::control_block_handle  _handle;  ///< Control block handle obtained before attaching.
 
     public:
 
@@ -57,7 +60,7 @@ namespace ace::futures {
          * @c await_resume() is called.
          * @param new_task  The task to post.
          */
-        [[nodiscard]] explicit post(task&& new_task)
+        [[nodiscard]] explicit post(async_t&& new_task)
             : _task(std::move(new_task))
             , _handle(_task.observe()) {}
 
@@ -72,7 +75,7 @@ namespace ace::futures {
         bool await_suspend(auto coroutine) {
             auto* runner_ptr = coroutine.promise()._runner.template as<core::runner>();
             _task._coroutine.promise()._roaming = coroutine.promise()._roaming = false;
-            runner_ptr->attach_front(std::forward<task>(_task));
+            runner_ptr->attach_front(std::forward<async_t>(_task));
             return true;
         }
 
@@ -80,7 +83,7 @@ namespace ace::futures {
          * @brief C++20 awaitable protocol — return the task handle.
          * @return An @c async_handle wrapping the posted task's control block.
          */
-        core::async_handle await_resume() const { return core::async_handle{_handle}; }
+        core::async_handle<resume_t> await_resume() const { return core::async_handle<resume_t>{_handle}; }
 
     };
 

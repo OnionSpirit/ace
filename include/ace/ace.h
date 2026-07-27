@@ -56,8 +56,10 @@
 
 namespace ace {
 
-    using spawn          = futures::spawn;
-    using post           = futures::post;
+    template <typename resume_t>
+    using spawn          = futures::spawn<resume_t>;
+    template <typename resume_t>
+    using post           = futures::post<resume_t>;
     using roaming        = futures::roaming;
     using get_runner     = futures::get_runner;
     using reattach       = futures::reattach;

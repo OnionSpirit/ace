@@ -225,6 +225,15 @@ namespace ace::core {
         }
 
         /**
+         * @brief Taking return value from a task
+         * @return @c false if associated coroutine not finished, @c true if value captured
+         */
+        [[nodiscard]] bool return_value(void* mem_ptr) const {
+            if (not finished()) [[unlikely]] return false;
+            return _block->_control_router->return_value(mem_ptr);
+        }
+
+        /**
          * @brief Register a waiter async to be notified when the coroutine finishes.
          * @param waiter  Pointer to the @c ace::task async to register.
          * @return @c true if the waiter was accepted by the router.

@@ -100,6 +100,12 @@ namespace ace::core::traits {
          */
         virtual void cancel() noexcept = 0;
 
+        /**
+         * @brief Taking return value from a task
+         * @return @c false if it is not automaton or task doesn't finished
+         */
+        virtual bool return_value(void*) noexcept = 0;
+
         virtual ~control_router_handle() = default;
     };
 

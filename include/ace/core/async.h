@@ -278,6 +278,16 @@ namespace ace::core {
                 return true;
             }
 
+            bool return_value(void* mem_ptr) noexcept override {
+                if constexpr (requires(promise_type promise_t) { promise_t._return_value; }) {
+                    if (not _address) [[unlikely]] return false;
+                    auto handle = coroutine_t::from_address(_address);
+                    auto ref = static_cast<returnT*>(mem_ptr);
+                    *ref = std::forward<returnT>(handle.promise()._return_value);
+                }
+                return true;
+            }
+
             ~async_router() override = default;
         };
 
@@ -400,7 +410,7 @@ namespace ace::core {
              *         @c _self_router).
              */
             template <typename promise_t>
-            traits::control_router_handle* get_promise_router(const std::coroutine_handle<promise_t>& self) {
+            traits::control_router_handle* get_control_router(const std::coroutine_handle<promise_t>& self) {
                 // NOTE: Initiating promise router
                 _self_router = async_router(self);
                 return &_self_router.value();

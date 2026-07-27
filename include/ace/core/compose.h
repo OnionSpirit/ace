@@ -98,12 +98,12 @@ namespace ace::core {
         omni_node _waiter;
         l_future_t& _l_future;
         r_future_t& _r_future;
-        std::optional<async_handle> _l_future_observer;
-        std::optional<async_handle> _r_future_observer;
+        std::optional<async_handle<>> _l_future_observer;
+        std::optional<async_handle<>> _r_future_observer;
         return_t _result;
 
         template <size_t observer_idx, typename future_t>
-        task observer(future_t& future, std::optional<async_handle>& opposite_observer) {
+        task observer(future_t& future, std::optional<async_handle<>>& opposite_observer) {
 
             typedef decltype(std::declval<future_t>().await_resume()) future_ret_t;
 
@@ -179,12 +179,12 @@ namespace ace::core {
         omni_node _waiter;
         l_future_t& _l_future;
         r_future_t& _r_future;
-        std::optional<async_handle> _l_future_observer;
-        std::optional<async_handle> _r_future_observer;
+        std::optional<async_handle<>> _l_future_observer;
+        std::optional<async_handle<>> _r_future_observer;
         return_t _result;
 
         template <size_t observer_idx, typename future_t>
-        task observer(future_t& future, std::optional<async_handle>& opposite_observer) {
+        task observer(future_t& future, std::optional<async_handle<>>& opposite_observer) {
 
             typedef meta::resume_type<future_t> future_ret_t;
 
@@ -253,7 +253,7 @@ namespace ace::core {
 
         omni_node _waiter;
         std::tuple<future_ts&...> _futures;
-        std::array<std::optional<async_handle>, sizeof...(future_ts)> _observers;
+        std::array<std::optional<async_handle<>>, sizeof...(future_ts)> _observers;
         return_t _result;
 
         template <size_t observer_idx, typename future_t>
@@ -324,7 +324,7 @@ namespace ace::core {
 
         omni_node _waiter;
         std::tuple<future_ts&...> _futures;
-        std::array<std::optional<async_handle>, sizeof...(future_ts)> _observers;
+        std::array<std::optional<async_handle<>>, sizeof...(future_ts)> _observers;
         return_t _result;
 
         template <size_t observer_idx, typename future_t>

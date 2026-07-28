@@ -162,11 +162,10 @@ namespace ace::core {
             if (_coroutine) {
                 release_waiters();
                 // NOTE: Canceling task if it is destructed incomplete
-                if constexpr (not std::same_as<promise_rule_t, automaton> and not std::same_as<promise_rule_t, generator>)
-                    if (_coroutine.promise()._runner_router) {
-                        _coroutine.promise()._runner_router->cancel();
-                        _coroutine.promise()._runner_router.release();
-                    }
+                if (_coroutine.promise()._runner_router) {
+                    _coroutine.promise()._runner_router->cancel();
+                    _coroutine.promise()._runner_router.release();
+                }
                 // NOTE: Destroying stack only if it is become untracked
                 if (control_block::disown(_coroutine.promise()._block))
                     _coroutine.destroy();
@@ -451,6 +450,7 @@ namespace ace::core {
             }
             if (is_resumable()) {
                 release_future();
+                // TODO: add router and other stuff propagation
                 _coroutine.resume();
                 return _coroutine.done();
             }

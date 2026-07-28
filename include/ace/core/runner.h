@@ -207,12 +207,15 @@ namespace ace::core {
 
         template <typename async_return_t>
         static task carrier(async<async_return_t> inner) {
-            while (not inner.await_ready()) {
-                // move inner's router onto this coroutine's promise,
-                // so yank() redirects our node through the router
+            while (not inner._coroutine.done())
                 co_await carrier_suspend{inner};
-            }
-            inner.await_resume();
+            co_return;
+        }
+
+        template <typename async_return_t>
+        static task carrier(async<async_return_t, automaton> inner) {
+            while (not inner._coroutine.done())
+                co_await automaton_suspend{inner};
             co_return;
         }
 
@@ -222,6 +225,29 @@ namespace ace::core {
             IMPORT_FUTURE_ENV(carrier_suspend)
 
             explicit carrier_suspend(async<async_return_t>& inner) : _inner(inner) {}
+
+            bool await_ready() override { return _inner.await_ready(); }
+
+            bool await_suspend(auto coroutine) {
+                // NOTE: Storing local value of roaming into outer
+                coroutine.promise()._roaming = _inner._coroutine.promise()._roaming;
+                // NOTE: Storing local value of status into outer
+                coroutine.promise().status(_inner._coroutine.promise().status());
+                // NOTE: No extra checks needed, because function would be called once before suspending.
+                // NOTE: Just coping router ptr. Outer task will destroy router before current promise stack
+                coroutine.promise()._runner_router << _inner._coroutine.promise()._runner_router;
+                return true;
+            }
+
+            void await_resume() { }
+        };
+
+        template <typename async_return_t>
+        struct automaton_suspend final : traits::future_traits<automaton_suspend<async_return_t>> {
+            async<async_return_t, automaton>& _inner;
+            IMPORT_FUTURE_ENV(automaton_suspend)
+
+            explicit automaton_suspend(async<async_return_t, automaton>& inner) : _inner(inner) {}
 
             bool await_ready() override { return _inner.await_ready(); }
 

@@ -37,10 +37,10 @@ namespace ace::futures {
      * @details Constructed by @c ace::post() and consumed by @c co_await.
      * Non-copyable, non-default-constructible.
      */
-    template <typename resume_t = void>
-    class ACE_AWAIT_NODISCARD post final : public core::traits::future_traits<post<resume_t>> {
+    template <typename resume_t = void, core::is_promise_rule rule_t = core::differed>
+    class ACE_AWAIT_NODISCARD post final : public core::traits::future_traits<post<resume_t, rule_t>> {
 
-        typedef async<resume_t, core::differed> async_t;
+        typedef async<resume_t, rule_t> async_t;
 
         async_t                     _task {}; ///< The task to be posted.
         core::control_block_handle  _handle;  ///< Control block handle obtained before attaching.

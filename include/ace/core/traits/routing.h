@@ -107,6 +107,20 @@ namespace ace::core::traits {
         virtual bool return_value(void*) noexcept = 0;
 
         /**
+         * @brief Taking a yielded value from automaton coroutine
+         * @details Copies @c _return_value to @c mem_ptr and sets status to @c e_executed
+         * @param mem_ptr  Pointer to storage for the yielded value
+         * @return @c true if value was captured, @c false otherwise
+         */
+        virtual bool yield_value(void*) noexcept { return false; }
+
+        /**
+         * @brief Check if coroutine has a yielded value ready
+         * @return @c true if status is e_executed_with_value and not done
+         */
+        virtual bool has_yield() noexcept { return false; }
+
+        /**
          * @brief manual destroy of the stack frame
          */
         virtual void destroy() noexcept = 0;

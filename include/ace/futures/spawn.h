@@ -83,7 +83,7 @@ namespace ace::futures {
          * @brief C++20 awaitable protocol — return the task handle.
          * @return An @c async_handle wrapping the spawned task's control block.
          */
-        core::async_handle<resume_t> await_resume() const { return core::async_handle<resume_t>{_handle}; }
+        core::async_handle<resume_t, rule_t> await_resume() const { return core::async_handle<resume_t, rule_t>{_handle}; }
 
     };
 

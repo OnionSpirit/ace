@@ -207,14 +207,14 @@ namespace ace::core {
 
         template <typename async_return_t>
         static task carrier(async<async_return_t> inner) {
-            while (not inner._coroutine.done())
+            while (not inner._coroutine.done() and inner._coroutine.promise().status() not_eq e_detached)
                 co_await carrier_suspend{inner};
             co_return;
         }
 
         template <typename async_return_t>
         static task carrier(async<async_return_t, automaton> inner) {
-            while (not inner._coroutine.done())
+            while (not inner._coroutine.done() and inner._coroutine.promise().status() not_eq e_detached)
                 co_await automaton_suspend{inner};
             co_return;
         }
@@ -226,7 +226,11 @@ namespace ace::core {
 
             explicit carrier_suspend(async<async_return_t>& inner) : _inner(inner) {}
 
-            bool await_ready() override { return _inner.await_ready(); }
+            bool await_ready() override {
+                if (_inner._coroutine.done()) return true;
+                if (_inner._coroutine.promise().status() == e_detached) return true;
+                return _inner.await_ready();
+            }
 
             bool await_suspend(auto coroutine) {
                 // NOTE: Storing local value of roaming into outer
@@ -249,15 +253,16 @@ namespace ace::core {
 
             explicit automaton_suspend(async<async_return_t, automaton>& inner) : _inner(inner) {}
 
-            bool await_ready() override { return _inner.await_ready(); }
+            bool await_ready() override {
+                if (_inner._coroutine.done()) return true;
+                if (_inner._coroutine.promise().status() == e_executed_with_value) return false;
+                if (_inner._coroutine.promise().status() == e_detached) return true;
+                return _inner.await_ready();
+            }
 
             bool await_suspend(auto coroutine) {
-                // NOTE: Storing local value of roaming into outer
                 coroutine.promise()._roaming = _inner._coroutine.promise()._roaming;
-                // NOTE: Storing local value of status into outer
                 coroutine.promise().status(_inner._coroutine.promise().status());
-                // NOTE: No extra checks needed, because function would be called once before suspending.
-                // NOTE: Just coping router ptr. Outer task will destroy router before current promise stack
                 coroutine.promise()._runner_router << _inner._coroutine.promise()._runner_router;
                 return true;
             }

@@ -233,6 +233,27 @@ namespace ace::core {
         }
 
         /**
+         * @brief Take a yielded value from automaton coroutine.
+         * @details Only succeeds when coroutine is in e_executed_with_value state.
+         * @param mem_ptr  Pointer to store the yielded value.
+         * @return @c true if value was captured, @c false if not yielded.
+         */
+        [[nodiscard]] bool yield_value(void* mem_ptr) const {
+            if (not _block or not _block->_control_router) [[unlikely]] return false;
+            return _block->_control_router->yield_value(mem_ptr);
+        }
+
+        /**
+         * @brief Check if automaton has a yielded value ready.
+         * @details Returns @c true when coroutine is in e_executed_with_value state.
+         * @return @c true if a yielded value is available.
+         */
+        [[nodiscard]] bool has_yield() const {
+            if (not _block or not _block->_control_router) [[unlikely]] return false;
+            return _block->_control_router->has_yield();
+        }
+
+        /**
          * @brief Register a waiter async to be notified when the coroutine finishes.
          * @param waiter  Pointer to the @c ace::task async to register.
          * @return @c true if the waiter was accepted by the router.

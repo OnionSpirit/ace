@@ -294,6 +294,24 @@ namespace ace::core {
                 return true;
             }
 
+            bool yield_value(void* mem_ptr) noexcept override {
+                if constexpr (requires(promise_type promise_t) { promise_t._return_value; }) {
+                    if (not _address) [[unlikely]] return false;
+                    auto handle = coroutine_t::from_address(_address);
+                    if (handle.promise().status() not_eq e_executed_with_value) return false;
+                    auto ref = static_cast<returnT*>(mem_ptr);
+                    *ref = std::forward<returnT>(handle.promise()._return_value);
+                    handle.promise().status(e_executed);
+                }
+                return true;
+            }
+
+            bool has_yield() noexcept override {
+                if (not _address) return false;
+                auto handle = coroutine_t::from_address(_address);
+                return handle.promise().status() == e_executed_with_value and not handle.done();
+            }
+
             void destroy() noexcept override {
                 if (not _address) [[unlikely]] return;
                 auto handle = coroutine_t::from_address(_address);
@@ -443,6 +461,7 @@ namespace ace::core {
          */
         bool await_ready() override {
             if (_coroutine.done()) return true;
+            if (_coroutine.promise().status() == e_detached) return true;
             // NOTE: Necessary to create execution gap to read yield value from calling side
             if (_coroutine.promise().status() == e_executed_with_value) {
                 _coroutine.promise().status(e_executed);

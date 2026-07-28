@@ -259,6 +259,61 @@ struct yield_fixture : base_fixture {
         _int_channel << res;
     }
 
+    ace::automaton<int> yield_123_return_42() {
+        co_yield 1;
+        co_yield 2;
+        co_yield 3;
+        co_return 42;
+    }
+
+    ace::task spawn_and_ping_test() {
+        auto handle = co_await ace::spawn<int, ace::core::automaton>(yield_123_return_42());
+        int val = (co_await handle.ping()).value();
+        _int_channel << val;
+        val = (co_await handle.ping()).value();
+        _int_channel << val;
+        val = (co_await handle.ping()).value();
+        _int_channel << val;
+        auto final_val = (co_await handle.ping()).value();
+        _int_channel << final_val;
+    }
+
+    ace::task spawn_and_join_test() {
+        auto handle = co_await ace::spawn<int, ace::core::automaton>(yield_123_return_42());
+        // join = ping next value, then cancel
+        auto val = (co_await handle.join()).value();
+        _int_channel << val;
+    }
+
+    ace::task post_and_ping_test() {
+        auto handle = co_await ace::post<int, ace::core::automaton>(yield_123_return_42());
+        int val = (co_await handle.ping()).value();
+        _int_channel << val;
+        val = (co_await handle.ping()).value();
+        _int_channel << val;
+        val = (co_await handle.ping()).value();
+        _int_channel << val;
+        auto final_val = (co_await handle.ping()).value();
+        _int_channel << final_val;
+    }
+
+    ace::task spawn_cancel_ping_nullopt() {
+        auto handle = co_await ace::spawn<int, ace::core::automaton>(yield_123_return_42());
+        handle.cancel();
+        auto result = co_await handle.ping();
+        if (not result.has_value())
+            _int_channel << -1;
+    }
+
+    ace::task spawn_move_handle() {
+        auto h1 = co_await ace::spawn<int, ace::core::automaton>(yield_123_return_42());
+        auto val = (co_await h1.ping()).value();
+        _int_channel << val;
+        auto h2 = std::move(h1);
+        val = (co_await h2.ping()).value();
+        _int_channel << val;
+    }
+
     void TearDown() override {
         ace::cfg::g_config._runners_amount = 1;
         ace::reload();

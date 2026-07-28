@@ -99,6 +99,67 @@ TEST_F(yield_fixture, do_generator_tests) {
     EXPECT_EQ(res[4], 5);
 }
 
+// Проверяет что spawn автоматона и последующий ping() возвращают
+// каждое значение co_yield в правильном порядке + финальное co_return
+TEST_F(yield_fixture, spawn_automaton_ping) {
+    ace::schedule(spawn_and_ping_test());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    const auto res = fetch(_int_channel);
+    ASSERT_EQ(res.size(), 4);
+    // Порядок: три co_yield (1,2,3) + co_return (42)
+    EXPECT_EQ(res[0], 1);
+    EXPECT_EQ(res[1], 2);
+    EXPECT_EQ(res[2], 3);
+    EXPECT_EQ(res[3], 42);
+}
+
+// Проверяет что join() на автоматоне = ping + cancel:
+// возвращает первое значение и отменяет корутину
+TEST_F(yield_fixture, spawn_automaton_join) {
+    ace::schedule(spawn_and_join_test());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    const auto res = fetch(_int_channel);
+    ASSERT_EQ(res.size(), 1);
+    // join пикает первое co_yield значение и тут же отменяет
+    EXPECT_EQ(res[0], 1);
+}
+
+// Проверяет что post аналог spawn — ping работает после post
+TEST_F(yield_fixture, post_automaton_ping) {
+    ace::schedule(post_and_ping_test());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    const auto res = fetch(_int_channel);
+    ASSERT_EQ(res.size(), 4);
+    EXPECT_EQ(res[0], 1);
+    EXPECT_EQ(res[1], 2);
+    EXPECT_EQ(res[2], 3);
+    EXPECT_EQ(res[3], 42);
+}
+
+// Проверяет что cancel автоматона делает ping() возвращающим nullopt
+TEST_F(yield_fixture, spawn_automaton_cancel_ping_nullopt) {
+    ace::schedule(spawn_cancel_ping_nullopt());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    const auto res = fetch(_int_channel);
+    ASSERT_EQ(res.size(), 1);
+    EXPECT_EQ(res[0], -1);
+}
+
+// Проверяет что handle двигается (move) и ping продолжает работать
+TEST_F(yield_fixture, spawn_automaton_move_handle) {
+    ace::schedule(spawn_move_handle());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    const auto res = fetch(_int_channel);
+    ASSERT_EQ(res.size(), 2);
+    EXPECT_EQ(res[0], 1);
+    EXPECT_EQ(res[1], 2);
+}
+
 TEST_F(fs_fixture, do_fs_tests) {
     ace::schedule(fs_testing());
     ace::run();

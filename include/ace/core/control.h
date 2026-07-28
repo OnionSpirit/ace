@@ -157,11 +157,8 @@ namespace ace::core {
         control_block* _block { nullptr };
 
         void release() {
-            if (control_block::unwatch(_block)) {
+            if (control_block::unwatch(_block))
                 _block->_control_router->destroy();
-                _block->~control_block();
-                ::operator delete(_block);
-            }
             _block = nullptr;
         }
 

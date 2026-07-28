@@ -332,7 +332,7 @@ struct spawn_fixture : base_fixture {
         co_await ace::futures::timeout(100ms);
         ace::console::println("'spawned' runned out");
         _runner_channel << curr_runner;
-        co_return 1;
+        co_return 123;
     }
 
     ace::task valued_spawner() {
@@ -343,7 +343,7 @@ struct spawn_fixture : base_fixture {
             ace::console::println("'spawned' not done");
             co_await ace::futures::timeout(10ms);
         }
-        ace::console::println("'spawned' done with {}!!!", (co_await handle.join()).value());
+        ace::console::println("'spawned' done with {} !!!", (co_await handle.join()).value());
     }
 
     ace::task join_spawner() {
@@ -442,6 +442,10 @@ struct spawn_fixture : base_fixture {
         #endif
         ace::console::println("Placing {} to channel", 5);
         ch << 5;
+        ace::console::println("From 1'st: {}", std::get<0>(res).value());
+        ace::console::println("From 2'st: {}", std::get<1>(res).value());
+        ace::console::println("From 3'st: {}", std::get<2>(res).value());
+        ace::console::println("From 4'st: {}", std::get<3>(res).value());
         co_return;
     }
 

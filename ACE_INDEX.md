@@ -86,7 +86,7 @@ ace::task work() {
 - `return_value(v)` / `return_void()` — сохраняет значение, `status = e_finished`
 - `unhandled_exception()` — `status = e_failed`, вывод в stderr
 - `operator new(size_t)` — аллоцирует `control_block` перед promise
-- `~promise_type()` — вызывает `control_block::disown(_block)` если блок есть
+- `~promise_type()` — default (больше не вызывает `disown`, этим занимается `~async()`)
 - **Поля:** `_runner_router` (router_slot_t), `_runner` (omni_runner), `_waiters`, `_self_router`, `_roaming`, `_polling`
 
 ### async:: методы
@@ -95,7 +95,7 @@ ace::task work() {
 |-------|-------|----------|
 | `async(async&&)` | `async.h:109` | Move-only, копирование удалено |
 | `is_exist()` / `operator bool()` | `:145,150` | Активна ли корутина |
-| `~async()` | `:156` | `release_waiters()`, cancel router если есть, `_coroutine.destroy()` |
+| `~async()` | `:156` | `release_waiters()`, cancel router если есть, `disown(_block)` → если untracked: `_coroutine.destroy()` |
 | `is_resumable()` | `:193` | Нет busy future или busy future готов |
 | `observe()` | `:207` | `control_block_handle` для join/cancel |
 | `release_waiters()` | `:218` | Будит всех ожидающих через `push_node()` |
@@ -113,6 +113,8 @@ ace::task work() {
 |-------|-------|----------|
 | `cancel()` | `:262` | Вызывает `_runner_router->cancel()` и `release()`, затем `status(e_detached)` |
 | `redirect(void*)` | `:272` | Регистрирует waiter через `_waiters->push_node()` |
+| `return_value(void*)` | `:285` | Читает `_return_value` из promise (для valued корутин) |
+| `destroy()` | `:295` | Вызывает `handle.destroy()` — ручное уничтожение фрейма через `release()` |
 
 ---
 
@@ -369,14 +371,19 @@ co_await (a or b or c);      // or_await_composed → variant / optional / int
 ### spawn (`futures/spawn.h`)
 
 ```cpp
+// void-таска
 auto handle = co_await ace::spawn(worker());
-// handle: async_handle
-co_await handle.join();  // дождаться завершения
+// valued-таска (valued join)
+auto handle_int = co_await ace::spawn(async_int_task());
+// handle: async_handle / async_handle<int>
+co_await handle.join();  // дождаться завершения → bool / std::optional<T>
 handle.cancel();         // отменить
 handle.done();           // проверить завершение
 ```
 
 **`co_await spawn()` НЕ суспендит вызывающего** — возвращает управление немедленно. Задача запускается на том же раннере через `attach()`. `_roaming = false` (привязана к раннеру).
+
+**Valued spawn:** `spawn<resume_t>` оборачивает не-void корутины через `runner::carrier()` — цикл, который проходит через все suspension point'ы пока корутина не завершится. `join()` возвращает `std::optional<resume_t>` (nullopt если не `e_finished`).
 
 ### post (`futures/post.h`)
 
@@ -467,8 +474,9 @@ Per-thread исполнитель. Три очереди:
 
 | Метод | Линия | Назначение |
 |-------|-------|-----------|
-| `attach(async&&)` | `:296` | Добавить задачу в очередь |
+| `attach(async&&)` | `:296` | Добавить задачу в очередь (void напрямую, valued через `carrier()`) |
 | `attach_front(async&&)` | `:307` | Добавить в начало очереди |
+| `carrier(async<T>*)` | `:207` | Цикл-обёртка для valued-тасок: проходит через все suspension point'ы через `carrier_suspend` |
 | `yank()` | `:323` | Обработать одну задачу |
 | `yank_vortex()` | `:373` | Обработать vortex-задачу |
 | `run()` | `:411` | Обработать до 128 задач за раз |
@@ -537,14 +545,16 @@ Copyable внешний handle для наблюдения за корутино
 | `finished()` | `bool` — `_status == e_finished`? |
 | `is_idle()` | `bool` — корутина не выполняется? |
 | `forward(void*)` | Передать waiter'а через `_control_router->redirect()` |
+| `return_value(void*)` | Прочитать return value valued-корутины через `_control_router->return_value()` |
+| `release()` | При `unwatch → true`: вызывает `_control_router->destroy()` (освобождает фрейм если все watcher'ы ушли) |
 
 ### async_handle (`core/async_handle.h:100`)
 
-Handle для spawn-нутых задач. Наследует `control_block_handle` (через `join_handler`).
+Handle для spawn-нутых задач. Наследует `control_block_handle` (через `join_handler<resume_t>`).
 
 | Метод | Описание |
 |-------|----------|
-| `join()` | `join_handler&` — `co_await` для ожидания завершения |
+| `join()` | `join_handler<resume_t>&` — `co_await` для ожидания завершения. Возвращает `bool` для void, `std::optional<resume_t>` для valued. |
 | `done()` | `bool` — завершена? |
 | `cancel()` | Отменить |
 
@@ -696,6 +706,8 @@ In-place storage для одного router'а (размер `ACE_ROUTER_MEM_SIZ
 Абстрактный интерфейс для control-block join/cancel:
 - `redirect(void* waiter)` — pure virtual, пробудить ожидающего
 - `cancel()` — pure virtual, отменить
+- `return_value(void*)` — pure virtual, прочитать возвращаемое значение
+- `destroy()` — pure virtual, ручное уничтожение фрейма
 
 ### Конкретные router'ы
 
@@ -709,7 +721,7 @@ In-place storage для одного router'а (размер `ACE_ROUTER_MEM_SIZ
 | `or_await_router` | `compose.h:480` | Сохраняет в `_waiter` | — |
 | `and_await_router` | `compose.h:529` | Сохраняет в `_waiter` | — |
 | `join_handler_router` | `async_handle.h:137` | `_handle.forward(node)` | — |
-| `async_router` | `async.h:251` | `_waiters->push_node(waiter)` | cancel router + `e_detached` |
+| `async_router` | `async.h:251` | `_waiters->push_node(waiter)` | cancel router + `e_detached` | +`return_value()`, `destroy()` |
 
 ---
 
@@ -812,7 +824,7 @@ RAII debug tracer: логирует конструирование/разруш�
 | `core/compose.h` | `or_await`, `and_await`, `or/and_await_composed`, `operator or/and/>>` |
 | `core/control.h` | `control_block`, `control_block_handle`, `promise_lifecycle` |
 | `core/dispatcher.h` | `dispatcher`, `schedule`, `run`, `empty`, `reload`, `interrupt`, `terminate` |
-| `core/runner.h` | `runner` (per-thread), `attach`, `reattach`, `yank`, `run`, `velocity` |
+| `core/runner.h` | `runner` (per-thread), `attach`, `carrier`, `carrier_suspend`, `reattach`, `yank`, `run`, `velocity` |
 | `core/signal.h` | `signal_handler`, `sig_pipe_t`, `termination_signal`, `interruption_signal` |
 | `core/traits/future.h` | `future_traits`, `busy_future_traits`, concepts (`is_future`, `is_awaitable`), type traits |
 | `core/traits/promise.h` | `permanent`, `automaton`, `differed`, `promise_traits`, `promise_return_traits` |
@@ -864,7 +876,7 @@ RAII debug tracer: логирует конструирование/разруш�
 | `TimerFixture` | `BaseFixture` | — | 5 тестов: timer, expire, or, and |
 | `TimerParallelFixture` | `BaseFixture` | `_runners=4` → reset | 1 тест: parallel timers |
 | `CutexFixture` | `BaseFixture` | `configure_runners(n)`, `TearDown` reset | 4 теста: race + cancel |
-| `SpawnFixture` | `BaseFixture` | — | 6 тестов: spawn, post, cancel, join, compose |
+| `SpawnFixture` | `BaseFixture` | — | 8 тестов: spawn, post, valued_spawn, valued_post, cancel, join, compose |
 | `SocketEchoFixture` | `BaseFixture` | `TearDown` reset_signal | 2 теста: TCP echo |
 | `FsFixture` | `BaseFixture` | — | 1 тест: filesystem |
 

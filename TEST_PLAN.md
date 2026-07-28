@@ -115,8 +115,8 @@ echo "Report: coverage_report/index.html"
 | `futures/timeout.h` | 60%→70% | ~~timeout нулевой~~ ✅, expire краевые случаи, cancel на разных стадиях |
 | `futures/channel.h` | 40%→60% | ~~push/pull, operator<<, empty, MPSC~~ ✅, pending_push, channel_st, allocation_type/access_mode варианты |
 | `futures/cutex.h` | 50%→70% | ~~try_lock, proxy double capture/sync/destructor, rescheduling~~ ✅, notify с rescheduling, pending_notify цикл, cutex_cancel |
-| `futures/spawn.h` | 50%→65% | ~~spawn_returns_handle~~ ✅, spawn_on_specific_runner, await_suspend |
-| `futures/post.h` | 30%→55% | ~~post_uses_attach_front~~ ✅, await_suspend |
+| `futures/spawn.h` | 50%→80% | ~~spawn_returns_handle, valued_spawn~~ ✅, spawn_on_specific_runner, await_suspend |
+| `futures/post.h` | 30%→75% | ~~post_uses_attach_front, valued_post~~ ✅, await_suspend |
 | `futures/reattach.h` | 30% | reattach_router::redirect, await_ready |
 | `futures/roaming.h` | 30%→60% ✅ | ~~roaming флаг~~ ✅, roaming + spawn/post взаимодействие |
 | `futures/polling.h` | 30%→60% ✅ | ~~polling флаг~~ ✅, polling + vortex взаимодействие |
@@ -627,6 +627,14 @@ echo "Report: coverage_report/index.html"
 | SP7 | `roaming_false` | roaming(false) → _roaming = false | ✅ |
 | SP8 | `polling_true` | polling(true) → задача идёт в _vortex_pool | ✅ |
 | SP9 | `get_runner_inside_runner` | get_runner внутри runner → не-nullptr | ✅ |
+| SP10 | `check_valued_spawn_command` | spawn valued-таски (async<int>), join → возвращает значение, spawner и spawnee на одном раннере | ✅ |
+| SP11 | `check_valued_post_command` | post valued-тасок + and-композиция (4 таски) → правильный порядок значений, join возвращает std::optional<int> | ✅ |
+
+### carrier — обёртка для valued-тасок в раннере
+
+`runner::carrier(async<T>*)` (`runner.h:206`) — замена `task_wrap()` для valued-тасок. В отличие от `task_wrap` (один `co_await` с воровством router), `carrier` в цикле вызывает `inner.await_ready()`, ворует router внутренней корутины через `carrier_suspend`, и ждёт пока внутренняя корутина полностью завершится. Это позволяет обрабатывать несколько suspension point'ов.
+
+`carrier_suspend` (`runner.h:221`) — awaitable, который при `await_suspend` переносит router внутренней корутины на promise обёртки (`operator<<`), позволяя `yank()` обработать router на correct-ноде.
 
 ---
 
@@ -741,7 +749,7 @@ echo "Report: coverage_report/index.html"
 | `timer_fixture` | `base_fixture` | +T1..T9 (timeout) | 5→8 (✅ 3) |
 | `timer_parallel_fixture` | `base_fixture` | без изменений | 1 |
 | `cutex_fixture` | `base_fixture` | +CX1..CX16 (cutex) | 4→4 |
-| `spawn_fixture` | `base_fixture` | +SP1..SP5, +AH1..AH8 | 6→6 |
+| `spawn_fixture` | `base_fixture` | +SP1..SP11, +AH1..AH8 | 6→8 (✅ 2) |
 | `socket_echo_fixture` | `base_fixture` | +N1..N35 (net) | 2→2 |
 | `fs_fixture` | `base_fixture` | +FS1..FS11 | 1→4 (✅ 3) |
 | `queue_fixture` | `::testing::Test` | **новый** | 10→10 (✅ 10) |
@@ -766,7 +774,7 @@ echo "Report: coverage_report/index.html"
 | `console_fixture` | `::testing::Test` | **новый** | 9→4 (✅ 4) |
 | `cross_mechanic_fixture` | `base_fixture` | **новый** | 25→14 (✅ 12) |
 | `entry_fixture` | `::testing::Test` | **новый** (отдельный executable) — не реализована | 3→0 |
-| `spawn_extra_fixture` | `base_fixture` | **новый** (расширение spawn) | —→8 (✅ 8) |
+| `spawn_extra_fixture` | `base_fixture` | **новый** (расширение spawn) | —→10 (✅ 8) |
 | `compose_extra_fixture` | `base_fixture` | **новый** (расширение compose) | —→3 (✅ 3) |
 | `channel_extra_fixture` | `base_fixture` | **новый** (расширение channel) | —→4 (✅ 4) |
 | `cutex_extra_fixture` | `base_fixture` | **новый** (расширение cutex) | —→5 (✅ 5) |

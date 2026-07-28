@@ -51,13 +51,25 @@ namespace ace::core {
     };
 
     /**
+     * @brief Lazy suspension policy — coroutine suspends at creation.
+     *
+     * @details Used by @c ace::automaton<T>. @c initial_suspend() returns
+     * @c std::suspend_always, so the coroutine does not run until it is
+     * explicitly scheduled or awaited.
+     */
+    struct automaton : promise_rule_traits {
+        /// @brief Returns @c std::suspend_never — no suspension at creation.
+        consteval static auto action() noexcept { return std::suspend_always{}; };
+    };
+
+    /**
      * @brief Eager suspension policy — coroutine starts executing immediately.
      *
-     * @details Used by @c ace::promise<T>. @c initial_suspend() returns
+     * @details Used by @c ace::generator<T>. @c initial_suspend() returns
      * @c std::suspend_never, so the coroutine body runs as soon as the
      * return object is constructed.
      */
-    struct automaton : promise_rule_traits {
+    struct generator : promise_rule_traits {
         /// @brief Returns @c std::suspend_never — no suspension at creation.
         consteval static auto action() noexcept { return std::suspend_never{}; };
     };
@@ -103,7 +115,7 @@ namespace ace::core::traits {
      * @tparam promiseT  The concrete derived promise type (CRTP).
      * @tparam returnT   The value type returned by @c co_return.
      */
-    template <typename promiseT, typename returnT>
+    template <typename promiseT, is_promise_rule promise_rule_t, typename returnT>
     struct promise_return_traits {
 
         alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
@@ -135,7 +147,8 @@ namespace ace::core::traits {
          * @param yield_value  Value produced by @c co_yield.
          * @return @c std::suspend_always — suspends after yielding.
          */
-        auto yield_value(returnT yield_value) {
+        auto yield_value(returnT yield_value)
+        requires (std::same_as<promise_rule_t, automaton> or std::same_as<promise_rule_t, generator>) {
             _derived->status(e_executed_with_value);
             _return_value = yield_value;
             return std::suspend_always{};
@@ -149,8 +162,8 @@ namespace ace::core::traits {
      *
      * @tparam promiseT  The concrete derived promise type (CRTP).
      */
-    template <typename promiseT>
-    struct promise_return_traits <promiseT, void> {
+    template <typename promiseT, is_promise_rule promise_rule_t>
+    struct promise_return_traits <promiseT, promise_rule_t, void> {
 
         alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
 
@@ -195,12 +208,13 @@ namespace ace::core::traits {
      *  base_ptr         mem_ptr  (returned by operator new)
      * @endcode
      */
-    template <typename derived_t, typename return_t>
-    struct promise_traits : promise_return_traits<promise_traits<derived_t, return_t>, return_t> {
+    template <typename derived_t, is_promise_rule promise_rule_t, typename return_t>
+    struct promise_traits
+        : promise_return_traits< promise_traits<derived_t, promise_rule_t, return_t>, promise_rule_t, return_t > {
 
         typedef future_handle* future_handler_ptr_t; ///< Pointer type for the currently awaited busy future.
 
-        typedef promise_return_traits<promise_traits, return_t> promise_return_traits_t;
+        typedef promise_return_traits<promise_traits, promise_rule_t, return_t> promise_return_traits_t;
 
         promise_traits() = default;
 
@@ -369,7 +383,7 @@ namespace ace::core::traits {
         std::optional<std::size_t>  _trace_id;                  ///< Optional debugging trace ID.
     };
 
-#define DECLARE_PROMISE_TRAITS(derived_t, return_type_t) typedef ace::core::traits::promise_traits<derived_t, return_type_t> promise_traits_t;
+#define DECLARE_PROMISE_TRAITS(derived_t, promise_rule_t, return_type_t) typedef ace::core::traits::promise_traits<derived_t, promise_rule_t, return_type_t> promise_traits_t;
 
 #define IMPORT_PROMISE_TRAITS_ENV               \
     using promise_traits_t::_busy_future;       \

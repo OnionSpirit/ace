@@ -73,6 +73,32 @@ TEST_F(timer_fixture, do_and_await_test) {
     EXPECT_GE(ms_time, 95);
 }
 
+TEST_F(yield_fixture, do_automaton_tests) {
+    ace::schedule(auto_user());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    const auto res = fetch(_int_channel);
+    ASSERT_FALSE(res.empty());
+    EXPECT_EQ(res[0], 1);
+    EXPECT_EQ(res[1], 2);
+    EXPECT_EQ(res[2], 3);
+    EXPECT_EQ(res[3], 4);
+    EXPECT_EQ(res[4], 5);
+}
+
+TEST_F(yield_fixture, do_generator_tests) {
+    ace::schedule(gen_user());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    const auto res = fetch(_int_channel);
+    ASSERT_FALSE(res.empty());
+    EXPECT_EQ(res[0], 1);
+    EXPECT_EQ(res[1], 2);
+    EXPECT_EQ(res[2], 3);
+    EXPECT_EQ(res[3], 4);
+    EXPECT_EQ(res[4], 5);
+}
+
 TEST_F(fs_fixture, do_fs_tests) {
     ace::schedule(fs_testing());
     ace::run();
@@ -1002,14 +1028,26 @@ TEST_F(promise_traits_fixture, differed_tag_action) {
     SUCCEED();
 }
 
-// Проверяет что automaton tag возвращает suspend_never.
+// Проверяет что automaton tag возвращает suspend_always
 TEST_F(promise_traits_fixture, automaton_tag_action) {
     // Почему проверяем automaton: используется для kernel_controller
     // и clock vortex сервисов. Отсутствие control_block означает что
     // деструктор async не вызывает cancel() — важно для сервисов
     // которые живут всё время работы программы.
     static_assert(
-        std::same_as<decltype(ace::core::automaton::action()), std::suspend_never>
+        std::same_as<decltype(ace::core::automaton::action()), std::suspend_always>
+    );
+    SUCCEED();
+}
+
+// Проверяет что generator tag возвращает suspend_never.
+TEST_F(promise_traits_fixture, generator_tag_action) {
+    // Почему проверяем automaton: используется для kernel_controller
+    // и clock vortex сервисов. Отсутствие control_block означает что
+    // деструктор async не вызывает cancel() — важно для сервисов
+    // которые живут всё время работы программы.
+    static_assert(
+        std::same_as<decltype(ace::core::generator::action()), std::suspend_never>
     );
     SUCCEED();
 }

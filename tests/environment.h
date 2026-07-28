@@ -188,6 +188,86 @@ struct timer_fixture : base_fixture {
 };
 
 // ==========================================================================
+// yield_fixture — automaton and generator tests
+// ==========================================================================
+
+struct yield_fixture : base_fixture {
+
+    ace::automaton<int> num_auto() {
+        ace::console::println("Yielding value: {}", 1);
+        co_yield 1;
+        ace::console::println("Yielding value: {}", 2);
+        co_yield 2;
+        ace::console::println("Yielding value: {}", 3);
+        co_yield 3;
+        ace::console::println("Yielding value: {}", 4);
+        co_yield 4;
+        ace::console::println("Yielding value: {}", 5);
+        co_return 5;
+    }
+
+    ace::generator<int> num_gen() {
+        ace::console::println("Yielding value: {}", 1);
+        co_yield 1;
+        ace::console::println("Yielding value: {}", 2);
+        co_yield 2;
+        ace::console::println("Yielding value: {}", 3);
+        co_yield 3;
+        ace::console::println("Yielding value: {}", 4);
+        co_yield 4;
+        ace::console::println("Yielding value: {}", 5);
+        co_return 5;
+    }
+
+    ace::task auto_user() {
+        auto at = num_auto();
+        ace::console::println("Automaton inited");
+        int res = co_await at;
+        ace::console::println("Get from automaton: {}", res);
+        _int_channel << res;
+        res = co_await at;
+        ace::console::println("Get from automaton: {}", res);
+        _int_channel << res;
+        res = co_await at;
+        ace::console::println("Get from automaton: {}", res);
+        _int_channel << res;
+        res = co_await at;
+        ace::console::println("Get from automaton: {}", res);
+        _int_channel << res;
+        res = co_await at;
+        ace::console::println("Get from automaton: {}", res);
+        _int_channel << res;
+    }
+
+    ace::task gen_user() {
+        auto at = num_auto();
+        ace::console::println("Automaton inited");
+        int res = co_await at;
+        ace::console::println("Get from automaton: {}", res);
+        _int_channel << res;
+        res = co_await at;
+        ace::console::println("Get from automaton: {}", res);
+        _int_channel << res;
+        res = co_await at;
+        ace::console::println("Get from automaton: {}", res);
+        _int_channel << res;
+        res = co_await at;
+        ace::console::println("Get from automaton: {}", res);
+        _int_channel << res;
+        res = co_await at;
+        ace::console::println("Get from automaton: {}", res);
+        _int_channel << res;
+    }
+
+    void TearDown() override {
+        ace::cfg::g_config._runners_amount = 1;
+        ace::reload();
+    }
+
+    ace::futures::tunnel::dyn::bus<int> _int_channel {};
+};
+
+// ==========================================================================
 // cutex_fixture — cutex race + cancel tests (multi-runner)
 // ==========================================================================
 
@@ -711,8 +791,8 @@ struct control_block_fixture : ::testing::Test {
     // mini promise type for control block allocation tests
     // Использует реальный operator new из promise_traits для аллокации
     // control_block ПЕРЕД promise (как в production коде).
-    struct mini_promise : ace::core::traits::promise_traits<mini_promise, void> {
-        DECLARE_PROMISE_TRAITS(mini_promise, void)
+    struct mini_promise : ace::core::traits::promise_traits<mini_promise, ace::core::differed, void> {
+        DECLARE_PROMISE_TRAITS(mini_promise, ace::core::differed, void)
         IMPORT_PROMISE_TRAITS_ENV
 
         mini_promise() = default;

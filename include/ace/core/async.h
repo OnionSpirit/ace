@@ -162,7 +162,7 @@ namespace ace::core {
             if (_coroutine) {
                 release_waiters();
                 // NOTE: Canceling task if it is destructed incomplete
-                if constexpr (not std::same_as<promise_rule_t, automaton>)
+                if constexpr (not std::same_as<promise_rule_t, automaton> and not std::same_as<promise_rule_t, generator>)
                     if (_coroutine.promise()._runner_router) {
                         _coroutine.promise()._runner_router->cancel();
                         _coroutine.promise()._runner_router.release();
@@ -320,8 +320,8 @@ namespace ace::core {
          *  | @c _roaming | @c bool | When @c true the balancer may migrate the task to another runner. |
          *  | @c _polling | @c bool | When @c true the runner holds it in low priority task pool. |
          */
-        struct promise_type : traits::promise_traits<promise_type, returnT> {
-            DECLARE_PROMISE_TRAITS(promise_type, returnT)
+        struct promise_type : traits::promise_traits<promise_type, promise_rule_t, returnT> {
+            DECLARE_PROMISE_TRAITS(promise_type, promise_rule_t, returnT)
             IMPORT_PROMISE_TRAITS_ENV
 
             promise_type() = default;
@@ -444,6 +444,11 @@ namespace ace::core {
          */
         bool await_ready() override {
             if (_coroutine.done()) return true;
+            // NOTE: Necessary to create execution gap to read yield value from calling side
+            if (_coroutine.promise().status() == e_executed_with_value) {
+                _coroutine.promise().status(e_executed);
+                return true;
+            }
             if (is_resumable()) {
                 release_future();
                 _coroutine.resume();
@@ -539,6 +544,14 @@ namespace ace {
     // NOTE: Type alias for eager coroutines
     template<typename returnT =void>
     using promise = async<returnT, core::permanent>;
+
+    // NOTE: Type alias for eager coroutines
+    template<typename returnT =void>
+    using automaton = async<returnT, core::automaton>;
+
+    // NOTE: Type alias for eager coroutines
+    template<typename returnT =void>
+    using generator = async<returnT, core::generator>;
 
     // NOTE: Type alias for runner task coroutines
     using task = async<>;

@@ -179,8 +179,9 @@ namespace ace::core {
          * @param new_task Task to be pushed into the runner
          * @return void
          */
-        template <typename async_return_t>
-        void attach(async<async_return_t> &&new_task);
+        template <typename async_return_t, is_promise_rule promise_rule_t>
+        requires (std::same_as<promise_rule_t, differed> or std::same_as<promise_rule_t, automaton>)
+        void attach(async<async_return_t, promise_rule_t> &&new_task);
 
         // TODO: Add support for automaton in the future
         /**
@@ -188,8 +189,9 @@ namespace ace::core {
          * @param new_task Task to be pushed into the runner
          * @return void
          */
-        template <typename async_return_t>
-        void attach_front(async<async_return_t> &&new_task);
+        template <typename async_return_t, is_promise_rule promise_rule_t>
+        requires (std::same_as<promise_rule_t, differed> or std::same_as<promise_rule_t, automaton>)
+        void attach_front(async<async_return_t, promise_rule_t> &&new_task);
 
         /**
          * @details Checks if any Tasks stored in the runner
@@ -304,6 +306,7 @@ namespace ace::core {
         if (local_runner_ptr == target_runner_ptr) {
             node->_data.prefetch();
             local_runner_ptr->_pool.push_node_front(node);
+            local_runner_ptr->_pull_source = pull_source::e_local_pool;
         } else
             target_runner_ptr->_insert_pool.push_node(node);
     }
@@ -328,8 +331,9 @@ namespace ace::core {
     }
 
 
-    template <typename async_return_t>
-    void runner::attach(async<async_return_t> &&new_task) {
+    template <typename async_return_t, is_promise_rule promise_rule_t>
+    requires (std::same_as<promise_rule_t, differed> or std::same_as<promise_rule_t, automaton>)
+    void runner::attach(async<async_return_t, promise_rule_t> &&new_task) {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner = &_pool;
         if (insert_node_ptr new_node; _insert_pool._mempool.capture(new_node)) {
@@ -342,8 +346,9 @@ namespace ace::core {
     }
 
 
-    template <typename async_return_t>
-    void runner::attach_front(async<async_return_t> &&new_task) {
+    template <typename async_return_t, is_promise_rule promise_rule_t>
+    requires (std::same_as<promise_rule_t, differed> or std::same_as<promise_rule_t, automaton>)
+    void runner::attach_front(async<async_return_t, promise_rule_t> &&new_task) {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner = &_pool;
         if (pool_node_ptr new_node; _pool._mempool.capture(new_node)) {

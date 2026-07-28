@@ -272,6 +272,33 @@ TEST_F(spawn_fixture, check_valued_post_command) {
     ASSERT_EQ(res[4], 5);
 }
 
+// Проверяет что join() на отменённой valued-таске возвращает std::nullopt.
+// Почему это важно: cancel должен обрывать корутину до co_return, поэтому
+// _status не становится e_finished и return_value() возвращает false.
+TEST_F(spawn_fixture, check_valued_spawn_cancel) {
+    ace::futures::tunnel::dyn::bus<int> ch;
+    ace::schedule(valued_spawner_cancel(ch));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    auto res = fetch(ch);
+    ASSERT_EQ(res.size(), 1);
+    // После cancel join возвращает nullopt → has_value() == false → pushed 0
+    ASSERT_EQ(res[0], 0);
+}
+
+// Проверяет что join() на завершённой valued-таске возвращает правильное значение.
+// Почему это важно: return_value должен вернуть то что передано в co_return.
+TEST_F(spawn_fixture, check_valued_spawn_join_value) {
+    ace::futures::tunnel::dyn::bus<int> ch;
+    ace::schedule(valued_spawner_join(ch));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    auto res = fetch(ch);
+    ASSERT_EQ(res.size(), 1);
+    // join возвращает optional<int> со значением 42 (co_return 42)
+    ASSERT_EQ(res[0], 42);
+}
+
 TEST_F(spawn_fixture, check_composed_output) {
     ace::schedule(composed_output(_int_channel));
     ace::run();

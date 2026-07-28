@@ -427,6 +427,8 @@ echo "Report: coverage_report/index.html"
 | AH6 | `join_after_cancel` | join() на отменённой → false | ✅ |
 | AH7 | `handle_done` | done() возвращает true после завершения | ✅ |
 | AH8 | `handle_cancel` | cancel() отменяет корутину | ⬜ |
+| AH9 | `check_valued_spawn_cancel` | join() на отменённой valued-таске → nullopt (cancel не даёт статусу стать e_finished) | ✅ |
+| AH10 | `check_valued_spawn_join_value` | join() на завершённой valued-таске → возвращает правильное значение из co_return | ✅ |
 
 ---
 
@@ -629,6 +631,8 @@ echo "Report: coverage_report/index.html"
 | SP9 | `get_runner_inside_runner` | get_runner внутри runner → не-nullptr | ✅ |
 | SP10 | `check_valued_spawn_command` | spawn valued-таски (async<int>), join → возвращает значение, spawner и spawnee на одном раннере | ✅ |
 | SP11 | `check_valued_post_command` | post valued-тасок + and-композиция (4 таски) → правильный порядок значений, join возвращает std::optional<int> | ✅ |
+| SP12 | `check_valued_spawn_cancel` | spawn valued-таски (async<int>), cancel до завершения → join возвращает std::nullopt (статус не e_finished) | ✅ |
+| SP13 | `check_valued_spawn_join_value` | spawn быстрой valued-таски (co_return 42), join → возвращает std::optional<int> с правильным значением | ✅ |
 
 ### carrier — обёртка для valued-тасок в раннере
 
@@ -749,7 +753,7 @@ echo "Report: coverage_report/index.html"
 | `timer_fixture` | `base_fixture` | +T1..T9 (timeout) | 5→8 (✅ 3) |
 | `timer_parallel_fixture` | `base_fixture` | без изменений | 1 |
 | `cutex_fixture` | `base_fixture` | +CX1..CX16 (cutex) | 4→4 |
-| `spawn_fixture` | `base_fixture` | +SP1..SP11, +AH1..AH8 | 6→8 (✅ 2) |
+| `spawn_fixture` | `base_fixture` | +SP1..SP13, +AH1..AH8 | 6→10 (✅ 4) |
 | `socket_echo_fixture` | `base_fixture` | +N1..N35 (net) | 2→2 |
 | `fs_fixture` | `base_fixture` | +FS1..FS11 | 1→4 (✅ 3) |
 | `queue_fixture` | `::testing::Test` | **новый** | 10→10 (✅ 10) |
@@ -774,13 +778,13 @@ echo "Report: coverage_report/index.html"
 | `console_fixture` | `::testing::Test` | **новый** | 9→4 (✅ 4) |
 | `cross_mechanic_fixture` | `base_fixture` | **новый** | 25→14 (✅ 12) |
 | `entry_fixture` | `::testing::Test` | **новый** (отдельный executable) — не реализована | 3→0 |
-| `spawn_extra_fixture` | `base_fixture` | **новый** (расширение spawn) | —→10 (✅ 8) |
+| `spawn_extra_fixture` | `base_fixture` | **новый** (расширение spawn) | —→12 (✅ 10) |
 | `compose_extra_fixture` | `base_fixture` | **новый** (расширение compose) | —→3 (✅ 3) |
 | `channel_extra_fixture` | `base_fixture` | **новый** (расширение channel) | —→4 (✅ 4) |
 | `cutex_extra_fixture` | `base_fixture` | **новый** (расширение cutex) | —→5 (✅ 5) |
 | `get_runner_fixture` | `base_fixture` | **новый** | —→1 (✅ 1) |
 
-**Итого:** 37 fixture-классов, 202 теста (было 24, добавлено 178).
+**Итого:** 37 fixture-классов, 204 теста (было 24, добавлено 180).
 
 **Бенчмарки:** 6 тестов перенесены в `benchmarks/` (см. `BUGS_AND_BENCHMARKS.md`).
 Запуск: `meson setup build-bench -Dbenchmarks=true && ninja -C build-bench ace_benchmarks`
@@ -847,7 +851,7 @@ echo "Report: coverage_report/index.html"
 | 148–169 | `cutex_fixture` | 2 |
 | 171–206 | `timer_parallel_fixture` | 1 |
 | 208–220 | `socket_echo_fixture` | 2 |
-| 226–298 | `spawn_fixture` | 6 |
+| 226–298 | `spawn_fixture` | 10 |
 | 300–354 | `cutex_fixture` | 2 |
 | 358–510 | `queue_fixture` | 10 |
 | 512–646 | `omniptr_fixture` | 10 (+2 lifetime) |

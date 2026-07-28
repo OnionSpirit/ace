@@ -399,6 +399,42 @@ struct spawn_fixture : base_fixture {
         ace::console::println("'spawner' finished");
     }
 
+    // ── valued cancel ──
+
+    ace::async<int> valued_long() {
+        // Долгая valued-таска для тестирования cancel
+        co_await ace::futures::timeout(100ms);
+        co_return 999;
+    }
+
+    ace::task valued_spawner_cancel(ace::futures::tunnel::dyn::bus<int>& ch) {
+        auto handle = co_await ace::spawn(valued_long());
+        co_await ace::futures::timeout(10ms);
+        handle.cancel();
+        auto joined = co_await handle.join();
+        // После cancel join должен вернуть nullopt
+        ch << (joined.has_value() ? 1 : 0);
+        co_return;
+    }
+
+    // ── valued join value check ──
+
+    ace::async<int> valued_fast() {
+        // Быстрая valued-таска: возвращает 42
+        co_return 42;
+    }
+
+    ace::task valued_spawner_join(ace::futures::tunnel::dyn::bus<int>& ch) {
+        auto handle = co_await ace::spawn(valued_fast());
+        while (not handle.done()) {
+            co_await ace::futures::timeout(1ms);
+        }
+        auto res = co_await handle.join();
+        // join должен вернуть optional<int> со значением 42
+        ch << (res.has_value() ? res.value() : -1);
+        co_return;
+    }
+
     // ── post / compose ──
 
     ace::task spawn_post(int idx, ace::futures::tunnel::dyn::bus<int>& ch) {

@@ -160,6 +160,20 @@ TEST_F(yield_fixture, spawn_automaton_move_handle) {
     EXPECT_EQ(res[1], 2);
 }
 
+// Проверяет что ping работает когда между co_yield есть co_await timeout —
+// автоматон не должен ждать ping на обычных co_await
+TEST_F(yield_fixture, spawn_automaton_ping_with_timeout) {
+    ace::schedule(spawn_and_ping_with_timeout_test());
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    const auto res = fetch(_int_channel);
+    ASSERT_EQ(res.size(), 4);
+    EXPECT_EQ(res[0], 10);
+    EXPECT_EQ(res[1], 20);
+    EXPECT_EQ(res[2], 30);
+    EXPECT_EQ(res[3], 99);
+}
+
 TEST_F(fs_fixture, do_fs_tests) {
     ace::schedule(fs_testing());
     ace::run();

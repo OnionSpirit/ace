@@ -253,6 +253,16 @@ namespace ace::core {
             return _block->_control_router->has_yield();
         }
 
+        bool set_yield_waiter(void* node_ptr) const {
+            if (not _block or not _block->_control_router) [[unlikely]] return false;
+            return _block->_control_router->set_yield_waiter(node_ptr);
+        }
+
+        bool cancel_yield() const {
+            if (not _block or not _block->_control_router) [[unlikely]] return false;
+            return _block->_control_router->cancel_yield();
+        }
+
         /**
          * @brief Register a waiter async to be notified when the coroutine finishes.
          * @param waiter  Pointer to the @c ace::task async to register.

@@ -120,6 +120,10 @@ namespace ace::core::traits {
          */
         virtual bool has_yield() noexcept { return false; }
 
+        virtual bool set_yield_waiter(void* /* omni_node */) noexcept { return false; }
+
+        virtual bool cancel_yield() noexcept { return false; }
+
         /**
          * @brief manual destroy of the stack frame
          */

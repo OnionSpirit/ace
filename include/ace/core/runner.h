@@ -254,11 +254,36 @@ namespace ace::core {
             explicit automaton_suspend(async<async_return_t, automaton>& inner) : _inner(inner) {}
 
             bool await_ready() override {
-                if (_inner._coroutine.done()) return true;
-                if (_inner._coroutine.promise().status() == e_executed_with_value) return false;
-                if (_inner._coroutine.promise().status() == e_detached) return true;
-                return _inner.await_ready();
+                if (_inner._coroutine.done()) {
+                    try_reattach_waiter();
+                    return true;
+                }
+                if (_inner._coroutine.promise().status() == e_detached) {
+                    try_reattach_waiter();
+                    return true;
+                }
+                if (_inner._coroutine.promise().status() == e_executed_with_value) {
+                    try_reattach_waiter();
+                    return false;
+                }
+                bool inner_ready = _inner.await_ready();
+                if (_inner._coroutine.done()) {
+                    try_reattach_waiter();
+                    return true;
+                }
+                if (_inner._coroutine.promise().status() == e_executed_with_value)
+                    try_reattach_waiter();
+                return inner_ready;
             }
+
+        private:
+            void try_reattach_waiter() {
+                if (_inner._coroutine.promise()._yield_waiter) {
+                    runner::reattach(_inner._coroutine.promise()._yield_waiter);
+                    _inner._coroutine.promise()._yield_waiter.reset();
+                }
+            }
+        public:
 
             bool await_suspend(auto coroutine) {
                 coroutine.promise()._roaming = _inner._coroutine.promise()._roaming;

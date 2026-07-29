@@ -52,16 +52,17 @@ namespace ace::core {
         bool await_resume() const { return _handle.finished(); }
     };
 
-    // ── ping_handler (automaton — consume one co_yield) ────────────────
+    // ── ping_handler (automaton — consume one co_yield via router) ─────
 
     template <typename resume_t = void>
-    class ACE_AWAIT_NODISCARD ping_handler : public traits::busy_future_traits<ping_handler<resume_t>> {
+    class ACE_AWAIT_NODISCARD ping_handler : public traits::future_traits<ping_handler<resume_t>> {
 
         control_block_handle _handle;
+        struct ping_router;
 
     public:
 
-        IMPORT_BUSY_FUTURE_ENV(ping_handler)
+        IMPORT_FUTURE_ENV(ping_handler)
 
         ping_handler() = default;
 
@@ -70,16 +71,16 @@ namespace ace::core {
 
         bool await_ready() override {
             if (_handle.is_idle()) return true;
-            if (_handle.done()) return true;
+            if (_handle.done() or _handle.finished()) return true;
             return _handle.has_yield();
         }
 
         template<typename promise_u>
-        bool await_suspend(std::coroutine_handle<promise_u>) { return true; }
+        bool await_suspend(std::coroutine_handle<promise_u> outer);
 
         [[nodiscard]] std::optional<resume_t> await_resume() requires (not std::is_void_v<resume_t>) {
             if (_handle.is_idle()) return std::nullopt;
-            if (_handle.done()) {
+            if (_handle.done() or _handle.finished()) {
                 resume_t res;
                 if (_handle.return_value(&res)) return res;
                 return std::nullopt;
@@ -92,16 +93,17 @@ namespace ace::core {
         ~ping_handler() override = default;
     };
 
-    // ── automaton_join_handler (ping then cancel) ──────────────────────
+    // ── automaton_join_handler (ping then cancel, via router) ──────────
 
     template <typename resume_t = void>
-    class ACE_AWAIT_NODISCARD automaton_join_handler : public traits::busy_future_traits<automaton_join_handler<resume_t>> {
+    class ACE_AWAIT_NODISCARD automaton_join_handler : public traits::future_traits<automaton_join_handler<resume_t>> {
 
         control_block_handle _handle;
+        struct join_router;
 
     public:
 
-        IMPORT_BUSY_FUTURE_ENV(automaton_join_handler)
+        IMPORT_FUTURE_ENV(automaton_join_handler)
 
         automaton_join_handler() = default;
 
@@ -110,16 +112,16 @@ namespace ace::core {
 
         bool await_ready() override {
             if (_handle.is_idle()) return true;
-            if (_handle.done()) return true;
+            if (_handle.done() or _handle.finished()) return true;
             return _handle.has_yield();
         }
 
         template<typename promise_u>
-        bool await_suspend(std::coroutine_handle<promise_u>) { return true; }
+        bool await_suspend(std::coroutine_handle<promise_u> outer);
 
         [[nodiscard]] std::optional<resume_t> await_resume() requires (not std::is_void_v<resume_t>) {
             if (_handle.is_idle()) return std::nullopt;
-            if (_handle.done()) {
+            if (_handle.done() or _handle.finished()) {
                 resume_t res;
                 if (_handle.return_value(&res)) return res;
                 return std::nullopt;
@@ -132,7 +134,7 @@ namespace ace::core {
 
         bool await_resume() {
             if (_handle.is_idle()) return false;
-            if (_handle.done()) { _handle.cancel(); return true; }
+            if (_handle.done() or _handle.finished()) { _handle.cancel(); return true; }
             _handle.cancel();
             return false;
         }
@@ -192,7 +194,7 @@ namespace ace::core {
 
     };
 
-    // ── join_handler_router ────────────────────────────────────────────
+    // ── routers ────────────────────────────────────────────────────────
 
     template <typename resume_t>
     struct join_handler<resume_t>::join_handler_router final : runner_router {
@@ -208,27 +210,76 @@ namespace ace::core {
         void cancel() override {  }
 
         ~join_handler_router() override = default;
+    };
 
+    template <typename resume_t>
+    struct ping_handler<resume_t>::ping_router final : runner_router {
+
+        control_block_handle _handle;
+
+        ping_router() = delete;
+
+        explicit ping_router(const control_block_handle& handle) : _handle{handle} {}
+
+        void redirect(const omni_node node) override { _handle.set_yield_waiter(node); }
+
+        void cancel() override { _handle.cancel_yield(); }
+
+        ~ping_router() override = default;
+    };
+
+    template <typename resume_t>
+    struct automaton_join_handler<resume_t>::join_router final : runner_router {
+
+        control_block_handle _handle;
+
+        join_router() = delete;
+
+        explicit join_router(const control_block_handle& handle) : _handle{handle} {}
+
+        void redirect(const omni_node node) override { _handle.set_yield_waiter(node); }
+
+        void cancel() override { _handle.cancel_yield(); }
+
+        ~join_router() override = default;
     };
 
 } // end namespace ace::core
 
 // ── definitions ───────────────────────────────────────────────────────
 
-#define ACE_FUTURE_JOIN_HANDLER_FUTURE_SPACE \
-ace::core::join_handler<resume_t>::
+#define ACE_JOIN_SPACE ace::core::join_handler<resume_t>::
+#define ACE_JOIN_MEMBER(RT) template <typename resume_t> RT ACE_JOIN_SPACE
 
-#define ACE_FUTURE_JOIN_HANDLER_FUTURE_MEMBER(returnT) \
-template <typename resume_t>                           \
-returnT ACE_FUTURE_JOIN_HANDLER_FUTURE_SPACE
+#define ACE_PING_SPACE ace::core::ping_handler<resume_t>::
+#define ACE_PING_MEMBER(RT) template <typename resume_t> RT ACE_PING_SPACE
 
-ACE_FUTURE_JOIN_HANDLER_FUTURE_MEMBER(template<typename promise_u> bool)
+#define ACE_AJOIN_SPACE ace::core::automaton_join_handler<resume_t>::
+#define ACE_AJOIN_MEMBER(RT) template <typename resume_t> RT ACE_AJOIN_SPACE
+
+ACE_JOIN_MEMBER(template<typename promise_u> bool)
 await_suspend(std::coroutine_handle<promise_u> outer) {
     outer.promise()._runner_router = join_handler_router{_handle};
     return true;
 }
 
-#undef ACE_FUTURE_JOIN_HANDLER_FUTURE_SPACE
-#undef ACE_FUTURE_JOIN_HANDLER_FUTURE_MEMBER
+ACE_PING_MEMBER(template<typename promise_u> bool)
+await_suspend(std::coroutine_handle<promise_u> outer) {
+    outer.promise()._runner_router = ping_router{_handle};
+    return true;
+}
+
+ACE_AJOIN_MEMBER(template<typename promise_u> bool)
+await_suspend(std::coroutine_handle<promise_u> outer) {
+    outer.promise()._runner_router = join_router{_handle};
+    return true;
+}
+
+#undef ACE_JOIN_SPACE
+#undef ACE_JOIN_MEMBER
+#undef ACE_PING_SPACE
+#undef ACE_PING_MEMBER
+#undef ACE_AJOIN_SPACE
+#undef ACE_AJOIN_MEMBER
 
 #endif //ACE_FUTURE_ASYNC_HANDLE_H

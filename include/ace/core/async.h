@@ -312,6 +312,20 @@ namespace ace::core {
                 return handle.promise().status() == e_executed_with_value and not handle.done();
             }
 
+            bool set_yield_waiter(void* node_ptr) noexcept override {
+                if (not _address or not node_ptr) return false;
+                auto handle = coroutine_t::from_address(_address);
+                handle.promise()._yield_waiter = omni_node(node_ptr);
+                return true;
+            }
+
+            bool cancel_yield() noexcept override {
+                if (not _address) return false;
+                auto handle = coroutine_t::from_address(_address);
+                handle.promise().status(e_detached);
+                return true;
+            }
+
             void destroy() noexcept override {
                 if (not _address) [[unlikely]] return;
                 auto handle = coroutine_t::from_address(_address);
@@ -448,6 +462,7 @@ namespace ace::core {
             std::optional<async_router> _self_router;
             bool _roaming { false };
             bool _polling { false };
+            omni_node _yield_waiter;
         };
 
         // -----------------------------------------------------------------------

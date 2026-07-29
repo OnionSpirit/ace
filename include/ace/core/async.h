@@ -322,7 +322,8 @@ namespace ace::core {
             }
 
             bool yield_value(void* mem_ptr) noexcept override {
-                if constexpr (requires(promise_type promise_t) { promise_t._return_value; }) {
+                // TODO: Need to split control routers for coroutines and automaton
+                if constexpr (is_automaton_rule<promise_rule_t>) {
                     if (not _address) [[unlikely]] return false;
                     auto handle = coroutine_t::from_address(_address);
                     if (handle.promise().status() not_eq e_executed_with_value) return false;
@@ -334,22 +335,32 @@ namespace ace::core {
             }
 
             bool has_yield() noexcept override {
-                if (not _address) return false;
-                auto handle = coroutine_t::from_address(_address);
-                return handle.promise().status() == e_executed_with_value and not handle.done();
+                // TODO: Need to split control routers for coroutines and automaton
+                if constexpr (is_automaton_rule<promise_rule_t>) {
+                    if (not _address) return false;
+                    auto handle = coroutine_t::from_address(_address);
+                    return handle.promise().status() == e_executed_with_value and not handle.done();
+                }
+                return false;
             }
 
             bool set_yield_waiter(void* node_ptr) noexcept override {
-                if (not _address or not node_ptr) return false;
-                auto handle = coroutine_t::from_address(_address);
-                handle.promise()._yield_waiter = omni_node(node_ptr);
+                // TODO: Need to split control routers for coroutines and automaton
+                if constexpr (is_automaton_rule<promise_rule_t>) {
+                    if (not _address or not node_ptr) return false;
+                    auto handle = coroutine_t::from_address(_address);
+                    handle.promise()._yield_waiter = omni_node(node_ptr);
+                }
                 return true;
             }
 
             bool cancel_yield() noexcept override {
-                if (not _address) return false;
-                auto handle = coroutine_t::from_address(_address);
-                handle.promise().status(e_canceled);
+                // TODO: Need to split control routers for coroutines and automaton
+                if constexpr (is_automaton_rule<promise_rule_t>) {
+                    if (not _address) return false;
+                    auto handle = coroutine_t::from_address(_address);
+                    handle.promise().status(e_canceled);
+                }
                 return true;
             }
 
@@ -487,9 +498,9 @@ namespace ace::core {
             // NOTE: Router to manage promise on suspended state.
             // NOTE: Context owns only one promise. Extra slot object is unnecessary
             std::optional<async_router> _self_router;
+            omni_node _yield_waiter; // TODO: Remove for non automaton tasks
             bool _roaming { false };
             bool _polling { false };
-            omni_node _yield_waiter;
         };
 
         // -----------------------------------------------------------------------

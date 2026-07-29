@@ -252,6 +252,15 @@ namespace ace::core {
         std::same_as<rule_t<std::monostate>, automaton_rule<std::monostate>> or
         std::same_as<rule_t<std::monostate>, lazy_rule<std::monostate>>;
 
+    /**
+     * @brief Concept that validates a rule that is a automaton.
+     *
+     * @tparam rule_t  The coroutine rule type to check.
+     */
+    template <template <typename> typename rule_t>
+    concept is_automaton_rule =
+        std::same_as<rule_t<std::monostate>, automaton_rule<std::monostate>>;
+
 }
 
 namespace ace::core::traits {

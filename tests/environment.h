@@ -188,7 +188,7 @@ struct timer_fixture : base_fixture {
 };
 
 // ==========================================================================
-// yield_fixture — automaton and generator tests
+// yield_fixture — automaton tests
 // ==========================================================================
 
 struct yield_fixture : base_fixture {
@@ -226,14 +226,14 @@ struct yield_fixture : base_fixture {
         _int_channel << res;
     }
 
-    ace::automaton<int> yield_123_return_42() {
+    static ace::automaton<int> yield_123_return_42() {
         co_yield 1;
         co_yield 2;
         co_yield 3;
         co_return 42;
     }
 
-    ace::automaton<int> yield_with_timeout() {
+    static ace::automaton<int> yield_with_timeout() {
         co_yield 10;
         co_await ace::futures::timeout(5ms);
         co_yield 20;
@@ -242,50 +242,37 @@ struct yield_fixture : base_fixture {
         co_return 99;
     }
 
-    ace::task spawn_and_ping_test() {
+    static ace::task spawn_and_ping_test() {
         auto handle = co_await ace::spawn(yield_123_return_42());
-        int val = (co_await handle.ping()).value();
-        _int_channel << val;
-        val = (co_await handle.ping()).value();
-        _int_channel << val;
-        val = (co_await handle.ping()).value();
-        _int_channel << val;
-        auto final_val = (co_await handle.ping()).value();
-        _int_channel << final_val;
+        (co_await handle.ping()).and_then(push_to_channel);
+        (co_await handle.ping()).and_then(push_to_channel);
+        (co_await handle.ping()).and_then(push_to_channel);
+        (co_await handle.ping()).and_then(push_to_channel);
     }
 
-    ace::task spawn_and_join_test() {
+    static ace::task spawn_and_join_test() {
         auto handle = co_await ace::spawn(yield_123_return_42());
         // join = ping next value, then cancel
-        auto val = (co_await handle.join()).value();
-        _int_channel << val;
+        (co_await handle.join()).and_then(push_to_channel);
     }
 
-    ace::task spawn_and_ping_with_timeout_test() {
+    static ace::task spawn_and_ping_with_timeout_test() {
         auto handle = co_await ace::spawn(yield_with_timeout());
-        int val = (co_await handle.ping()).value();
-        _int_channel << val;
-        val = (co_await handle.ping()).value();
-        _int_channel << val;
-        val = (co_await handle.ping()).value();
-        _int_channel << val;
-        auto final_val = (co_await handle.ping()).value();
-        _int_channel << final_val;
+        (co_await handle.ping()).and_then(push_to_channel);
+        (co_await handle.ping()).and_then(push_to_channel);
+        (co_await handle.ping()).and_then(push_to_channel);
+        (co_await handle.ping()).and_then(push_to_channel);
     }
 
-    ace::task post_and_ping_test() {
+    static ace::task post_and_ping_test() {
         auto handle = co_await ace::post(yield_123_return_42());
-        int val = (co_await handle.ping()).value();
-        _int_channel << val;
-        val = (co_await handle.ping()).value();
-        _int_channel << val;
-        val = (co_await handle.ping()).value();
-        _int_channel << val;
-        auto final_val = (co_await handle.ping()).value();
-        _int_channel << final_val;
+        (co_await handle.ping()).and_then(push_to_channel);
+        (co_await handle.ping()).and_then(push_to_channel);
+        (co_await handle.ping()).and_then(push_to_channel);
+        (co_await handle.ping()).and_then(push_to_channel);
     }
 
-    ace::task spawn_cancel_ping_nullopt() {
+    static ace::task spawn_cancel_ping_nullopt() {
         auto handle = co_await ace::spawn(yield_123_return_42());
         handle.cancel();
         auto result = co_await handle.ping();
@@ -293,7 +280,7 @@ struct yield_fixture : base_fixture {
             _int_channel << -1;
     }
 
-    ace::task spawn_move_handle() {
+    static ace::task spawn_move_handle() {
         auto h1 = co_await ace::spawn(yield_123_return_42());
         auto val = (co_await h1.ping()).value();
         _int_channel << val;
@@ -307,7 +294,11 @@ struct yield_fixture : base_fixture {
         ace::reload();
     }
 
-    ace::futures::tunnel::dyn::bus<int> _int_channel {};
+    static inline ace::futures::tunnel::dyn::bus<int> _int_channel {};
+
+    static auto push_to_channel (std::optional<int>&& val) -> std::optional<int> {
+        _int_channel << val.value(); val.reset(); return val;
+    };
 };
 
 // ==========================================================================

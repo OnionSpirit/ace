@@ -63,18 +63,6 @@ namespace ace::core {
     };
 
     /**
-     * @brief Eager suspension policy — coroutine starts executing immediately.
-     *
-     * @details Used by @c ace::generator<T>. @c initial_suspend() returns
-     * @c std::suspend_never, so the coroutine body runs as soon as the
-     * return object is constructed.
-     */
-    struct generator : promise_rule_traits {
-        /// @brief Returns @c std::suspend_never — no suspension at creation.
-        consteval static auto action() noexcept { return std::suspend_never{}; };
-    };
-
-    /**
      * @brief Lazy suspension policy — coroutine suspends at creation.
      *
      * @details Used by @c ace::async<T>. @c initial_suspend() returns
@@ -148,7 +136,7 @@ namespace ace::core::traits {
          * @return @c std::suspend_always — suspends after yielding.
          */
         auto yield_value(returnT yield_value)
-        requires (std::same_as<promise_rule_t, automaton> or std::same_as<promise_rule_t, generator>) {
+        requires std::same_as<promise_rule_t, automaton> {
             _derived->status(e_executed_with_value);
             _return_value = yield_value;
             return std::suspend_always{};

@@ -86,19 +86,6 @@ TEST_F(yield_fixture, do_automaton_tests) {
     EXPECT_EQ(res[4], 5);
 }
 
-TEST_F(yield_fixture, do_generator_tests) {
-    ace::schedule(gen_user());
-    ace::run();
-    ASSERT_TRUE(ace::empty());
-    const auto res = fetch(_int_channel);
-    ASSERT_FALSE(res.empty());
-    EXPECT_EQ(res[0], 1);
-    EXPECT_EQ(res[1], 2);
-    EXPECT_EQ(res[2], 3);
-    EXPECT_EQ(res[3], 4);
-    EXPECT_EQ(res[4], 5);
-}
-
 // Проверяет что spawn автоматона и последующий ping() возвращают
 // каждое значение co_yield в правильном порядке + финальное co_return
 TEST_F(yield_fixture, spawn_automaton_ping) {
@@ -1111,18 +1098,6 @@ TEST_F(promise_traits_fixture, automaton_tag_action) {
     // которые живут всё время работы программы.
     static_assert(
         std::same_as<decltype(ace::core::automaton::action()), std::suspend_always>
-    );
-    SUCCEED();
-}
-
-// Проверяет что generator tag возвращает suspend_never.
-TEST_F(promise_traits_fixture, generator_tag_action) {
-    // Почему проверяем automaton: используется для kernel_controller
-    // и clock vortex сервисов. Отсутствие control_block означает что
-    // деструктор async не вызывает cancel() — важно для сервисов
-    // которые живут всё время работы программы.
-    static_assert(
-        std::same_as<decltype(ace::core::generator::action()), std::suspend_never>
     );
     SUCCEED();
 }

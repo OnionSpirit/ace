@@ -98,7 +98,7 @@ namespace ace::core {
         coroutine_t _coroutine; ///< Underlying coroutine handle.  Null after move.
 
         bool*                  _outer_roaming { nullptr };
-        runner_router_slot_t*  _outer_router  { nullptr};
+        runner_router_slot_t*  _outer_router  { nullptr };
         promise_lifecycle*     _outer_status  { nullptr };
 
         /// @brief Helper to get active runner pool ptr or @c nullptr
@@ -599,13 +599,9 @@ namespace ace {
     template<typename returnT =void>
     using promise = async<returnT, core::permanent>;
 
-    // NOTE: Type alias for eager coroutines
+    // NOTE: Type alias for lazy generators
     template<typename returnT =void>
     using automaton = async<returnT, core::automaton>;
-
-    // NOTE: Type alias for eager coroutines
-    template<typename returnT =void>
-    using generator = async<returnT, core::generator>;
 
     // NOTE: Type alias for runner task coroutines
     using task = async<>;

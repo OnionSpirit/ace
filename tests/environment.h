@@ -206,40 +206,7 @@ struct yield_fixture : base_fixture {
         co_return 5;
     }
 
-    ace::generator<int> num_gen() {
-        ace::console::println("Yielding value: {}", 1);
-        co_yield 1;
-        ace::console::println("Yielding value: {}", 2);
-        co_yield 2;
-        ace::console::println("Yielding value: {}", 3);
-        co_yield 3;
-        ace::console::println("Yielding value: {}", 4);
-        co_yield 4;
-        ace::console::println("Yielding value: {}", 5);
-        co_return 5;
-    }
-
     ace::task auto_user() {
-        auto at = num_auto();
-        ace::console::println("Automaton inited");
-        int res = co_await at;
-        ace::console::println("Get from automaton: {}", res);
-        _int_channel << res;
-        res = co_await at;
-        ace::console::println("Get from automaton: {}", res);
-        _int_channel << res;
-        res = co_await at;
-        ace::console::println("Get from automaton: {}", res);
-        _int_channel << res;
-        res = co_await at;
-        ace::console::println("Get from automaton: {}", res);
-        _int_channel << res;
-        res = co_await at;
-        ace::console::println("Get from automaton: {}", res);
-        _int_channel << res;
-    }
-
-    ace::task gen_user() {
         auto at = num_auto();
         ace::console::println("Automaton inited");
         int res = co_await at;

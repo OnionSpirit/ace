@@ -144,13 +144,14 @@ namespace ace::core {
 
     // ── async_handle ───────────────────────────────────────────────────
 
-    template <typename resume_t = void, is_promise_rule rule_t = differed>
+    template <typename resume_t = void, template <typename> typename rule_t = lazy_rule>
+        requires ace::core::is_spawnable_rule<rule_t>
     class ACE_AWAIT_NODISCARD async_handle final {
 
         control_block_handle _handle;
 
         void auto_cancel() {
-            if constexpr (std::same_as<rule_t, automaton>)
+            if constexpr (std::same_as<rule_t<std::monostate>, automaton_rule<std::monostate>>)
                 if (not _handle.is_idle() and not _handle.done())
                     _handle.cancel();
         }
@@ -178,13 +179,13 @@ namespace ace::core {
         ~async_handle() { auto_cancel(); }
 
         auto join() noexcept {
-            if constexpr (std::same_as<rule_t, automaton>)
+            if constexpr (std::same_as<rule_t<std::monostate>, automaton_rule<std::monostate>>)
                 return automaton_join_handler<resume_t>{_handle};
             else
                 return join_handler<resume_t>{_handle};
         }
 
-        auto ping() noexcept requires (std::same_as<rule_t, automaton>) {
+        auto ping() noexcept requires (std::same_as<rule_t<std::monostate>, automaton_rule<std::monostate>>) {
             return ping_handler<resume_t>{_handle};
         }
 

@@ -243,7 +243,7 @@ struct yield_fixture : base_fixture {
     }
 
     ace::task spawn_and_ping_test() {
-        auto handle = co_await ace::spawn<int, ace::core::automaton>(yield_123_return_42());
+        auto handle = co_await ace::spawn(yield_123_return_42());
         int val = (co_await handle.ping()).value();
         _int_channel << val;
         val = (co_await handle.ping()).value();
@@ -255,14 +255,14 @@ struct yield_fixture : base_fixture {
     }
 
     ace::task spawn_and_join_test() {
-        auto handle = co_await ace::spawn<int, ace::core::automaton>(yield_123_return_42());
+        auto handle = co_await ace::spawn(yield_123_return_42());
         // join = ping next value, then cancel
         auto val = (co_await handle.join()).value();
         _int_channel << val;
     }
 
     ace::task spawn_and_ping_with_timeout_test() {
-        auto handle = co_await ace::spawn<int, ace::core::automaton>(yield_with_timeout());
+        auto handle = co_await ace::spawn(yield_with_timeout());
         int val = (co_await handle.ping()).value();
         _int_channel << val;
         val = (co_await handle.ping()).value();
@@ -274,7 +274,7 @@ struct yield_fixture : base_fixture {
     }
 
     ace::task post_and_ping_test() {
-        auto handle = co_await ace::post<int, ace::core::automaton>(yield_123_return_42());
+        auto handle = co_await ace::post(yield_123_return_42());
         int val = (co_await handle.ping()).value();
         _int_channel << val;
         val = (co_await handle.ping()).value();
@@ -286,7 +286,7 @@ struct yield_fixture : base_fixture {
     }
 
     ace::task spawn_cancel_ping_nullopt() {
-        auto handle = co_await ace::spawn<int, ace::core::automaton>(yield_123_return_42());
+        auto handle = co_await ace::spawn(yield_123_return_42());
         handle.cancel();
         auto result = co_await handle.ping();
         if (not result.has_value())
@@ -294,7 +294,7 @@ struct yield_fixture : base_fixture {
     }
 
     ace::task spawn_move_handle() {
-        auto h1 = co_await ace::spawn<int, ace::core::automaton>(yield_123_return_42());
+        auto h1 = co_await ace::spawn(yield_123_return_42());
         auto val = (co_await h1.ping()).value();
         _int_channel << val;
         auto h2 = std::move(h1);
@@ -834,8 +834,8 @@ struct control_block_fixture : ::testing::Test {
     // mini promise type for control block allocation tests
     // Использует реальный operator new из promise_traits для аллокации
     // control_block ПЕРЕД promise (как в production коде).
-    struct mini_promise : ace::core::traits::promise_traits<mini_promise, ace::core::differed, void> {
-        DECLARE_PROMISE_TRAITS(mini_promise, ace::core::differed, void)
+    struct mini_promise : ace::core::traits::promise_traits<mini_promise, ace::core::lazy_rule, void> {
+        DECLARE_PROMISE_TRAITS(mini_promise, ace::core::lazy_rule, void)
         IMPORT_PROMISE_TRAITS_ENV
 
         mini_promise() = default;
@@ -846,7 +846,7 @@ struct control_block_fixture : ::testing::Test {
         void unhandled_exception() {}
 
         auto get_return_object() noexcept {
-            return ace::core::async<void, ace::core::differed>{};
+            return ace::core::async<void, ace::core::lazy_rule>{};
         }
     };
 

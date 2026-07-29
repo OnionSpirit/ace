@@ -179,8 +179,8 @@ namespace ace::core {
          * @param new_task Task to be pushed into the runner
          * @return void
          */
-        template <typename async_return_t, is_promise_rule promise_rule_t>
-        requires (std::same_as<promise_rule_t, differed> or std::same_as<promise_rule_t, automaton>)
+        template <typename async_return_t, template <typename> typename promise_rule_t>
+        requires is_spawnable_rule<promise_rule_t>
         void attach(async<async_return_t, promise_rule_t> &&new_task);
 
         // TODO: Add support for automaton in the future
@@ -189,8 +189,8 @@ namespace ace::core {
          * @param new_task Task to be pushed into the runner
          * @return void
          */
-        template <typename async_return_t, is_promise_rule promise_rule_t>
-        requires (std::same_as<promise_rule_t, differed> or std::same_as<promise_rule_t, automaton>)
+        template <typename async_return_t, template <typename> typename promise_rule_t>
+        requires is_spawnable_rule<promise_rule_t>
         void attach_front(async<async_return_t, promise_rule_t> &&new_task);
 
         /**
@@ -213,7 +213,7 @@ namespace ace::core {
         }
 
         template <typename async_return_t>
-        static task carrier(async<async_return_t, automaton> inner) {
+        static task carrier(async<async_return_t, automaton_rule> inner) {
             while (not inner._coroutine.done() and inner._coroutine.promise().status() not_eq e_canceled)
                 co_await automaton_suspend{inner};
             co_return;
@@ -248,10 +248,10 @@ namespace ace::core {
 
         template <typename async_return_t>
         struct automaton_suspend final : traits::future_traits<automaton_suspend<async_return_t>> {
-            async<async_return_t, automaton>& _inner;
+            async<async_return_t, automaton_rule>& _inner;
             IMPORT_FUTURE_ENV(automaton_suspend)
 
-            explicit automaton_suspend(async<async_return_t, automaton>& inner) : _inner(inner) {}
+            explicit automaton_suspend(async<async_return_t, automaton_rule>& inner) : _inner(inner) {}
 
             bool await_ready() override {
                 if (_inner._coroutine.done()) {
@@ -387,8 +387,8 @@ namespace ace::core {
     }
 
 
-    template <typename async_return_t, is_promise_rule promise_rule_t>
-    requires (std::same_as<promise_rule_t, differed> or std::same_as<promise_rule_t, automaton>)
+    template <typename async_return_t, template <typename> typename promise_rule_t>
+        requires is_spawnable_rule<promise_rule_t>
     void runner::attach(async<async_return_t, promise_rule_t> &&new_task) {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner = &_pool;
@@ -402,8 +402,8 @@ namespace ace::core {
     }
 
 
-    template <typename async_return_t, is_promise_rule promise_rule_t>
-    requires (std::same_as<promise_rule_t, differed> or std::same_as<promise_rule_t, automaton>)
+    template <typename async_return_t, template <typename> typename promise_rule_t>
+        requires is_spawnable_rule<promise_rule_t>
     void runner::attach_front(async<async_return_t, promise_rule_t> &&new_task) {
         ++_tasks_amount;
         new_task._coroutine.promise()._runner = &_pool;
@@ -552,8 +552,9 @@ namespace ace::core {
 
 inline thread_local ace::omni_runner ace::core::runner::current_runner_ptr {};
 
-template<typename returnT, ace::core::is_promise_rule promise_rule_t>
-inline auto ace::core::async<returnT, promise_rule_t>::get_current_pool() noexcept
+template<typename returnT, template <typename> typename promise_rule_t>
+requires ace::core::is_rule<promise_rule_t>
+auto ace::core::async<returnT, promise_rule_t>::get_current_pool() noexcept
 -> runner_pool_t* { return runner::get(); }
 
 //==============================DEFINITIONS==================================

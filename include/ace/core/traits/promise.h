@@ -35,30 +35,42 @@
 
 namespace ace::core {
 
+
+    struct promise_primitives {
+
+    protected:
+
+        alignas(ACE_BUS_SIZE) promise_lifecycle  _status { e_inited };
+
+    public:
+
+        control_block*     _block  { nullptr };  ///< Pointer to the intrusive control block (set on coroutine construction).
+
+        promise_lifecycle& status() { return _status; }
+
+        promise_lifecycle status(const promise_lifecycle status) {
+            _status = status;
+            if (_block) _block->_status = status;
+            return status;
+        }
+    };
+
+
     /**
-     * @brief CRTP mixin that provides @c return_value() and @c yield_value()
+     * @brief Base that provides @c return_value() and @c yield_value()
      *        to a promise type for non-void coroutines.
      *
      * @details This specialization handles coroutines that return a value via
      * @c co_return expr or produce intermediate values via @c co_yield expr.
      *
-     * @tparam promiseT  The concrete derived promise type (CRTP).
      * @tparam returnT   The value type returned by @c co_return.
      */
-    template <typename promiseT, typename returnT>
-    struct automaton_rule {
+    template <typename returnT>
+    struct automaton_rule : promise_primitives {
 
-        static_assert(not std::is_void_v<returnT>, "It is forbidden to create an <automaton> with <void> return value");
+        static_assert(not std::is_void_v<returnT>, "It is forbidden to create an <automaton> with <void> return type");
 
-        alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
-
-        alignas(ACE_BUS_SIZE) returnT _return_value {};                          ///< Storage for the value produced by @c co_return.
-
-    protected:
-
-        alignas(ACE_BUS_SIZE) promise_lifecycle _status { e_inited };           ///< Current lifecycle state.
-
-    public:
+        alignas(ACE_BUS_SIZE) returnT _return_value {}; ///< Storage for the value produced by @c co_return.
 
         /**
          * @brief Called by the coroutine machinery when @c co_return expr is executed.
@@ -68,7 +80,7 @@ namespace ace::core {
          */
         auto return_value(returnT return_value) {
             _return_value = std::forward<std::remove_reference_t<returnT>>(return_value);
-            _derived->status(e_finished);
+            status(e_finished);
             return std::suspend_never{};
         }
 
@@ -80,7 +92,7 @@ namespace ace::core {
          * @return @c std::suspend_always — suspends after yielding.
          */
         auto yield_value(returnT yield_value) {
-            _derived->status(e_executed_with_value);
+            status(e_executed_with_value);
             _return_value = yield_value;
             return std::suspend_always{};
         }
@@ -91,7 +103,7 @@ namespace ace::core {
 
 
     /**
-     * @brief CRTP mixin that provides @c return_value()
+     * @brief Base that provides @c return_value()
      *        to a promise type for lazy non-void coroutines.
      *
      * @details This specialization handles lazy coroutines that return a value via
@@ -100,21 +112,12 @@ namespace ace::core {
      * @c std::suspend_always, so the coroutine does not run until it is
      * explicitly scheduled or awaited.
      *
-     * @tparam promiseT  The concrete derived promise type (CRTP).
      * @tparam returnT   The value type returned by @c co_return.
      */
-    template <typename promiseT, typename returnT>
-    struct lazy_rule {
+    template <typename returnT>
+    struct lazy_rule : promise_primitives {
 
-        alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
-
-        alignas(ACE_BUS_SIZE) returnT _return_value {};                          ///< Storage for the value produced by @c co_return.
-
-    protected:
-
-        alignas(ACE_BUS_SIZE) promise_lifecycle _status { e_inited };           ///< Current lifecycle state.
-
-    public:
+        alignas(ACE_BUS_SIZE) returnT _return_value {}; ///< Storage for the value produced by @c co_return.
 
         /**
          * @brief Called by the coroutine machinery when @c co_return expr is executed.
@@ -124,7 +127,7 @@ namespace ace::core {
          */
         auto return_value(returnT return_value) {
             _return_value = std::forward<std::remove_reference_t<returnT>>(return_value);
-            _derived->status(e_finished);
+            status(e_finished);
             return std::suspend_never{};
         }
 
@@ -134,7 +137,7 @@ namespace ace::core {
 
 
     /**
-     * @brief CRTP mixin specialization for @c void-returning lazy coroutines.
+     * @brief Base specialization for @c void-returning lazy coroutines.
      *
      * @details This specialization handles lazy coroutines that return @c void.
      * Provides @c return_void() instead of @c return_value().
@@ -142,25 +145,16 @@ namespace ace::core {
      * @c std::suspend_always, so the coroutine does not run until it is
      * explicitly scheduled or awaited.
      *
-     * @tparam promiseT  The concrete derived promise type (CRTP).
      */
-    template <typename promiseT>
-    struct lazy_rule <promiseT, void> {
-
-        alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
-
-    protected:
-
-        alignas(ACE_BUS_SIZE) promise_lifecycle _status { e_inited };           ///< Current lifecycle state.
-
-    public:
+    template <>
+    struct lazy_rule<void> : promise_primitives {
 
         /**
          * @brief Called by the coroutine machinery when @c co_return (no value) is executed.
          * @return @c std::suspend_never — no suspension.
          */
         auto return_void() {
-            _derived->status(e_finished);
+            status(e_finished);
             return std::suspend_never{};
         }
 
@@ -170,7 +164,7 @@ namespace ace::core {
 
 
     /**
-     * @brief CRTP mixin that provides @c return_value() and @c yield_value()
+     * @brief Base that provides @c return_value() and @c yield_value()
      *        to a promise type for non-void eager coroutines.
      *
      * @details This specialization handles eager coroutines that return a value via
@@ -179,21 +173,12 @@ namespace ace::core {
      * @c std::suspend_never, so the coroutine body runs as soon as the
      * return object is constructed.
      *
-     * @tparam promiseT  The concrete derived promise type (CRTP).
      * @tparam returnT   The value type returned by @c co_return.
      */
-    template <typename promiseT, typename returnT>
-    struct eager_rule {
+    template <typename returnT>
+    struct eager_rule : promise_primitives {
 
-        alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
-
-        alignas(ACE_BUS_SIZE) returnT _return_value {};                          ///< Storage for the value produced by @c co_return.
-
-    protected:
-
-        alignas(ACE_BUS_SIZE) promise_lifecycle _status { e_inited };           ///< Current lifecycle state.
-
-    public:
+        alignas(ACE_BUS_SIZE) returnT _return_value {}; ///< Storage for the value produced by @c co_return.
 
         /**
          * @brief Called by the coroutine machinery when @c co_return expr is executed.
@@ -203,7 +188,7 @@ namespace ace::core {
          */
         auto return_value(returnT return_value) {
             _return_value = std::forward<std::remove_reference_t<returnT>>(return_value);
-            _derived->status(e_finished);
+            status(e_finished);
             return std::suspend_never{};
         }
 
@@ -220,25 +205,16 @@ namespace ace::core {
      * @c std::suspend_never, so the coroutine body runs as soon as the
      * return object is constructed.
      *
-     * @tparam promiseT  The concrete derived promise type (CRTP).
      */
-    template <typename promiseT>
-    struct eager_rule <promiseT, void> {
-
-        alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
-
-    protected:
-
-        alignas(ACE_BUS_SIZE) promise_lifecycle _status { e_inited };           ///< Current lifecycle state.
-
-    public:
+    template <>
+    struct eager_rule<void> : promise_primitives {
 
         /**
          * @brief Called by the coroutine machinery when @c co_return (no value) is executed.
          * @return @c std::suspend_never — no suspension.
          */
         auto return_void() {
-            _derived->status(e_finished);
+            status(e_finished);
             return std::suspend_never{};
         }
 
@@ -246,141 +222,39 @@ namespace ace::core {
         consteval static auto initial_result() noexcept { return std::suspend_never{}; };
     };
 
-    /// @brief CRTP tag base for promise suspension policy types.
-    struct promise_rule_traits { struct e_promise_rule {}; };
-
     /**
-     * @brief Eager suspension policy — coroutine starts executing immediately.
-     *
-     * @details Used by @c ace::promise<T>. @c initial_suspend() returns
-     * @c std::suspend_never, so the coroutine body runs as soon as the
-     * return object is constructed.
-     */
-    struct permanent : promise_rule_traits {
-        /// @brief Returns @c std::suspend_never — no suspension at creation.
-        consteval static auto action() noexcept { return std::suspend_never{}; };
-    };
-
-    /**
-     * @brief Lazy suspension policy — coroutine suspends at creation.
-     *
-     * @details Used by @c ace::automaton<T>. @c initial_suspend() returns
-     * @c std::suspend_always, so the coroutine does not run until it is
-     * explicitly scheduled or awaited.
-     */
-    struct automaton : promise_rule_traits {
-        /// @brief Returns @c std::suspend_never — no suspension at creation.
-        consteval static auto action() noexcept { return std::suspend_always{}; };
-    };
-
-    /**
-     * @brief Lazy suspension policy — coroutine suspends at creation.
-     *
-     * @details Used by @c ace::async<T>. @c initial_suspend() returns
-     * @c std::suspend_always, so the coroutine does not run until it is
-     * explicitly scheduled or awaited.
-     */
-    struct differed : promise_rule_traits {
-        /// @brief Returns @c std::suspend_always — suspends on creation.
-        consteval static auto action() noexcept { return std::suspend_always{}; };
-    };
-
-    /**
-     * @brief Concept that validates a promise suspension policy tag.
+     * @brief Concept that validates a coroutine rule object.
      *
      * @details A type satisfies @c is_promise_rule if:
-     *  1. It nests @c e_promise_rule (inherits from @c promise_rule_traits).
-     *  2. Its static @c action() returns either @c std::suspend_never or
+     *  1. It has @c _status member.
+     *  2. Its static @c initial_result() returns either @c std::suspend_never or
      *     @c std::suspend_always.
      *
-     * @tparam modeT  The suspension policy type to check.
+     * @tparam rule_t  The coroutine rule type to check.
      */
-    template <typename modeT>
-    concept is_promise_rule = requires { typename modeT::e_promise_rule; }
-        and (std::same_as<decltype(modeT::action()), std::suspend_never>
-        or std::same_as<decltype(modeT::action()), std::suspend_always>);
+    template <template <typename> typename rule_t>
+    concept is_rule =
+        std::derived_from<rule_t<std::monostate>, promise_primitives>
+        and
+        (
+            std::same_as<decltype(rule_t<std::monostate>::initial_result()), std::suspend_never>
+            or
+            std::same_as<decltype(rule_t<std::monostate>::initial_result()), std::suspend_always>
+        );
+
+    /**
+     * @brief Concept that validates a rule that allowed to be spawned.
+     *
+     * @tparam rule_t  The coroutine rule type to check.
+     */
+    template <template <typename> typename rule_t>
+    concept is_spawnable_rule =
+        std::same_as<rule_t<std::monostate>, automaton_rule<std::monostate>> or
+        std::same_as<rule_t<std::monostate>, lazy_rule<std::monostate>>;
 
 }
 
 namespace ace::core::traits {
-
-    /**
-     * @brief CRTP mixin that provides @c return_value() and @c yield_value()
-     *        to a promise type for non-void coroutines.
-     *
-     * @details This specialization handles coroutines that return a value via
-     * @c co_return expr or produce intermediate values via @c co_yield expr.
-     *
-     * @tparam promiseT  The concrete derived promise type (CRTP).
-     * @tparam returnT   The value type returned by @c co_return.
-     */
-    template <typename promiseT, is_promise_rule promise_rule_t, typename returnT>
-    struct promise_return_traits {
-
-        alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
-
-        alignas(ACE_BUS_SIZE) returnT _return_value {};                          ///< Storage for the value produced by @c co_return.
-
-    protected:
-
-        alignas(ACE_BUS_SIZE) promise_lifecycle _status { e_inited };           ///< Current lifecycle state.
-
-    public:
-
-        /**
-         * @brief Called by the coroutine machinery when @c co_return expr is executed.
-         * @details Stores the value and transitions status to @c e_finished.
-         * @param return_value  Value produced by @c co_return.
-         * @return @c std::suspend_never — no suspension after returning.
-         */
-        auto return_value(returnT return_value) {
-            _return_value = std::forward<std::remove_reference_t<returnT>>(return_value);
-            _derived->status(e_finished);
-            return std::suspend_never{};
-        }
-
-        /**
-         * @brief Called by the coroutine machinery when @c co_yield expr is executed.
-         * @details Stores the intermediate value and transitions status to
-         * @c e_executed_with_value, then suspends the coroutine.
-         * @param yield_value  Value produced by @c co_yield.
-         * @return @c std::suspend_always — suspends after yielding.
-         */
-        auto yield_value(returnT yield_value)
-        requires std::same_as<promise_rule_t, automaton> {
-            _derived->status(e_executed_with_value);
-            _return_value = yield_value;
-            return std::suspend_always{};
-        }
-    };
-
-    /**
-     * @brief CRTP mixin specialization for @c void-returning coroutines.
-     *
-     * @details Provides @c return_void() instead of @c return_value().
-     *
-     * @tparam promiseT  The concrete derived promise type (CRTP).
-     */
-    template <typename promiseT, is_promise_rule promise_rule_t>
-    struct promise_return_traits <promiseT, promise_rule_t, void> {
-
-        alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
-
-    protected:
-
-        alignas(ACE_BUS_SIZE) promise_lifecycle _status { e_inited };           ///< Current lifecycle state.
-
-    public:
-
-        /**
-         * @brief Called by the coroutine machinery when @c co_return (no value) is executed.
-         * @return @c std::suspend_never — no suspension.
-         */
-        auto return_void() {
-            _derived->status(e_finished);
-            return std::suspend_never{};
-        }
-    };
 
     /**
      * @brief Full promise base class for ACE coroutines.
@@ -396,6 +270,8 @@ namespace ace::core::traits {
      *
      * @tparam derived_t  Derived type of inherited trait user
      *
+     * @tparam promise_rule_t Rule type that defines initial and return actions
+     *
      * @tparam return_t  The value type returned by @c co_return inside the
      *                   coroutine.  Use @c void for coroutines that do not
      *                   return a value.
@@ -407,23 +283,17 @@ namespace ace::core::traits {
      *  base_ptr         mem_ptr  (returned by operator new)
      * @endcode
      */
-    template <typename derived_t, is_promise_rule promise_rule_t, typename return_t>
-    struct promise_traits
-        : promise_return_traits< promise_traits<derived_t, promise_rule_t, return_t>, promise_rule_t, return_t > {
+    template <typename derived_t, template <typename> typename promise_rule_t, typename return_t>
+    requires is_rule<promise_rule_t>
+    struct promise_traits : promise_rule_t<return_t> {
 
         typedef future_handle* future_handler_ptr_t; ///< Pointer type for the currently awaited busy future.
 
-        typedef promise_return_traits<promise_traits, promise_rule_t, return_t> promise_return_traits_t;
+        typedef promise_rule_t<return_t> rule_t;
+
+        using rule_t::status;
 
         promise_traits() = default;
-
-        promise_lifecycle& status() { return promise_return_traits_t::_status; }
-
-        promise_lifecycle status(const promise_lifecycle status) {
-            promise_return_traits_t::_status = status;
-            if (_block) _block->_status = status;
-            return status;
-        }
 
         /**
          * @brief Destructor.  Releases the tracing ID if one was allocated.
@@ -578,7 +448,6 @@ namespace ace::core::traits {
         }
 
         future_handler_ptr_t        _busy_future  { nullptr };  ///< Pointer to the currently active busy future, or @c nullptr.
-        control_block*              _block        { nullptr };  ///< Pointer to the intrusive control block (set on first @c observe()).
         std::optional<std::size_t>  _trace_id;                  ///< Optional debugging trace ID.
     };
 

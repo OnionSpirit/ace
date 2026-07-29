@@ -56,10 +56,12 @@
 
 namespace ace {
 
-    template <typename resume_t = void, core::is_promise_rule rule_t = core::differed>
-    using spawn          = futures::spawn<resume_t, rule_t>;
-    template <typename resume_t = void, core::is_promise_rule rule_t = core::differed>
-    using post           = futures::post<resume_t, rule_t>;
+    template <typename resume_t = void, template <typename> typename promise_rule_t = core::lazy_rule>
+        requires ace::core::is_spawnable_rule<promise_rule_t>
+    using spawn          = futures::spawn<resume_t, promise_rule_t>;
+    template <typename resume_t = void, template <typename> typename promise_rule_t = core::lazy_rule>
+        requires ace::core::is_spawnable_rule<promise_rule_t>
+    using post           = futures::post<resume_t, promise_rule_t>;
     using roaming        = futures::roaming;
     using get_runner     = futures::get_runner;
     using reattach       = futures::reattach;

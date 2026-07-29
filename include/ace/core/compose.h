@@ -381,7 +381,7 @@ namespace ace::core {
     template <
         meta::is_future sender_t,
         typename async_return, typename async_input,
-        is_promise_rule async_promise_rule_t =differed
+        template <typename> typename async_promise_rule_t = lazy_rule
     > requires (not std::same_as<meta::resume_type<sender_t>, void>)
     //
     promise<async_return>
@@ -395,7 +395,7 @@ namespace ace::core {
     template <
         meta::is_future sender_t,
         typename async_return,
-        is_promise_rule async_promise_rule_t =differed
+        template <typename> typename async_promise_rule_t = lazy_rule
     > requires std::same_as<meta::resume_type<sender_t>, void>
     //
     promise<async_return>
@@ -884,7 +884,7 @@ operator or(ace::core::or_await_composed<composed_future_ts...>& composed_future
 template <
     ace::core::meta::is_future sender_t,
     typename async_return, typename async_input,
-    ace::core::is_promise_rule async_promise_rule_t =ace::core::differed
+    template <typename> typename async_promise_rule_t = ace::core::lazy_rule
 > requires (not std::same_as<ace::core::meta::resume_type<sender_t>, void>)
 //
 ace::promise<async_return>
@@ -896,7 +896,7 @@ operator >> (sender_t&& sender, ace::core::async<async_return, async_promise_rul
 template <
     ace::core::meta::is_future sender_t,
     typename async_return,
-    ace::core::is_promise_rule async_promise_rule_t =ace::core::differed
+    template <typename> typename async_promise_rule_t = ace::core::lazy_rule
 > requires std::same_as<ace::core::meta::resume_type<sender_t>, void>
 //
 ace::promise<async_return>

@@ -1074,7 +1074,7 @@ TEST_F(promise_traits_fixture, permanent_tag_action) {
     // initial_suspend() должен возвращать suspend_never, чтобы
     // корутина начала выполняться немедленно.
     static_assert(
-        std::same_as<decltype(ace::core::permanent::action()), std::suspend_never>
+        std::same_as<decltype(ace::core::eager_rule<std::monostate>::initial_result()), std::suspend_never>
     );
     SUCCEED();
 }
@@ -1085,7 +1085,7 @@ TEST_F(promise_traits_fixture, differed_tag_action) {
     // initial_suspend() должен возвращать suspend_always, чтобы
     // корутина не стартовала до явного schedule или co_await.
     static_assert(
-        std::same_as<decltype(ace::core::differed::action()), std::suspend_always>
+        std::same_as<decltype(ace::core::lazy_rule<std::monostate>::initial_result()), std::suspend_always>
     );
     SUCCEED();
 }
@@ -1097,7 +1097,7 @@ TEST_F(promise_traits_fixture, automaton_tag_action) {
     // деструктор async не вызывает cancel() — важно для сервисов
     // которые живут всё время работы программы.
     static_assert(
-        std::same_as<decltype(ace::core::automaton::action()), std::suspend_always>
+        std::same_as<decltype(ace::core::automaton_rule<std::monostate>::initial_result()), std::suspend_always>
     );
     SUCCEED();
 }
@@ -2334,8 +2334,8 @@ TEST_F(context_fixture, automaton_no_cancel_in_dtor) {
     // вызывается при завершении программы — cancel() в этот момент
     // не должен вызываться потому что io_uring уже может быть разрушен.
     static_assert(
-        ace::core::is_promise_rule<ace::core::automaton>,
-        "automaton must satisfy is_promise_rule"
+        ace::core::is_rule<ace::core::automaton_rule>,
+        "automaton must satisfy is_rule"
     );
     SUCCEED();
 }

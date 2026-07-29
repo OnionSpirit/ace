@@ -67,18 +67,20 @@ namespace ace::core {
      *
      * @tparam returnT        Value type returned by @c co_return.
      *                        Defaults to @c void.
-     * @tparam promise_rule_t Suspension policy tag.
-     *                        Use @c differed (default) for lazy execution or
-     *                        @c permanent for eager execution.
+     * @tparam promise_rule_t Return and initial suspension policy type.
      *
      * @see ace::async, ace::promise
      */
-    template<typename returnT =void, is_promise_rule promise_rule_t =differed>
+    template<typename returnT =void, template <typename> typename promise_rule_t = lazy_rule>
+    requires is_rule<promise_rule_t>
     struct ACE_AWAIT_NODISCARD async : traits::busy_future_traits<async<returnT, promise_rule_t>> {
 
         IMPORT_BUSY_FUTURE_ENV(async)
 
         struct promise_type;
+
+        /// @brief Implemented rule type
+        typedef promise_rule_t<returnT> rule_t;
 
         /// @brief Type of the underlying coroutine handle.
         typedef std::coroutine_handle<promise_type>                            coroutine_t;
@@ -392,7 +394,7 @@ namespace ace::core {
             [[nodiscard]] auto initial_suspend() noexcept {
                 // NOTE: Fetching runner ptr
                 _runner = get_current_pool();
-                return promise_rule_t::action();
+                return rule_t::initial_result();
             }
 
             /**
@@ -592,22 +594,23 @@ namespace ace::core {
 namespace ace {
 
     // NOTE: Type alias for any type of coroutines (default: lazy)
-    template<typename returnT =void, core::is_promise_rule promise_rule_t = core::differed>
+    template<typename returnT =void, template <typename> typename promise_rule_t = core::lazy_rule>
+    requires core::is_rule<promise_rule_t>
     using async = core::async<returnT, promise_rule_t>;
 
     // NOTE: Type alias for eager coroutines
     template<typename returnT =void>
-    using promise = async<returnT, core::permanent>;
+    using promise = core::async<returnT, core::eager_rule>;
 
     // NOTE: Type alias for lazy generators
     template<typename returnT =void>
-    using automaton = async<returnT, core::automaton>;
+    using automaton = core::async<returnT, core::automaton_rule>;
 
     // NOTE: Type alias for runner task coroutines
-    using task = async<>;
+    using task = core::async<>;
 
     // NOTE: Wrapper to spawn and manage coroutines in runner pool
-    template <typename async_return_t, core::is_promise_rule async_rule_t>
+    template <typename async_return_t, template <typename> typename async_rule_t>
     task task_wrap(core::async<async_return_t, async_rule_t> some_context) {
         co_await some_context;
         co_return;

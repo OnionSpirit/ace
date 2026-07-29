@@ -37,7 +37,8 @@ namespace ace::futures {
      * @details Constructed by @c ace::post() and consumed by @c co_await.
      * Non-copyable, non-default-constructible.
      */
-    template <typename resume_t = void, core::is_promise_rule rule_t = core::differed>
+    template <typename resume_t = void, template <typename> typename rule_t = core::lazy_rule>
+        requires ace::core::is_spawnable_rule<rule_t>
     class ACE_AWAIT_NODISCARD post final : public core::traits::future_traits<post<resume_t, rule_t>> {
 
         typedef async<resume_t, rule_t> async_t;

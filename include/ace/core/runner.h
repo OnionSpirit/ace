@@ -207,14 +207,14 @@ namespace ace::core {
 
         template <typename async_return_t>
         static task carrier(async<async_return_t> inner) {
-            while (not inner._coroutine.done() and inner._coroutine.promise().status() not_eq e_detached)
+            while (not inner._coroutine.done() and inner._coroutine.promise().status() not_eq e_canceled)
                 co_await carrier_suspend{inner};
             co_return;
         }
 
         template <typename async_return_t>
         static task carrier(async<async_return_t, automaton> inner) {
-            while (not inner._coroutine.done() and inner._coroutine.promise().status() not_eq e_detached)
+            while (not inner._coroutine.done() and inner._coroutine.promise().status() not_eq e_canceled)
                 co_await automaton_suspend{inner};
             co_return;
         }
@@ -228,7 +228,7 @@ namespace ace::core {
 
             bool await_ready() override {
                 if (_inner._coroutine.done()) return true;
-                if (_inner._coroutine.promise().status() == e_detached) return true;
+                if (_inner._coroutine.promise().status() == e_canceled) return true;
                 return _inner.await_ready();
             }
 
@@ -258,7 +258,7 @@ namespace ace::core {
                     try_reattach_waiter();
                     return true;
                 }
-                if (_inner._coroutine.promise().status() == e_detached) {
+                if (_inner._coroutine.promise().status() == e_canceled) {
                     try_reattach_waiter();
                     return true;
                 }
@@ -445,7 +445,7 @@ namespace ace::core {
             task_unit->_data
             and touch_result not_eq e_failed
             and touch_result not_eq e_finished
-            and touch_result not_eq e_detached
+            and touch_result not_eq e_canceled
         };
 
         // NOTE: If task is idle, releasing its node.
@@ -489,7 +489,7 @@ namespace ace::core {
             vortex_unit->_data
             and touch_result not_eq e_failed
             and touch_result not_eq e_finished
-            and touch_result not_eq e_detached
+            and touch_result not_eq e_canceled
         };
 
         // NOTE: If task is idle, releasing its node.

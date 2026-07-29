@@ -97,6 +97,10 @@ namespace ace::core {
 
         coroutine_t _coroutine; ///< Underlying coroutine handle.  Null after move.
 
+        bool*                  _outer_roaming { nullptr };
+        runner_router_slot_t*  _outer_router  { nullptr};
+        promise_lifecycle*     _outer_status  { nullptr };
+
         /// @brief Helper to get active runner pool ptr or @c nullptr
         /// if @c async<...> is constructed out of runner context
         static runner_pool_t* get_current_pool() noexcept;
@@ -149,6 +153,27 @@ namespace ace::core {
 
         /// @brief Equivalent to @c is_exist().
         explicit operator bool() const { return is_exist(); }
+
+        /// @brief Propagates status parameters to outer coroutine
+        void propagate() {
+            if (not _outer_roaming or not _outer_status or not _outer_router)
+                return;
+            // NOTE: Storing local value of roaming into outer
+            *_outer_roaming = _coroutine.promise()._roaming;
+            // NOTE: Storing local value of status into outer
+            *_outer_status = _coroutine.promise().status();
+            // NOTE: Just coping router ptr. Outer task will destroy router before current promise stack
+            *_outer_router << _coroutine.promise()._runner_router;
+        }
+
+        /// @brief Setting outer status params refs
+        void setup_outer(auto& outer) {
+            if (_outer_roaming or _outer_status or _outer_router)
+                return;
+            _outer_roaming = &outer.promise()._roaming;
+            _outer_status = &outer.promise().status();
+            _outer_router = &outer.promise()._runner_router;
+        }
 
         /**
          * @brief Destructor. Wakes all registered waiters
@@ -272,7 +297,7 @@ namespace ace::core {
                     handle.promise()._runner_router->cancel();
                     handle.promise()._runner_router.release();
                 }
-                handle.promise().status(e_detached);
+                handle.promise().status(e_canceled);
             }
 
             bool redirect(void* undefined_waiter) noexcept override {
@@ -322,7 +347,7 @@ namespace ace::core {
             bool cancel_yield() noexcept override {
                 if (not _address) return false;
                 auto handle = coroutine_t::from_address(_address);
-                handle.promise().status(e_detached);
+                handle.promise().status(e_canceled);
                 return true;
             }
 
@@ -476,7 +501,7 @@ namespace ace::core {
          */
         bool await_ready() override {
             if (_coroutine.done()) return true;
-            if (_coroutine.promise().status() == e_detached) return true;
+            if (_coroutine.promise().status() == e_canceled) return true;
             // NOTE: Necessary to create execution gap to read yield value from calling side
             if (_coroutine.promise().status() == e_executed_with_value) {
                 _coroutine.promise().status(e_executed);
@@ -484,8 +509,8 @@ namespace ace::core {
             }
             if (is_resumable()) {
                 release_future();
-                // TODO: add router and other stuff propagation
                 _coroutine.resume();
+                propagate();
                 return _coroutine.done();
             }
             return false;
@@ -505,13 +530,8 @@ namespace ace::core {
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
             // NOTE: Secure if _runner is null
             _coroutine.promise()._runner = outer.promise()._runner;
-            // NOTE: Storing local value of roaming into outer
-            outer.promise()._roaming = _coroutine.promise()._roaming;
-            // NOTE: Storing local value of status into outer
-            outer.promise().status(_coroutine.promise().status());
-            // NOTE: No extra checks needed, because function would be called once before suspending.
-            // NOTE: Just coping router ptr. Outer task will destroy router before current promise stack
-            outer.promise()._runner_router << _coroutine.promise()._runner_router;
+            setup_outer(outer);
+            propagate();
             return true;
         }
 
@@ -549,7 +569,7 @@ namespace ace::core {
                 is_exist()
                 and _coroutine.promise().status() not_eq e_failed
                 and _coroutine.promise().status() not_eq e_finished
-                and _coroutine.promise().status() not_eq e_detached
+                and _coroutine.promise().status() not_eq e_canceled
                 and is_resumable()
             };
             // NOTE: Releasing future and resume async

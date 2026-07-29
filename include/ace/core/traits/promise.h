@@ -218,7 +218,7 @@ namespace ace::core::traits {
 
         promise_traits() = default;
 
-        promise_lifecycle status() { return promise_return_traits_t::_status; }
+        promise_lifecycle& status() { return promise_return_traits_t::_status; }
 
         promise_lifecycle status(const promise_lifecycle status) {
             promise_return_traits_t::_status = status;

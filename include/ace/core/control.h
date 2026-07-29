@@ -51,7 +51,7 @@ namespace ace::core {
         e_executed,             ///< Coroutine is suspended normally (awaiting a future).
         e_executed_with_value,  ///< Coroutine yielded a value and is suspended.
         e_finished,             ///< Coroutine reached @c co_return successfully.
-        e_detached,             ///< Coroutine was cancelled and should be dropped.
+        e_canceled,             ///< Coroutine was canceled and should be dropped.
     };
 
     /**

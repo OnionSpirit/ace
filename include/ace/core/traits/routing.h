@@ -209,6 +209,7 @@ namespace ace::core::traits {
         template<typename carry_t>
         requires requires { carry_t::_router; carry_t::_area; }
         router_slot& operator <<(carry_t& carry) noexcept {
+            // TODO: Make only ptr copy without memcpy
             if (carry._router) {
                 memcpy(_area, carry._area, slot_memsize_v);
                 _router = reinterpret_cast<router_handle_t *>(_area);

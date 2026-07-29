@@ -35,6 +35,217 @@
 
 namespace ace::core {
 
+    /**
+     * @brief CRTP mixin that provides @c return_value() and @c yield_value()
+     *        to a promise type for non-void coroutines.
+     *
+     * @details This specialization handles coroutines that return a value via
+     * @c co_return expr or produce intermediate values via @c co_yield expr.
+     *
+     * @tparam promiseT  The concrete derived promise type (CRTP).
+     * @tparam returnT   The value type returned by @c co_return.
+     */
+    template <typename promiseT, typename returnT>
+    struct automaton_rule {
+
+        static_assert(not std::is_void_v<returnT>, "It is forbidden to create an <automaton> with <void> return value");
+
+        alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
+
+        alignas(ACE_BUS_SIZE) returnT _return_value {};                          ///< Storage for the value produced by @c co_return.
+
+    protected:
+
+        alignas(ACE_BUS_SIZE) promise_lifecycle _status { e_inited };           ///< Current lifecycle state.
+
+    public:
+
+        /**
+         * @brief Called by the coroutine machinery when @c co_return expr is executed.
+         * @details Stores the value and transitions status to @c e_finished.
+         * @param return_value  Value produced by @c co_return.
+         * @return @c std::suspend_never — no suspension after returning.
+         */
+        auto return_value(returnT return_value) {
+            _return_value = std::forward<std::remove_reference_t<returnT>>(return_value);
+            _derived->status(e_finished);
+            return std::suspend_never{};
+        }
+
+        /**
+         * @brief Called by the coroutine machinery when @c co_yield expr is executed.
+         * @details Stores the intermediate value and transitions status to
+         * @c e_executed_with_value, then suspends the coroutine.
+         * @param yield_value  Value produced by @c co_yield.
+         * @return @c std::suspend_always — suspends after yielding.
+         */
+        auto yield_value(returnT yield_value) {
+            _derived->status(e_executed_with_value);
+            _return_value = yield_value;
+            return std::suspend_always{};
+        }
+
+        /// @brief Returns @c std::suspend_never — no suspension at creation.
+        consteval static auto initial_result() noexcept { return std::suspend_always{}; };
+    };
+
+
+    /**
+     * @brief CRTP mixin that provides @c return_value()
+     *        to a promise type for lazy non-void coroutines.
+     *
+     * @details This specialization handles lazy coroutines that return a value via
+     * @c co_return expr.
+     * Used by @c ace::async<T>. @c initial_suspend() returns
+     * @c std::suspend_always, so the coroutine does not run until it is
+     * explicitly scheduled or awaited.
+     *
+     * @tparam promiseT  The concrete derived promise type (CRTP).
+     * @tparam returnT   The value type returned by @c co_return.
+     */
+    template <typename promiseT, typename returnT>
+    struct lazy_rule {
+
+        alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
+
+        alignas(ACE_BUS_SIZE) returnT _return_value {};                          ///< Storage for the value produced by @c co_return.
+
+    protected:
+
+        alignas(ACE_BUS_SIZE) promise_lifecycle _status { e_inited };           ///< Current lifecycle state.
+
+    public:
+
+        /**
+         * @brief Called by the coroutine machinery when @c co_return expr is executed.
+         * @details Stores the value and transitions status to @c e_finished.
+         * @param return_value  Value produced by @c co_return.
+         * @return @c std::suspend_never — no suspension after returning.
+         */
+        auto return_value(returnT return_value) {
+            _return_value = std::forward<std::remove_reference_t<returnT>>(return_value);
+            _derived->status(e_finished);
+            return std::suspend_never{};
+        }
+
+        /// @brief Returns @c std::suspend_never — suspension at creation.
+        consteval static auto initial_result() noexcept { return std::suspend_always{}; };
+    };
+
+
+    /**
+     * @brief CRTP mixin specialization for @c void-returning lazy coroutines.
+     *
+     * @details This specialization handles lazy coroutines that return @c void.
+     * Provides @c return_void() instead of @c return_value().
+     * Used by @c ace::async<void>. @c initial_suspend() returns
+     * @c std::suspend_always, so the coroutine does not run until it is
+     * explicitly scheduled or awaited.
+     *
+     * @tparam promiseT  The concrete derived promise type (CRTP).
+     */
+    template <typename promiseT>
+    struct lazy_rule <promiseT, void> {
+
+        alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
+
+    protected:
+
+        alignas(ACE_BUS_SIZE) promise_lifecycle _status { e_inited };           ///< Current lifecycle state.
+
+    public:
+
+        /**
+         * @brief Called by the coroutine machinery when @c co_return (no value) is executed.
+         * @return @c std::suspend_never — no suspension.
+         */
+        auto return_void() {
+            _derived->status(e_finished);
+            return std::suspend_never{};
+        }
+
+        /// @brief Returns @c std::suspend_never — suspension at creation.
+        consteval static auto initial_result() noexcept { return std::suspend_always{}; };
+    };
+
+
+    /**
+     * @brief CRTP mixin that provides @c return_value() and @c yield_value()
+     *        to a promise type for non-void eager coroutines.
+     *
+     * @details This specialization handles eager coroutines that return a value via
+     * @c co_return expr.
+     * Used by @c ace::promise<T>. @c initial_suspend() returns
+     * @c std::suspend_never, so the coroutine body runs as soon as the
+     * return object is constructed.
+     *
+     * @tparam promiseT  The concrete derived promise type (CRTP).
+     * @tparam returnT   The value type returned by @c co_return.
+     */
+    template <typename promiseT, typename returnT>
+    struct eager_rule {
+
+        alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
+
+        alignas(ACE_BUS_SIZE) returnT _return_value {};                          ///< Storage for the value produced by @c co_return.
+
+    protected:
+
+        alignas(ACE_BUS_SIZE) promise_lifecycle _status { e_inited };           ///< Current lifecycle state.
+
+    public:
+
+        /**
+         * @brief Called by the coroutine machinery when @c co_return expr is executed.
+         * @details Stores the value and transitions status to @c e_finished.
+         * @param return_value  Value produced by @c co_return.
+         * @return @c std::suspend_never — no suspension after returning.
+         */
+        auto return_value(returnT return_value) {
+            _return_value = std::forward<std::remove_reference_t<returnT>>(return_value);
+            _derived->status(e_finished);
+            return std::suspend_never{};
+        }
+
+        /// @brief Returns @c std::suspend_never — no suspension at creation.
+        consteval static auto initial_result() noexcept { return std::suspend_never{}; };
+    };
+
+
+    /**
+     * @brief CRTP mixin specialization for @c void-returning eager coroutines.
+     *
+     * @details This specialization handles eager coroutines that return @c void.
+     * Used by @c ace::promise<void>. @c initial_suspend() returns
+     * @c std::suspend_never, so the coroutine body runs as soon as the
+     * return object is constructed.
+     *
+     * @tparam promiseT  The concrete derived promise type (CRTP).
+     */
+    template <typename promiseT>
+    struct eager_rule <promiseT, void> {
+
+        alignas(ACE_BUS_SIZE) promiseT* _derived = static_cast<promiseT*>(this); ///< CRTP pointer to the concrete promise.
+
+    protected:
+
+        alignas(ACE_BUS_SIZE) promise_lifecycle _status { e_inited };           ///< Current lifecycle state.
+
+    public:
+
+        /**
+         * @brief Called by the coroutine machinery when @c co_return (no value) is executed.
+         * @return @c std::suspend_never — no suspension.
+         */
+        auto return_void() {
+            _derived->status(e_finished);
+            return std::suspend_never{};
+        }
+
+        /// @brief Returns @c std::suspend_never — no suspension at creation.
+        consteval static auto initial_result() noexcept { return std::suspend_never{}; };
+    };
+
     /// @brief CRTP tag base for promise suspension policy types.
     struct promise_rule_traits { struct e_promise_rule {}; };
 

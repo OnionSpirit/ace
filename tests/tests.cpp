@@ -3144,6 +3144,30 @@ TEST_F(cross_mechanic_fixture, channel_clean_after_run) {
     EXPECT_EQ(42, res[0]);
 }
 
+// Проверяет что при гонке ping() двух automaton через operator or в цикле
+// не теряется ни одно co_yield значение. Каждый автоматон генерирует
+// 3 co_yield + 1 co_return = 4 значения. Ожидается 8 значений суммарно.
+// Когда один ping выигрывает гонку, пинг проигравшего отменяется, но сам
+// автоматон должен остаться жив и его значения доступны на следующей итерации.
+TEST_F(cross_mechanic_fixture, or_ping_automaton_loop_no_value_loss) {
+    // Почему проверяем гонку ping через or в цикле: это финальный тест
+    // параллельной работы нескольких automaton с композитным оператором or.
+    // co_yield значения не должны теряться при отмене проигравшего ping —
+    // cancel_yield должен очищать только ожидающего (yield_waiter), но не
+    // разрушать сам автоматон и не затирать e_executed_with_value статус.
+    ace::futures::tunnel::dyn::bus<int> result;
+    ace::schedule(or_ping_two_in_loop(result));
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+    auto values = fetch(result);
+    ASSERT_EQ(8u, values.size());
+    // Проверяем что все 8 значений присутствуют (порядок недетерминирован)
+    std::set<int> expected {10, 20, 30, 40, 100, 200, 300, 400};
+    for (auto v : values)
+        expected.erase(v);
+    EXPECT_TRUE(expected.empty()) << "Not all expected values were collected";
+}
+
 // ==========================================================================
 // clock — hierarchical time wheel tests
 // ==========================================================================

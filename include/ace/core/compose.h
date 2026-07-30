@@ -108,7 +108,7 @@ namespace ace::core {
             typedef decltype(std::declval<future_t>().await_resume()) future_ret_t;
 
             if constexpr (std::same_as<return_t, std::variant<l_future_ret_t, r_future_ret_t>>)
-                std::get<observer_idx>(_result) = co_await future;
+                _result.template emplace<observer_idx>(co_await future);
             else if constexpr (std::same_as<return_t, std::optional<future_ret_t>>)
                 _result = co_await future;
             else

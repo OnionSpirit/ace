@@ -102,11 +102,11 @@ echo "Report: coverage_report/index.html"
 | `core/traits/routing.h` | 60%→95% ✅ | ~~router_slot::operator=, release(), reset()~~ ✅, router_slot_size_limit (compile-time) |
 | `core/traits/vortex.h` | 50% | detach_set/detach_get, respawn, vortex() цикл с сигналами, inspect() |
 | `core/control.h` | 40%→90% ✅ | ~~disown, watch/unwatch, is_untracked, is_disowned, get_block_from_address, forward~~ ✅, handle_cancel с router |
-| `core/async.h` | 60%→75% | ~~~async c router, prefetch, track, automaton paths, observe edge cases~~ ✅, release_waiters, release_router, await_ready_done/with_router/resumable, await_suspend_propagates, await_resume_void/typed, get_current_pool |
+| `core/async.h` | 60%→78% | ~~~async c router, prefetch, track, automaton paths, observe edge cases~~ ✅, ~~cancel_yield фикс: сброс _yield_waiter вместо e_canceled~~ ✅, release_waiters, release_router, await_ready_done/with_router/resumable, await_suspend_propagates, await_resume_void/typed, get_current_pool |
 | `core/runner.h` | 60%→70% | ~~velocity, clear_velocity, empty, runner_move~~ ✅, reattach_front, yank_vortex, run цикл >128 задач, fetch_task_node_local/insert/empty |
 | `core/dispatcher.h` | 50%→65% | ~~reload, interrupt/terminate~~ ✅, worker_round, round_robin, fetch_config, schedule_specific_runner, многопоточное взаимодействие |
 | `core/signal.h` | 0%→80% ✅ | ~~весь модуль~~ ✅ |
-| `core/compose.h` | 40%→55% | ~~or_await_left_wins, and_await_both_succeed~~ ✅, or_await_composed, compose(), observer(), все router-ы |
+| `core/compose.h` | 40%→65% | ~~or_await_left_wins, and_await_both_succeed~~ ✅, ~~or_await_composed_3~~ ✅, or_await_composed, compose(), observer(), все router-ы. Исправлен баг: or_await::observer (typed) использовал std::get вместо emplace. Исправлен баг: cancel_yield разрушал automaton при отмене ping в or |
 | `core/async_handle.h` | 50%→65% | ~~join после cancel, done~~ ✅, join_handler::await_ready/suspend/resume, join_handler_router |
 | `io.h` | 30%→85% | ~~io::buffer (append/clone/clear/move/formatter/all overloads)~~ ✅, ~~io::guard RAII close~~ ✅, ~~io::hanged~~ ✅, ~~io::any~~ ✅, ~~span dynamic_extent bug fixed~~, ~~any placement new + deleter fix~~, query_router::cancel |
 | `net.h` | 20% | UDP (sendto/recv), connected UDP, sendmsg/recvmsg, все bind/connect/accept overloads, error-пути, connection_link, io::caster |
@@ -406,10 +406,11 @@ echo "Report: coverage_report/index.html"
 | C11 | `operator_pipe` | pipe: цепочка выполняется | ✅ |
 | C12 | `operator_pipe_void` | void >> void: вызов без аргументов | ⬜ |
 | C13 | `compose_function` | compose(sender, responder) | ⬜ |
-| C14 | `or_await_composed_3` | or(a, b, c) — три future | ⬜ (баг compose.h с omniptr::operator->) |
+| C14 | `or_await_composed_3` | or(a, b, c) — три future | ✅ (исправлен баг variant emplace в or_await::observer для typed-race) |
 | C15 | `and_await_composed_3` | and(a, b, c) — три future | ⬜ |
 | C16 | `or_await_cancel_observer` | cancel одного из observer-ов в or | ⬜ |
 | C17 | `or_await_router_cancel` | cancel во время гонки | ⬜ |
+| C18 | `or_await_two_typed` | or(T, T) — одинаковые типы: проверка что emplace вместо get работает | ✅ (фикс: или в or_ping_automaton_loop_no_value_loss) |
 
 ---
 
@@ -724,6 +725,7 @@ echo "Report: coverage_report/index.html"
 | X24 | `fs_write_read_cycle` | write → read → verify | ✅ |
 | X25 | `stress_spawn_cancel` | 100 spawn → cancel всех → нет утечек | ✅ |
 | X26 | `channel_clean_after_run` | Каналы пусты после run (no waiter leak) | ✅ (добавлен) |
+| X27 | `or_ping_automaton_loop_no_value_loss` | 2 automaton → or-гонка ping в цикле (8 итераций) → проверка что cancel_yield не разрушает автоматон и не теряет co_yield значения | ✅ (добавлен) |
 
 ---
 

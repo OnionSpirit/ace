@@ -952,6 +952,45 @@ struct cross_mechanic_fixture : base_fixture {
         ace::cfg::g_config._runners_amount = n;
         ace::reload();
     }
+
+    // Автоматоны с задержками между co_yield для проверки
+    // or-гонки ping в цикле без потери значений
+    static ace::automaton<int> gen_delayed_seq(int a, int b, int c, int d) {
+        co_yield a;
+        co_await ace::futures::timeout(std::chrono::milliseconds(1));
+        co_yield b;
+        co_await ace::futures::timeout(std::chrono::milliseconds(1));
+        co_yield c;
+        co_await ace::futures::timeout(std::chrono::milliseconds(1));
+        co_return d;
+    }
+
+    static ace::task or_ping_two_in_loop(
+        ace::futures::tunnel::dyn::bus<int>& result)
+    {
+        auto ha = co_await ace::spawn(gen_delayed_seq(10, 20, 30, 40));
+        auto hb = co_await ace::spawn(gen_delayed_seq(100, 200, 300, 400));
+
+        int collected = 0;
+        while (collected < 8) {
+            if (ha.done()) {
+                auto val = co_await hb.ping();
+                if (val) { result << *val; ++collected; }
+            } else if (hb.done()) {
+                auto val = co_await ha.ping();
+                if (val) { result << *val; ++collected; }
+            } else {
+                auto race = co_await (ha.ping() or hb.ping());
+                // or возвращает variant<optional<int>, optional<int>>,
+                // используем visit чтобы извлечь значение независимо
+                // от индекса победителя
+                std::optional<int> extracted;
+                std::visit([&extracted](auto&& arg) { extracted = arg; }, race);
+                if (extracted) { result << *extracted; ++collected; }
+            }
+        }
+        co_return;
+    }
 };
 
 // ==========================================================================

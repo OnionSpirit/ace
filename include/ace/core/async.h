@@ -359,7 +359,7 @@ namespace ace::core {
                 if constexpr (is_automaton_rule<promise_rule_t>) {
                     if (not _address) return false;
                     auto handle = coroutine_t::from_address(_address);
-                    handle.promise().status(e_canceled);
+                    handle.promise()._yield_waiter.reset();
                 }
                 return true;
             }

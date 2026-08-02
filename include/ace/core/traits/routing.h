@@ -84,9 +84,9 @@ namespace ace::core::traits {
      *    producer coroutine finishes.
      *  - @c cancel() — request cancellation of the producer coroutine.
      */
-    struct control_router_handle {
+    struct async_router_handle {
 
-        control_router_handle() noexcept = default;
+        async_router_handle() noexcept = default;
 
         /**
          * @brief Register an external waiter that will be notified on finish.
@@ -129,7 +129,7 @@ namespace ace::core::traits {
          */
         virtual void destroy() noexcept = 0;
 
-        virtual ~control_router_handle() = default;
+        virtual ~async_router_handle() = default;
     };
 
     /**

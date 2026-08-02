@@ -70,7 +70,7 @@ namespace ace::core {
 
         uint64_t _weak_refcount {1};                                      ///< Number of watchers (handles). Initial value: 1 (the block itself).
         uint64_t _strong_refcount {1};                                    ///< Number of owners (always the coroutine frame). Initial value: 1.
-        traits::control_router_handle* _control_router { nullptr };       ///< Optional router for external join/cancel; set by @c setup_control_block().
+        traits::async_router_handle* _control_router { nullptr };       ///< Optional router for external join/cancel; set by @c setup_control_block().
         uint32_t _frame_size {1};                                         ///< Coroutine frame size, including control block. Non-zero value means stack is exist, 0 otherwise
         promise_lifecycle _status { e_inited };                           ///< Flag that shows that Coroutines completed without cancellation
 

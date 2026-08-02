@@ -38,20 +38,18 @@ namespace ace::core {
 
     struct promise_primitives {
 
-    protected:
-
-        alignas(ACE_BUS_SIZE) promise_lifecycle  _status { e_inited };
-
-    public:
-
         control_block*     _block  { nullptr };  ///< Pointer to the intrusive control block (set on coroutine construction).
 
-        promise_lifecycle& status() { return _status; }
+        [[nodiscard]] promise_lifecycle& status() {
+            if (not _block)
+                throw std::runtime_error("trying to get status from a frame control block that is null");
+            return _block->_status;
+        }
 
         promise_lifecycle status(const promise_lifecycle status) {
-            _status = status;
-            if (_block) _block->_status = status;
-            return status;
+            if (not _block)
+                throw std::runtime_error("trying to set status to a frame control block that is null");
+            return _block->_status = status;
         }
     };
 

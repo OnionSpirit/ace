@@ -281,7 +281,7 @@ namespace ace::core {
             }
         }
 
-        class async_router : public traits::control_router_handle {
+        class async_router : public traits::async_router_handle {
 
             void* _address { nullptr };
 
@@ -484,7 +484,7 @@ namespace ace::core {
              *         @c _self_router).
              */
             template <typename promise_t>
-            traits::control_router_handle* get_control_router(const std::coroutine_handle<promise_t>& self) {
+            traits::async_router_handle* get_control_router(const std::coroutine_handle<promise_t>& self) {
                 // NOTE: Initiating promise router
                 _self_router = async_router(self);
                 return &_self_router.value();

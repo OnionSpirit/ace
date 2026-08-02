@@ -101,7 +101,7 @@ namespace ace::core {
 
         bool*                  _outer_roaming { nullptr };
         runner_router_slot_t*  _outer_router  { nullptr };
-        promise_lifecycle*     _outer_status  { nullptr };
+        control_block*         _outer_block   { nullptr };
 
         /// @brief Helper to get active runner pool ptr or @c nullptr
         /// if @c async<...> is constructed out of runner context
@@ -158,22 +158,22 @@ namespace ace::core {
 
         /// @brief Propagates status parameters to outer coroutine
         void propagate() {
-            if (not _outer_roaming or not _outer_status or not _outer_router)
+            if (not _outer_roaming or not _outer_block or not _outer_router)
                 return;
             // NOTE: Storing local value of roaming into outer
             *_outer_roaming = _coroutine.promise()._roaming;
             // NOTE: Storing local value of status into outer
-            *_outer_status = _coroutine.promise().status();
+            _outer_block->_status = _coroutine.promise().status();
             // NOTE: Just coping router ptr. Outer task will destroy router before current promise stack
             *_outer_router << _coroutine.promise()._runner_router;
         }
 
         /// @brief Setting outer status params refs
         void setup_outer(auto& outer) {
-            if (_outer_roaming or _outer_status or _outer_router)
+            if (_outer_roaming or _outer_block or _outer_router)
                 return;
             _outer_roaming = &outer.promise()._roaming;
-            _outer_status = &outer.promise().status();
+            _outer_block = outer.promise()._block;
             _outer_router = &outer.promise()._runner_router;
         }
 

@@ -40,7 +40,7 @@ namespace ace::core {
 
         control_block*     _block  { nullptr };  ///< Pointer to the intrusive control block (set on coroutine construction).
 
-        [[nodiscard]] promise_lifecycle& status() {
+        [[nodiscard]] promise_lifecycle status() {
             if (not _block)
                 throw std::runtime_error("trying to get status from a frame control block that is null");
             return _block->_status;

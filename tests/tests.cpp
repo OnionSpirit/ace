@@ -1288,8 +1288,7 @@ TEST_F(control_block_fixture, control_block_init) {
     // NOTE: control_block конструируется через default-конструктор,
     // который устанавливает _weak_refcount=1, _strong_refcount=1, _frame_size=1.
     ace::core::control_block block;
-    EXPECT_EQ(1u, block._weak_refcount);
-    EXPECT_EQ(1u, block._strong_refcount);
+    EXPECT_EQ(1u, block._refcount);
     EXPECT_EQ(1u, block._frame_size);
     EXPECT_EQ(ace::core::e_inited, block._status);
 }
@@ -1302,8 +1301,7 @@ TEST_F(control_block_fixture, disown_strong) {
     // NOTE: напрямую тестируем control_block, без promise.
     ace::core::control_block block;
     ace::core::control_block::disown(&block);
-    EXPECT_EQ(0u, block._strong_refcount);
-    EXPECT_EQ(0u, block._weak_refcount);
+    EXPECT_EQ(0u, block._refcount);
     EXPECT_EQ(0u, block._frame_size);
 }
 
@@ -1328,9 +1326,9 @@ TEST_F(control_block_fixture, watch_unwatch) {
     // NOTE: напрямую тестируем control_block.
     ace::core::control_block block;
     ace::core::control_block::watch(&block);
-    EXPECT_EQ(2u, block._weak_refcount);
+    EXPECT_EQ(2u, block._refcount);
     EXPECT_FALSE(ace::core::control_block::unwatch(&block));
-    EXPECT_EQ(1u, block._weak_refcount);
+    EXPECT_EQ(1u, block._refcount);
 }
 
 // Проверяет is_untracked: true когда оба счётчика = 0.
@@ -1340,8 +1338,7 @@ TEST_F(control_block_fixture, is_untracked) {
     // NOTE: напрямую тестируем control_block.
     ace::core::control_block block;
     EXPECT_FALSE(ace::core::control_block::is_untracked(&block));
-    block._strong_refcount = 0;
-    block._weak_refcount = 0;
+    block._refcount = 0;
     EXPECT_TRUE(ace::core::control_block::is_untracked(&block));
 }
 
@@ -1406,18 +1403,18 @@ TEST_F(control_block_fixture, handle_copy) {
     // NOTE: allocated_promise выделяет control_block + promise через
     // operator new (как в production коде).
     allocated_promise ap;
-    EXPECT_EQ(1u, ap.block->_weak_refcount);
+    EXPECT_EQ(1u, ap.block->_refcount);
     {
         auto ch = ap.get_handle();
         ace::core::control_block_handle h1(ch);
-        EXPECT_EQ(2u, ap.block->_weak_refcount);
+        EXPECT_EQ(2u, ap.block->_refcount);
         {
             ace::core::control_block_handle h2(h1);
-            EXPECT_EQ(3u, ap.block->_weak_refcount);
+            EXPECT_EQ(3u, ap.block->_refcount);
         }
-        EXPECT_EQ(2u, ap.block->_weak_refcount);
+        EXPECT_EQ(2u, ap.block->_refcount);
     }
-    EXPECT_EQ(1u, ap.block->_weak_refcount);
+    EXPECT_EQ(1u, ap.block->_refcount);
 }
 
 // Проверяет что done() возвращает true когда _frame_size = 0.
@@ -1482,13 +1479,13 @@ TEST_F(control_block_fixture, handle_destroy) {
     // Почему проверяем деструктор: release() вызывается из
     // ~control_block_handle и должен корректно декрементировать счётчик.
     allocated_promise ap;
-    EXPECT_EQ(1u, ap.block->_weak_refcount);
+    EXPECT_EQ(1u, ap.block->_refcount);
     {
         auto h_coro = ap.get_handle();
         ace::core::control_block_handle h(h_coro);
-        EXPECT_EQ(2u, ap.block->_weak_refcount);
+        EXPECT_EQ(2u, ap.block->_refcount);
     }
-    EXPECT_EQ(1u, ap.block->_weak_refcount);
+    EXPECT_EQ(1u, ap.block->_refcount);
 }
 
 // ==========================================================================

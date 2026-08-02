@@ -45,7 +45,7 @@ namespace ace::core {
      * @details The runner inspects this value after each call to @c awake() to
      * decide what to do with the coroutine frame next.
      */
-    enum promise_lifecycle : uint32_t  {
+    enum promise_lifecycle : uint8_t  {
         e_failed,               ///< Coroutine terminated via unhandled exception.
         e_inited,               ///< Coroutine was just created; runner pool not yet assigned.
         e_executed,             ///< Coroutine is suspended normally (awaiting a future).
@@ -68,11 +68,12 @@ namespace ace::core {
      */
     struct control_block {
 
-        uint64_t _weak_refcount {1};                                      ///< Number of watchers (handles). Initial value: 1 (the block itself).
-        uint64_t _strong_refcount {1};                                    ///< Number of owners (always the coroutine frame). Initial value: 1.
-        traits::async_router_handle* _control_router { nullptr };       ///< Optional router for external join/cancel; set by @c setup_control_block().
-        uint32_t _frame_size {1};                                         ///< Coroutine frame size, including control block. Non-zero value means stack is exist, 0 otherwise
-        promise_lifecycle _status { e_inited };                           ///< Flag that shows that Coroutines completed without cancellation
+        struct {
+            uint32_t          _refcount : 24 { 1 };                  ///< Number of watchers (handles). Initial value: 1 (the coroutine itself).
+            promise_lifecycle _status   : 8  { e_inited };           ///< Flag that shows that Coroutines completed without cancellation
+        };
+        traits::async_router_handle* _control_router { nullptr };    ///< Optional router for external join/cancel; set by @c setup_control_block().
+        uint32_t _frame_size {1};                                    ///< Coroutine frame size, including control block. Non-zero value means stack is exist, 0 otherwise
 
         control_block() = default;
 
@@ -86,7 +87,7 @@ namespace ace::core {
         static bool is_untracked(void* v_block);
 
         /**
-         * @brief Decrement the strong (owner) count and mark the block as dead.
+         * @brief Decrement the refcount and mark the block as dead.
          * @details Called from @c promise_type::final_suspend() when the
          * coroutine has finished executing.
          * @param v_block  Pointer to the control block.
@@ -95,16 +96,16 @@ namespace ace::core {
         static bool disown(void* v_block);
 
         /**
-         * @brief Increment the weak (watcher) count.
+         * @brief Increment the refcount.
          * @details Called when a new @c control_block_handle is constructed.
          * @param v_block  Pointer to the control block.
          * @return @c true if the block became untracked after the operation
-         *         (only possible if @c _weak_refcount was already 0).
+         *         (only possible if @c refcount was already 0).
          */
         static bool watch(void* v_block);
 
         /**
-         * @brief Decrement the weak (watcher) count.
+         * @brief Decrement the refcount.
          * @details Called from @c control_block_handle's destructor or @c cancel().
          * @param v_block  Pointer to the control block.
          * @return @c true if the block became untracked and can be freed.
@@ -281,8 +282,7 @@ namespace ace::core {
     inline bool control_block::is_untracked(void* v_block) {
         if (v_block == nullptr) [[unlikely]] return false;
         const auto block = static_cast<control_block*>(v_block);
-        return  block->_weak_refcount == 0
-            and block->_strong_refcount == 0;
+        return  block->_refcount == 0;
     }
 
     // NOTE: Detaches owner from the control block
@@ -290,8 +290,7 @@ namespace ace::core {
         if (v_block == nullptr) [[unlikely]] return false;
         const auto block = static_cast<control_block*>(v_block);
         if (block->_frame_size == 0) [[unlikely]] goto end;
-        --block->_strong_refcount;
-        --block->_weak_refcount;
+        --block->_refcount;
         block->_frame_size = 0;
         end: return is_untracked(block);
     }
@@ -300,8 +299,8 @@ namespace ace::core {
     inline bool control_block::watch(void* v_block) {
         if (v_block == nullptr) [[unlikely]] return false;
         const auto block = static_cast<control_block*>(v_block);
-        if (block->_weak_refcount == 0) [[unlikely]] goto end;
-        ++block->_weak_refcount;
+        if (block->_refcount == 0) [[unlikely]] goto end;
+        ++block->_refcount;
         end: return is_untracked(block);
     }
 
@@ -309,7 +308,7 @@ namespace ace::core {
     inline bool control_block::unwatch(void* v_block) {
         if (v_block == nullptr) [[unlikely]] return false;
         const auto block = static_cast<control_block*>(v_block);
-        --block->_weak_refcount;
+        --block->_refcount;
         return is_untracked(block);
     }
 

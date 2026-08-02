@@ -19,7 +19,7 @@ namespace ace::core {
     // ── join_handler (regular tasks) ───────────────────────────────────
 
     template <typename resume_t = void>
-    class ACE_AWAIT_NODISCARD join_handler : public traits::future_traits<join_handler<resume_t>> {
+    struct ACE_AWAIT_NODISCARD join_handler : traits::future_traits<join_handler<resume_t>> {
 
     protected:
 
@@ -55,7 +55,9 @@ namespace ace::core {
     // ── ping_handler (automaton — consume one co_yield via router) ─────
 
     template <typename resume_t = void>
-    class ACE_AWAIT_NODISCARD ping_handler : public traits::future_traits<ping_handler<resume_t>> {
+    struct ACE_AWAIT_NODISCARD ping_handler : traits::future_traits<ping_handler<resume_t>> {
+
+    protected:
 
         control_block_handle _handle;
         struct ping_router;

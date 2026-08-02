@@ -980,13 +980,22 @@ struct cross_mechanic_fixture : base_fixture {
                 auto val = co_await ha.ping();
                 if (val) { result << *val; ++collected; }
             } else {
-                auto race = co_await (ha.ping() or hb.ping());
-                // or возвращает variant<optional<int>, optional<int>>,
-                // используем visit чтобы извлечь значение независимо
-                // от индекса победителя
-                std::optional<int> extracted;
-                std::visit([&extracted](auto&& arg) { extracted = arg; }, race);
-                if (extracted) { result << *extracted; ++collected; }
+                auto race = co_await (
+                       ha.ping() >> [&] (std::optional<int> val)
+                           -> std::optional<int> {
+                           if (val) { result << *val; ++collected; }
+                           return val;
+                       }
+                    or hb.ping() >> [&] (std::optional<int> val)
+                           -> std::optional<int> {
+                           if (val) { result << *val; ++collected; }
+                           return val;
+                       }
+                );
+                // race — std::variant<std::optional<int>, std::optional<int>>
+                // Значения уже собраны внутри lambdas через operator>>,
+                // race используется только для синхронизации гонки.
+                (void)race;
             }
         }
         co_return;

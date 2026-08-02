@@ -429,6 +429,44 @@ namespace ace::core {
         co_return responder();
     }
 
+
+    template <
+        meta::is_future sender_t,
+        typename callable_t
+    > requires (not std::same_as<meta::resume_type<sender_t>, void>)
+    //
+    auto compose(sender_t&& sender, callable_t&& responder)
+        -> promise<std::invoke_result_t<std::decay_t<callable_t>, meta::resume_type<sender_t>&&>>
+    {
+        typedef meta::resume_type<sender_t> sender_resume_t;
+        using return_t = std::invoke_result_t<std::decay_t<callable_t>, sender_resume_t&&>;
+        if constexpr (std::is_void_v<return_t>) {
+            std::forward<callable_t>(responder)(std::forward<sender_resume_t>(co_await sender));
+            co_return;
+        } else {
+            co_return std::forward<callable_t>(responder)(std::forward<sender_resume_t>(co_await sender));
+        }
+    }
+
+
+    template <
+        meta::is_future sender_t,
+        typename callable_t
+    > requires std::same_as<meta::resume_type<sender_t>, void>
+    //
+    auto compose(sender_t&& sender, callable_t&& responder)
+        -> promise<std::invoke_result_t<std::decay_t<callable_t>>>
+    {
+        co_await sender;
+        using return_t = std::invoke_result_t<std::decay_t<callable_t>>;
+        if constexpr (std::is_void_v<return_t>) {
+            std::forward<callable_t>(responder)();
+            co_return;
+        } else {
+            co_return std::forward<callable_t>(responder)();
+        }
+    }
+
 } // end namespace ace::core
 
 //==============================- DEFINITIONS -==================================
@@ -889,7 +927,7 @@ template <
 //
 ace::promise<async_return>
 operator >> (sender_t&& sender, ace::core::async<async_return, async_promise_rule_t>(responder)(async_input)) {
-    return std::move(compose(std::forward<sender_t>(sender), responder));
+    return compose(std::forward<sender_t>(sender), responder);
 }
 
 
@@ -901,7 +939,7 @@ template <
 //
 ace::promise<async_return>
 operator >> (sender_t&& sender, ace::core::async<async_return, async_promise_rule_t>(responder)()) {
-    return std::move(compose(std::forward<sender_t>(sender), responder));
+    return compose(std::forward<sender_t>(sender), responder);
 }
 
 
@@ -912,7 +950,7 @@ template <
 //
 ace::promise<foo_return>
 operator >> (sender_t&& sender, foo_return(responder)(foo_input)) {
-    return std::move(compose(std::forward<sender_t>(sender), responder));
+    return compose(std::forward<sender_t>(sender), responder);
 }
 
 
@@ -923,7 +961,33 @@ template <
 //
 ace::promise<foo_return>
 operator >> (sender_t&& sender, foo_return(responder)()) {
-    return std::move(compose(std::forward<sender_t>(sender), responder));
+    return compose(std::forward<sender_t>(sender), responder);
+}
+
+
+template <
+    ace::core::meta::is_future sender_t,
+    typename callable_t
+> requires (
+    not std::same_as<ace::core::meta::resume_type<sender_t>, void>
+    and not std::is_function_v<std::remove_pointer_t<std::decay_t<callable_t>>>
+)
+//
+auto operator >> (sender_t&& sender, callable_t&& responder) {
+    return compose(std::forward<sender_t>(sender), std::forward<callable_t>(responder));
+}
+
+
+template <
+    ace::core::meta::is_future sender_t,
+    typename callable_t
+> requires (
+    std::same_as<ace::core::meta::resume_type<sender_t>, void>
+    and not std::is_function_v<std::remove_pointer_t<std::decay_t<callable_t>>>
+)
+//
+auto operator >> (sender_t&& sender, callable_t&& responder) {
+    return compose(std::forward<sender_t>(sender), std::forward<callable_t>(responder));
 }
 
 #undef ACE_COMPOSE_MEMBERS_ASSERT

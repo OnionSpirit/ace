@@ -972,30 +972,27 @@ struct cross_mechanic_fixture : base_fixture {
         auto hb = co_await ace::spawn(gen_delayed_seq(100, 200, 300, 400));
 
         int collected = 0;
+        auto grab_value = [&] (std::optional<int> val) -> std::optional<int> {
+            if (val) {
+                result << *val; ++collected;
+                ace::console::println("Grabbed value form automaton - {}", *val);
+            }
+            return val;
+        };
+
         while (collected < 8) {
             if (ha.done()) {
-                auto val = co_await hb.ping();
-                if (val) { result << *val; ++collected; }
+                if (auto val = co_await hb.ping()) {
+                    result << *val;
+                    ++collected;
+                }
             } else if (hb.done()) {
-                auto val = co_await ha.ping();
-                if (val) { result << *val; ++collected; }
+                if (auto val = co_await ha.ping()) {
+                    result << *val;
+                    ++collected;
+                }
             } else {
-                auto race = co_await (
-                       ha.ping() >> [&] (std::optional<int> val)
-                           -> std::optional<int> {
-                           if (val) { result << *val; ++collected; }
-                           return val;
-                       }
-                    or hb.ping() >> [&] (std::optional<int> val)
-                           -> std::optional<int> {
-                           if (val) { result << *val; ++collected; }
-                           return val;
-                       }
-                );
-                // race — std::variant<std::optional<int>, std::optional<int>>
-                // Значения уже собраны внутри lambdas через operator>>,
-                // race используется только для синхронизации гонки.
-                (void)race;
+                co_await ( ha.ping() >> grab_value or hb.ping() >> grab_value );
             }
         }
         co_return;

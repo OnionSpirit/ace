@@ -69,31 +69,22 @@ namespace ace::core {
     struct control_block {
 
         struct {
-            uint32_t          _refcount : 24 { 1 };                  ///< Number of watchers (handles). Initial value: 1 (the coroutine itself).
-            promise_lifecycle _status   : 8  { e_inited };           ///< Flag that shows that Coroutines completed without cancellation
+            uint32_t          _refcount   : 24 { 1 };                ///< Number of watchers (handles). Initial value: 1 (the coroutine itself).
+            promise_lifecycle _status     : 8  { e_inited };         ///< Flag that shows that Coroutines completed without cancellation
+            uint32_t          _frame_size : 32 { 0 };                ///< Coroutine frame size, including control block. Non-zero value means stack is exist, 0 otherwise
         };
         traits::async_router_handle* _control_router { nullptr };    ///< Optional router for external join/cancel; set by @c setup_control_block().
-        uint32_t _frame_size {1};                                    ///< Coroutine frame size, including control block. Non-zero value means stack is exist, 0 otherwise
 
         control_block() = default;
 
         ~control_block() = default;
 
         /**
-         * @brief Check whether both reference counts are zero.
+         * @brief Check reference count is zero.
          * @param v_block  Pointer to the control block.
-         * @return @c true if both @c _weak_refcount and @c _strong_refcount are 0.
+         * @return @c true if @c _refcount is 0.
          */
         static bool is_untracked(void* v_block);
-
-        /**
-         * @brief Decrement the refcount and mark the block as dead.
-         * @details Called from @c promise_type::final_suspend() when the
-         * coroutine has finished executing.
-         * @param v_block  Pointer to the control block.
-         * @return @c true if the block became untracked and can be freed.
-         */
-        static bool disown(void* v_block);
 
         /**
          * @brief Increment the refcount.
@@ -102,7 +93,7 @@ namespace ace::core {
          * @return @c true if the block became untracked after the operation
          *         (only possible if @c refcount was already 0).
          */
-        static bool watch(void* v_block);
+        static bool track(void* v_block);
 
         /**
          * @brief Decrement the refcount.
@@ -110,14 +101,7 @@ namespace ace::core {
          * @param v_block  Pointer to the control block.
          * @return @c true if the block became untracked and can be freed.
          */
-        static bool unwatch(void* v_block);
-
-        /**
-         * @brief Check whether the coroutine that owns this block has finished.
-         * @param address  Raw promise address (offset by @c control_block_size).
-         * @return @c true if @c _exists == false.
-         */
-        static bool is_disowned(void* address);
+        static bool untrack(void* v_block);
 
         /**
          * @brief Convert a promise address to the @c control_block* that precedes it.
@@ -158,7 +142,7 @@ namespace ace::core {
         control_block* _block { nullptr };
 
         void release() {
-            if (control_block::unwatch(_block))
+            if (control_block::untrack(_block))
                 _block->_control_router->destroy();
             _block = nullptr;
         }
@@ -173,7 +157,7 @@ namespace ace::core {
          */
         control_block_handle(const control_block_handle& h) {
             this->_block = h._block;
-            control_block::watch(_block);
+            control_block::track(_block);
         }
 
         /**
@@ -185,7 +169,7 @@ namespace ace::core {
         template <is_controled_promise promise_t>
         explicit control_block_handle(const std::coroutine_handle<promise_t>& promise) {
             _block = promise.promise()._block;
-            control_block::watch(_block);
+            control_block::track(_block);
         }
 
         /// @brief Destructor.  Decrements the weak reference count; may delete the block.
@@ -212,7 +196,9 @@ namespace ace::core {
          */
         [[nodiscard]] bool done() const {
             if (is_idle()) [[unlikely]] return false;
-            return _block->_frame_size == 0;
+            return _block->_status == e_failed or
+                   _block->_status == e_canceled or
+                   _block->_status == e_finished;
         }
 
         /**
@@ -285,18 +271,8 @@ namespace ace::core {
         return  block->_refcount == 0;
     }
 
-    // NOTE: Detaches owner from the control block
-    inline bool control_block::disown(void* v_block) {
-        if (v_block == nullptr) [[unlikely]] return false;
-        const auto block = static_cast<control_block*>(v_block);
-        if (block->_frame_size == 0) [[unlikely]] goto end;
-        --block->_refcount;
-        block->_frame_size = 0;
-        end: return is_untracked(block);
-    }
-
-    // NOTE: Attaches spectator (not owner) to the control block
-    inline bool control_block::watch(void* v_block) {
+    // NOTE: Attaches spectator to the control block
+    inline bool control_block::track(void* v_block) {
         if (v_block == nullptr) [[unlikely]] return false;
         const auto block = static_cast<control_block*>(v_block);
         if (block->_refcount == 0) [[unlikely]] goto end;
@@ -304,17 +280,13 @@ namespace ace::core {
         end: return is_untracked(block);
     }
 
-    // NOTE: Detaches spectator (not owner) from the control block
-    inline bool control_block::unwatch(void* v_block) {
+    // NOTE: Detaches spectator from the control block
+    inline bool control_block::untrack(void* v_block) {
         if (v_block == nullptr) [[unlikely]] return false;
         const auto block = static_cast<control_block*>(v_block);
+        if (block->_refcount == 0) [[unlikely]] goto end;
         --block->_refcount;
-        return is_untracked(block);
-    }
-
-    // NOTE: Gets control block of passed promise address, and checks ownership status
-    inline bool control_block::is_disowned(void* address) {
-        return get_block_from_address(address)->_frame_size == 0;
+        end: return is_untracked(block);
     }
 
     // NOTE: Gets control block pointer from the raw promise address

@@ -150,7 +150,7 @@ namespace ace::core {
          * @return @c true if resumable.
          */
         [[nodiscard]] bool is_exist() const noexcept {
-            return _coroutine and not _coroutine.done() and not control_block::is_disowned(_coroutine.address());
+            return _coroutine and not _coroutine.done();
         }
 
         /// @brief Equivalent to @c is_exist().
@@ -194,7 +194,7 @@ namespace ace::core {
                     _coroutine.promise()._runner_router.release();
                 }
                 // NOTE: Destroying stack only if it is become untracked
-                if (control_block::disown(_coroutine.promise()._block))
+                if (control_block::untrack(_coroutine.promise()._block))
                     _coroutine.destroy();
             }
         };

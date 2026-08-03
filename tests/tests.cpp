@@ -1144,7 +1144,7 @@ TEST_F(promise_traits_fixture, operator_new_layout) {
         auto* promise_addr = t._coroutine.address();
         auto* block = ace::core::control_block::get_block_from_address(promise_addr);
         EXPECT_NE(nullptr, block);
-        EXPECT_GT(block->_frame_size, 0u);
+        EXPECT_EQ(block->_frame_size, 0u);
     }
 }
 
@@ -1289,31 +1289,19 @@ TEST_F(control_block_fixture, control_block_init) {
     // который устанавливает _weak_refcount=1, _strong_refcount=1, _frame_size=1.
     ace::core::control_block block;
     EXPECT_EQ(1u, block._refcount);
-    EXPECT_EQ(1u, block._frame_size);
+    EXPECT_EQ(0u, block._frame_size);
     EXPECT_EQ(ace::core::e_inited, block._status);
 }
 
-// Проверяет disown(): декрементирует _strong_refcount и _weak_refcount.
-TEST_F(control_block_fixture, disown_strong) {
-    // Почему проверяем disown: вызывается из promise_type::final_suspend()
-    // когда корутина завершилась. _strong_refcount должен уменьшиться
-    // чтобы блок мог быть освобождён когда все наблюдатели уйдут.
-    // NOTE: напрямую тестируем control_block, без promise.
-    ace::core::control_block block;
-    ace::core::control_block::disown(&block);
-    EXPECT_EQ(0u, block._refcount);
-    EXPECT_EQ(0u, block._frame_size);
-}
-
-// Проверяет что последний disown делает блок untracked.
-TEST_F(control_block_fixture, disown_last) {
+// Проверяет что последний unwatch делает блок untracked.
+TEST_F(control_block_fixture, unwatch_last) {
     // Почему проверяем возврат is_untracked: operator delete в
     // promise_traits проверяет is_untracked перед освобождением
     // памяти. Если возвращается false когда должно быть true —
     // утечка памяти.
     // NOTE: напрямую тестируем control_block.
     ace::core::control_block block;
-    bool untracked = ace::core::control_block::disown(&block);
+    bool untracked = ace::core::control_block::untrack(&block);
     EXPECT_TRUE(untracked);
     EXPECT_TRUE(ace::core::control_block::is_untracked(&block));
 }
@@ -1325,9 +1313,9 @@ TEST_F(control_block_fixture, watch_unwatch) {
     // (watch) и разрушается (unwatch).
     // NOTE: напрямую тестируем control_block.
     ace::core::control_block block;
-    ace::core::control_block::watch(&block);
+    ace::core::control_block::track(&block);
     EXPECT_EQ(2u, block._refcount);
-    EXPECT_FALSE(ace::core::control_block::unwatch(&block));
+    EXPECT_FALSE(ace::core::control_block::untrack(&block));
     EXPECT_EQ(1u, block._refcount);
 }
 
@@ -1340,23 +1328,6 @@ TEST_F(control_block_fixture, is_untracked) {
     EXPECT_FALSE(ace::core::control_block::is_untracked(&block));
     block._refcount = 0;
     EXPECT_TRUE(ace::core::control_block::is_untracked(&block));
-}
-
-// Проверяет is_disowned: true когда _frame_size = 0.
-TEST_F(control_block_fixture, is_disowned) {
-    // Почему проверяем is_disowned: используется в async::is_exist()
-    // для проверки не отменена ли корутина.
-    // NOTE: is_disowned требует address промиса (смещение от control_block).
-    // Создаём control_block + promise layout в куче.
-    constexpr auto cb_size = sizeof(ace::core::control_block);
-    alignas(ace::core::control_block) uint8_t buf[cb_size + 64];
-    auto* prom_addr = buf + cb_size;
-    // инициализируем control_block
-    auto* block = new (buf) ace::core::control_block();
-    block->_frame_size = 0;
-    EXPECT_TRUE(ace::core::control_block::is_disowned(prom_addr));
-    block->_frame_size = 42;
-    EXPECT_FALSE(ace::core::control_block::is_disowned(prom_addr));
 }
 
 // Проверяет get_block_from_address: корректно вычисляет адрес control_block.
@@ -1426,7 +1397,7 @@ TEST_F(control_block_fixture, handle_done) {
     auto h_coro = ap.get_handle();
     ace::core::control_block_handle h(h_coro);
     EXPECT_FALSE(h.done());
-    ap.block->_frame_size = 0;
+    ap.block->_status = ace::core::e_failed;
     EXPECT_TRUE(h.done());
 }
 

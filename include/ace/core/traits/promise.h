@@ -53,6 +53,7 @@ namespace ace::core {
         }
     };
 
+    // TODO: Move async_routers to the rules
 
     /**
      * @brief Base that provides @c return_value() and @c yield_value()
@@ -416,28 +417,13 @@ namespace ace::core::traits {
          * @brief Custom deallocator.  Decrements the control-block strong
          * reference count and frees the whole allocation only when untracked.
          * @param mem_ptr  Pointer to the promise area.
-         */
-        void operator delete(void* mem_ptr) noexcept {
-            // NOTE: Trying to disown, and if it's untracked do delete
-            if (control_block* block = control_block::get_block_from_address(mem_ptr); control_block::is_untracked(block)) {
-                // NOTE: Using true frame size with control block
-                const auto mem_size = block->_frame_size;
-                block->~control_block();
-                ::operator delete(block, mem_size);
-            }
-        }
-
-        /**
-         * @brief Custom deallocator.  Decrements the control-block strong
-         * reference count and frees the whole allocation only when untracked.
-         * @param mem_ptr  Pointer to the promise area.
          * @param mem_size Memory size of the promise frame
          */
         void operator delete(void* mem_ptr, size_t mem_size) noexcept {
             // NOTE: Trying to disown, and if it's untracked do delete
             if (control_block* block = control_block::get_block_from_address(mem_ptr); control_block::is_untracked(block)) {
                 // NOTE: Using true frame size with control block
-                mem_size = block->_frame_size;
+                mem_size += sizeof(control_block);
                 block->~control_block();
                 ::operator delete(block, mem_size);
             }

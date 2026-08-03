@@ -66,4 +66,10 @@ typedef struct {} ACE_EMPTY_TYPE;
 
 #define ACE_IO_BUFFER_CHUNK_LIMIT 16
 
+#ifdef NDEBUG
+inline constexpr bool is_debug = true;
+#else
+inline constexpr bool is_debug = false;
+#endif
+
 #endif // ACE_COMMON_TERMS_H

@@ -67,7 +67,13 @@ private:
         }
 
         void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override {
-            (void)p; (void)bytes; (void)alignment;
+            // NOTE: Actually never deallocate on release builds.
+            // NOTE: Fine allocator never deallocates from itself
+            if constexpr (is_debug)
+                (void)p, (void)bytes, (void)alignment;
+            // NOTE: Enables actual deallocation to suppress ASAN if it is naughty.
+            else
+                std::pmr::new_delete_resource()->deallocate(p, bytes, alignment);
         }
 
         [[nodiscard]] bool do_is_equal(const memory_resource& other) const noexcept override {

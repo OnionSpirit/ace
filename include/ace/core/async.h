@@ -249,12 +249,14 @@ namespace ace::core {
          * its own runner pool.  Called automatically from the destructor.
          */
         void release_waiters() {
-            if (_coroutine.promise()._waiters) {
-                omni_node waiter = _coroutine.promise()._waiters->pop_node();
-                while (waiter.operator bool() and waiter->_data.is_exist()) {
-                    waiter->_data.release_future();
-                    waiter->_data._coroutine.promise()._runner.as<runner_pool_t>()->push_node(waiter);
-                    waiter = _coroutine.promise()._waiters->pop_node();
+            if constexpr (is_spawnable_rule<promise_rule_t>) {
+                if (_coroutine.promise()._waiters) {
+                    omni_node waiter = _coroutine.promise()._waiters->pop_node();
+                    while (waiter.operator bool() and waiter->_data.is_exist()) {
+                        waiter->_data.release_future();
+                        waiter->_data._coroutine.promise()._runner.as<runner_pool_t>()->push_node(waiter);
+                        waiter = _coroutine.promise()._waiters->pop_node();
+                    }
                 }
             }
         }
@@ -303,11 +305,13 @@ namespace ace::core {
             }
 
             bool redirect(void* undefined_waiter) noexcept override {
-                if (not _address or not undefined_waiter) [[unlikely]] return false;
-                auto handle = coroutine_t::from_address(_address);
-                auto waiter = omni_node(undefined_waiter);
-                handle.promise()._waiters = std::make_shared<runner_pool_t>();
-                handle.promise()._waiters->push_node(std::forward<omni_node>(waiter));
+                if constexpr (is_spawnable_rule<promise_rule_t>) {
+                    if (not _address or not undefined_waiter) [[unlikely]] return false;
+                    auto handle = coroutine_t::from_address(_address);
+                    auto waiter = omni_node(undefined_waiter);
+                    handle.promise()._waiters = std::make_shared<runner_pool_t>();
+                    handle.promise()._waiters->push_node(std::forward<omni_node>(waiter));
+                }
                 return true;
             }
 
@@ -322,7 +326,6 @@ namespace ace::core {
             }
 
             bool yield_value(void* mem_ptr) noexcept override {
-                // TODO: Need to split control routers for coroutines and automaton
                 if constexpr (is_automaton_rule<promise_rule_t>) {
                     if (not _address) [[unlikely]] return false;
                     auto handle = coroutine_t::from_address(_address);
@@ -335,7 +338,6 @@ namespace ace::core {
             }
 
             bool has_yield() noexcept override {
-                // TODO: Need to split control routers for coroutines and automaton
                 if constexpr (is_automaton_rule<promise_rule_t>) {
                     if (not _address) return false;
                     auto handle = coroutine_t::from_address(_address);
@@ -345,7 +347,6 @@ namespace ace::core {
             }
 
             bool set_yield_waiter(void* node_ptr) noexcept override {
-                // TODO: Need to split control routers for coroutines and automaton
                 if constexpr (is_automaton_rule<promise_rule_t>) {
                     if (not _address or not node_ptr) return false;
                     auto handle = coroutine_t::from_address(_address);
@@ -355,7 +356,6 @@ namespace ace::core {
             }
 
             bool cancel_yield() noexcept override {
-                // TODO: Need to split control routers for coroutines and automaton
                 if constexpr (is_automaton_rule<promise_rule_t>) {
                     if (not _address) return false;
                     auto handle = coroutine_t::from_address(_address);
@@ -374,6 +374,44 @@ namespace ace::core {
         };
 
         /**
+         * @brief Mandatory promise type fields
+         */
+        struct mandatory_locals {
+            runner_router_slot_t   _runner_router {};        ///< In-place router slot.  Set by the awaited future; read by the runner.
+            omni_runner            _runner {nullptr};     ///< Pointer to the owning runner's MPSC task queue.  Set by @c runner::attach().
+            // NOTE: Router to manage promise on suspended state.
+            // NOTE: Context owns only one promise. Extra slot object is unnecessary
+            std::optional<async_router> _self_router;
+            bool _roaming { false };
+            bool _polling { false };
+        };
+
+        /**
+         * @brief Mandatory promise type fields and extra fields for lazy coroutines
+         */
+        struct lazy_locals : mandatory_locals { std::shared_ptr<runner_pool_t> _waiters; };
+
+        /**
+         * @brief Mandatory promise type fields and extra fields for lazy and automaton coroutines
+         */
+        struct automaton_locals : lazy_locals { omni_node _yield_waiter; };
+
+        /**
+         * @brief All possible promise type fields for coroutines
+         */
+        struct full_locals : automaton_locals { };
+
+        typedef
+            std::conditional_t<std::same_as<rule_t, lazy_rule<returnT>>,
+                lazy_locals,
+            std::conditional_t<std::same_as<rule_t, eager_rule<returnT>>,
+                mandatory_locals,
+            std::conditional_t<std::same_as<rule_t, automaton_rule<returnT>>,
+                automaton_locals,
+                full_locals
+        >>> promise_locals;
+
+        /**
          * @brief C++20 promise type for @c async<returnT, promise_rule_t>.
          *
          * @details Inherits return-value machinery and @c await_transform
@@ -389,7 +427,7 @@ namespace ace::core {
          *  | @c _roaming | @c bool | When @c true the balancer may migrate the task to another runner. |
          *  | @c _polling | @c bool | When @c true the runner holds it in low priority task pool. |
          */
-        struct promise_type : traits::promise_traits<promise_type, promise_rule_t, returnT> {
+        struct promise_type : traits::promise_traits<promise_type, promise_rule_t, returnT>, promise_locals {
             DECLARE_PROMISE_TRAITS(promise_type, promise_rule_t, returnT)
             IMPORT_PROMISE_TRAITS_ENV
 
@@ -404,7 +442,7 @@ namespace ace::core {
              */
             [[nodiscard]] auto initial_suspend() noexcept {
                 // NOTE: Fetching runner ptr
-                _runner = get_current_pool();
+                promise_locals::_runner = get_current_pool();
                 return rule_t::initial_result();
             }
 
@@ -469,9 +507,9 @@ namespace ace::core {
                 // NOTE: Getting control block address
                 _block = control_block::get_block_from_address(self.address());
                 // NOTE: Initiating promise router
-                _self_router = async_router(self);
+                promise_locals::_self_router = async_router(self);
                 // NOTE: Passing reference of the inited router to the control block
-                _block->_control_router = &_self_router.value();
+                _block->_control_router = &promise_locals::_self_router.value();
             }
 
             /**
@@ -486,21 +524,11 @@ namespace ace::core {
             template <typename promise_t>
             traits::async_router_handle* get_control_router(const std::coroutine_handle<promise_t>& self) {
                 // NOTE: Initiating promise router
-                _self_router = async_router(self);
-                return &_self_router.value();
+                promise_locals::_self_router = async_router(self);
+                return &promise_locals::_self_router.value();
             }
 
-            // NOTE: Order of the following variables is optimized. DO NOT SWAP THEM!!!
-
-            runner_router_slot_t   _runner_router {};        ///< In-place router slot.  Set by the awaited future; read by the runner.
-            omni_runner            _runner {nullptr};     ///< Pointer to the owning runner's MPSC task queue.  Set by @c runner::attach().
-            std::shared_ptr<runner_pool_t> _waiters;
-            // NOTE: Router to manage promise on suspended state.
-            // NOTE: Context owns only one promise. Extra slot object is unnecessary
-            std::optional<async_router> _self_router;
-            omni_node _yield_waiter; // TODO: Remove for non automaton tasks
-            bool _roaming { false };
-            bool _polling { false };
+            promise_locals _locals;
         };
 
         // -----------------------------------------------------------------------

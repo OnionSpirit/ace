@@ -71,7 +71,7 @@ namespace ace::core {
         struct {
             uint32_t          _refcount   : 24 { 1 };                ///< Number of watchers (handles). Initial value: 1 (the coroutine itself).
             promise_lifecycle _status     : 8  { e_inited };         ///< Flag that shows that Coroutines completed without cancellation
-            uint32_t          _frame_size : 32 { 0 };                ///< Coroutine frame size, including control block. Non-zero value means stack is exist, 0 otherwise
+            uint32_t          _frame_size : 32 { 0 };                ///< Coroutine frame size, including control block.
         };
         traits::async_router_handle* _control_router { nullptr };    ///< Optional router for external join/cancel; set by @c setup_control_block().
 

@@ -529,6 +529,10 @@ struct ACE_OR_AWAIT_FUTURE_SPACE or_await_router final : runner_router {
     void cancel() override {
         _or_await->_l_future_observer->cancel();
         _or_await->_r_future_observer->cancel();
+        // NOTE: The stored waiter node must be returned to its runner,
+        // otherwise the cancelled coroutine frame and its node leak.
+        if (_or_await->_waiter.operator bool() and _or_await->_waiter->_data.is_exist())
+            runner::reattach(_or_await->_waiter);
     }
 
     ~or_await_router() override = default;
@@ -578,6 +582,10 @@ struct ACE_AND_AWAIT_FUTURE_SPACE and_await_router final : runner_router {
     void cancel() override {
         _and_await->_l_future_observer->cancel();
         _and_await->_r_future_observer->cancel();
+        // NOTE: The stored waiter node must be returned to its runner,
+        // otherwise the cancelled coroutine frame and its node leak.
+        if (_and_await->_waiter.operator bool() and _and_await->_waiter->_data.is_exist())
+            runner::reattach(_and_await->_waiter);
     }
 
     ~and_await_router() override = default;
@@ -625,6 +633,10 @@ struct ACE_AND_AWAIT_COMPOSED_FUTURE_SPACE and_await_composed_router final : run
         for (auto& opposite_observer : _and_await_composed->_observers) {
             opposite_observer->cancel();
         }
+        // NOTE: The stored waiter node must be returned to its runner,
+        // otherwise the cancelled coroutine frame and its node leak.
+        if (_and_await_composed->_waiter.operator bool() and _and_await_composed->_waiter->_data.is_exist())
+            runner::reattach(_and_await_composed->_waiter);
     }
 
     ~and_await_composed_router() override = default;
@@ -672,6 +684,10 @@ struct ACE_OR_AWAIT_COMPOSED_FUTURE_SPACE or_await_composed_router final : runne
         for (auto& opposite_observer : _or_await_composed->_observers) {
             opposite_observer->cancel();
         }
+        // NOTE: The stored waiter node must be returned to its runner,
+        // otherwise the cancelled coroutine frame and its node leak.
+        if (_or_await_composed->_waiter.operator bool() and _or_await_composed->_waiter->_data.is_exist())
+            runner::reattach(_or_await_composed->_waiter);
     }
 
     ~or_await_composed_router() override = default;

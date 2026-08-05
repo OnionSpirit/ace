@@ -3248,3 +3248,397 @@ TEST_F(fs_fixture, file_open_fail) {
     ASSERT_GE(res.size(), 1u);
     EXPECT_TRUE(res[0]); // ошибка открытия = успешный тест
 }
+
+// ==========================================================================
+// kernelic + io queries — прямые io_uring операции (покрытие kernelic.h)
+// ==========================================================================
+
+// Nop-запрос: проверяет прямой submit/CQE путь kernel_controller::nop.
+struct ace_nop_query : ace::io::query<ace_nop_query> {
+    IMPORT_IO_QUERY_ENV(ace_nop_query)
+    ace_nop_query() : io_query_t(0) {}
+    bool setup_query(ace::services::kernel_observer* kwp) const noexcept {
+        return ace::services::kernel_controller::nop(kwp);
+    }
+    [[nodiscard]] int await_resume() const { return _res; }
+};
+
+// Проверяет kernel_controller::nop — базовый submit + CQE обработку.
+TEST_F(base_fixture, kernel_controller_nop) {
+    // Почему nop: самый простой io_uring запрос — покрывает путь
+    // submit() → ping() → on_result() без участия FD.
+    // NOTE: lvalue lambda — rvalue-lambda корутины сохраняют указатель на
+    // оригинальный lambda-объект (GCC), который умирает раньше корутины.
+    auto worker = []() -> ace::task {
+        const int res = co_await ace_nop_query{};
+        EXPECT_GE(res, 0);
+        co_return;
+    };
+    ace::schedule(worker());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+}
+
+// Проверяет read_query/write_query на pipe — покрытие io::query CQE пути.
+TEST_F(base_fixture, io_query_pipe_write_read) {
+    // Почему pipe: pipefd — самый простой способ проверить асинхронные
+    // read/write без сетевого стека. Обе стороны в одном раннере.
+    int fds[2] = {-1, -1};
+    ASSERT_EQ(0, ::pipe(fds));
+    auto worker = [&fds]() -> ace::task {
+        char buf[64] {};
+        const int w = co_await ace::io::write_query(fds[1], "hello pipe", 10);
+        EXPECT_EQ(10, w);
+        const int r = co_await ace::io::read_query(fds[0], buf, 10);
+        EXPECT_EQ(10, r);
+        EXPECT_STREQ("hello pipe", buf);
+        ::close(fds[0]);
+        ::close(fds[1]);
+        co_return;
+    };
+    ace::schedule(worker());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+}
+
+// Проверяет close_query на pipe — асинхронное закрытие FD.
+TEST_F(base_fixture, io_query_pipe_close) {
+    // Почему close: close_query — отдельный путь kernel_controller::close.
+    int fds[2] = {-1, -1};
+    ASSERT_EQ(0, ::pipe(fds));
+    auto worker = [&fds]() -> ace::task {
+        const int c = co_await ace::io::close_query(fds[0]);
+        EXPECT_GE(c, 0);
+        const int c2 = co_await ace::io::close_query(fds[1]);
+        EXPECT_GE(c2, 0);
+        co_return;
+    };
+    ace::schedule(worker());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+}
+
+// Проверяет iovec_allocator: аллокация/деаллокация малых и больших буферов.
+TEST_F(base_fixture, iovec_allocator_basic) {
+    // Почему iovec allocator: используется buffer::assemble и read/write
+    // путями. Разные ветки: <=4096 (пул) и >4096 (malloc).
+    auto& alloc = ace::services::kernel_controller::iovec_alloc();
+    ::iovec* small = alloc.allocate(64);
+    ASSERT_NE(nullptr, small);
+    EXPECT_EQ(64u, small->iov_len);
+    EXPECT_NE(nullptr, small->iov_base);
+    alloc.deallocate(small);
+
+    ::iovec* big = alloc.allocate(5000);
+    ASSERT_NE(nullptr, big);
+    EXPECT_EQ(5000u, big->iov_len);
+    alloc.deallocate(big);
+
+    alloc.deallocate(nullptr); // no-op ветка
+
+    ::iovec* arr = alloc.allocate_as<::iovec>(4);
+    ASSERT_NE(nullptr, arr);
+    alloc.deallocate_as(arr, sizeof(::iovec) * 4);
+
+    // > kMaxSize для allocate_as → nullptr
+    EXPECT_EQ(nullptr, alloc.allocate_as<::iovec>(300));
+    alloc.deallocate_as(nullptr, 0);
+}
+
+// Проверяет kernel_controller::register_files / unregister_files.
+TEST_F(base_fixture, kernel_register_files) {
+    // Почему register_files: путь IORING_REGISTER_FILES — используется
+    // для fixed-file операций. Вызываем без активных задач — только
+    // инициализация ring и регистрация.
+    auto worker = []() -> ace::task {
+        int fds[2] = {-1, -1};
+        if (::pipe(fds) == 0) {
+            // NOTE: ring должен быть инициализирован до register_files —
+            // touch() через первый submit (nop).
+            const int n = co_await ace_nop_query{};
+            EXPECT_GE(n, 0);
+            int reg_fds[2] = {fds[0], fds[1]};
+            EXPECT_EQ(0, ace::services::kernel_controller::register_files(reg_fds, 2));
+            // NOTE: update возвращает количество обновлённых fd (1), не 0
+            EXPECT_EQ(1, ace::services::kernel_controller::register_files_update(0, fds[0]));
+            EXPECT_EQ(0, ace::services::kernel_controller::unregister_files());
+            ::close(fds[0]);
+            ::close(fds[1]);
+        }
+        co_return;
+    };
+    ace::schedule(worker());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+}
+
+// ==========================================================================
+// channel — bounded/static/spsc варианты (покрытие channel.h)
+// ==========================================================================
+
+// Проверяет bounded (e_static) канал: push на полный → false.
+TEST_F(base_fixture, channel_bounded_full) {
+    // Почему bounded: e_static канал имеет фиксированный буфер — push
+    // должен вернуть false при переполнении (в отличие от dyn).
+    ace::futures::tunnel::bounded::bus<int, 2> ch;
+    EXPECT_TRUE(ch.push(1));
+    EXPECT_TRUE(ch.push(2));
+    EXPECT_FALSE(ch.push(3)); // буфер переполнен
+    auto drain = [&ch]() -> ace::task {
+        EXPECT_EQ(1, co_await ch.pull());
+        EXPECT_EQ(2, co_await ch.pull());
+        co_return;
+    };
+    ace::schedule(drain());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+}
+
+// Проверяет pending_push на bounded канале: ждёт освобождения места.
+TEST_F(base_fixture, channel_pending_push_waits) {
+    // Почему pending_push: асинхронный push суспендится пока буфер полон.
+    // Покрывает pending_push + notify путь в channel.
+    ace::futures::tunnel::bounded::bus<int, 1> ch;
+    ace::futures::tunnel::dyn::bus<int> result;
+    ch.push(1); // буфер заполнен
+
+    auto pusher = [&ch, &result]() -> ace::task {
+        int pushed = 2;
+        co_await ch.pending_push(pushed); // ждёт освобождения слота (lvalue → by-value overload)
+        int v = 2;
+        result << v;
+        co_return;
+    };
+    auto drain = [&ch, &result]() -> ace::task {
+        EXPECT_EQ(1, co_await ch.pull()); // освобождает слот
+        EXPECT_EQ(2, co_await ch.pull()); // забирает 2
+        int out = 1;
+        result << out;
+        co_return;
+    };
+    ace::schedule(pusher());
+    ace::schedule(drain());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+    auto res = fetch(result);
+    ASSERT_EQ(2u, res.size());
+}
+
+// Проверяет SPSC (bridge) канал: push/pull в одном раннере.
+TEST_F(base_fixture, channel_spsc_bridge) {
+    // Почему spsc: bridge использует e_spsc — специализированная очередь.
+    ace::futures::tunnel::dyn::bridge<int> ch;
+    ch.push(10);
+    ch.push(20);
+    auto drain = [&ch]() -> ace::task {
+        EXPECT_EQ(10, co_await ch.pull());
+        EXPECT_EQ(20, co_await ch.pull());
+        co_return;
+    };
+    ace::schedule(drain());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+}
+
+// Проверяет MPMC (bus) канал с несколькими producer/consumer.
+TEST_F(base_fixture, channel_mpmc_parallel) {
+    // Почему mpmc: dyn::bus с несколькими продюсерами — атомарность push.
+    ace::futures::tunnel::dyn::bus<int> ch;
+    ace::futures::tunnel::dyn::bus<int> result;
+    constexpr int producers = 4;
+    constexpr int per_producer = 100;
+
+    auto producer = [&ch](int p) -> ace::task {
+        for (int i = 0; i < per_producer; ++i)
+            ch << (p * per_producer + i);
+        co_return;
+    };
+    auto consumer = [&ch, &result]() -> ace::task {
+        int sum = 0;
+        int count = 0;
+        while (count < producers * per_producer) {
+            sum += co_await ch.pull();
+            ++count;
+        }
+        int v = sum;
+        result << v;
+        co_return;
+    };
+    for (int p = 0; p < producers; ++p)
+        ace::schedule(producer(p));
+    ace::schedule(consumer());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+    auto res = fetch(result);
+    ASSERT_GE(res.size(), 1u);
+    // Сумма 0..399
+    EXPECT_EQ(399 * 400 / 2, res[0]);
+}
+
+// ==========================================================================
+// async — низкоуровневые пути (покрытие async.h)
+// ==========================================================================
+
+// Проверяет get_current_pool вне раннера → nullptr.
+TEST_F(base_fixture, get_current_pool_outside_runner) {
+    // Почему вне раннера: async, созданный вне run(), не должен иметь
+    // привязанный runner pool. initial_suspend вызывает get_current_pool.
+    ace::runner_pool_t* pool = nullptr;
+    {
+        auto t = []() -> ace::task { co_return; }();
+        pool = t._coroutine.promise()._runner.as<ace::runner_pool_t>();
+    }
+    EXPECT_EQ(nullptr, pool);
+}
+
+// Проверяет async_router::return_value после завершения valued-задачи.
+TEST_F(base_fixture, async_router_return_value) {
+    // Почему return_value: control_block_handle::return_value читает
+    // _return_value через async_router — путь для valued join().
+    ace::futures::tunnel::dyn::bus<int> result;
+    auto worker = [&result]() -> ace::task {
+        auto inner = []() -> ace::async<int> {
+            co_return 42;
+        }();
+        auto handle = inner.observe();
+        co_await inner;
+        int out = -1;
+        EXPECT_TRUE(handle.return_value(&out));
+        EXPECT_EQ(42, out);
+        int v = out;
+        result << v;
+        co_return;
+    };
+    ace::schedule(worker());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+    auto res = fetch(result);
+    ASSERT_EQ(1u, res.size());
+    EXPECT_EQ(42, res[0]);
+}
+
+// ==========================================================================
+// reattach — миграция задач между раннерами (покрытие reattach.h)
+// ==========================================================================
+
+// Проверяет reattach: задача переносится на целевой раннер через router.
+TEST_F(base_fixture, reattach_resumes_on_other_runner) {
+    // Почему reattach: futures/reattach.h — явная миграция корутины.
+    // Мигрируем на текущий раннер (no-op путь) и проверяем что
+    // reattach_router::redirect корректно вернул ноду в раннер.
+    ace::futures::tunnel::dyn::bus<int> result;
+    auto worker = [&result]() -> ace::task {
+        auto* current = co_await ace::get_runner{};
+        EXPECT_NE(nullptr, current);
+        co_await ace::reattach(current);
+        auto* after = co_await ace::get_runner{};
+        int v = (after == current) ? 1 : 0;
+        result << v;
+        co_return;
+    };
+    ace::schedule(worker());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+    auto res = fetch(result);
+    ASSERT_GE(res.size(), 1u);
+    EXPECT_EQ(1, res[0]);
+}
+
+
+// ==========================================================================
+// UDP — sendto/recv через net_interface (покрытие kernelic sendto)
+// ==========================================================================
+
+// Проверяет UDP-цикл: sendto + recv через kernel_controller::sendto.
+TEST_F(base_fixture, udp_sendto_recv_loop) {
+    // Почему UDP: sendto — отдельный путь kernelic (в отличие от send).
+    // Локальный loopback UDP — без внешних зависимостей. Порт берём
+    // фиксированный с привязкой к PID, чтобы избежать коллизий.
+    const int server_port = 23000 + (static_cast<int>(::getpid()) % 1000);
+    ace::futures::tunnel::dyn::bus<int> result;
+    auto server = [server_port, &result]() -> ace::task {
+        auto sock = co_await ace::net::socket_udp();
+        if (not sock) { int v = 0; result << v; co_return; }
+        auto udp = co_await sock.bind("127.0.0.1", static_cast<uint16_t>(server_port));
+        if (not udp) { int v = 0; result << v; co_return; }
+        char buf[64] {};
+        const int n = co_await udp.recv(buf, sizeof(buf));
+        if (n > 0) {
+            int r = 1;
+            result << r;
+        }
+        co_return;
+    };
+    auto client = [server_port, &result]() -> ace::task {
+        auto sock = co_await ace::net::socket_udp();
+        if (not sock) { int v = 0; result << v; co_return; }
+        auto udp = co_await sock.bind("127.0.0.1", 0);
+        if (not udp) { int v = 0; result << v; co_return; }
+        sockaddr_in server_addr {};
+        server_addr.sin_family = AF_INET;
+        server_addr.sin_port = htons(static_cast<uint16_t>(server_port));
+        ::inet_pton(AF_INET, "127.0.0.1", &server_addr.sin_addr);
+        const int s = co_await udp.sendto(std::string_view("ping-udp"), 0,
+            reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr));
+        EXPECT_EQ(8, s);
+        co_return;
+    };
+    ace::schedule(server());
+    ace::schedule(client());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+    auto res = fetch(result);
+    ASSERT_GE(res.size(), 1u);
+    EXPECT_EQ(1, res[0]);
+}
+
+// Проверяет send(io::buffer) / recv(io::buffer) — sendmsg/recvmsg путь.
+TEST_F(base_fixture, tcp_sendmsg_recvmsg_echo) {
+    // Почему sendmsg: send(io::buffer) использует sendmsg_query — отдельный
+    // путь kernelic. recv(io::buffer) — recvmsg_query.
+    const int server_port = 24000 + (static_cast<int>(::getpid()) % 1000);
+    ace::futures::tunnel::dyn::bus<int> result;
+    auto server = [server_port, &result]() -> ace::task {
+        auto sock = co_await ace::net::socket_tcp();
+        if (not sock) { int v = 0; result << v; co_return; }
+        auto stream = co_await sock.bind("127.0.0.1", static_cast<uint16_t>(server_port));
+        if (not stream) { int v = 0; result << v; co_return; }
+        auto listener = co_await stream.listen();
+        if (not listener) { int v = 0; result << v; co_return; }
+        auto conn = co_await listener.accept("127.0.0.1", 0);
+        if (not conn) { int v = 0; result << v; co_return; }
+        ace::io::buffer rbuf;
+        rbuf.expand(64);
+        const int n = co_await conn.recv(rbuf);
+        if (n > 0) {
+            std::string s = rbuf.as<std::string>().substr(0, static_cast<std::size_t>(n));
+            EXPECT_EQ("msg-buffer", s);
+            int v = 1;
+            result << v;
+        }
+        co_return;
+    };
+    auto client = [server_port, &result]() -> ace::task {
+        auto sock = co_await ace::net::socket_tcp();
+        if (not sock) { int v = 0; result << v; co_return; }
+        auto stream = co_await sock.bind("127.0.0.1", 0);
+        if (not stream) { int v = 0; result << v; co_return; }
+        auto conn = co_await stream.connect("127.0.0.1", static_cast<uint16_t>(server_port));
+        if (not conn) { int v = 0; result << v; co_return; }
+        ace::io::buffer wbuf;
+        wbuf.append("msg-buffer");
+        const int s = co_await conn.send(wbuf);
+        if (s == 10) {
+            int v = 1;
+            result << v;
+        }
+        co_return;
+    };
+    ace::schedule(server());
+    ace::schedule(client());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+    auto res = fetch(result);
+    ASSERT_GE(res.size(), 1u);
+    EXPECT_EQ(1, res[0]);
+}

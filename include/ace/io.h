@@ -916,8 +916,18 @@ public:                                                                         
             std::span<const char> _user_data {};
 
             void on_result(const int res) override {
-                if (res < 0 and fail_cb_handler)
-                    fail_cb_handler(res, _user_data);
+                if (res < 0 and fail_cb_handler) {
+                    // NOTE: A throwing handler must not kill the kernel
+                    // vortex coroutine — otherwise the ring is never pinged
+                    // again and all subsequent I/O leaks.
+                    try { fail_cb_handler(res, _user_data); }
+                    catch (const std::exception& e) {
+                        std::cerr << "io command fail handler threw: " << e.what() << std::endl;
+                    }
+                    catch (...) {
+                        std::cerr << "io command fail handler threw (unknown)" << std::endl;
+                    }
+                }
                 _command_pool.raw_sync(this);
             }
 
@@ -925,7 +935,8 @@ public:                                                                         
         };
 
         static void basic_fail_handler(const int res, const std::span<const char>& user_data) {
-            throw std::runtime_error(std::format("io operation failed: {}\nuser data: {}", strerror(-res), std::string{user_data.data()}));
+            throw std::runtime_error(std::format("io operation failed: {}\nuser data: {}",
+                strerror(-res), std::string{user_data.data(), user_data.size()}));
         }
 
         static void(*fail_cb_handler)(int, const std::span<const char>&); ///< Fail handler for commands errors handling
@@ -1011,6 +1022,11 @@ public:                                                                         
             _is_closed = io._is_closed;
             io._fd = -1;
             io._is_closed = true;
+            // NOTE: The guard holds references to _fd/_is_closed — after the
+            // move it must be rebound to THIS entity's members, otherwise it
+            // references the (invalidated, soon destroyed) source members.
+            _guard.~guard();
+            new (&_guard) guard(_fd, _is_closed);
         }
 
         entity& operator=(entity&& io) noexcept {
@@ -1018,6 +1034,8 @@ public:                                                                         
             _is_closed = io._is_closed;
             io._fd = -1;
             io._is_closed = true;
+            _guard.~guard();
+            new (&_guard) guard(_fd, _is_closed);
             return *this;
         }
 

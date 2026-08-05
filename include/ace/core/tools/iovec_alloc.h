@@ -42,7 +42,7 @@ struct iovec_allocator {
     auto deallocate(iovec* iov) -> void {
         if (!iov) return;
         if (iov->iov_len > kMaxSize)
-            return delete iov;
+            return free(iov); // NOTE: allocated with malloc() in allocate()
         _small_pool.deallocate(iov, iov->iov_len + sizeof(iovec));
         iov->iov_len = 0;
     }

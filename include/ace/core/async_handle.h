@@ -168,12 +168,17 @@ namespace ace::core {
         async_handle& operator=(const async_handle&) = delete;
 
         async_handle(async_handle&& other) noexcept
-            : _handle{std::exchange(other._handle, control_block_handle{})} {}
+            : _handle{other._handle} {
+            // NOTE: Release the reference of the source handle.  The plain
+            // pointer steal (std::exchange) leaks the source's reference.
+            other._handle = control_block_handle{};
+        }
 
         async_handle& operator=(async_handle&& other) noexcept {
             if (this != &other) {
                 auto_cancel();
-                _handle = std::exchange(other._handle, control_block_handle{});
+                _handle = other._handle;
+                other._handle = control_block_handle{};
             }
             return *this;
         }

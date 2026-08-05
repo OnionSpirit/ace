@@ -161,6 +161,24 @@ namespace ace::core {
         }
 
         /**
+         * @brief Copy assignment. Releases the previously held reference and
+         *        tracks the new one.
+         * @details The compiler-generated copy assignment would just copy the
+         *        pointer, silently leaking the old reference and borrowing the
+         *        new block without tracking it.
+         * @param h  Handle to copy.
+         * @return Reference to this handle.
+         */
+        control_block_handle& operator=(const control_block_handle& h) {
+            if (this != &h) {
+                release();
+                _block = h._block;
+                control_block::track(_block);
+            }
+            return *this;
+        }
+
+        /**
          * @brief Construct from a coroutine handle whose promise satisfies
          *        @c is_controled_promise.
          * @tparam promise_t  Promise type (must have @c _block member).

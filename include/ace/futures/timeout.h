@@ -68,7 +68,11 @@ public:
     template <typename I, typename T>
     requires std::is_integral_v<I>
     explicit timeout(std::chrono::duration<I, T> t) {
-        _duration = std::chrono::duration_cast<std::chrono::milliseconds, uint64_t, std::milli>(t);
+        _duration = std::chrono::duration_cast<std::chrono::milliseconds>(t);
+        // NOTE: Negative durations must not reach the time wheel — a negative slot
+        // offset would make it index a slot out of range (std::out_of_range).
+        if (_duration < services::duration_t::zero()) [[unlikely]]
+            _duration = services::duration_t::zero();
     };
 
     timeout() = default;

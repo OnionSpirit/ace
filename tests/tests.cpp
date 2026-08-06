@@ -265,7 +265,7 @@ TEST_F(timer_fixture, do_timer_on_runner_parallel_test) {
     constexpr long set_size = max_in_set / set_step;
 
     for (int i = 0; i < sets_count; ++i)
-        for (int q = 0; q < max_in_set; q += set_step)
+        for (int q = 50; q <= max_in_set; q += set_step)
             ace::schedule(timer_waiter(std::chrono::milliseconds(q), _int_channel));
 
     std::cout << "Tasks spawned" << std::endl;
@@ -274,6 +274,7 @@ TEST_F(timer_fixture, do_timer_on_runner_parallel_test) {
     const auto end_time = std::chrono::steady_clock::now();
     const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(
         end_time - start_time).count();
+    ASSERT_GE(ms_time, 500);
     std::cout << "Timers released after: " << ms_time << "ms.\n\t"
                  "Timers amount: " << sets_count * set_size << ".\n\t"
                  "Durations range: [" << set_step << "ms, " << max_in_set

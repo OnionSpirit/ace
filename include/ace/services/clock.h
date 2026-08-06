@@ -54,10 +54,12 @@ namespace ace::services {
     );
 
     inline auto clock_now() {
-        static auto curr_ts = std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
+        // NOTE: thread_local — the clock vortex is per-runner (per-thread), so the cached
+        // timestamp and refresh counter must not be shared across threads (data race otherwise).
+        thread_local auto curr_ts = std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
             std::chrono::steady_clock::now()
         );
-        static uint32_t counter = 0;
+        thread_local uint32_t counter = 0;
         ++counter;
         if (counter % 16 == 0) {
             curr_ts = std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
@@ -70,12 +72,16 @@ namespace ace::services {
 }
 
 namespace ace::services {
-
     /**
-     * @brief A stored timer record — holds a task and its remaining duration.
+     * @brief A stored timer record — holds a task and its absolute expiry time.
+     *
+     * @details @c _expires is the absolute deadline expressed on the wheel's
+     * release-bound time scale.  Keeping the deadline (instead of the original
+     * relative duration) lets every cascade recompute the exact remaining time,
+     * independent of the injection phase and of wheel stalls.
      */
     struct clock_record {
-        duration_t _duration {};
+        timepoint_t _expires {};
         omni_node _context {};
 
         clock_record() = default;
@@ -85,18 +91,18 @@ namespace ace::services {
         clock_record operator= (const clock_record&) = delete;
 
         clock_record(clock_record&& clk_rec) noexcept {
-            this->_duration = clk_rec._duration;
+            this->_expires = clk_rec._expires;
             this->_context = clk_rec._context;
         };
 
         clock_record& operator=(clock_record&& clk_rec) noexcept {
-            this->_duration = clk_rec._duration;
+            this->_expires = clk_rec._expires;
             this->_context = clk_rec._context;
             return *this;
         };
 
-        clock_record(const omni_node node, const duration_t dur)
-            : _duration(dur)
+        clock_record(const omni_node node, const timepoint_t expires)
+            : _expires(expires)
             , _context(node) {}
 
         static thread_local core::tools::slab_mempool<clock_record> _clock_record_mempool;
@@ -157,6 +163,8 @@ namespace ace::services {
         core::tools::queue<clock_record> _records{clock_record::_clock_record_mempool}; ///< Queue of stored records
     };
 
+    struct multi_dial;
+
     /**
      * @brief A single level of the hierarchical time wheel.
      *
@@ -180,6 +188,7 @@ namespace ace::services {
 
         const duration_t        _dial_round;
         dial*                   _upper_dial;
+        multi_dial*             _wheel;
 
         dial() = delete;
 
@@ -188,6 +197,7 @@ namespace ace::services {
                             const std::size_t tick_count,
                             const timepoint_t* current_ts,
                             int* release_counter,
+                            multi_dial* wheel,
                             dial* upper_dial = nullptr)
             : _tick_count((tick_count > 0) && ((tick_count & (tick_count - 1)) == 0) ? tick_count : std::bit_ceil(tick_count))
             , _dial(_tick_count)
@@ -196,27 +206,28 @@ namespace ace::services {
             , _release_counter(release_counter)
             , _dial_round(_tick_duration * _tick_count)
             , _upper_dial(upper_dial)
+            , _wheel(wheel)
             {};
 
         /**
-         * @brief Injects async to the dial. Slot will be selected by duration
+         * @brief Injects async to the dial into the slot selected by an explicit arrow offset.
          * @param [in] node Context to await
-         * @param [in] dur Duration of awaiting
+         * @param [in] expires Absolute expiry of the record (wheel's release-bound scale)
+         * @param [in] arrow_offset Slot offset relative to the current arrow
          * @return Injected node ptr
          */
-        clock_node* inject_raw(omni_node node, duration_t dur) {
-            const auto arrow_offset = (dur / _tick_duration) % _tick_count;
+        clock_node* inject_raw(omni_node node, const timepoint_t expires, const std::size_t arrow_offset) {
             const auto arrow = (_arrow + arrow_offset) % _tick_count;
-            return _dial.at(arrow)._records.enqueue(std::forward<clock_record>({node, dur}));
+            return _dial.at(arrow)._records.enqueue(std::forward<clock_record>({node, expires}));
         }
 
         /**
-         * @brief Injects record to the dial. Slot will be selected by duration
+         * @brief Injects an existing record node into the slot selected by an explicit arrow offset.
          * @param [in] node Record node to inject
+         * @param [in] arrow_offset Slot offset relative to the current arrow
          * @return Injected node ptr
          */
-        clock_node* inject_node(clock_node&& node) {
-            const auto arrow_offset = (node.data()->_duration / _tick_duration + 1) % _tick_count;
+        clock_node* inject_node(clock_node&& node, const std::size_t arrow_offset) {
             const auto arrow = (_arrow + arrow_offset) % _tick_count;
             return _dial.at(arrow)._records.enqueue(std::forward<clock_node>(node));
         }
@@ -241,7 +252,7 @@ namespace ace::services {
                 if (not _dial[arrow].empty()) [[unlikely]]
                     break;
 
-                migrate(arrow_offset);
+                migrate(arrow_offset, arrow_offset);
                 ++arrow_offset;
             }
             _arrow += arrow_offset;
@@ -258,22 +269,15 @@ namespace ace::services {
         }
 
         // NOTE: Pumps time from upper dial by ticking its arrow if current dial finished its round
-        void migrate(const std::size_t offset = 0) {
+        // NOTE: release_progress is the amount of base ticks the release loop has already
+        // NOTE: advanced in the current release() call — needed by cascades to compute the
+        // NOTE: exact remaining time from the record's absolute deadline.
+        void migrate(const std::size_t offset = 0, const std::size_t release_progress = 0) {
             if ((_arrow + offset) % _tick_count == 0 and _upper_dial)
-                _upper_dial->advance_arrow(this);
+                _upper_dial->advance_arrow(this, release_progress);
         }
 
-        void advance_arrow(dial* lower_dial) {
-
-            auto&& records =
-                std::move(_dial[_arrow % _tick_count]._records);
-
-            while(not records.empty())
-                lower_dial->inject_node(std::forward<clock_node>(records.pop()));
-
-            migrate();
-            ++_arrow;
-        }
+        void advance_arrow(dial* lower_dial, const std::size_t release_progress);
     };
 
     /**
@@ -338,7 +342,21 @@ namespace ace::services {
 
             const std::size_t dur_ticks = dur / _tick_duration;
             auto res = fast_log(dur_ticks, _tick_count);
-            return res;
+            // NOTE: Clamp to the actual wheel range (the top dial's round fits int64)
+            return std::min(res, _dials.size() - 1);
+        }
+
+        /**
+         * @brief Position of the dials below @b dial_idx expressed in time, i.e. how
+         * much of the current round of dial @b dial_idx has already elapsed.
+         * @param [in] dial_idx Target dial index
+         * @return Elapsed part of the target dial's round
+         */
+        [[nodiscard]] duration_t lower_dial_phase(const std::size_t dial_idx) const {
+            duration_t phase = duration_t::zero();
+            for (std::size_t i = 0; i < dial_idx; ++i)
+                phase += duration_t(static_cast<long>((_dials[i]._arrow % _tick_count)) * _dials[i]._tick_duration.count());
+            return phase;
         }
 
         /**
@@ -370,13 +388,16 @@ namespace ace::services {
                               : std::bit_ceil(tick_count)) {
 
             const auto ticks_amount = UINT64_MAX / tick_duration.count();
-            // NOTE: Needs to increment because log function cuts off float reminder of log. We must handle all records
-            const auto dials_amount = fast_log(ticks_amount, _tick_count) + 1;
+            // NOTE: Cap the amount of dials so the top dial's round (tick * count^n)
+            // cannot overflow the int64 duration_t (signed overflow is UB).
+            const auto max_round_ticks = INT64_MAX / tick_duration.count();
+            const auto dials_amount = std::min(fast_log(ticks_amount, _tick_count) + 1,
+                                               fast_log(max_round_ticks, _tick_count));
             _dials.reserve(dials_amount);
 
             auto dur = _tick_duration;
             for (std::size_t i = 0; i < dials_amount; ++i, dur *= static_cast<long>(_tick_count))
-                _dials.emplace_back(dur, _tick_count, &_current_ts, &_release_counter);
+                _dials.emplace_back(dur, _tick_count, &_current_ts, &_release_counter, this);
 
             for (std::size_t i = 0; i < (dials_amount - 1); ++i)
                 _dials[i]._upper_dial = &_dials[i + 1];
@@ -410,6 +431,9 @@ namespace ace::services {
          */
         clock_node* subscribe(omni_node node, duration_t dur) {
 
+            if (dur < duration_t::zero()) [[unlikely]]
+                dur = duration_t::zero();
+
             const auto idx = select_dial(dur);
 
             if (not idx) [[unlikely]] {
@@ -417,8 +441,57 @@ namespace ace::services {
                 return nullptr;
             }
             ++_total_records;
-            return _dials[idx.value()].inject_raw(node, dur);
+
+            const timepoint_t expires = _release_bound_ts + dur;
+            const auto sel = idx.value();
+
+            if (sel == 0) {
+                const auto offset = (dur / _dials[0]._tick_duration) % _tick_count;
+                return _dials[0].inject_raw(node, expires, offset);
+            }
+
+            // NOTE: The upper dial's arrow advances once per round of the dial below.
+            // The first advance happens not exactly one round after injection but after
+            // (round - phase) where phase is the lower dials' current position.  The slot
+            // offset must therefore be computed from the next wrap, otherwise timers in
+            // upper dials fire up to one dial tick late.
+            const auto to_next_wrap = _dials[sel]._tick_duration - lower_dial_phase(sel);
+            const auto offset = static_cast<std::size_t>((dur - to_next_wrap) / _dials[sel]._tick_duration);
+            return _dials[sel].inject_raw(node, expires, offset);
         };
+
+        /**
+         * @brief Re-injects a cascaded record into the wheel using its absolute deadline.
+         * @param [in] node Record node being cascaded from an upper dial
+         * @param [in] release_progress Base ticks already released in the current release() call
+         */
+        void cascade_node(clock_node&& node, const std::size_t release_progress) {
+
+            const timepoint_t now = _release_bound_ts + duration_t(static_cast<long>(release_progress) * _tick_duration.count());
+            duration_t remaining = node.data()->_expires - now;
+
+            if (remaining < duration_t::zero()) [[unlikely]]
+                remaining = duration_t::zero();
+
+            const auto idx = select_dial(remaining);
+            const auto sel = idx ? idx.value() : 0;
+
+            if (sel == 0) {
+                // NOTE: +1 tick safety margin — the current slot has just been released,
+                // so a record must never be placed into the position the arrow is at now.
+                const auto offset = static_cast<std::size_t>((remaining / _dials[0]._tick_duration + 1) % _tick_count);
+                _dials[0].inject_node(std::forward<clock_node>(node), offset);
+                return;
+            }
+
+            // NOTE: The lower dial's arrow is exactly at position 0 at the cascade moment,
+            // and a record placed at slot s is processed at the (s+1)-th advance, hence -1.
+            // NOTE: The offset must be clamped to at least 1 — the slot the arrow points at
+            // right now is being drained by the ongoing cascade, so a record injected back
+            // into it would be re-processed immediately (infinite loop) or, worse, never.
+            const auto offset = std::max<std::size_t>((remaining - _dials[sel]._tick_duration) / _dials[sel]._tick_duration, 1);
+            _dials[sel].inject_node(std::forward<clock_node>(node), offset);
+        }
 
         /**
          * @brief Gets current timepoint
@@ -453,6 +526,23 @@ namespace ace::services {
         }
 
     };
+
+    inline void dial::advance_arrow(dial* lower_dial, const std::size_t release_progress) {
+
+        auto&& records =
+            std::move(_dial[_arrow % _tick_count]._records);
+
+        while(not records.empty())
+            _wheel->cascade_node(std::forward<clock_node>(records.pop()), release_progress);
+
+        // NOTE: If this dial finished its round, pump time from the upper dial.
+        // The wrap is detected on the pre-increment arrow position, which is exactly
+        // position 0 — the phase every cascade relies on.
+        if (_arrow % _tick_count == 0 and _upper_dial)
+            _upper_dial->advance_arrow(this, release_progress);
+
+        ++_arrow;
+    }
 
     /**
      * @brief Thread-local vortex that manages a @c multi_dial time wheel.

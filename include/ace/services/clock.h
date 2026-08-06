@@ -1,39 +1,41 @@
 /**
  * @file clock.h
- * @brief Hierarchical multi-dial time wheel and clock vortex for O(1) timer management.
+ * @brief Hierarchical time wheel and clock vortex for O(1) amortized timer management.
  *
  * @details The clock module provides:
  *
- *  - <b>@c time_slot</b> — a single slot that holds all timers expiring at
- *    the same tick.  Supports batched release.
- *  - <b>@c dial</b> — a single level of the time wheel (256 slots per dial).
- *    Higher-frequency dials cascade into lower-frequency ones as the arrow
- *    wraps around.
- *  - <b>@c multi_dial</b> — the full hierarchical time wheel.  Selects the
- *    appropriate dial level based on the timer duration (logarithmic dial
- *    selection).  Maximum timer range: ~4.6 hours with 3 dials (1ms base tick,
- *    256 slots each).
- *  - <b>@c clock</b> — a thread-local vortex that owns a @c multi_dial and
- *    calls @c release() on each @c ping() to wake expired timers.
+ *  - <b>@c time_slot</b> — a single slot holding all timers expiring at the
+ *    same tick.  Supports batched expiry.
+ *  - <b>@c time_wheel</b> — a single level of the hierarchical wheel
+ *    (@c slot_count slots per wheel).  Timers of the coarser (upper) wheels
+ *    cascade down into finer (lower) ones as the hand wraps around.
+ *  - <b>@c hierarchical_time_wheel</b> — the full hierarchical time wheel.
+ *    Selects the appropriate level by timer duration (logarithmic wheel
+ *    selection).  The default configuration uses 1ms ticks and 256-slot
+ *    wheels, supporting timers up to the int64 millisecond range
+ *    (~292 million years).
+ *  - <b>@c clock</b> — a thread-local vortex that owns a
+ *    @c hierarchical_time_wheel and calls @c advance() on each @c ping() to
+ *    expire timers.
  *
  * ### How timeouts work
  *
  * 1. @c co_await timeout(500ms) creates a @c timeout future.
  * 2. @c await_suspend() installs a @c timeout_router.
  * 3. The runner calls @c router.redirect(node) → @c clock::subscribe(node, 500ms).
- * 4. @c multi_dial::subscribe() selects a dial level and inserts the task.
- * 5. When 500ms elapses, @c clock::ping() → @c multi_dial::release() pops
- *    the task and calls @c runner::reattach().
+ * 4. @c hierarchical_time_wheel::subscribe() selects a wheel level and
+ *    inserts the timer.
+ * 5. When 500ms elapses, @c clock::ping() → @c hierarchical_time_wheel::advance()
+ *    pops the timer and calls @c runner::reattach().
  *
- * @mermaid{ graph LR; Timeout[\"timeout(dur)\"]-->Router[\"timeout_router\"]; Router-->Subscribe[\"clock::subscribe\"]; Subscribe-->MultiDial[\"multi_dial\"]; MultiDial-->Slot[\"time_slot\"]; clock_ping[\"clock::ping()\"]-->Release[\"multi_dial::release\"]; Release-->Reattach[\"runner::reattach\"]; }
+ * @mermaid{ graph LR; Timeout[\"timeout(dur)\"]-->Router[\"timeout_router\"]; Router-->Subscribe[\"clock::subscribe\"]; Subscribe-->Wheel[\"hierarchical_time_wheel\"]; Wheel-->Slot[\"time_slot\"]; clock_ping[\"clock::ping()\"]-->Advance[\"wheel::advance\"]; Advance-->Reattach[\"runner::reattach\"]; }
  *
  * @see ace::futures::timeout, ace::core::traits::vortex_traits
  */
 #ifndef ACE_SERVICES_CLOCK_H
 #define ACE_SERVICES_CLOCK_H
+#include <bit>
 #include <chrono>
-#include <complex>
-#include <list>
 
 #include "ace/core/async.h"
 #include "ace/core/traits/vortex.h"
@@ -53,265 +55,254 @@ namespace ace::services {
         )
     );
 
-    inline auto clock_now() {
+    inline auto cached_now() {
         // NOTE: thread_local — the clock vortex is per-runner (per-thread), so the cached
         // timestamp and refresh counter must not be shared across threads (data race otherwise).
-        thread_local auto curr_ts = std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
+        thread_local auto cached_ts = std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
             std::chrono::steady_clock::now()
         );
-        thread_local uint32_t counter = 0;
-        ++counter;
-        if (counter % 16 == 0) {
-            curr_ts = std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
+        thread_local uint32_t refresh_counter = 0;
+        ++refresh_counter;
+        if (refresh_counter % 16 == 0) {
+            cached_ts = std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
             std::chrono::steady_clock::now());
         }
-        return curr_ts;
-
+        return cached_ts;
     }
 
-}
-
-namespace ace::services {
     /**
-     * @brief A stored timer record — holds a task and its absolute expiry time.
+     * @brief A stored timer — holds a task and its absolute expiry time.
      *
      * @details @c _expires is the absolute deadline expressed on the wheel's
      * release-bound time scale.  Keeping the deadline (instead of the original
      * relative duration) lets every cascade recompute the exact remaining time,
-     * independent of the injection phase and of wheel stalls.
+     * independent of the insertion phase and of wheel stalls.
      */
-    struct clock_record {
+    struct timer_record {
         timepoint_t _expires {};
         omni_node _context {};
 
-        clock_record() = default;
+        timer_record() = default;
 
-        clock_record(const clock_record&) = delete;
+        timer_record(const timer_record&) = delete;
 
-        clock_record operator= (const clock_record&) = delete;
+        timer_record& operator=(const timer_record&) = delete;
 
-        clock_record(clock_record&& clk_rec) noexcept {
-            this->_expires = clk_rec._expires;
-            this->_context = clk_rec._context;
-        };
+        timer_record(timer_record&& other) noexcept {
+            _expires = other._expires;
+            _context = other._context;
+        }
 
-        clock_record& operator=(clock_record&& clk_rec) noexcept {
-            this->_expires = clk_rec._expires;
-            this->_context = clk_rec._context;
+        timer_record& operator=(timer_record&& other) noexcept {
+            _expires = other._expires;
+            _context = other._context;
             return *this;
-        };
+        }
 
-        clock_record(const omni_node node, const timepoint_t expires)
+        timer_record(const omni_node node, const timepoint_t expires)
             : _expires(expires)
             , _context(node) {}
 
-        static thread_local core::tools::slab_mempool<clock_record> _clock_record_mempool;
+        static thread_local core::tools::slab_mempool<timer_record> _timer_mempool;
     };
 
-    using clock_node = core::tools::q_node<clock_record>;
+    using timer_node = core::tools::q_node<timer_record>;
 
     /**
-     * @brief A single slot in the time wheel holding records with the same expiration.
+     * @brief A single slot in the time wheel holding timers with the same expiry.
      */
     struct time_slot {
 
         time_slot() = default;
 
-        time_slot(const time_slot& x) =delete;
+        time_slot(const time_slot&) = delete;
 
-        time_slot& operator=(const time_slot& x) =delete;
+        time_slot& operator=(const time_slot&) = delete;
 
         /**
-         * @brief Releases passed record to scheduler
-         * @param [in] record Clock record to release
+         * @brief Expires the passed timer, returning it to the scheduler.
+         * @param [in] record Timer record to expire
          * @warning May cause cross-runner roaming in future updates
          */
-        static void release_record(clock_record&& record) {
+        static void expire_record(timer_record&& record) {
             core::runner::reattach(record._context);
         }
 
         /**
-         * @brief Releases not more than @b allowed_releases count of clock records
-         * @param [in] allowed_releases Max allowed releases
-         * @return Amount of released records
+         * @brief Expires not more than @b max_count stored timers
+         * @param [in] max_count Max allowed expirations
+         * @return Amount of expired timers
          */
-        int release_slot(const int allowed_releases) {
+        int expire_up_to(const int max_count) {
 
-            int released =0;
+            int expired = 0;
 
-            while (not _records.empty() and released < allowed_releases) {
-                release_record(std::forward<clock_record>(_records.dequeue()));
-                ++released;
+            while (not _timers.empty() and expired < max_count) {
+                expire_record(std::forward<timer_record>(_timers.dequeue()));
+                ++expired;
             }
-            return released;
+            return expired;
         }
 
         /**
-         * @brief Releases all stored records
+         * @brief Expires all stored timers
          */
-        void release_slot() {
-            while (not _records.empty())
-                release_record(std::forward<clock_record>(_records.dequeue()));
+        void expire_all() {
+            while (not _timers.empty())
+                expire_record(std::forward<timer_record>(_timers.dequeue()));
         }
 
         /**
-         * @brief @b ARE @b YOU @b DUMB @b ?!
-         * @return Result of emptiness check operation
+         * @return Whether the slot holds no timers
          */
-        [[nodiscard]] bool empty() const { return _records.empty(); }
+        [[nodiscard]] bool empty() const { return _timers.empty(); }
 
-        core::tools::queue<clock_record> _records{clock_record::_clock_record_mempool}; ///< Queue of stored records
+        core::tools::queue<timer_record> _timers { timer_record::_timer_mempool }; ///< Queue of stored timers
     };
 
-    struct multi_dial;
+    struct hierarchical_time_wheel;
 
     /**
      * @brief A single level of the hierarchical time wheel.
      *
-     * @details Each dial contains @c _tick_count slots (power of 2, default 256).
-     * When the arrow wraps around, remaining timers are cascaded to the upper
-     * (coarser-grained) dial via @c migrate().  An upper dial pointer
-     * (@c _upper_dial) links levels together.
+     * @details Each wheel contains @c _slot_count slots (power of 2, default 256).
+     * When the hand wraps around, timers of the upper (coarser) wheel cascade
+     * down into this one via @c cascade_slot().  An upper wheel pointer
+     * (@c _upper_time_wheel) links the levels together.
      */
-    struct dial {
+    struct time_wheel {
 
         ACE_CACHE_LINE(0)
 
-        const std::size_t       _tick_count;
-        std::vector<time_slot>  _dial;
-        const duration_t        _tick_duration;
-        const timepoint_t*      _current_ts;
-        int*                    _release_counter;
-        std::size_t             _arrow {0};
+        const std::size_t   _slot_count;
+        std::vector<time_slot> _slots;
+        const duration_t    _tick_duration;
+        int*                _release_budget_ptr;
+        std::size_t         _hand {0};
 
         ACE_CACHE_LINE(1)
 
-        const duration_t        _dial_round;
-        dial*                   _upper_dial;
-        multi_dial*             _wheel;
+        time_wheel*              _upper_time_wheel;
+        hierarchical_time_wheel* _hierarchical;
 
-        dial() = delete;
+        time_wheel() = delete;
 
         template <typename rep_t, typename period_t>
-        explicit dial(const std::chrono::duration<rep_t, period_t> tick_duration,
-                            const std::size_t tick_count,
-                            const timepoint_t* current_ts,
-                            int* release_counter,
-                            multi_dial* wheel,
-                            dial* upper_dial = nullptr)
-            : _tick_count((tick_count > 0) && ((tick_count & (tick_count - 1)) == 0) ? tick_count : std::bit_ceil(tick_count))
-            , _dial(_tick_count)
+        explicit time_wheel(const std::chrono::duration<rep_t, period_t> tick_duration,
+                            const std::size_t slot_count,
+                            int* release_budget_ptr,
+                            hierarchical_time_wheel* hierarchical,
+                            time_wheel* upper_time_wheel = nullptr)
+            : _slot_count((slot_count > 0) && ((slot_count & (slot_count - 1)) == 0) ? slot_count : std::bit_ceil(slot_count))
+            , _slots(_slot_count)
             , _tick_duration(std::chrono::duration_cast<duration_t>(tick_duration))
-            , _current_ts(current_ts)
-            , _release_counter(release_counter)
-            , _dial_round(_tick_duration * _tick_count)
-            , _upper_dial(upper_dial)
-            , _wheel(wheel)
+            , _release_budget_ptr(release_budget_ptr)
+            , _upper_time_wheel(upper_time_wheel)
+            , _hierarchical(hierarchical)
             {};
 
         /**
-         * @brief Injects async to the dial into the slot selected by an explicit arrow offset.
+         * @brief Inserts a new timer into the slot selected by an explicit hand offset.
          * @param [in] node Context to await
-         * @param [in] expires Absolute expiry of the record (wheel's release-bound scale)
-         * @param [in] arrow_offset Slot offset relative to the current arrow
-         * @return Injected node ptr
+         * @param [in] expires Absolute expiry of the timer (release-bound scale)
+         * @param [in] hand_offset Slot offset relative to the current hand
+         * @return Inserted node ptr
          */
-        clock_node* inject_raw(omni_node node, const timepoint_t expires, const std::size_t arrow_offset) {
-            const auto arrow = (_arrow + arrow_offset) % _tick_count;
-            return _dial.at(arrow)._records.enqueue(std::forward<clock_record>({node, expires}));
+        timer_node* insert(omni_node node, const timepoint_t expires, const std::size_t hand_offset) {
+            const auto slot = (_hand + hand_offset) % _slot_count;
+            return _slots.at(slot)._timers.enqueue(std::forward<timer_record>({node, expires}));
         }
 
         /**
-         * @brief Injects an existing record node into the slot selected by an explicit arrow offset.
-         * @param [in] node Record node to inject
-         * @param [in] arrow_offset Slot offset relative to the current arrow
-         * @return Injected node ptr
+         * @brief Re-inserts an existing timer node into the slot selected by an explicit hand offset.
+         * @param [in] node Timer node to re-insert
+         * @param [in] hand_offset Slot offset relative to the current hand
+         * @return Inserted node ptr
          */
-        clock_node* inject_node(clock_node&& node, const std::size_t arrow_offset) {
-            const auto arrow = (_arrow + arrow_offset) % _tick_count;
-            return _dial.at(arrow)._records.enqueue(std::forward<clock_node>(node));
+        timer_node* insert(timer_node&& node, const std::size_t hand_offset) {
+            const auto slot = (_hand + hand_offset) % _slot_count;
+            return _slots.at(slot)._timers.enqueue(std::forward<timer_node>(node));
         }
 
         /**
-         * @brief Releases all slots pointed to by the arrow on its way to completing the specified number of steps (passed_ticks).
+         * @brief Expires all slots pointed to by the hand on its way to completing the specified number of steps (ticks).
          * @warning Has two side effects:
-         * 1 - Dependent on the current position of the arrow;
-         * 2 - Constrained by the _release_counter class attribute.
-         * This attribute represents the number of released entries and can prevent the arrow from passing.
-         * @param [in] passed_ticks — The number of ticks passed. Also, the target number of arrow steps.
-         * @return The number of completed arrow steps.
+         * 1 - Dependent on the current position of the hand;
+         * 2 - Constrained by the shared release budget.
+         * The budget represents the number of expirations allowed per ping
+         * and can prevent the hand from passing.
+         * @param [in] ticks — The number of ticks passed. Also, the target number of hand steps.
+         * @return The number of completed hand steps.
          */
-        std::size_t release_ticks(const std::size_t passed_ticks) {
+        std::size_t advance_hand(const std::size_t ticks) {
 
-            std::size_t arrow_offset = 0;
+            std::size_t hand_offset = 0;
 
-            while (arrow_offset < passed_ticks and *_release_counter > 0) {
-                const auto arrow = (_arrow + arrow_offset) % _tick_count;
-                *_release_counter -= _dial[arrow].release_slot(*_release_counter);
+            while (hand_offset < ticks and *_release_budget_ptr > 0) {
+                const auto slot = (_hand + hand_offset) % _slot_count;
+                *_release_budget_ptr -= _slots[slot].expire_up_to(*_release_budget_ptr);
 
-                if (not _dial[arrow].empty()) [[unlikely]]
+                if (not _slots[slot].empty()) [[unlikely]]
                     break;
 
-                migrate(arrow_offset, arrow_offset);
-                ++arrow_offset;
+                cascade_on_wrap(hand_offset, hand_offset);
+                ++hand_offset;
             }
-            _arrow += arrow_offset;
-            return arrow_offset;
+            _hand += hand_offset;
+            return hand_offset;
         }
 
         /**
-         * @brief Releases all slots inside passed @b interval which means time duration from @b past to @b now
+         * @brief Expires all slots inside the passed @b interval, i.e. the time duration from @b past to @b now
          * @param interval A time interval that is treated as passed
-         * @return The number of completed arrow steps.
+         * @return The number of completed hand steps.
          */
-        auto release(const duration_t& interval) {
-            return release_ticks(interval / _tick_duration);
+        std::size_t advance(const duration_t& interval) {
+            return advance_hand(interval / _tick_duration);
         }
 
-        // NOTE: Pumps time from upper dial by ticking its arrow if current dial finished its round
-        // NOTE: release_progress is the amount of base ticks the release loop has already
-        // NOTE: advanced in the current release() call — needed by cascades to compute the
-        // NOTE: exact remaining time from the record's absolute deadline.
-        void migrate(const std::size_t offset = 0, const std::size_t release_progress = 0) {
-            if ((_arrow + offset) % _tick_count == 0 and _upper_dial)
-                _upper_dial->advance_arrow(this, release_progress);
+        // NOTE: Pumps time from the upper wheel by ticking its hand if the current wheel finished its round
+        // NOTE: release_progress is the amount of base ticks the advance loop has already
+        // NOTE: moved in the current advance() call — needed by cascades to compute the
+        // NOTE: exact remaining time from the timer's absolute deadline.
+        void cascade_on_wrap(const std::size_t offset = 0, const std::size_t release_progress = 0) {
+            if ((_hand + offset) % _slot_count == 0 and _upper_time_wheel)
+                _upper_time_wheel->cascade_slot(this, release_progress);
         }
 
-        void advance_arrow(dial* lower_dial, const std::size_t release_progress);
+        void cascade_slot(time_wheel* lower_wheel, const std::size_t release_progress);
     };
 
     /**
-     * @brief Hierarchical multi-level time wheel with O(1) insert and release.
+     * @brief Hierarchical multi-level time wheel with O(1) amortized insert and advance.
      *
-     * @details Composed of multiple @c dial instances arranged in increasing
-     * tick duration.  Timers are placed into the dial level that best matches
-     * their duration (logarithmic dial selection).  Each call to @c release()
-     * advances the finest dial's arrow by the number of ticks that have
-     * passed since the last release.
+     * @details Composed of multiple @c time_wheel instances arranged in increasing
+     * tick duration.  Timers are placed into the level that best matches their
+     * duration (logarithmic wheel selection).  Each call to @c advance() moves
+     * the finest wheel's hand by the number of ticks that have passed since the
+     * last advance.
      *
-     * The default configuration uses 1ms ticks and 256-slot dials, supporting
-     * timers up to ~4.6 hours.
+     * The default configuration uses 1ms ticks and 256-slot wheels, supporting
+     * timers up to the int64 millisecond range (~292 million years).
      */
-    struct multi_dial {
+    struct hierarchical_time_wheel {
 
     private:
 
-        typedef std::tuple<task, duration_t> input_record_t;
-
         ACE_CACHE_LINE(0)
 
-        std::vector<dial>  _dials;
-        timepoint_t        _current_ts;
-        timepoint_t        _release_bound_ts { clock_now() }; ///< Time lower bound, higher than all released timers
-        const duration_t   _tick_duration;
-        const std::size_t  _tick_count;
-        int                _release_counter  { };
-        int                _release_limit    { 1024 };
+        std::vector<time_wheel> _time_wheels;
+        timepoint_t             _current_ts;
+        timepoint_t             _release_bound { cached_now() }; ///< Time lower bound, higher than all expired timers
+        const duration_t        _tick_duration;
+        const std::size_t       _slot_count;
+        int                     _release_budget { };
+        int                     _release_limit  { 1024 };
 
         ACE_CACHE_LINE(1)
 
-        std::size_t        _total_records    { 0 };
-        bool               _stopped          { false };
+        std::size_t             _pending_timer_count { 0 };
+        bool                    _stopped            { false };
 
 
         static std::size_t fast_log2(std::size_t x) {
@@ -328,169 +319,171 @@ namespace ace::services {
         }
 
         /**
-         * @brief Selects dial depending on required duration
-         * @param [in] dur Required wait time interval
-         * @return dial id
+         * @brief Selects wheel level depending on required duration
+         * @param [in] duration Required wait time interval
+         * @return Wheel level index
          */
-        [[nodiscard]] std::optional<std::size_t> select_dial(const duration_t dur) const {
+        [[nodiscard]] std::optional<std::size_t> select_time_wheel(const duration_t duration) const {
 
-            if (dur.count() == 0) [[unlikely]]
+            if (duration.count() == 0) [[unlikely]]
                 return std::nullopt;
 
-            if (dur < _tick_duration) [[unlikely]]
+            if (duration < _tick_duration) [[unlikely]]
                 return 0;
 
-            const std::size_t dur_ticks = dur / _tick_duration;
-            auto res = fast_log(dur_ticks, _tick_count);
-            // NOTE: Clamp to the actual wheel range (the top dial's round fits int64)
-            return std::min(res, _dials.size() - 1);
+            const std::size_t duration_ticks = duration / _tick_duration;
+            auto level = fast_log(duration_ticks, _slot_count);
+            // NOTE: Clamp to the actual wheel range (the top wheel's round fits int64)
+            return std::min(level, _time_wheels.size() - 1);
         }
 
         /**
-         * @brief Position of the dials below @b dial_idx expressed in time, i.e. how
-         * much of the current round of dial @b dial_idx has already elapsed.
-         * @param [in] dial_idx Target dial index
-         * @return Elapsed part of the target dial's round
+         * @brief Position of the wheels below @b wheel_index expressed in time, i.e. how
+         * much of the current round of wheel @b wheel_index has already elapsed.
+         *
+         * @details O(1): every lower wheel's hand position is derived from the finest
+         * wheel's hand, so the combined phase equals the finest hand modulo the
+         * target wheel's tick.
+         * @param [in] wheel_index Target wheel index
+         * @return Elapsed part of the target wheel's round
          */
-        [[nodiscard]] duration_t lower_dial_phase(const std::size_t dial_idx) const {
-            duration_t phase = duration_t::zero();
-            for (std::size_t i = 0; i < dial_idx; ++i)
-                phase += duration_t(static_cast<long>((_dials[i]._arrow % _tick_count)) * _dials[i]._tick_duration.count());
-            return phase;
+        [[nodiscard]] duration_t lower_wheel_phase(const std::size_t wheel_index) const {
+            const auto base_tick = _time_wheels[0]._tick_duration.count();
+            const auto ticks_per_tick = _time_wheels[wheel_index]._tick_duration.count() / base_tick;
+            return duration_t(static_cast<long>(_time_wheels[0]._hand % ticks_per_tick) * base_tick);
         }
 
         /**
          * @brief Calculates passed time
          * @return Passed time interval
          */
-        [[nodiscard]] auto calc_passed() const {
-            return _current_ts.time_since_epoch() - _release_bound_ts.time_since_epoch();
+        [[nodiscard]] duration_t elapsed() const {
+            return _current_ts.time_since_epoch() - _release_bound.time_since_epoch();
         }
 
         /**
          * @brief Updates release bound
-         * @param [in] passed_interval Passed time interval to increase released bound timestamp
+         * @param [in] interval Passed time interval to increase released bound timestamp
          */
-        void update_release_bound(duration_t passed_interval) {
-            _release_bound_ts += passed_interval;
+        void advance_release_bound(duration_t interval) {
+            _release_bound += interval;
         }
 
     public:
 
         template <typename rep_t, typename period_t>
-        explicit multi_dial(const std::chrono::duration<rep_t, period_t> tick_duration,
-                               const std::size_t tick_count)
-            : _current_ts(clock_now())
-            , _release_bound_ts(_current_ts)
+        explicit hierarchical_time_wheel(const std::chrono::duration<rep_t, period_t> tick_duration,
+                                         const std::size_t slot_count)
+            : _current_ts(cached_now())
+            , _release_bound(_current_ts)
             , _tick_duration(std::chrono::duration_cast<duration_t>(tick_duration))
-            , _tick_count((tick_count > 0) && ((tick_count & (tick_count - 1)) == 0)
-                              ? tick_count
-                              : std::bit_ceil(tick_count)) {
+            , _slot_count((slot_count > 0) && ((slot_count & (slot_count - 1)) == 0)
+                              ? slot_count
+                              : std::bit_ceil(slot_count)) {
 
             const auto ticks_amount = UINT64_MAX / tick_duration.count();
-            // NOTE: Cap the amount of dials so the top dial's round (tick * count^n)
+            // NOTE: Cap the amount of wheels so the top wheel's round (tick * count^n)
             // cannot overflow the int64 duration_t (signed overflow is UB).
             const auto max_round_ticks = INT64_MAX / tick_duration.count();
-            const auto dials_amount = std::min(fast_log(ticks_amount, _tick_count) + 1,
-                                               fast_log(max_round_ticks, _tick_count));
-            _dials.reserve(dials_amount);
+            const auto wheels_amount = std::min(fast_log(ticks_amount, _slot_count) + 1,
+                                                fast_log(max_round_ticks, _slot_count));
+            _time_wheels.reserve(wheels_amount);
 
-            auto dur = _tick_duration;
-            for (std::size_t i = 0; i < dials_amount; ++i, dur *= static_cast<long>(_tick_count))
-                _dials.emplace_back(dur, _tick_count, &_current_ts, &_release_counter, this);
+            auto tick = _tick_duration;
+            for (std::size_t i = 0; i < wheels_amount; ++i, tick *= static_cast<long>(_slot_count))
+                _time_wheels.emplace_back(tick, _slot_count, &_release_budget, this);
 
-            for (std::size_t i = 0; i < (dials_amount - 1); ++i)
-                _dials[i]._upper_dial = &_dials[i + 1];
-        };
-
+            for (std::size_t i = 0; i < (wheels_amount - 1); ++i)
+                _time_wheels[i]._upper_time_wheel = &_time_wheels[i + 1];
+        }
 
         /**
-         * @brief Releases portion of subscribers depending on those expiration time
-         * @return amount of the released subscribers
+         * @brief Advances the wheel by the elapsed time, expiring due timers
+         * @return Amount of expired timers
          */
-        std::size_t release() {
+        std::size_t advance() {
 
             adjust();
-            const duration_t passed = calc_passed();
+            const duration_t passed = elapsed();
 
             if (passed < _tick_duration) [[unlikely]]
                 return 0;
 
-            const auto released_ticks = _dials[0].release(passed);
-            const auto released = _release_limit - _release_counter;
-            _total_records -= released;
-            update_release_bound(_tick_duration * released_ticks);
-            return released;
-        };
+            const auto advanced_ticks = _time_wheels[0].advance(passed);
+            const auto expired = _release_limit - _release_budget;
+            _pending_timer_count -= expired;
+            advance_release_bound(_tick_duration * advanced_ticks);
+            return expired;
+        }
 
         /**
-         * @brief Subscribes async to dial by passed current duration
-         * @param [in] node async to subscribe
-         * @param [in] dur subscription duration
-         * @return Injected node ptr
+         * @brief Subscribes a task to the wheel by the passed duration
+         * @param [in] node Task to subscribe
+         * @param [in] duration Subscription duration
+         * @return Inserted node ptr
          */
-        clock_node* subscribe(omni_node node, duration_t dur) {
+        timer_node* subscribe(omni_node node, duration_t duration) {
 
-            if (dur < duration_t::zero()) [[unlikely]]
-                dur = duration_t::zero();
+            if (duration < duration_t::zero()) [[unlikely]]
+                duration = duration_t::zero();
 
-            const auto idx = select_dial(dur);
+            const auto idx = select_time_wheel(duration);
 
             if (not idx) [[unlikely]] {
                 core::runner::reattach(node);
                 return nullptr;
             }
-            ++_total_records;
+            ++_pending_timer_count;
 
-            const timepoint_t expires = _release_bound_ts + dur;
-            const auto sel = idx.value();
+            const timepoint_t expires = _release_bound + duration;
+            const auto wheel_index = idx.value();
 
-            if (sel == 0) {
-                const auto offset = (dur / _dials[0]._tick_duration) % _tick_count;
-                return _dials[0].inject_raw(node, expires, offset);
+            if (wheel_index == 0) {
+                const auto hand_offset = (duration / _time_wheels[0]._tick_duration) % _slot_count;
+                return _time_wheels[0].insert(node, expires, hand_offset);
             }
 
-            // NOTE: The upper dial's arrow advances once per round of the dial below.
-            // The first advance happens not exactly one round after injection but after
-            // (round - phase) where phase is the lower dials' current position.  The slot
+            // NOTE: The upper wheel's hand advances once per round of the wheel below.
+            // The first advance happens not exactly one round after insertion but after
+            // (round - phase) where phase is the lower wheels' current position.  The hand
             // offset must therefore be computed from the next wrap, otherwise timers in
-            // upper dials fire up to one dial tick late.
-            const auto to_next_wrap = _dials[sel]._tick_duration - lower_dial_phase(sel);
-            const auto offset = static_cast<std::size_t>((dur - to_next_wrap) / _dials[sel]._tick_duration);
-            return _dials[sel].inject_raw(node, expires, offset);
-        };
+            // upper wheels expire up to one wheel tick late.
+            const auto to_next_wrap = _time_wheels[wheel_index]._tick_duration - lower_wheel_phase(wheel_index);
+            const auto hand_offset = static_cast<std::size_t>((duration - to_next_wrap) / _time_wheels[wheel_index]._tick_duration);
+            return _time_wheels[wheel_index].insert(node, expires, hand_offset);
+        }
 
         /**
-         * @brief Re-injects a cascaded record into the wheel using its absolute deadline.
-         * @param [in] node Record node being cascaded from an upper dial
-         * @param [in] release_progress Base ticks already released in the current release() call
+         * @brief Re-inserts a cascaded timer into the wheel using its absolute deadline.
+         * @param [in] node Timer node being cascaded from an upper wheel
+         * @param [in] release_progress Base ticks already advanced in the current advance() call
          */
-        void cascade_node(clock_node&& node, const std::size_t release_progress) {
+        void cascade(timer_node&& node, const std::size_t release_progress) {
 
-            const timepoint_t now = _release_bound_ts + duration_t(static_cast<long>(release_progress) * _tick_duration.count());
+            const timepoint_t now = _release_bound + duration_t(static_cast<long>(release_progress) * _tick_duration.count());
             duration_t remaining = node.data()->_expires - now;
 
             if (remaining < duration_t::zero()) [[unlikely]]
                 remaining = duration_t::zero();
 
-            const auto idx = select_dial(remaining);
-            const auto sel = idx ? idx.value() : 0;
+            const auto idx = select_time_wheel(remaining);
+            const auto wheel_index = idx ? idx.value() : 0;
 
-            if (sel == 0) {
-                // NOTE: +1 tick safety margin — the current slot has just been released,
-                // so a record must never be placed into the position the arrow is at now.
-                const auto offset = static_cast<std::size_t>((remaining / _dials[0]._tick_duration + 1) % _tick_count);
-                _dials[0].inject_node(std::forward<clock_node>(node), offset);
+            if (wheel_index == 0) {
+                // NOTE: +1 tick safety margin — the current slot has just been expired,
+                // so a timer must never be placed into the position the hand is at now.
+                const auto hand_offset = static_cast<std::size_t>((remaining / _time_wheels[0]._tick_duration + 1) % _slot_count);
+                _time_wheels[0].insert(std::forward<timer_node>(node), hand_offset);
                 return;
             }
 
-            // NOTE: The lower dial's arrow is exactly at position 0 at the cascade moment,
-            // and a record placed at slot s is processed at the (s+1)-th advance, hence -1.
-            // NOTE: The offset must be clamped to at least 1 — the slot the arrow points at
-            // right now is being drained by the ongoing cascade, so a record injected back
+            // NOTE: The lower wheel's hand is exactly at position 0 at the cascade moment,
+            // and a timer placed at slot s is processed at the (s+1)-th advance, hence -1.
+            // NOTE: The hand offset must be clamped to at least 1 — the slot the hand points
+            // at right now is being drained by the ongoing cascade, so a timer inserted back
             // into it would be re-processed immediately (infinite loop) or, worse, never.
-            const auto offset = std::max<std::size_t>((remaining - _dials[sel]._tick_duration) / _dials[sel]._tick_duration, 1);
-            _dials[sel].inject_node(std::forward<clock_node>(node), offset);
+            const auto hand_offset = std::max<std::size_t>((remaining - _time_wheels[wheel_index]._tick_duration) / _time_wheels[wheel_index]._tick_duration, 1);
+            _time_wheels[wheel_index].insert(std::forward<timer_node>(node), hand_offset);
         }
 
         /**
@@ -500,55 +493,54 @@ namespace ace::services {
         [[nodiscard]] auto current_time() const { return _current_ts; }
 
         /**
-         * @brief Adjusting the multi-dial before next release
+         * @brief Adjusting the wheel before the next advance
          */
         void adjust() {
-            _current_ts = clock_now();
-            _release_counter = _release_limit;
-            // NOTE: If multi-dial didn't reach empty state and become stopped, then no effect.
+            _current_ts = cached_now();
+            _release_budget = _release_limit;
+            // NOTE: If the wheel didn't reach empty state and become stopped, then no effect.
             // NOTE: Else increasing with inactivity time
-            _release_bound_ts += ((_current_ts - _release_bound_ts) * (_stopped & 0b1));
+            _release_bound += ((_current_ts - _release_bound) * (_stopped & 0b1));
             _stopped = false;
         }
 
         /**
-         * @brief @b ARE @b YOU @b DUMB @b ?!
-         * @return Result of emptiness check operation
+         * @return Whether the wheel holds no pending timers
          */
         [[nodiscard]] bool empty() {
-            return _stopped = _total_records == 0;
+            return _stopped = _pending_timer_count == 0;
         }
 
-        void detach_record(clock_node* node) {
+        void detach(timer_node* node) {
             // NOTE: Pushing context back to the runner. It is already marked as canceled
             core::runner::reattach(node->data()->_context);
-            _total_records -= (node->remove() & 0b1);
+            _pending_timer_count -= (node->remove() & 0b1);
         }
 
     };
 
-    inline void dial::advance_arrow(dial* lower_dial, const std::size_t release_progress) {
+    inline void time_wheel::cascade_slot(time_wheel* lower_wheel, const std::size_t release_progress) {
 
-        auto&& records =
-            std::move(_dial[_arrow % _tick_count]._records);
+        auto&& timers =
+            std::move(_slots[_hand % _slot_count]._timers);
 
-        while(not records.empty())
-            _wheel->cascade_node(std::forward<clock_node>(records.pop()), release_progress);
+        while (not timers.empty())
+            _hierarchical->cascade(std::forward<timer_node>(timers.pop()), release_progress);
 
-        // NOTE: If this dial finished its round, pump time from the upper dial.
-        // The wrap is detected on the pre-increment arrow position, which is exactly
+        // NOTE: If this wheel finished its round, pump time from the upper wheel.
+        // The wrap is detected on the pre-increment hand position, which is exactly
         // position 0 — the phase every cascade relies on.
-        if (_arrow % _tick_count == 0 and _upper_dial)
-            _upper_dial->advance_arrow(this, release_progress);
+        if (_hand % _slot_count == 0 and _upper_time_wheel)
+            _upper_time_wheel->cascade_slot(this, release_progress);
 
-        ++_arrow;
+        ++_hand;
     }
 
     /**
-     * @brief Thread-local vortex that manages a @c multi_dial time wheel.
+     * @brief Thread-local vortex that manages a @c hierarchical_time_wheel.
      *
-     * @details On each @c ping(), calls @c multi_dial::release() to wake
-     * expired timers.  Provides @c subscribe() (used by @c timeout future)
+     * @details On each @c ping(), calls @c hierarchical_time_wheel::advance() to
+     * expire due timers.  Provides @c subscribe() (used by @c timeout future)
      * and @c detach() (for timer cancellation).  The @c current_time()
      * static method returns the cached timepoint, updated every 16 calls
      * for performance.
@@ -557,27 +549,27 @@ namespace ace::services {
 
         clock() = default;
 
-        static thread_local multi_dial _multi_dial;
+        static thread_local hierarchical_time_wheel _wheel;
 
-        static auto current_time() { return inspect()._multi_dial.current_time(); }
+        static auto current_time() { return inspect()._wheel.current_time(); }
 
-        static auto detach(clock_node* node) { inspect()._multi_dial.detach_record(node); }
+        static auto detach(timer_node* node) { inspect()._wheel.detach(node); }
 
-        [[nodiscard]] static clock_node* subscribe(omni_node node, const duration_t dur) {
-            return touch(node->_data._coroutine.promise()._runner.as<runner_pool_t>())._multi_dial.subscribe(node, dur);
-        };
+        [[nodiscard]] static timer_node* subscribe(omni_node node, const duration_t duration) {
+            return touch(node->_data._coroutine.promise()._runner.as<runner_pool_t>())._wheel.subscribe(node, duration);
+        }
 
         static bool ping() {
-            _multi_dial.release();
-            return not _multi_dial.empty();
+            _wheel.advance();
+            return not _wheel.empty();
         }
     };
 
-    inline thread_local core::tools::slab_mempool<clock_record> clock_record::_clock_record_mempool =
-        core::tools::slab_mempool<clock_record>();
+    inline thread_local core::tools::slab_mempool<timer_record> timer_record::_timer_mempool =
+        core::tools::slab_mempool<timer_record>();
 
-    inline thread_local multi_dial clock::_multi_dial =
-        multi_dial{std::chrono::milliseconds(1), 256};
+    inline thread_local hierarchical_time_wheel clock::_wheel =
+        hierarchical_time_wheel { std::chrono::milliseconds(1), 256 };
 
 }
 

@@ -849,41 +849,43 @@ Thread-local vortex. Каждый раннер имеет свой экземп�
 
 ## Clock
 
-### clock / multi_dial (`services/clock.h`)
+### clock / hierarchical_time_wheel (`services/clock.h`)
 
-Иерархическое колесо времени с O(1) вставкой и освобождением.
+Иерархическое колесо времени с O(1) вставкой и амортизированным освобождением.
 
 | Компонент | Линия | Описание |
 |-----------|-------|----------|
-| `clock` | 466 | Thread-local vortex. `ping()` освобождает истекшие таймеры. |
-| `multi_dial` | 291 | Полное колесо: 5 уровней (1ms → 256ms → 65s → 4.6h → 49d) |
-| `dial` | 168 | Один уровень колеса (256 слотов) |
-| `time_slot` | 110 | Один слот в уровне |
-| `clock_record` | 77 | Запись таймера: `duration_t _duration` + `omni_node _context` |
+| `clock` | 548 | Thread-local vortex. `ping()` продвигает колесо и истекает таймеры. |
+| `hierarchical_time_wheel` | 288 | Полное колесо: до 7 уровней (1ms → 256ms → 65s → 4.6h → 49d → 34y → 2.3My); верхний уровень ограничен переполнением int64 (UB), лимит ~292 млн лет |
+| `time_wheel` | 173 | Один уровень колеса (256 слотов) |
+| `time_slot` | 114 | Один слот в уровне |
+| `timer_record` | 81 | Запись таймера: `timepoint_t _expires` (абсолютный дедлайн) + `omni_node _context` |
 
 **Типы:**
 | Тип | Линия |
 |-----|-------|
-| `timepoint_t` | 44 — `time_point_cast<milliseconds>(steady_clock::now())` |
-| `duration_t` | 50 — `duration_cast<milliseconds>` |
-| `clock_node` | 105 — `q_node<clock_record>` |
+| `timepoint_t` | 46 — `time_point_cast<milliseconds>(steady_clock::now())` |
+| `duration_t` | 52 — `duration_cast<milliseconds>` |
+| `timer_node` | 109 — `q_node<timer_record>` |
+| `cached_now()` | 58 — кэшированный `steady_clock::now()` (thread_local, обновление каждые 16 вызовов) |
 
 | Метод clock | Линия | Назначение |
 |------------|-------|-----------|
-| `current_time()` | 472 | Кешированный `steady_clock::now()` |
-| `subscribe(omni_node, duration)` | 476 | Подписать задачу на таймер |
-| `detach(node*)` | 474 | Отменить таймер (возвращает ноду в runner) |
-| `ping()` | 480 | Освободить истекшие таймеры |
+| `current_time()` | 554 | Кешированный `steady_clock::now()` |
+| `subscribe(omni_node, duration)` | 558 | Подписать задачу на таймер |
+| `detach(node*)` | 556 | Отменить таймер (возвращает ноду в runner) |
+| `ping()` | 562 | Продвинуть колесо (`_wheel.advance()`) и вернуть `not empty()` |
 
-**Методы multi_dial:**
+**Методы hierarchical_time_wheel:**
 | Метод | Линия | Назначение |
 |-------|-------|-----------|
-| `release()` | 390 | Освобождение истекших таймеров |
-| `subscribe(omni_node, duration)` | 411 | Подписка в колесо |
-| `adjust()` | 432 | Синхронизация времени |
-| `detach_record(clock_node*)` | 449 | Отмена таймера с возвратом ноды в runner |
+| `advance()` | 404 | Продвижение колеса на прошедшее время, истечение таймеров |
+| `subscribe(omni_node, duration)` | 425 | Подписка в колесо (фаза нижних дисков — O(1), `lower_wheel_phase`) |
+| `cascade(timer_node&&, progress)` | 461 | Перевставка каскадируемой записи по абсолютному дедлайну (re-select уровня) |
+| `adjust()` | 498 | Синхронизация времени и сброс бюджета релиза |
+| `detach(timer_node*)` | 514 | Отмена таймера с возвратом ноды в runner |
 
-**Важно:** `clock_record::_context` — `omni_node` (не `task`). При отмене таймера `detach_record()` делает `runner::reattach()` ноды перед удалением из колеса. Пул записей: `slab_mempool<clock_record>` (thread-local).
+**Важно:** `timer_record::_context` — `omni_node` (не `task`). При отмене таймера `detach()` делает `runner::reattach()` ноды перед удалением из колеса. Пул записей: `slab_mempool<timer_record>` (thread-local). Каскад идёт **сверху вниз** (из грубого уровня в мелкий): `cascade_on_wrap()` → `cascade_slot()` → `cascade()`; бюджет релиза 1024 записи на ping ограничивает проход стрелки.
 
 ---
 
@@ -1125,7 +1127,7 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 | `futures/get_runner.h` | `get_runner` — текущий раннер |
 | `futures/polling.h` | `polling(bool)` — флаг низкого приоритета |
 | `services/kernelic.h` | `kernel_controller` (io_uring vortex), `kernel_observer`, `kernel_entity`, все `io_uring_prep_*`, iovec management |
-| `services/clock.h` | `clock` vortex, `multi_dial`, `dial`, `time_slot`, `clock_record`, `clock::subscribe()`, `clock::ping()` |
+| `services/clock.h` | `clock` vortex, `hierarchical_time_wheel`, `time_wheel`, `time_slot`, `timer_record`, `cached_now`, `clock::subscribe()`, `clock::ping()` |
 
 ---
 

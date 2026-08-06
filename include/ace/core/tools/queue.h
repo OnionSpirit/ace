@@ -6,7 +6,7 @@
  * @details Unlike the lock-free nukes queues, this queue is single-threaded and
  * designed for use inside a single runner.  Its key feature is @c q_node::remove()
  * — a node can unlink itself from the queue in O(1) without knowing its position.
- * This is used by the clock's @c multi_dial for timer cancellation.
+ * This is used by the clock's @c hierarchical_time_wheel for timer cancellation.
  *
  * Components:
  *  - @c q_node<T> — doubly-linked node with in-place storage for @c T.

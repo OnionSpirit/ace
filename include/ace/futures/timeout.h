@@ -143,7 +143,7 @@ struct ACE_FUTURE_TIMEOUT_SPACE timeout_router : runner_router {
 
     ~timeout_router() override = default;
 
-    services::clock_node* _injected_node = nullptr;
+    services::timer_node* _injected_node = nullptr;
     timeout* const _timeout;
 };
 

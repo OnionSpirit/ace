@@ -641,7 +641,7 @@ TEST_F(queue_fixture, q_node_remove) {
 
 // Проверяет move-конструктор очереди: перенесённая очередь работает.
 TEST_F(queue_fixture, queue_move_constructor) {
-    // Почему проверяем move: очередь используется в clock/multi_dial
+    // Почему проверяем move: очередь используется в clock/hierarchical_time_wheel
     // и должна поддерживать перемещение для композиции.
     _queue.enqueue(test_payload{55});
     tool::queue<test_payload> moved_q(std::move(_queue));

@@ -25,7 +25,7 @@
  * ### Example: clock vortex
  *
  * @c ace::core::clock derives from @c vortex_traits<clock, e_thread_local> and
- * implements @c bool ping() which calls @c multi_dial::release().
+ * implements @c bool ping() which calls @c hierarchical_time_wheel::advance().
  *
  * @tparam derived_t      The concrete vortex type (CRTP).
  * @tparam spawn_mode_v   Spawn mode — thread-local or thread-shared.

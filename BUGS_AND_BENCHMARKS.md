@@ -133,7 +133,7 @@ queue(queue&& q) noexcept : mempool(q.mempool) {
 
 **Тест:** `queue_fixture.queue_move_constructor` — изначально ожидал `_queue.empty()` после move, тест был скорректирован под текущее поведение.
 
-**Приоритет:** Средний (move-конструктор используется в clock/multi_dial; потенциальный use-after-free).
+**Приоритет:** Средний (move-конструктор используется в clock/hierarchical_time_wheel; потенциальный use-after-free).
 
 ---
 
@@ -145,7 +145,7 @@ queue(queue&& q) noexcept : mempool(q.mempool) {
 
 **Время:** ~30-60s  
 **Нагрузка:** 1,000,000 set'ов × 10 таймеров = 10,000,000 таймеров на 4 раннерах  
-**Что проверяет:** Масштабируемость clock/multi_dial при массовых таймерах.  
+**Что проверяет:** Масштабируемость clock/hierarchical_time_wheel при массовых таймерах.  
 **Файл:** `tests/tests.cpp:171-206`
 
 ### BM2. `cutex_fixture.cutex_race`
@@ -180,7 +180,7 @@ queue(queue&& q) noexcept : mempool(q.mempool) {
 
 **Время:** ~500ms+ каждый  
 **Нагрузка:** 16 таймеров с разными duration (0ms → 501ms)  
-**Что проверяет:** Точность срабатывания и порядок таймеров в clock/multi_dial.  
+**Что проверяет:** Точность срабатывания и порядок таймеров в clock/hierarchical_time_wheel.  
 **Файл:** `tests/tests.cpp:95-146`
 
 ---
@@ -192,7 +192,7 @@ queue(queue&& q) noexcept : mempool(q.mempool) {
 ### F1. `compose_extra_fixture.or_await_left_wins`
 
 **Симптом:** При запуске в общем наборе правый future иногда выигрывает (1ms vs 500ms).  
-**Причина:** Накопленная задержка в clock/multi_dial от предыдущих тестов.  
+**Причина:** Накопленная задержка в clock/hierarchical_time_wheel от предыдущих тестов.  
 **Исправление:** Разница таймаутов увеличена до 10ms vs 2000ms, проверяется что or разрешился (0 или 1).
 
 ### F2. `cross_mechanic_fixture.interrupt_during_timeout`

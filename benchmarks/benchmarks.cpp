@@ -83,7 +83,7 @@ static void bm_cutex_race_sync(benchmark::State& state) {
 BENCHMARK(bm_cutex_race_sync)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM3 — timer_parallel: массовые таймеры на clock/multi_dial
+// BM3 — timer_parallel: массовые таймеры на clock/hierarchical_time_wheel
 // ==========================================================================
 // Проверяет масштабируемость иерархического колеса времени.
 // Создаёт N таймеров с разными duration на 4 раннерах,
@@ -177,7 +177,7 @@ static void bm_spawn_cancel(benchmark::State& state) {
 BENCHMARK(bm_spawn_cancel)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM5 — timer_ordering: порядок срабатывания таймеров (проверка clock/multi_dial)
+// BM5 — timer_ordering: порядок срабатывания таймеров (проверка clock/hierarchical_time_wheel)
 // ==========================================================================
 // Проверяет что таймеры срабатывают в правильном порядке при разных duration.
 // Аналог unit-теста timer_fixture.do_timer_on_runner_test.
@@ -186,7 +186,7 @@ static void bm_timer_ordering(benchmark::State& state) {
     using namespace std::chrono_literals;
 
     // Прогрев clock vortex: первый вызов timeout() инициализирует
-    // clock::touch() → spawn vortex → multi_dial. Без прогрева
+    // clock::touch() → spawn vortex → hierarchical_time_wheel. Без прогрева
     // первая итерация бенчмарка может иметь другой тайминг из-за
     // холодного старта инфраструктуры (vortex корутина + io_uring ring).
     // Почему schedule+run а не прямой вызов: vortex должен работать

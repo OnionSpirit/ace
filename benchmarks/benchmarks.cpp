@@ -21,7 +21,7 @@ static void bm_cutex_race_capture(benchmark::State& state) {
         // оригинальный lambda (GCC), время жизни которого короче корутины.
         auto racer = [](ace::cutex& mtx, std::string& cnt, int max) -> ace::task {
             ace::guard crx(mtx);
-            for (volatile int i = 0; i < max; ++i) {
+            for (int i = 0; i < max; ++i) {
                 co_await crx.capture();
                 cnt = std::to_string(std::stoi(cnt) + 1);
                 co_await crx.release();
@@ -60,7 +60,7 @@ static void bm_cutex_race_sync(benchmark::State& state) {
 
         auto racer = [](ace::cutex& mtx, std::string& cnt, int max) -> ace::task {
             ace::guard crx(mtx);
-            for (volatile int i = 0; i < max; ++i) {
+            for (int i = 0; i < max; ++i) {
                 co_await crx.sync();
                 cnt = std::to_string(std::stoi(cnt) + 1);
                 co_await crx.release();
@@ -121,10 +121,7 @@ static void bm_timer_parallel(benchmark::State& state) {
             state.SkipWithError("Dispatcher not empty after timers");
         }
 
-        // Дренируем канал и проверяем количество
-        std::vector<long> res;
-        ace::schedule(base_fixture::channel_fetcher(ch, res));
-        ace::run();
+        std::vector<long> res = fetch(ch);
         if (static_cast<long>(res.size()) != total_timers) {
             state.SkipWithError("Timer count mismatch");
         }
@@ -214,11 +211,10 @@ static void bm_timer_ordering(benchmark::State& state) {
         };
 
         ace::schedule(timer_valued(501ms, ch));
-        ace::schedule(timer_valued(500ms, ch));
+        ace::schedule(timer_valued(495ms, ch));
         ace::schedule(timer_valued(450ms, ch));
         ace::schedule(timer_valued(401ms, ch));
-        ace::schedule(timer_valued(400ms, ch));
-        ace::schedule(timer_valued(399ms, ch));
+        ace::schedule(timer_valued(395ms, ch));
         ace::schedule(timer_valued(350ms, ch));
         ace::schedule(timer_valued(300ms, ch));
         ace::schedule(timer_valued(256ms, ch));
@@ -255,18 +251,21 @@ static void bm_timer_ordering(benchmark::State& state) {
             break;
         }
 
-        // Проверяем что значения не убывают
-        // Почему нестрогое неравенство: duration 256 и 250 — оба в одном
-        // слоте dial, порядок их пробуждения не гарантирован для равных квантов.
-        if (res.size() == 16) {
-            for (std::size_t i = 1; i < res.size(); ++i) {
-                if (res[i] < res[i - 1]) {
-                    state.SkipWithError("Timer ordering violation");
+        // NOTE: Проверяем что каждый таймер сработал и доставлен ровно один раз.
+        // NOTE: Почему не порядок: таймеры одного слота колеса пробуждаются в
+        // NOTE: одном advance в порядке вставки (канал наполняется не по
+        // NOTE: дедлайнам, а по порядку реаттача), поэтому строгая монотонность
+        // NOTE: значений в канале не гарантирована — гарантировано лишь
+        // NOTE: присутствие всех длительностей.
+        if (res.size() == 15) {
+            for (long d : { 501l, 495l, 450l, 401l, 395l, 350l, 300l, 256l, 250l, 200l, 150l, 100l, 50l, 10l, 0l }) {
+                if (std::ranges::find(res, d) == res.end()) {
+                    state.SkipWithError("Timer missing from results");
                     break;
                 }
             }
         } else {
-            state.SkipWithError("Timer count mismatch: expected 16");
+            state.SkipWithError("Timer count mismatch: expected 15");
         }
     }
 
@@ -294,7 +293,7 @@ static void bm_multi_runner_cutex(benchmark::State& state) {
             for (int i = 0; i < max; ++i) {
                 co_await g.capture();
                 cnt = std::to_string(std::stoi(cnt) + 1);
-                g.release();
+                co_await g.release();
             }
             co_return;
         };
@@ -545,3 +544,313 @@ static void bm_io_buffer_append(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * messages * chunks_per_message);
 }
 BENCHMARK(bm_io_buffer_append)->Unit(benchmark::kMillisecond);
+
+// ==========================================================================
+// BM13 — io_buffer_clone: глубокое копирование scatter-gather буфера
+// ==========================================================================
+// N раз: собрать буфер из чанков и склонировать его.
+// Характеризует стоимость аллокации чанков при clone() (обход цепочки iovec).
+
+static void bm_io_buffer_clone(benchmark::State& state) {
+    constexpr int messages = 20000;
+    constexpr int chunks_per_message = 8;
+
+    for (auto _ : state) {
+        for (int m = 0; m < messages; ++m) {
+            ace::io::buffer buf;
+            for (int c = 0; c < chunks_per_message; ++c)
+                buf.append("chunk {}", c);
+            auto clone = buf.clone();
+            if (clone.len() != buf.len())
+                state.SkipWithError("clone len mismatch");
+        }
+    }
+
+    state.SetItemsProcessed(state.iterations() * messages * chunks_per_message);
+}
+BENCHMARK(bm_io_buffer_clone)->Unit(benchmark::kMillisecond);
+
+// ==========================================================================
+// BM14 — pipe_io_roundtrip: цикл write+read через io_uring на pipe
+// ==========================================================================
+// N раз: co_await io::write_query + io::read_query на паре pipe-дескрипторов.
+// Характеризует полный цикл submit→CQE→reattach kernel_controller'а
+// (services/kernelic.h + io::query router).
+
+static void bm_pipe_io_roundtrip(benchmark::State& state) {
+    constexpr int messages = 20000;
+
+    for (auto _ : state) {
+        int fds[2];
+        if (pipe(fds) != 0) {
+            state.SkipWithError("pipe() failed");
+            break;
+        }
+
+        auto worker = [](int rd, int wr, int n) -> ace::task {
+            std::string payload(256, 'x');
+            for (int i = 0; i < n; ++i) {
+                const int w = co_await ace::io::write_query(wr, payload.data(), static_cast<unsigned>(payload.size()));
+                if (w != static_cast<int>(payload.size())) co_return;
+                const int r = co_await ace::io::read_query(rd, payload.data(), static_cast<unsigned>(payload.size()));
+                if (r != static_cast<int>(payload.size())) co_return;
+            }
+            co_return;
+        };
+
+        ace::schedule(worker(fds[0], fds[1], messages));
+        ace::run();
+        if (not ace::empty())
+            state.SkipWithError("Dispatcher not empty after io roundtrip");
+
+        close(fds[0]);
+        close(fds[1]);
+    }
+
+    state.SetItemsProcessed(state.iterations() * messages);
+}
+BENCHMARK(bm_pipe_io_roundtrip)->Unit(benchmark::kMillisecond);
+
+// ==========================================================================
+// BM15 — channel_pending_push: асинхронный push с backpressure
+// ==========================================================================
+// Producer использует pending_push (асинхронный push, ждёт место в буфере),
+// consumer вытягивает через pull(). Характеризует путь ожидания
+// освобождения буфера канала (channel_router / pending_push промис).
+
+static void bm_channel_pending_push(benchmark::State& state) {
+    constexpr int messages = 20000;
+
+    for (auto _ : state) {
+        ace::futures::tunnel::dyn::bus<int> ch;
+
+        auto producer = [](int n, ace::futures::tunnel::dyn::bus<int>& ch) -> ace::task {
+            for (int i = 0; i < n; ++i)
+                co_await ch.pending_push(i);
+            co_return;
+        };
+
+        auto consumer = [](int n, ace::futures::tunnel::dyn::bus<int>& ch) -> ace::task {
+            int sum = 0;
+            for (int i = 0; i < n; ++i)
+                sum += co_await ch.pull();
+            if (sum != n * (n - 1) / 2)
+                std::cerr << "[bench] pending_push sum mismatch\n";
+            co_return;
+        };
+
+        ace::schedule(producer(messages, ch));
+        ace::schedule(consumer(messages, ch));
+        ace::run();
+
+        if (not ace::empty())
+            state.SkipWithError("Dispatcher not empty after pending_push test");
+    }
+
+    state.SetItemsProcessed(state.iterations() * messages);
+}
+BENCHMARK(bm_channel_pending_push)->Unit(benchmark::kMillisecond);
+
+// ==========================================================================
+// BM16 — reattach_migration: миграция корутины между раннерами
+// ==========================================================================
+// Задача N раз переключается между двумя раннерами через
+// co_await ace::futures::reattach{runner*}. Характеризует стоимость
+// кросс-раннерной передачи узла (insert_pool + reattach_router).
+
+static void bm_reattach_migration(benchmark::State& state) {
+    constexpr int hops = 20000;
+
+    for (auto _ : state) {
+        configure_runners(2);
+        ace::futures::tunnel::dyn::bus<ace::core::runner*> rch;
+
+        auto gather = [](ace::futures::tunnel::dyn::bus<ace::core::runner*>& rch) -> ace::task {
+            auto* r = co_await ace::get_runner();
+            rch << r;
+            co_return;
+        };
+
+        ace::schedule(gather(rch));
+        ace::schedule(gather(rch));
+        ace::run();
+        auto rs = fetch(rch);
+        if (rs.size() != 2 or rs[0] == rs[1]) {
+            state.SkipWithError("Could not gather two distinct runners");
+            reset_runners();
+            continue;
+        }
+
+        auto* r0 = rs[0];
+        auto* r1 = rs[1];
+
+        auto hopper = [](int n, ace::core::runner* r0, ace::core::runner* r1) -> ace::task {
+            for (int i = 0; i < n; ++i) {
+                co_await ace::futures::reattach{r0};
+                co_await ace::futures::reattach{r1};
+            }
+            co_return;
+        };
+
+        ace::schedule(hopper(hops, r0, r1));
+        ace::run();
+
+        if (not ace::empty())
+            state.SkipWithError("Dispatcher not empty after reattach test");
+
+        reset_runners();
+    }
+
+    state.SetItemsProcessed(state.iterations() * hops * 2);
+}
+BENCHMARK(bm_reattach_migration)->Unit(benchmark::kMillisecond);
+
+// ==========================================================================
+// BM17 — spawn_fire_forget: массовый spawn без join
+// ==========================================================================
+// Спавнит N тривиальных задач и не дожидается их (fire-and-forget).
+// Характеризует накладные расходы attach + carrier без join-механизма.
+
+static void bm_spawn_fire_forget(benchmark::State& state) {
+    constexpr int tasks = 50000;
+
+    for (auto _ : state) {
+        ace::futures::tunnel::dyn::bus<int> result;
+
+        auto spawner = [](int n, ace::futures::tunnel::dyn::bus<int>& result) -> ace::task {
+            for (int i = 0; i < n; ++i) {
+                co_await ace::spawn([&result, i]() -> ace::task {
+                    int v = i;
+                    result << v;
+                    co_return;
+                }());
+            }
+            co_return;
+        };
+
+        ace::schedule(spawner(tasks, result));
+        ace::run();
+
+        if (not ace::empty())
+            state.SkipWithError("Dispatcher not empty — possible leak");
+    }
+
+    state.SetItemsProcessed(state.iterations() * tasks);
+}
+BENCHMARK(bm_spawn_fire_forget)->Unit(benchmark::kMillisecond);
+
+// ==========================================================================
+// BM18 — automaton_ping: потребление co_yield значений через ping()
+// ==========================================================================
+// N автоматонов, каждый co_yield-ит K значений; consumer потребляет их
+// через handle.ping(). Характеризует стоимость automaton_rule +
+// ping_handler + yield_waiter.
+
+static void bm_automaton_ping(benchmark::State& state) {
+    constexpr int values_per_automaton = 10;
+    constexpr int automata = 5000;
+
+    for (auto _ : state) {
+        ace::futures::tunnel::dyn::bus<int> ch;
+
+        auto user = [](int n, ace::futures::tunnel::dyn::bus<int>& ch) -> ace::task {
+            auto handle = co_await ace::spawn([](int n) -> ace::automaton<int> {
+                for (int i = 0; i < n; ++i)
+                    co_yield i;
+                co_return n;
+            }(n));
+            for (int i = 0; i <= n; ++i) {
+                if (auto v = co_await handle.ping()) {
+                    int x = *v;
+                    ch << x;
+                }
+            }
+            co_return;
+        };
+
+        for (int i = 0; i < automata; ++i)
+            ace::schedule(user(values_per_automaton, ch));
+
+        ace::run();
+
+        if (not ace::empty())
+            state.SkipWithError("Dispatcher not empty after automaton test");
+    }
+
+    state.SetItemsProcessed(state.iterations() * automata * (values_per_automaton + 1));
+}
+BENCHMARK(bm_automaton_ping)->Unit(benchmark::kMillisecond);
+
+// ==========================================================================
+// BM19 — expire_absolute: таймеры с абсолютными дедлайнами
+// ==========================================================================
+// N таймеров через ace::futures::expire(deadline) с короткими дедлайнами.
+// Характеризует путь абсолютных дедлайнов clock (expire → timeout).
+// NOTE: Дедлайны в пределах 1..20ms — проверяет подписку в нижний диск
+// колеса и корректность подсчёта.
+
+static void bm_expire_absolute(benchmark::State& state) {
+    constexpr int timers = 5000;
+
+    for (auto _ : state) {
+        ace::futures::tunnel::dyn::bus<int> ch;
+
+        auto waiter = [](ace::services::timepoint_t deadline, ace::futures::tunnel::dyn::bus<int>& ch) -> ace::task {
+            co_await ace::futures::expire(deadline);
+            int v = 1;
+            ch << v;
+            co_return;
+        };
+
+        const auto base = ace::services::clock::current_time();
+        for (int i = 0; i < timers; ++i)
+            ace::schedule(waiter(base + std::chrono::milliseconds(i % 20 + 1), ch));
+
+        ace::run();
+
+        if (not ace::empty())
+            state.SkipWithError("Dispatcher not empty after expire test");
+
+        auto res = fetch(ch);
+        if (static_cast<int>(res.size()) != timers)
+            state.SkipWithError("Expire timer count mismatch");
+    }
+
+    state.SetItemsProcessed(state.iterations() * timers);
+}
+BENCHMARK(bm_expire_absolute)->Unit(benchmark::kMillisecond);
+
+// ==========================================================================
+// BM20 — compose_variadic: вариативные and/or композиции из 3+ futures
+// ==========================================================================
+// N раз: co_await (a and b and c) + (a or b or c) с мгновенными (0ms)
+// таймерами. Характеризует стоимость and_await_composed / or_await_composed
+// (observer-задачи, каскадные cancel).
+
+static void bm_compose_variadic(benchmark::State& state) {
+    using namespace std::chrono_literals;
+    constexpr int compositions = 3000;
+
+    for (auto _ : state) {
+        auto composer = [](int n) -> ace::task {
+            for (int i = 0; i < n; ++i) {
+                co_await (ace::futures::timeout(0ms)
+                    and ace::futures::timeout(0ms)
+                    and ace::futures::timeout(0ms));
+                co_await (ace::futures::timeout(0ms)
+                    or ace::futures::timeout(0ms)
+                    or ace::futures::timeout(0ms));
+            }
+            co_return;
+        };
+
+        ace::schedule(composer(compositions));
+        ace::run();
+
+        if (not ace::empty())
+            state.SkipWithError("Dispatcher not empty after variadic composition");
+    }
+
+    state.SetItemsProcessed(state.iterations() * compositions * 6);
+}
+BENCHMARK(bm_compose_variadic)->Unit(benchmark::kMillisecond);

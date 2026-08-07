@@ -331,8 +331,10 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_router : runner_router {
         // NOTE: Target canceled task will be marked as detached and Runner will drop it
         // TODO: Batch read needed
         auto* node = _waiters->pop_node();
-        while (node)
+        while (node) {
             core::runner::reattach(node);
+            node = _waiters->pop_node();
+        }
     }
 
     ~channel_router() override = default;

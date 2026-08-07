@@ -1133,52 +1133,67 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 
 ## Тесты
 
-Тесты находятся в `tests/`. Используют Google Test с fixture-based архитектурой. Сборка через meson (`-Dtests=true`), C++23, ASan.
+Тесты находятся в `tests/`. Используют Google Test с fixture-based архитектурой. Сборка через meson (`-Dtests=true`), C++23, ASan. **Каждый тест регистрируется meson-ом отдельным процессом** (`discover_tests.py` + `--gtest_filter=@0@` — без пробелов внутри аргумента, иначе gtest не найдёт тест).
 
 | Файл | Назначение |
 |------|-----------|
 | `tests/main.cpp` | GTest main |
 | `tests/environment.h` | Все fixture-классы с хелпер-тасками (1098 строк) |
-| `tests/tests.cpp` | `TEST_F` тесты (3250 строк, 221+ тест) |
+| `tests/tests.cpp` | `TEST_F` тесты (3746 строк, 237 тестов; отключённых нет — `cancel_spawned_with_channel` переоткрыт после фикса B7 в `BUGS_AND_BENCHMARKS.md`) |
 
-### Fixture-классы (31 fixture)
+### Fixture-классы (32 fixture)
 
 | Fixture | Наследует | TearDown | Тесты |
 |---------|----------|----------|-------|
-| `base_fixture` | `::testing::Test` | — | Базовый: `once_suspend`, `channel_fetcher<T>`, `sleeper`, `fancy`, `fetch<T>(ch)` |
-| `context_fixture` | `base_fixture` | — | 12: coroutine lifecycle, async move, track, observe, prefetch |
+| `base_fixture` | `::testing::Test` | — | Базовый: `once_suspend`, `channel_fetcher<T>`, `sleeper`, `fancy`, `fetch<T>(ch)`; +17 интеграционных тестов (kernelic, io_query, channel-варианты, reattach, udp, tcp) |
+| `context_fixture` | `base_fixture` | — | 13: coroutine lifecycle, async move, track, observe, prefetch, task_wrap, automaton_no_cancel |
 | `channel_fixture` | `base_fixture` | — | 1: channel send/receive |
-| `timer_fixture` | `base_fixture` | reset runners | 9: or, and, timer, expire, timeout_zero/short/multiple |
+| `timer_fixture` | `base_fixture` | reset runners | 10: or, and, timer, expire, timeout_zero/short/multiple, parallel |
 | `yield_fixture` | `base_fixture` | reset runners | 7: automaton spawn/ping/join/post/cancel |
 | `cutex_fixture` | `base_fixture` | reset runners + signal | 4: cutex race, rescheduling, cancel |
 | `spawn_fixture` | `base_fixture` | — | 10: spawn, post, valued_spawn/post, cancel, join, composed_output |
 | `socket_echo_fixture` | `base_fixture` | reset_signal | 2: TCP echo, zero-copy echo |
-| `fs_fixture` | `base_fixture` | — | 3: filesystem write/read, open fail |
+| `fs_fixture` | `base_fixture` | — | 4: filesystem write/read, open fail |
 | `queue_fixture` | `::testing::Test` | — | 10: slab_mempool + queue operations |
-| `omniptr_fixture` | `::testing::Test` | — | 10: omniptr all operations |
+| `omniptr_fixture` | `::testing::Test` | — | 10: omniptr all operations (+2 lifetime) |
 | `id_alloc_fixture` | `::testing::Test` | — | 3: id alloc/free |
 | `moving_average_fixture` | `::testing::Test` | — | 7: moving average edge cases |
 | `future_traits_fixture` | `::testing::Test` | — | 8: compile-time concept/trait checks |
 | `promise_traits_fixture` | `base_fixture` | — | 8: rule tags, return traits, operator new layout |
 | `router_slot_fixture` | `::testing::Test` | reset_counter | 8 + 1: router slot copy/move/steal |
 | `signal_fixture` | `base_fixture` | — | 4: signal push/pop |
-| `control_block_fixture` | `::testing::Test` | — | 14: control_block lifecycle + handle ops |
-| `runner_fixture` | `base_fixture` | — | 8: attach, run, velocity, move |
+| `control_block_fixture` | `::testing::Test` | — | 15: control_block lifecycle + handle ops |
+| `runner_fixture` | `base_fixture` | — | 8: attach, run, velocity, move, suspending_task_run (с pump времени) |
 | `dispatcher_fixture` | `base_fixture` | reset runners + signal | 7: schedule, run, reload, signals |
 | `io_buffer_fixture` | `::testing::Test` | — | 24: buffer expand/append/prepend/assemble/clone |
 | `io_entity_fixture` | `::testing::Test` | — | 9: entity lifecycle, move, extract, close, guard |
 | `io_any_fixture` | `::testing::Test` | — | 6: type-erased any construction/move/destructor |
 | `io_hanged_fixture` | `::testing::Test` | — | 5: fire-and-forget command pool |
 | `console_fixture` | `::testing::Test` | — | 4: console print/println |
-| `cross_mechanic_fixture` | `base_fixture` | reset runners + signal | 14: cross-subsystem integration (spawn + timeout + channel + cutex + or_ping_automaton) |
+| `cross_mechanic_fixture` | `base_fixture` | reset runners + signal | 17: cross-subsystem integration (spawn + timeout + channel + cutex + or_ping_automaton + cancel_channel) |
 | `spawn_extra_fixture` | `base_fixture` | — | 8: spawn join, cancel, done, post priority, roaming, polling |
 | `compose_extra_fixture` | `base_fixture` | — | 3: or_await, and_await, operator>> pipe tests |
 | `channel_extra_fixture` | `base_fixture` | — | 4: push/pull, shift operator, mpsc |
-| `cutex_extra_fixture` | `base_fixture` | reset runners + signal | 4: proxy double capture/sync/destructor |
+| `cutex_extra_fixture` | `base_fixture` | reset runners + signal | 5: proxy double capture/sync/destructor, try_lock |
 | `get_runner_fixture` | `base_fixture` | — | 1: get_runner inside runner |
+
+### Бенчмарки
+
+`benchmarks/` — Google Benchmark, сборка `-Dbenchmarks=true` (цель `ace_benchmarks`).
+21 бенчмарк (BM1-BM20): cutex race (capture/sync), таймеры (parallel/ordering/expire),
+spawn (cancel/join/fire-forget), каналы (push_pull/pending_push), reattach-миграция,
+automaton ping, compose (and/or/variadic), io_buffer (append/clone), pipe io_uring
+roundtrip, schedule throughput. См. инвентарь в `BUGS_AND_BENCHMARKS.md`.
+
+### Coverage
+
+Цель 95%. Текущее значение: **94.3%** (gcov, meson per-test режим; см. `TEST_PLAN.md`).
+Измерение требует симлинков `tests`/`include` внутри build-каталога (см. TEST_PLAN.md).
 
 ### Добавление новых тестов
 
 1. Добавить хелпер-таски как методы fixture-класса в `tests/environment.h`
 2. Написать `TEST_F(FixtureName, test_name) { ... }` в `tests/tests.cpp`
 3. Общие `fetch<T>(ch)`, `channel_fetcher`, `sleeper` — уже в `base_fixture`
+4. Переконфигурировать build-каталог (`meson setup build --reconfigure`), чтобы
+   `discover_tests.py` зарегистрировал новый тест в meson.

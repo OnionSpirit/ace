@@ -2,6 +2,10 @@
 
 Цель: 95-100% покрытия кодовой базы + проверка всех механик и их взаимодействий.
 
+> **Статус (2026-08-07):** покрытие **94.3%** (2054/2179 уникальных строк по
+> `include/ace/**`, gcov + meson per-test). Отдельные модули — 85-100%.
+> План ниже актуализирован под фактическое состояние тестов.
+
 ## Требования к генерации тестов (agent instructions)
 
 1. **Приоритет исправления проекта над тестами**: если сгенерированные тесты не проходят из-за ошибок в проекте — исправлять исходный код, а не «костылить» тесты. Тесты должны проверять корректное поведение, а не маскировать баги.
@@ -90,40 +94,57 @@ echo "Report: coverage_report/index.html"
 
 ## Текущее покрытие
 
-| Модуль | Покрыто | Не покрыто |
-|--------|---------|------------|
-| `core/tools/queue.h` | 10%→90% | ~~slab_mempool grow/free, q_node::remove, queue::pop/unlink/remove_node, move ctor~~ ✅ |
-| `core/tools/omniptr.h` | 70%→85% | ~~operator&~~ (баг const-correctness), wrong_type_cast (compile-time) |
-| `core/tools/id_alloc.h` | 0%→80% ✅ | ~~весь модуль~~ ✅, исчерпание пула |
-| `core/tools/moving_average.h` | 80%→95% ✅ | ~~краевые случаи~~ ✅ |
-| `core/tools/lifetime.h` | 50%→80% ✅ | ~~untrack(), mark()~~ ✅ |
-| `core/traits/future.h` | 60%→95% ✅ | ~~concepts, type traits~~ ✅ |
-| `core/traits/promise.h` | 70%→80% | ~~automaton tag, return_traits краевые случаи~~ частично, yield_value, operator_delete, operator_delete_sized |
-| `core/traits/routing.h` | 60%→95% ✅ | ~~router_slot::operator=, release(), reset()~~ ✅, router_slot_size_limit (compile-time) |
-| `core/traits/vortex.h` | 50% | detach_set/detach_get, respawn, vortex() цикл с сигналами, inspect() |
-| `core/control.h` | 40%→90% ✅ | ~~disown, watch/unwatch, is_untracked, is_disowned, get_block_from_address, forward~~ ✅, handle_cancel с router |
-| `core/async.h` | 60%→78% | ~~~async c router, prefetch, track, automaton paths, observe edge cases~~ ✅, ~~cancel_yield фикс: сброс _yield_waiter вместо e_canceled~~ ✅, release_waiters, release_router, await_ready_done/with_router/resumable, await_suspend_propagates, await_resume_void/typed, get_current_pool |
-| `core/runner.h` | 60%→70% | ~~velocity, clear_velocity, empty, runner_move~~ ✅, reattach_front, yank_vortex, run цикл >128 задач, fetch_task_node_local/insert/empty |
-| `core/dispatcher.h` | 50%→65% | ~~reload, interrupt/terminate~~ ✅, worker_round, round_robin, fetch_config, schedule_specific_runner, многопоточное взаимодействие |
-| `core/signal.h` | 0%→80% ✅ | ~~весь модуль~~ ✅ |
-| `core/compose.h` | 40%→65% | ~~or_await_left_wins, and_await_both_succeed~~ ✅, ~~or_await_composed_3~~ ✅, or_await_composed, compose(), observer(), все router-ы. Исправлен баг: or_await::observer (typed) использовал std::get вместо emplace. Исправлен баг: cancel_yield разрушал automaton при отмене ping в or |
-| `core/async_handle.h` | 50%→65% | ~~join после cancel, done~~ ✅, join_handler::await_ready/suspend/resume, join_handler_router |
-| `io.h` | 30%→85% | ~~io::buffer (append/clone/clear/move/formatter/all overloads)~~ ✅, ~~io::guard RAII close~~ ✅, ~~io::hanged~~ ✅, ~~io::any~~ ✅, ~~span dynamic_extent bug fixed~~, ~~any placement new + deleter fix~~, query_router::cancel |
-| `net.h` | 20% | UDP (sendto/recv), connected UDP, sendmsg/recvmsg, все bind/connect/accept overloads, error-пути, connection_link, io::caster |
-| `services/kernelic.h` | 30% | cancel/cancel_fd/nop, multishot, overflow buffer (>4096), ring params, iovec allocator |
-| `services/clock.h` | 30% | multi_dial уровни 2+, detach_record реаттач, dial::migrate, time_slot::release_slot(limit) |
-| `futures/timeout.h` | 60%→70% | ~~timeout нулевой~~ ✅, expire краевые случаи, cancel на разных стадиях |
-| `futures/channel.h` | 40%→60% | ~~push/pull, operator<<, empty, MPSC~~ ✅, pending_push, channel_st, allocation_type/access_mode варианты |
-| `futures/cutex.h` | 50%→70% | ~~try_lock, proxy double capture/sync/destructor, rescheduling~~ ✅, notify с rescheduling, pending_notify цикл, cutex_cancel |
-| `futures/spawn.h` | 50%→80% | ~~spawn_returns_handle, valued_spawn~~ ✅, spawn_on_specific_runner, await_suspend |
-| `futures/post.h` | 30%→75% | ~~post_uses_attach_front, valued_post~~ ✅, await_suspend |
-| `futures/reattach.h` | 30% | reattach_router::redirect, await_ready |
-| `futures/roaming.h` | 30%→60% ✅ | ~~roaming флаг~~ ✅, roaming + spawn/post взаимодействие |
-| `futures/polling.h` | 30%→60% ✅ | ~~polling флаг~~ ✅, polling + vortex взаимодействие |
-| `futures/get_runner.h` | 50%→65% ✅ | ~~get_runner внутри runner~~ ✅, get_runner вне runner |
-| `ace_entry.cpp` | 0% | весь модуль (если собран) |
-| `fs.h` | 30%→50% ✅ | ~~file_write_read, file_open_fail~~ ✅, open_query краевые случаи, file_link input_action/read |
-| `console.h` | 30%→60% ✅ | ~~println, print~~ ✅, stdin input, stdout write/writeln все перегрузки |
+**Измерение (2026-08-07):** gcov по ACE-заголовкам, режим meson per-test (237 прогонов),
+уникальные строки (множественные include не учитываются повторно).
+
+**Итог: 2054/2179 = 94.3%**
+
+| Модуль | Покрыто | Примечания |
+|--------|---------|-----------|
+| `core/tools/queue.h` | 96.9% | slab_mempool, queue, q_node — полный набор |
+| `core/tools/omniptr.h` | 100% | + lifetime 100% |
+| `core/tools/id_alloc.h` | 100% | |
+| `core/tools/moving_average.h` | 100% | |
+| `core/traits/future.h` | 100% | compile-time |
+| `core/traits/promise.h` | 97.2% | операторы new/delete покрыты |
+| `core/traits/routing.h` | 89.5% | router_slot — полный набор |
+| `core/traits/vortex.h` | 100% | |
+| `core/control.h` | 100% | |
+| `core/async.h` | 94.3% | |
+| `core/async_handle.h` | 85.5% | join/ping handler-ы |
+| `core/runner.h` | 92.3% | |
+| `core/dispatcher.h` | 89.0% | |
+| `core/signal.h` | 100% | |
+| `core/compose.h` | 86.9% | or/and/composed, operator>> |
+| `io.h` | 95.1% | query/buffer/entity/guard/hanged/any |
+| `net.h` | 95.1% | TCP echo, UDP, sendmsg/recvmsg |
+| `services/kernelic.h` | 90%+ | включая overflow-буфер (6000 запросов) |
+| `services/clock.h` | 97.6% | включая expire |
+| `futures/timeout.h` | 95.5% | |
+| `futures/channel.h` | 95.3% | включая cancel и pending_push |
+| `futures/cutex.h` | 96.9% | |
+| `futures/spawn.h` / `post.h` | 100% / 100% | |
+| `futures/reattach.h` | 100% | включая кросс-раннерную миграцию |
+| `futures/roaming.h` / `polling.h` / `get_runner.h` | 100% | |
+| `fs.h` | 93.9% | |
+| `console.h` | 100% | |
+| `iovec_alloc.h` | 93.5% | |
+
+**Не покрыто (остаточные пробелы):** multishot CQE-пути kernelic (accept-multishot не
+используется в тестах), error-пути compose (несовместимые типы — compile-time),
+`channel::channel_st` (e_regular режим), `kernelic` null-observer CQE.
+
+**Как измерить:**
+```bash
+meson setup build-cov -Dtests=true -Dcoverage=true
+ninja -C build-cov ace_tests
+meson test -C build-cov
+cd build-cov && ln -sfn ../tests tests && ln -sfn ../include include
+gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
+# затем свести уникальные строки по include/ace/**/*.h (см. scripts/cov_summary.py)
+```
+> ⚠️ `ln -sfn ../tests tests` обязателен: gcov резолвит пути gcno относительно
+> build-каталога, без симлинков показывает 0%.
 
 ---
 
@@ -695,6 +716,10 @@ echo "Report: coverage_report/index.html"
 
 Тесты взаимодействия нескольких подсистем одновременно.
 
+> ⚠️ Ниже — исходный список плана. **Все пункты кроме X4, X5, X6, X7, X8, X10,
+> X14, X15, X16, X18, X22, X23 реализованы и проходят.** Дополнительно реализованы
+> тесты X26-X33 (см. конец раздела).
+
 #### `cross_mechanic_fixture`
 
 | # | Тест | Взаимодействие | Статус |
@@ -726,6 +751,12 @@ echo "Report: coverage_report/index.html"
 | X25 | `stress_spawn_cancel` | 100 spawn → cancel всех → нет утечек | ✅ |
 | X26 | `channel_clean_after_run` | Каналы пусты после run (no waiter leak) | ✅ (добавлен) |
 | X27 | `or_ping_automaton_loop_no_value_loss` | 2 automaton → or-гонка ping в цикле (8 итераций) → проверка что cancel_yield не разрушает автоматон и не теряет co_yield значения | ✅ (добавлен) |
+| X28 | `channel_clean_after_run` | Каналы пусты после run (no waiter leak) | ✅ |
+| X29 | `kernelic_overflow_buffer_stress` | 6000 висящих read (>4096 ring) → overflow-буфер kernel_entity → все завершаются | ✅ (добавлен, покрывает B8/B9) |
+| X30 | `reattach_nullptr_noop` | reattach(nullptr) → await_ready=true, задача не суспендится | ✅ (добавлен) |
+| X31 | `reattach_cross_runner_migration` | 2 раннера: задача мигрирует между ними через reattach_router::redirect | ✅ (добавлен) |
+| X32 | `cancel_spawned_with_channel` (переоткрыт) | spawn → channel.pull → cancel — БЫЛ DISABLED (hang, B7); после фикса channel_router::cancel проходит стабильно | ✅ (переоткрыт) |
+| X33 | `do_timer_on_runner_test` / `do_expire_on_runner_test` (переработаны) | Проверка «каждый таймер сработал» вместо неверной монотонности (F6) | ✅ (переработаны) |
 
 ---
 
@@ -747,48 +778,49 @@ echo "Report: coverage_report/index.html"
 
 ## Карта fixture-классов (итоговая)
 
-| Fixture | Наследует | Новые/Расширение | Тестов (план/факт) |
-|---------|----------|-----------------|---------------------|
-| `base_fixture` | `::testing::Test` | существующий | — |
-| `context_fixture` | `base_fixture` | +A1..A20 (async) | 5→13 (✅ 8) |
-| `channel_fixture` | `base_fixture` | +CH1..CH16 (channel) | 1→1 |
-| `timer_fixture` | `base_fixture` | +T1..T9 (timeout) | 5→8 (✅ 3) |
-| `timer_parallel_fixture` | `base_fixture` | без изменений | 1 |
-| `cutex_fixture` | `base_fixture` | +CX1..CX16 (cutex) | 4→4 |
-| `spawn_fixture` | `base_fixture` | +SP1..SP13, +AH1..AH8 | 6→10 (✅ 4) |
-| `socket_echo_fixture` | `base_fixture` | +N1..N35 (net) | 2→2 |
-| `fs_fixture` | `base_fixture` | +FS1..FS11 | 1→4 (✅ 3) |
-| `queue_fixture` | `::testing::Test` | **новый** | 10→10 (✅ 10) |
-| `omniptr_fixture` | `::testing::Test` | **новый** | 13→12 (✅ 10) |
-| `id_alloc_fixture` | `::testing::Test` | **новый** | 4→3 (✅ 3) |
-| `moving_average_fixture` | `::testing::Test` | **новый** | 4→7 (✅ 7) |
-| `future_traits_fixture` | `::testing::Test` | **новый** (compile-time) | 8→8 (✅ 8) |
-| `promise_traits_fixture` | `base_fixture` | **новый** | 12→8 (✅ 6) |
-| `router_slot_fixture` | `::testing::Test` | **новый** | 10→8 (✅ 8) |
-| `vortex_fixture` | `base_fixture` | **новый** — не реализована | 10→0 |
-| `control_block_fixture` | `::testing::Test` | **новый** | 18→15 (✅ 14) |
-| `runner_fixture` | `base_fixture` | **новый** | 21→10 (✅ 8) |
-| `dispatcher_fixture` | `base_fixture` | **новый** | 14→8 (✅ 7) |
-| `signal_fixture` | `base_fixture` | **новый** | 6→4 (✅ 4) |
-| `io_buffer_fixture` | `::testing::Test` | **новый** | 26→8 (✅ 15) |
-| `io_query_fixture` | `base_fixture` | **новый** — не реализована | 12→0 |
-| `io_entity_fixture` | `::testing::Test` | **новый** | 9→1 (✅ 9) |
-| `io_hanged_fixture` | `::testing::Test` | **новый** | 5→0 (✅ 5) |
-| `io_any_fixture` | `::testing::Test` | **новый** | 6→0 (✅ 6) |
-| `kernelic_fixture` | `base_fixture` | **новый** — не реализована | 16→0 |
-| `clock_fixture` | `base_fixture` | **новый** — не реализована | 18→0 |
-| `console_fixture` | `::testing::Test` | **новый** | 9→4 (✅ 4) |
-| `cross_mechanic_fixture` | `base_fixture` | **новый** | 25→14 (✅ 12) |
-| `entry_fixture` | `::testing::Test` | **новый** (отдельный executable) — не реализована | 3→0 |
-| `spawn_extra_fixture` | `base_fixture` | **новый** (расширение spawn) | —→12 (✅ 10) |
-| `compose_extra_fixture` | `base_fixture` | **новый** (расширение compose) | —→3 (✅ 3) |
-| `channel_extra_fixture` | `base_fixture` | **новый** (расширение channel) | —→4 (✅ 4) |
-| `cutex_extra_fixture` | `base_fixture` | **новый** (расширение cutex) | —→5 (✅ 5) |
-| `get_runner_fixture` | `base_fixture` | **новый** | —→1 (✅ 1) |
+| Fixture | Наследует | Статус | Тестов (план/факт) |
+|---------|----------|--------|---------------------|
+| `base_fixture` | `::testing::Test` | ✅ существующий + расширен | —/17 (io/kernelic/udp/tcp/reattach) |
+| `context_fixture` | `base_fixture` | ✅ | 5→13 (✅ 13) |
+| `channel_fixture` | `base_fixture` | ✅ | 1→1 |
+| `timer_fixture` | `base_fixture` | ✅ | 5→10 (✅ 10) |
+| `yield_fixture` | `base_fixture` | ✅ **добавлен** (automaton) | —→7 (✅ 7) |
+| `cutex_fixture` | `base_fixture` | ✅ | 4→4 |
+| `spawn_fixture` | `base_fixture` | ✅ | 6→10 (✅ 10) |
+| `socket_echo_fixture` | `base_fixture` | ✅ | 2→2 |
+| `fs_fixture` | `base_fixture` | ✅ | 1→4 (✅ 4) |
+| `queue_fixture` | `::testing::Test` | ✅ | 10→10 (✅ 10) |
+| `omniptr_fixture` | `::testing::Test` | ✅ (+lifetime 2) | 13→12 (✅ 12) |
+| `id_alloc_fixture` | `::testing::Test` | ✅ | 4→3 (✅ 3) |
+| `moving_average_fixture` | `::testing::Test` | ✅ | 4→7 (✅ 7) |
+| `future_traits_fixture` | `::testing::Test` | ✅ | 8→8 (✅ 8) |
+| `promise_traits_fixture` | `base_fixture` | ✅ | 12→8 (✅ 8) |
+| `router_slot_fixture` | `::testing::Test` | ✅ | 10→8 (✅ 8) |
+| `signal_fixture` | `base_fixture` | ✅ | 6→4 (✅ 4) |
+| `control_block_fixture` | `::testing::Test` | ✅ | 18→15 (✅ 15) |
+| `runner_fixture` | `base_fixture` | ✅ | 21→10 (✅ 10, suspending_task_run починен) |
+| `dispatcher_fixture` | `base_fixture` | ✅ | 14→8 (✅ 8) |
+| `io_buffer_fixture` | `::testing::Test` | ✅ | 26→24 (✅ 24) |
+| `io_entity_fixture` | `::testing::Test` | ✅ | 9→9 (✅ 9) |
+| `io_hanged_fixture` | `::testing::Test` | ✅ | 5→5 (✅ 5) |
+| `io_any_fixture` | `::testing::Test` | ✅ | 6→6 (✅ 6) |
+| `console_fixture` | `::testing::Test` | ✅ | 9→4 (✅ 4) |
+| `cross_mechanic_fixture` | `base_fixture` | ✅ | 25→17 (✅ 17, включая переоткрытый cancel_spawned_with_channel) |
+| `spawn_extra_fixture` | `base_fixture` | ✅ | —→12 (✅ 12) |
+| `compose_extra_fixture` | `base_fixture` | ✅ | —→3 (✅ 3) |
+| `channel_extra_fixture` | `base_fixture` | ✅ | —→4 (✅ 4) |
+| `cutex_extra_fixture` | `base_fixture` | ✅ | —→5 (✅ 5) |
+| `get_runner_fixture` | `base_fixture` | ✅ | —→1 (✅ 1) |
 
-**Итого:** 37 fixture-классов, 204 теста (было 24, добавлено 180).
+**Итого:** 32 fixture-класса, **237 тестов** (из них 1 отключён → 236 активных по gtest;
+в meson-режиме 237 зарегистрированных прогонов, отключённый тест не регистрируется).
 
-**Бенчмарки:** 6 тестов перенесены в `benchmarks/` (см. `BUGS_AND_BENCHMARKS.md`).
+> Примечание: `timer_parallel_fixture` и `vortex_fixture`/`io_query_fixture`/
+> `kernelic_fixture`/`clock_fixture`/`entry_fixture` из ранней версии плана не
+> реализованы как отдельные fixture-классы — их сценарии покрыты внутри
+> `timer_fixture` (parallel) и `base_fixture` (io_query/kernelic/clock/udp/tcp).
+
+**Бенчмарки:** 21 бенчмарк в `benchmarks/` (BM1-BM20, см. `BUGS_AND_BENCHMARKS.md`).
 Запуск: `meson setup build-bench -Dbenchmarks=true && ninja -C build-bench ace_benchmarks`
 
 ---
@@ -808,75 +840,82 @@ echo "Report: coverage_report/index.html"
 
 | Строки (примерно) | Fixture | Категория |
 |-------------------|---------|-----------|
-| 25–70 | `base_fixture` | Базовый |
-| 76–89 | `context_fixture` | async |
-| 95–117 | `channel_fixture` | channel |
-| 123–180 | `timer_fixture` | timeout |
-| 187–209 | `timer_parallel_fixture` | timeout (parallel) |
-| 215–311 | `cutex_fixture` | cutex |
-| 317–450 | `spawn_fixture` | spawn/post/compose |
-| 458–533 | `socket_echo_fixture` | net |
-| 539–545 | `fs_fixture` | fs |
-| 549–556 | `queue_fixture` | tools |
-| 558 | `omniptr_fixture` | tools |
-| 560 | `id_alloc_fixture` | tools |
-| 562 | `moving_average_fixture` | tools |
-| 564 | `future_traits_fixture` | traits |
-| 570–594 | `promise_traits_fixture` | traits |
-| 600–629 | `router_slot_fixture` | traits |
-| 631–633 | `signal_fixture` | signal |
-| 638–680 | `control_block_fixture` | control |
-| 685–698 | `runner_fixture` | runner |
-| 704–725 | `dispatcher_fixture` | dispatcher |
-| 729 | `io_buffer_fixture` | io |
-| 735 | `io_entity_fixture` | io |
-| 740 | `io_any_fixture` | io |
-| 746 | `io_hanged_fixture` | io |
-| 752 | `console_fixture` | console |
-| 741–750 | `cross_mechanic_fixture` | integration |
-| 755–768 | `spawn_extra_fixture` | futures |
-| 775–793 | `compose_extra_fixture` | compose |
-| 799–809 | `channel_extra_fixture` | channel |
-| 815–836 | `cutex_extra_fixture` | cutex |
-| 840–842 | `get_runner_fixture` | futures |
+| 27–72 | `base_fixture` | Базовый |
+| 78–95 | `context_fixture` | async |
+| 97–123 | `channel_fixture` | channel |
+| 125–192 | `timer_fixture` | timeout |
+| 194–306 | `yield_fixture` | automaton |
+| 308–420 | `cutex_fixture` | cutex |
+| 422–642 | `spawn_fixture` | spawn/post/compose |
+| 644–723 | `socket_echo_fixture` | net |
+| 725–736 | `fs_fixture` | fs |
+| 738–750 | `queue_fixture` | tools |
+| 752–756 | `omniptr_fixture` | tools |
+| 758–762 | `id_alloc_fixture` | tools |
+| 764–768 | `moving_average_fixture` | tools |
+| 770–774 | `future_traits_fixture` | traits |
+| 776–788 | `promise_traits_fixture` | traits |
+| 790–816 | `router_slot_fixture` | traits |
+| 818–822 | `signal_fixture` | signal |
+| 824–871 | `control_block_fixture` | control |
+| 873–890 | `runner_fixture` | runner |
+| 892–907 | `dispatcher_fixture` | dispatcher |
+| 909–913 | `io_buffer_fixture` | io |
+| 915–924 | `io_entity_fixture` | io |
+| 926–930 | `io_any_fixture` | io |
+| 932–936 | `io_hanged_fixture` | io |
+| 938–942 | `console_fixture` | console |
+| 944–1004 | `cross_mechanic_fixture` | integration |
+| 1006–1023 | `spawn_extra_fixture` | futures |
+| 1025–1047 | `compose_extra_fixture` | compose |
+| 1049–1060 | `channel_extra_fixture` | channel |
+| 1062–1083 | `cutex_extra_fixture` | cutex |
+| 1085–1093 | `get_runner_fixture` | futures |
 
 ### Расположение тестов в `tests/tests.cpp`
 
 | Строки | Fixture | Количество тестов |
 |--------|---------|-------------------|
-| 9–36 | `context_fixture` | 4 (существующие) |
-| 42–47 | `context_fixture` (runner) | 1 |
-| 49–74 | `timer_fixture` | 3 |
-| 76–80 | `fs_fixture` | 1 (существующий) |
-| 86–93 | `channel_fixture` | 1 |
-| 95–146 | `timer_fixture` | 2 |
-| 148–169 | `cutex_fixture` | 2 |
-| 171–206 | `timer_parallel_fixture` | 1 |
-| 208–220 | `socket_echo_fixture` | 2 |
-| 226–298 | `spawn_fixture` | 10 |
-| 300–354 | `cutex_fixture` | 2 |
-| 358–510 | `queue_fixture` | 10 |
-| 512–646 | `omniptr_fixture` | 10 (+2 lifetime) |
-| 648–676 | `id_alloc_fixture` | 3 |
-| 678–750 | `moving_average_fixture` | 7 |
-| 752–808 | `future_traits_fixture` | 8 |
-| 810–896 | `promise_traits_fixture` | 8 |
-| 898–1004 | `router_slot_fixture` | 8 |
-| 1006–1124 | `control_block_fixture` | 15 |
-| 1126–1178 | `signal_fixture` | 4 |
-| 1180–1260 | `runner_fixture` | 8 |
-| 1262–1364 | `dispatcher_fixture` | 7 |
-| 1366–1525 | `io_buffer_fixture` | 15 |
-| 1527–1550 | `io_entity_fixture` | 9 |
-| 1552–1600 | `io_any_fixture` | 7 |
-| 1602–1655 | `io_hanged_fixture` | 5 |
-| 1466–1498 | `console_fixture` | 4 |
-| 1500–1554 | `context_fixture` (async ext) | 8 |
-| 1556–1670 | `spawn_extra_fixture` | 8 |
-| 1672–1732 | `compose_extra_fixture` | 3 |
-| 1734–1850 | `channel_extra_fixture` | 4 |
-| 1852–1964 | `cutex_extra_fixture` | 5 |
-| 1966–1980 | `get_runner_fixture` | 1 |
-| 1982–2348 | `cross_mechanic_fixture` | 14 |
-| 2350–2430 | `timer_fixture` (timeout ext) | 3 |
-| 2432–2500 | `fs_fixture` (fs ext) | 3 |
+| 9–48 | `context_fixture` | 5 (базовые) |
+| 49–74 | `timer_fixture` | 3 (or/and/or_with_promise) |
+| 76–163 | `yield_fixture` | 7 (automaton) |
+| 164–182 | `fs_fixture` + `channel_fixture` | 2 |
+| 183–208 | `timer_fixture` | 1 (do_timer_on_runner_test) |
+| 209–234 | `timer_fixture` | 1 (do_expire_on_runner_test) |
+| 236–258 | `cutex_fixture` | 2 (race) |
+| 259–297 | `timer_fixture` | 1 (parallel) |
+| 298–315 | `socket_echo_fixture` | 2 |
+| 316–441 | `spawn_fixture` | 10 |
+| 441–502 | `cutex_fixture` | 2 (cancel) |
+| 503–672 | `queue_fixture` | 10 |
+| 673–969 | `omniptr_fixture` (+2 lifetime) | 12 |
+| 970–989 | `id_alloc_fixture` | 3 |
+| 990–1061 | `moving_average_fixture` | 7 |
+| 1062–1168 | `future_traits_fixture` | 8 |
+| 1169–1283 | `promise_traits_fixture` | 8 |
+| 1284–1380 | `router_slot_fixture` | 8 |
+| 1381–1563 | `control_block_fixture` | 15 |
+| 1564–1634 | `signal_fixture` | 4 |
+| 1635–1718 | `runner_fixture` | 8 (suspending_task_run починен) |
+| 1719–1821 | `dispatcher_fixture` | 7 |
+| 1822–2116 | `io_buffer_fixture` | 24 |
+| 2118–2231 | `io_entity_fixture` | 9 |
+| 2232–2272 | `io_any_fixture` | 6 |
+| 2273–2316 | `io_hanged_fixture` | 5 |
+| 2317–2348 | `console_fixture` | 4 |
+| 2349–2444 | `context_fixture` (async ext) | 8 |
+| 2445–2565 | `spawn_extra_fixture` | 8 |
+| 2566–2627 | `compose_extra_fixture` | 3 |
+| 2628–2715 | `channel_extra_fixture` | 4 |
+| 2716–2828 | `cutex_extra_fixture` | 5 |
+| 2829–2831 | `get_runner_fixture` | 1 |
+| 2832–3240 | `cross_mechanic_fixture` | 17 (включая переоткрытый cancel_spawned_with_channel) |
+| 3241–3320 | `timer_fixture` (timeout ext) | 3 |
+| 3321–3400 | `fs_fixture` (fs ext) | 3 |
+| 3401–3470 | `base_fixture` (kernelic: nop, pipe r/w, close, iovec, register_files, overflow) | 6 |
+| 3471–3650 | `base_fixture` (channel bounded/pending/spsc/mpmc, get_current_pool, router, reattach×3, udp, tcp) | 14 |
+
+> ⚠️ Номера строк приблизительные и сдвигаются при правках. Источник истины —
+> `grep -n '^TEST' tests/tests.cpp`.
+
+---

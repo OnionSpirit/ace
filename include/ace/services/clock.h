@@ -63,9 +63,17 @@ namespace ace::services {
         );
         thread_local uint32_t refresh_counter = 0;
         ++refresh_counter;
-        if (refresh_counter % 16 == 0) {
-            cached_ts = std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
+        // TODO: Research
+        const auto now = std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
             std::chrono::steady_clock::now());
+        // NOTE: The cache must be refreshed not only by call count but also when it is
+        // older than the wheel tick (1ms).  Otherwise, under a burst of timer
+        // subscriptions/expirations the cached timestamp lags real time for long
+        // intervals: the release bound syncs to the stale value, freshly subscribed
+        // timers get deadlines in the past, and they fire immediately on the next ping
+        // when the cache refreshes (observed: 100ms timers firing after ~2ms).
+        if (refresh_counter % 16 == 0 or (now - cached_ts) >= std::chrono::milliseconds(1)) {
+            cached_ts = now;
         }
         return cached_ts;
     }

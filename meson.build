@@ -137,7 +137,7 @@ if tests_enabled
       test_name,
       test_executable,
       args: [
-        '--gtest_filter= "@0@"'.format(test_name),
+        '--gtest_filter=@0@'.format(test_name),
         '--gtest_print_time=0',
         '--gtest_color=yes',
         '--gtest_catch_exceptions=0',

@@ -293,13 +293,15 @@ namespace ace::services {
     struct kernel_controller::kernel_entity {
 
         template <typename io_uring_foo_t, typename ... Args>
-        kernel_entity(io_uring_foo_t foo, io_uring_sqe *sqe, Args... args);
+        kernel_entity(io_uring_foo_t foo, kernel_observer* observer, Args... args);
 
         // NOTE: Polymorphic action handler
         template <typename io_uring_foo_t, typename ... Args>
         static void action_templ(void* io_uring_foo, io_uring_sqe* sqe, const uintptr_t* params);
 
-        void apply();
+        // NOTE: Applies the buffered request.  Returns @c false when the ring
+        // has no free SQE slot at the moment (the caller should re-queue).
+        bool apply();
 
         ACE_CACHE_LINE(0)
 
@@ -308,7 +310,7 @@ namespace ace::services {
         ACE_CACHE_LINE(1)
 
         void (*_action)(void*, io_uring_sqe*, const uintptr_t*) = nullptr;
-        io_uring_sqe* _sqe = nullptr;
+        kernel_observer* _observer = nullptr;
         void* _io_uring_foo = nullptr;
 
         static thread_local core::tools::slab_mempool<kernel_entity> _kernelic_entity_mempool;
@@ -361,9 +363,17 @@ ACE_SERVICES_KERNEL_CONTROLLER_MEMBER(bool)
 ping() {
     // NOTE: Setting requests to the io_uring
     _need_submission = _need_submission or not _submission_buffer.empty();
-    for (unsigned int i = 0; i < (max_entries - _queries) and not _submission_buffer.empty(); ++i) {
+    // NOTE: The bound must stay signed — when _queries exceeds the ring
+    // capacity, max_entries - _queries would underflow to a huge unsigned
+    // value and drain the whole buffer while the ring is full, losing
+    // every deferred request (no CQE ever arrives for them).
+    for (int i = 0; i < static_cast<int>(max_entries) - _queries and not _submission_buffer.empty(); ++i) {
         auto entity = _submission_buffer.dequeue();
-        entity.apply();
+        if (not entity.apply()) [[unlikely]] {
+            // NOTE: No free SQE slot yet — return the request to the buffer
+            _submission_buffer.enqueue(std::move(entity));
+            break;
+        }
     }
 
     // NOTE: Requesting submission if it's needed
@@ -426,23 +436,30 @@ submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept
         observer->_runner_identity = core::runner::get().as<runner_pool_t>();
     touch(observer->_runner_identity);
     io_uring_sqe *sqe = io_uring_get_sqe(&_ring);
-    io_uring_sqe_set_data(sqe, observer);
-    ++_queries;
-    if (_queries < 4096) {
+    if (_queries < static_cast<int>(max_entries) and sqe) [[likely]] {
+        io_uring_sqe_set_data(sqe, observer);
+        ++_queries;
         io_uring_foo(sqe, params...);
         _need_submission = true;
+        return true;
     }
-    else if (not _submission_buffer.enqueue( kernel_entity{io_uring_foo, sqe, params...} )) [[unlikely]]
+    // NOTE: The ring has no free SQE slots (more than 4096 pending
+    // requests).  Defer the request WITHOUT holding an sqe — apply() will
+    // fetch a fresh slot on the next ping() once the CQ drains.  Holding
+    // a fetched slot across submissions would let io_uring_submit emit a
+    // stale, half-prepared entry and produce a bogus CQE for the observer.
+    if (not _submission_buffer.enqueue(kernel_entity{io_uring_foo, observer, params...}))
         return false;
+    ++_queries;
     return true;
 }
 
 
 template <typename io_uring_foo_t, typename ... Args>
 ACE_SERVICES_KERNEL_ENTITY_SPACE
-kernel_entity(io_uring_foo_t foo, io_uring_sqe *sqe, Args... args) {
+kernel_entity(io_uring_foo_t foo, kernel_observer* observer, Args... args) {
     _action = action_templ<io_uring_foo_t, Args...>;
-    _sqe = sqe;
+    _observer = observer;
     _io_uring_foo = reinterpret_cast<void*>(foo);
     // NOTE: Placement new to copy params to the local storage
     new (_params) std::tuple<Args...>(args...);
@@ -460,10 +477,17 @@ action_templ(void* io_uring_foo, io_uring_sqe* sqe, const uintptr_t* params) {
 }
 
 
-ACE_SERVICES_KERNEL_ENTITY_MEMBER(void)
+ACE_SERVICES_KERNEL_ENTITY_MEMBER(bool)
 apply() {
-    if (_sqe not_eq nullptr)
-        _action(_io_uring_foo, _sqe, _params);
+    // NOTE: Fetching a fresh SQE slot — the buffered request must not
+    // hold a pre-fetched slot across submissions (it may already be
+    // consumed by io_uring_submit as an unprepared entry).
+    if (not _observer) [[unlikely]] return false;
+    io_uring_sqe* sqe = io_uring_get_sqe(&_ring);
+    if (not sqe) [[unlikely]] return false;
+    io_uring_sqe_set_data(sqe, _observer);
+    _action(_io_uring_foo, sqe, _params);
+    return true;
 }
 
 #undef ACE_SERVICES_KERNEL_CONTROLLER_SPACE

@@ -1,3 +1,7 @@
 docs/doxygen/html/
 docs/doxygen/warnings.log
 docs/doxygen/ace.tag
+# Test artifacts (created by fs tests at repo root)
+flexing.txt
+test_write_read.txt
+a--.006t.original

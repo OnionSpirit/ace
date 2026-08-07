@@ -88,8 +88,8 @@ namespace ace::core {
                 return std::nullopt;
             }
             resume_t res;
-            _handle.yield_value(&res);
-            return res;
+            if (_handle.yield_value(&res)) return res;
+            return std::nullopt;
         }
 
         ~ping_handler() override = default;

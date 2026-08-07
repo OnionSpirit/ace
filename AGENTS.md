@@ -19,7 +19,7 @@
 15. [Clock: иерархическое колесо времени](#clock)
 16. [Router: маршрутизация futures](#router)
 17. [Promise traits и память](#promise-traits)
-18. [Vortex: фоновые сервисы](#vortex)
+18. [Service: фоновые сервисы](#service)
 19. [Tools: omniptr, queue, id_alloc, moving_average, iovec_alloc](#tools)
 20. [Важные ограничения и паттерны](#ограничения)
 21. [Файловая карта (полная)](#файловая-карта)
@@ -517,7 +517,7 @@ handle.done();           // проверить завершение
 ### polling (`futures/polling.h:26`)
 
 ```cpp
-co_await ace::polling(true);  // пометить задачу как низкоприоритетную (vortex)
+co_await ace::polling(true);  // пометить задачу как низкоприоритетную (service)
 ```
 
 Не суспендит (`await_suspend` возвращает `false`).
@@ -611,7 +611,7 @@ ace::task critical_section() {
 Per-thread исполнитель. Три очереди:
 - `_pool` — lock-free reg_queue для локальных задач
 - `_insert_pool` — lock-free mpsc_queue для кросс-поточных вставок
-- `_vortex_pool` — низкоприоритетные (polling) задачи
+- `_service_pool` — низкоприоритетные (polling) задачи
 
 | Метод | Линия | Назначение |
 |-------|-------|-----------|
@@ -620,7 +620,7 @@ Per-thread исполнитель. Три очереди:
 | `carrier(async<T>*)` | 208 | Цикл-обёртка для valued-тасок: проходит suspension point'ы через `carrier_suspend` |
 | `carrier(automaton)` | 215 | Версия для automaton через `automaton_suspend` |
 | `yank()` | 154 | Обработать одну задачу из `_pool` или `_insert_pool` |
-| `yank_vortex()` | 160 | Обработать vortex-задачу |
+| `yank_service()` | 160 | Обработать service-задачу |
 | `run()` | 174 | Обработать до 128 задач за раз |
 | `reattach(omni_node&, runner)` | 106 | Вернуть ноду владеющему раннеру (4 перегрузки: lvalue/rvalue) |
 | `reattach_front(omni_node&, runner)` | 120 | Вернуть ноду в начало очереди (4 перегрузки) |
@@ -812,7 +812,7 @@ Thread-local пул fire-and-forget I/O команд для деструктор
 
 ### kernel_controller (`services/kernelic.h:87`)
 
-Thread-local vortex. Каждый раннер имеет свой экземпляр с собственным `io_uring` ring (4096 entries).
+Thread-local service. Каждый раннер имеет свой экземпляр с собственным `io_uring` ring (4096 entries).
 
 | Метод | Линия | io_uring обёртка |
 |-------|-------|-----------------|
@@ -855,7 +855,7 @@ Thread-local vortex. Каждый раннер имеет свой экземп�
 
 | Компонент | Линия | Описание |
 |-----------|-------|----------|
-| `clock` | 548 | Thread-local vortex. `ping()` продвигает колесо и истекает таймеры. |
+| `clock` | 548 | Thread-local service. `ping()` продвигает колесо и истекает таймеры. |
 | `hierarchical_time_wheel` | 288 | Полное колесо: до 7 уровней (1ms → 256ms → 65s → 4.6h → 49d → 34y → 2.3My); верхний уровень ограничен переполнением int64 (UB), лимит ~292 млн лет |
 | `time_wheel` | 173 | Один уровень колеса (256 слотов) |
 | `time_slot` | 114 | Один слот в уровне |
@@ -966,30 +966,31 @@ In-place storage для одного router'а (размер `ACE_ROUTER_MEM_SIZ
 
 ---
 
-## Vortex
+## Service
 
-### vortex_traits (`core/traits/vortex.h:67`)
+### service_traits (`core/traits/service.h:94`)
 
 CRTP база для фоновых polling-сервисов.
 
 | Метод | Линия | Описание |
 |-------|-------|----------|
-| `vortex_traits()` | 98 | Конструктор |
-| `vortex(sig_pipe_t&)` | 117 | Корутина вечного цикла `ping()` + ожидание сигналов |
-| `touch(omni_runner)` | 155,159 | Активация vortex'а на раннере |
-| `inspect()` (static) | 163 | Получить общий экземпляр |
+| `service_traits()` | 147 | Конструктор — связывает detach-аксессоры по режиму |
+| `service(sig_pipe_t&)` | 177 | Корутина вечного цикла `ping()` + ожидание сигналов |
+| `respawn(runner*)` | 141 | Запустить service-корутину и сбросить detach-флаг |
+| `touch(omni_runner)` | 220,224 | Активация service на раннере (респавн при detach) |
+| `inspect()` (static) | 228 | Получить общий экземпляр без респавна |
 
-**Режимы (enum `vortex_spawn_mode`, line 45):**
+**Режимы (enum `service_spawn_mode`, line 48):**
 - `e_thread_shared` — один экземпляр на все потоки
 - `e_thread_local` — отдельный экземпляр на каждый поток
 
 **Концепты:**
 | Концепт | Линия |
 |---------|-------|
-| `is_vortex_routine<V>` | 50 — имеет `ping() → bool` |
-| `is_vortex_promise<V>` | 55 — имеет `ping() → promise<bool>` |
-| `is_vortex_compatible<V>` | 60 |
-| `is_vortex<V>` | 173 |
+| `is_service_routine<V>` | 58 — имеет `ping() → bool` |
+| `is_service_promise<V>` | 67 — имеет `ping() → promise<bool>` |
+| `is_service_compatible<V>` | 76 |
+| `is_service<V>` | 243 |
 
 ---
 
@@ -1105,7 +1106,7 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 | `core/traits/future.h` | `future_handle`, `future_traits`, `busy_future_traits`, concepts (`is_future`, `is_awaitable`, `is_busy_future`), type traits (`resume_type`, `replace_type`, `unique_tuple_t`, `tuple_to_variant_t`, `at_pack`) |
 | `core/traits/promise.h` | `lazy_rule`, `eager_rule`, `automaton_rule`, `promise_primitives`, `promise_traits`, concepts (`is_rule`, `is_spawnable_rule`, `is_automaton_rule`) |
 | `core/traits/routing.h` | `runner_router_handle`, `async_router_handle` (control_router_handle), `router_slot` |
-| `core/traits/vortex.h` | `vortex_traits` CRTP, `vortex_spawn_mode` enum, vortex concepts |
+| `core/traits/service.h` | `service_traits` CRTP, `service_spawn_mode` enum, service concepts |
 | `core/tools/omniptr.h` | `omniptr<T, Ts...>` — тип-agnostic указатель |
 | `core/tools/queue.h` | `queue<T>`, `q_node<T>`, `slab_mempool<T>` |
 | `core/tools/id_alloc.h` | `id_allocator`, `async_id_allocator` |
@@ -1126,8 +1127,8 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 | `futures/roaming.h` | `roaming(bool)` — флаг миграции |
 | `futures/get_runner.h` | `get_runner` — текущий раннер |
 | `futures/polling.h` | `polling(bool)` — флаг низкого приоритета |
-| `services/kernelic.h` | `kernel_controller` (io_uring vortex), `kernel_observer`, `kernel_entity`, все `io_uring_prep_*`, iovec management |
-| `services/clock.h` | `clock` vortex, `hierarchical_time_wheel`, `time_wheel`, `time_slot`, `timer_record`, `cached_now`, `clock::subscribe()`, `clock::ping()` |
+| `services/kernelic.h` | `kernel_controller` (io_uring service), `kernel_observer`, `kernel_entity`, все `io_uring_prep_*`, iovec management |
+| `services/clock.h` | `clock` service, `hierarchical_time_wheel`, `time_wheel`, `time_slot`, `timer_record`, `cached_now`, `clock::subscribe()`, `clock::ping()` |
 
 ---
 

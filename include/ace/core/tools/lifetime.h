@@ -23,26 +23,36 @@ namespace ace::core::tools {
      */
     class lifetime {
 
-        std::string _mark;
-
-        static bool _active;
+        std::string _mark;       ///< Identifier printed in the log messages.
+        static bool _active;     ///< Global tracking switch; @c false by default.
 
     public:
 
+        /// @brief Globally enable lifetime tracking.
         static void track() { _active = true; }
 
-        static void untrack() { _active = true; }
+        /// @brief Globally disable lifetime tracking.
+        static void untrack() { _active = false; }
 
+        /**
+         * @brief Constructs a tracker and logs construction if tracking is enabled.
+         * @param mark Identifier to print.
+         */
         explicit lifetime(const std::string_view mark) : _mark(mark) {
             if (_active)
                 console::println("{} constructed", _mark);
         };
 
+        /// @brief Logs destruction if tracking is enabled.
         ~lifetime() {
             if (_active)
                 console::println("{} destroyed", _mark);
         }
 
+        /**
+         * @brief Returns the tracker's identifier.
+         * @return The mark string.
+         */
         [[nodiscard]] std::string_view mark() const { return _mark; }
     };
 

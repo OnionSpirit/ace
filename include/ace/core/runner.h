@@ -3,14 +3,14 @@
  * @brief Per-thread task runner — the core execution unit of the ACE runtime.
  *
  * @details Each @c runner owns a lock-free MPSC task queue (@c _pool), an
- * inter-thread insertion queue (@c _insert_pool), and a vortex service
- * pool (@c _vortex_pool).  The dispatcher assigns tasks to runners via
+ * inter-thread insertion queue (@c _insert_pool), and a service
+ * pool (@c _service_pool).  The dispatcher assigns tasks to runners via
  * @c attach() / @c attach_front().
  *
  * ### Execution loop
  *
  * @c run() processes up to 128 tasks per call (the @c yank_limit).  Every
- * 16 tasks it drains the @c _insert_pool and processes vortex tasks.
+ * 16 tasks it drains the @c _insert_pool and processes service tasks.
  *
  * ### Task lifecycle inside a runner
  *
@@ -43,21 +43,27 @@ namespace ace::core {
      * @details Owns three task queues:
      *  - @c _pool — lock-free MPSC queue for local tasks (fast path).
      *  - @c _insert_pool — lock-free MPSC queue for cross-thread inserts.
-     *  - @c _vortex_pool — queue for low-priority polling tasks (vortex services).
+     *  - @c _service_pool — queue for low-priority polling tasks (service routines).
      *
      * Tracks @c _tasks_amount for velocity calculation (used by the balancer
      * for weighted task distribution).
      */
     struct runner {
 
+        /// @brief Queue type for cross-thread task insertion.
         typedef nukes::dynamic::mpsc_queue<task> insert_pool_t;
 
+        /// @brief Node type of the local task pool.
         typedef runner_pool_t::node_t *pool_node_ptr;
+        /// @brief Node type of the cross-thread insertion pool.
         typedef insert_pool_t::node_t *insert_node_ptr;
 
+        /**
+         * @brief Source pool selection for the next @c fetch_task_node().
+         */
         enum class pull_source : uint8_t {
-            e_local_pool,
-            e_interthread_pool,
+            e_local_pool,        ///< Pull from the local pool.
+            e_interthread_pool,  ///< Pull from the inter-thread insertion pool.
         };
 
         ACE_CACHE_LINE(0)
@@ -67,16 +73,17 @@ namespace ace::core {
 
         ACE_CACHE_LINE(1)
 
-        runner_pool_t                   _vortex_pool        {};
-        long                            _tasks_amount       {};
-        pull_source                     _pull_source        { pull_source::e_local_pool };
+        runner_pool_t                   _service_pool       {}; ///< Pool of low-priority polling tasks (service routines).
+        long                            _tasks_amount       {}; ///< Number of tasks currently attached to this runner.
+        pull_source                     _pull_source        { pull_source::e_local_pool }; ///< Pool selected for the next fetch.
 
         ACE_CACHE_LINE(2)
 
         mutable insert_pool_t           _insert_pool   {}; ///< Pool for the interthread insertion
 
-        static thread_local omni_runner current_runner_ptr;
+        static thread_local omni_runner current_runner_ptr; ///< Runner active on the current thread (set inside @c run()).
 
+        /// @brief Default constructor.
         runner() = default;
 
         // TODO: Need to figure out how to validate this wo warn cuz its important
@@ -85,10 +92,20 @@ namespace ace::core {
         //         "'_pool' must be the first member of runner. Stop touching not your code idiot");
         // };
 
+        /// @brief Default destructor.
         ~runner() = default;
 
+        /**
+         * @brief Move constructor — transfers all pools and task count.
+         * @param t Source runner to move from.
+         */
         runner(runner &&t) noexcept;
 
+        /**
+         * @brief Move assignment — transfers all pools and task count.
+         * @param t Source runner to move from.
+         * @return Reference to this runner.
+         */
         runner &operator=(runner &&t) noexcept;
 
         /**
@@ -154,17 +171,17 @@ namespace ace::core {
         bool yank() noexcept;
 
         /**
-         * @details Resumes only vortex service tasks
+         * @details Resumes only service polling tasks
          * @return @b true if task was processed, @b false otherwise
          */
-        bool yank_vortex() noexcept;
+        bool yank_service() noexcept;
 
         /**
-         * @details Checks if runner has only vortex polling tasks
-         * @return @c true if runner has only vortex tasks, @c false otherwise
+         * @details Checks if runner has only service polling tasks
+         * @return @c true if runner has only service tasks, @c false otherwise
          */
         bool is_polling() const noexcept {
-            return _pool.empty() and not _vortex_pool.empty();
+            return _pool.empty() and not _service_pool.empty();
         };
 
         /**
@@ -198,13 +215,24 @@ namespace ace::core {
          * @return @b true if empty, @b false otherwise
          */
         [[nodiscard]] bool empty() const noexcept {
-            return _pool.empty() and _vortex_pool.empty() and _insert_pool.empty();
+            return _pool.empty() and _service_pool.empty() and _insert_pool.empty();
         };
 
+        /**
+         * @brief Fetches one task node from the selected pool.
+         * @details Alternates between the local pool and the insertion pool
+         * when the current one is empty.
+         * @return The fetched node, or a null node when both pools are empty.
+         */
         omni_node fetch_task_node();
 
     private:
 
+        /**
+         * @brief Carrier wrapper for valued tasks: resumes the inner coroutine
+         * until it finishes or is canceled.
+         * @param inner Valued task to carry.
+         */
         template <typename async_return_t>
         static task carrier(async<async_return_t> inner) {
             while (not inner._coroutine.done() and inner._coroutine.promise().status() not_eq e_canceled)
@@ -212,6 +240,10 @@ namespace ace::core {
             co_return;
         }
 
+        /**
+         * @brief Carrier wrapper for automaton tasks.
+         * @param inner Automaton task to carry.
+         */
         template <typename async_return_t>
         static task carrier(async<async_return_t, automaton_rule> inner) {
             while (not inner._coroutine.done() and inner._coroutine.promise().status() not_eq e_canceled)
@@ -219,19 +251,37 @@ namespace ace::core {
             co_return;
         }
 
+        /**
+         * @brief Awaitable used by @c carrier for ordinary valued tasks.
+         * @details Steals the inner coroutine's router and roaming state
+         * onto the carrier promise before suspending.
+         * @tparam async_return_t Return type of the carried task.
+         */
         template <typename async_return_t>
         struct carrier_suspend final : traits::future_traits<carrier_suspend<async_return_t>> {
-            async<async_return_t>& _inner;
+            async<async_return_t>& _inner; ///< Carried task.
             IMPORT_FUTURE_ENV(carrier_suspend)
 
+            /**
+             * @brief Constructs the suspend point.
+             * @param inner Carried task.
+             */
             explicit carrier_suspend(async<async_return_t>& inner) : _inner(inner) {}
 
+            /**
+             * @brief @c true when the inner task is done, canceled or immediately resumable.
+             */
             bool await_ready() override {
                 if (_inner._coroutine.done()) return true;
                 if (_inner._coroutine.promise().status() == e_canceled) return true;
                 return _inner.await_ready();
             }
 
+            /**
+             * @brief Propagates roaming, status and router from the inner task.
+             * @param coroutine Carrier's promise accessor.
+             * @return Always @c true — the carrier always suspends.
+             */
             bool await_suspend(auto coroutine) {
                 // NOTE: Storing local value of roaming into outer
                 coroutine.promise()._roaming = _inner._coroutine.promise()._roaming;
@@ -243,14 +293,25 @@ namespace ace::core {
                 return true;
             }
 
+            /// @brief No value produced.
             void await_resume() { }
         };
 
+        /**
+         * @brief Awaitable used by @c carrier for automaton tasks.
+         * @details Mirrors @c carrier_suspend but also re-attaches the
+         * yield waiter when the automaton finishes or yields.
+         * @tparam async_return_t Return type of the carried automaton.
+         */
         template <typename async_return_t>
         struct automaton_suspend final : traits::future_traits<automaton_suspend<async_return_t>> {
-            async<async_return_t, automaton_rule>& _inner;
+            async<async_return_t, automaton_rule>& _inner; ///< Carried automaton.
             IMPORT_FUTURE_ENV(automaton_suspend)
 
+            /**
+             * @brief Constructs the suspend point.
+             * @param inner Carried automaton.
+             */
             explicit automaton_suspend(async<async_return_t, automaton_rule>& inner) : _inner(inner) {}
 
             bool await_ready() override {
@@ -277,6 +338,9 @@ namespace ace::core {
             }
 
         private:
+            /**
+             * @brief Re-attaches the pending yield waiter, if any.
+             */
             void try_reattach_waiter() {
                 if (_inner._coroutine.promise()._yield_waiter) {
                     runner::reattach(_inner._coroutine.promise()._yield_waiter);
@@ -285,6 +349,11 @@ namespace ace::core {
             }
         public:
 
+            /**
+             * @brief Propagates roaming, status and router from the automaton.
+             * @param coroutine Carrier's promise accessor.
+             * @return Always @c true — the carrier always suspends.
+             */
             bool await_suspend(auto coroutine) {
                 coroutine.promise()._roaming = _inner._coroutine.promise()._roaming;
                 coroutine.promise().status(_inner._coroutine.promise().status());
@@ -292,6 +361,7 @@ namespace ace::core {
                 return true;
             }
 
+            /// @brief No value produced.
             void await_resume() { }
         };
 
@@ -431,7 +501,7 @@ namespace ace::core {
 
         // NOTE: If can not pull task
         if (not task_unit) [[unlikely]]
-            return yank_vortex();
+            return yank_service();
 
         // NOTE: Prefetching next task frame
         if (const auto head = _pool.inspect_head()) [[likely]]
@@ -461,9 +531,9 @@ namespace ace::core {
             return true;
         }
 
-        // NOTE: If task is a service unit then placing it to the vortex pool
+        // NOTE: If task is a service unit then placing it to the service pool
         if (task_unit->_data._coroutine.promise()._polling) {
-            _vortex_pool.push_node(task_unit);
+            _service_pool.push_node(task_unit);
             return true;
         }
 
@@ -473,20 +543,20 @@ namespace ace::core {
     }
 
 
-    inline bool runner::yank_vortex() noexcept {
+    inline bool runner::yank_service() noexcept {
 
         promise_lifecycle touch_result = e_executed;
-        omni_node vortex_unit = _vortex_pool.pop_node();
+        omni_node service_unit = _service_pool.pop_node();
 
         // NOTE: If node is empty breaking
-        if (not vortex_unit) [[unlikely]] return false;
+        if (not service_unit) [[unlikely]] return false;
 
         // NOTE: Proceeding async
-        vortex_unit->_data.awake(&touch_result);
+        service_unit->_data.awake(&touch_result);
 
         // NOTE: Checking if async can be resumed
         const bool is_resumable {
-            vortex_unit->_data
+            service_unit->_data
             and touch_result not_eq e_failed
             and touch_result not_eq e_finished
             and touch_result not_eq e_canceled
@@ -494,19 +564,19 @@ namespace ace::core {
 
         // NOTE: If task is idle, releasing its node.
         if (not is_resumable) {
-            _insert_pool.release_node(vortex_unit);
+            _insert_pool.release_node(service_unit);
             --_tasks_amount;
             return true;
         }
 
         // NOTE: Forwarding the async via passed router if needed
-        if (vortex_unit->_data._coroutine.promise()._runner_router) [[likely]] {
-            vortex_unit->_data._coroutine.promise()._runner_router->redirect(vortex_unit);
+        if (service_unit->_data._coroutine.promise()._runner_router) [[likely]] {
+            service_unit->_data._coroutine.promise()._runner_router->redirect(service_unit);
             return true;
         }
 
         // NOTE: Returning task back to the local pool on this step
-        _vortex_pool.push_node(vortex_unit);
+        _service_pool.push_node(service_unit);
         return true;
     }
 
@@ -516,7 +586,7 @@ namespace ace::core {
         current_runner_ptr = this;
         for (constexpr int yank_limit = 128; i < yank_limit and yank(); ++i) {
             if (i % 16 == 0) {
-                yank_vortex();
+                yank_service();
                 // NOTE: Trying to switch between pools
                 if (_pull_source == pull_source::e_local_pool and not _insert_pool.empty())
                     _pull_source = pull_source::e_interthread_pool;
@@ -525,7 +595,7 @@ namespace ace::core {
             }
         }
         current_runner_ptr = nullptr;
-        return i not_eq 0 or yank_vortex();
+        return i not_eq 0 or yank_service();
     }
 
     inline omni_node runner::fetch_task_node() {

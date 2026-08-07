@@ -1,19 +1,19 @@
 /**
  * @file signal.h
- * @brief Signal system for controlling vortex services at runtime.
+ * @brief Signal system for controlling service routines at runtime.
  *
- * @details Defines @c signal_handler — an abstract awaitable that vortex
- * services inspect after each @c ping() cycle.  Two built-in signals:
+ * @details Defines @c signal_handler — an abstract awaitable that service
+ * routines inspect after each @c ping() cycle.  Two built-in signals:
  *
- *  - @c termination_signal — requests the vortex to shut down (@c e_shutdown).
- *  - @c interruption_signal — requests the vortex to suspend (@c e_break).
+ *  - @c termination_signal — requests the service to shut down (@c e_shutdown).
+ *  - @c interruption_signal — requests the service to suspend (@c e_break).
  *
  * Signals are delivered through a per-dispatcher @c sig_pipe_t (lock-free
  * MPSC queue).  The dispatcher exposes @c ace::interrupt() and
  * @c ace::terminate() to push signals, and @c ace::reset_signal() to drain
  * the pipe.
  *
- * @see ace::core::traits::vortex_traits, ace::core::dispatcher
+ * @see ace::core::traits::service_traits, ace::core::dispatcher
  */
 #ifndef ACE_SIGNAL_H
 #define ACE_SIGNAL_H
@@ -23,12 +23,12 @@
 namespace ace::core {
 
     /**
-     * @brief Signal actions that vortex services respond to.
+     * @brief Signal actions that service routines respond to.
      */
     enum signal_trivial_orders {
-        e_shutdown, ///< Stop the vortex service permanently.
+        e_shutdown, ///< Stop the service permanently.
         e_idle,     ///< No action — continue normal operation.
-        e_break     ///< Suspend the current vortex iteration.
+        e_break     ///< Suspend the current service iteration.
     };
 
     /**
@@ -48,7 +48,7 @@ namespace ace::core {
     typedef nukes::dynamic::mpsc_queue<std::unique_ptr<signal_handler>> sig_pipe_t;
 
     /**
-     * @brief Signal that requests vortex shutdown (@c e_shutdown).
+     * @brief Signal that requests service shutdown (@c e_shutdown).
      */
     struct termination_signal : signal_handler {
         termination_signal() = default;
@@ -57,7 +57,7 @@ namespace ace::core {
     };
 
     /**
-     * @brief Signal that requests vortex suspension (@c e_break).
+     * @brief Signal that requests service suspension (@c e_break).
      */
     struct interruption_signal : signal_handler {
         interruption_signal() = default;

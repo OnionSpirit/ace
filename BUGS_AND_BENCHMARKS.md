@@ -266,7 +266,7 @@ bool apply() {
 **Файл:** `include/ace/services/kernelic.h:364-367`
 
 **Симптом:** Тест `kernelic_overflow_buffer_stress` зависал навсегда: ровно 1904
-(6000-4096) запросов никогда не выполнялись, `_queries` застревал на 1904, vortex
+(6000-4096) запросов никогда не выполнялись, `_queries` застревал на 1904, service
 busy-loop-ил `ping()` (миллионы итераций).
 
 **Причина:** `for (unsigned i = 0; i < (max_entries - _queries) and ...)` — при
@@ -422,7 +422,7 @@ WARNING: filter " queue_fixture.queue_order" did not match any test
 ### F2. `cross_mechanic_fixture.interrupt_during_timeout` — исправлено (B6)
 
 **Симптом:** `ace::interrupt()` до `ace::run()` блокировал выполнение задач.
-**Причина:** Сигнал e_break в pipe обрабатывался vortex-сервисами до того как runner
+**Причина:** Сигнал e_break в pipe обрабатывался service-корутинами до того как runner
 начинал обрабатывать задачи (устаревший clock задерживал таймеры).
 
 ### F3. `cross_mechanic_fixture.spawn_post_interaction` — исправлено (B6)

@@ -1,5 +1,5 @@
 /**
- * @file terms.h
+ * @file macro.h
  * @brief Shared compile-time constants and alignment macros.
  *
  * @details This header defines platform-agnostic size and alignment helpers
@@ -42,33 +42,46 @@
 /// @brief A zero-byte type used as a default template argument placeholder.
 typedef struct {} ACE_EMPTY_TYPE;
 
+/// @brief Message emitted by @c ACE_AWAIT_NODISCARD when the await is missing.
 #define ACE_AWAIT_MISSING_MSG "probably 'co_await' operator missing"
 
+/// @brief Marks awaitables whose result must be consumed via @c co_await.
 #define ACE_AWAIT_NODISCARD [[nodiscard(ACE_AWAIT_MISSING_MSG)]]
 
+/// @brief Static-assert message for incompatible @c compose / @c operator>> operands.
 #define ACE_INCOMPATIBLE_COMPOSE_ERROR "Receiver's (Right Operand) input does not compatible with Sender's (Left Operand) return type"
 
 #if defined(__GNUC__) || defined(__clang__)
+/// @brief Force-inline attribute (GCC/Clang).
 #define ACE_INLINE inline __attribute__((always_inline))
 #elif defined(_MSC_VER)
+/// @brief Force-inline attribute (MSVC).
 #define ACE_INLINE __forceinline
 #else
+/// @brief Force-inline fallback — plain inline.
 #define ACE_INLINE inline
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
+/// @brief Weak symbol attribute (GCC/Clang) — allows user override of @c main().
 #define ACE_WEAK __attribute__((weak))
 #elif defined(_MSC_VER)
+/// @brief Weak symbol attribute (MSVC) — selectany.
 #define ACE_WEAK __declspec(selectany)
 #else
+/// @brief Weak symbol fallback — no attribute.
 #define ACE_WEAK
 #endif
 
+/// @brief Maximum number of chunks an @c io::buffer may keep assembled.
 #define ACE_IO_BUFFER_CHUNK_LIMIT 16
 
 #ifdef NDEBUG
+/// @brief @c true in release builds (NDEBUG defined).  Note the inverted naming:
+///        it flags the release-optimised path, e.g. skipping allocator deallocation.
 inline constexpr bool is_debug = true;
 #else
+/// @brief @c true in debug builds (no NDEBUG).
 inline constexpr bool is_debug = false;
 #endif
 

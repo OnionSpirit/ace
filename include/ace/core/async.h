@@ -1,6 +1,6 @@
 /**
  * @file async.h
- * @brief Core coroutine async type (@c ace::coroutines::async<T, Rule>)
+ * @brief Core coroutine async type (@c ace::core::async<returnT, Rule>)
  *        and the public @c ace::async<T> / @c ace::promise<T> aliases.
  *
  * @details This file defines the central type of the ACE framework.
@@ -18,14 +18,14 @@
  *
  * @code{.cpp}
  * // Lazy coroutine — suspends at creation (initial_suspend = suspend_always)
- * template<typename T = void> using ace::async   = async<T, differed>;
+ * template<typename T = void> using ace::async = ace::core::async<T, ace::core::lazy_rule>;
  *
  * // Eager coroutine — runs immediately (initial_suspend = suspend_never)
- * template<typename T = void> using ace::promise = async<T, permanent>;
+ * template<typename T = void> using ace::promise = ace::core::async<T, ace::core::eager_rule>;
  * @endcode
  *
- * @see ace::async, ace::promise, ace::coroutines::promise_traits,
- *      ace::coroutines::control_block
+ * @see ace::async, ace::promise, ace::core::traits::promise_traits,
+ *      ace::core::control_block
  */
 #ifndef ACE_ASYNC_H
 #define ACE_ASYNC_H
@@ -86,7 +86,7 @@ namespace ace::core {
         typedef std::coroutine_handle<promise_type>                            coroutine_t;
         /// @brief Queue type used as the runner's task pool.
         typedef nukes::dynamic::reg_queue<async<>>                             runner_pool_t;
-        /// @brief Queue type used as the runner's task pool.
+        /// @brief Queue type used for cross-thread task insertion from other runners.
         typedef nukes::dynamic::mpsc_queue<async<>>                            insert_pool_t;
         /// @brief Secured void* for any nodes
         typedef tools::omniptr<runner_pool_t::node_t, insert_pool_t::node_t>   omni_node;
@@ -99,14 +99,18 @@ namespace ace::core {
 
         coroutine_t _coroutine; ///< Underlying coroutine handle.  Null after move.
 
+        /// @brief Pointer to the outer coroutine's @c _roaming flag, captured by @c setup_outer().
         bool*                  _outer_roaming { nullptr };
+        /// @brief Pointer to the outer coroutine's router slot, captured by @c setup_outer().
         runner_router_slot_t*  _outer_router  { nullptr };
+        /// @brief Pointer to the outer coroutine's control block, captured by @c setup_outer().
         control_block*         _outer_block   { nullptr };
 
         /// @brief Helper to get active runner pool ptr or @c nullptr
         /// if @c async<...> is constructed out of runner context
         static runner_pool_t* get_current_pool() noexcept;
 
+        /// @brief Default constructor — creates an empty @c async with a null coroutine handle.
         async() = default;
 
         /**
@@ -220,7 +224,8 @@ namespace ace::core {
         /**
          * @brief Check whether the async is ready to be resumed by the runner.
          * @details Returns @c true if no busy future is pending, or if the
-         * pending busy future has become ready (@c await_ready() returns @c true).
+         * pending busy future has become ready (@c await_ready() returns @c true),
+         * and no router is currently installed in the @c _runner_router slot.
          * @return @c true if the runner may resume this async.
          */
         bool is_resumable() {
@@ -274,6 +279,12 @@ namespace ace::core {
             return std::unexpected("async is already dead.");
         }
 
+        /**
+         * @brief Prefetch the coroutine frame's cache lines for temporal locality.
+         * @details Reads the frame size from the control block prefix and issues
+         * @c nukes::details::prefetch hints for each cache line of the frame,
+         * preparing it for an imminent resume.
+         */
         void prefetch() const {
             const control_block* frame = control_block::get_block_from_address(_coroutine.address());
             const std::size_t frame_size = frame->_frame_size;
@@ -283,17 +294,36 @@ namespace ace::core {
             }
         }
 
+        /**
+         * @brief Router installed into the control block to implement external
+         *        join / cancel / yield operations on this async.
+         * @details Resolves the owning coroutine from a stored frame address.
+         * Waiter-related operations are compiled in only for spawnable rules
+         * (@c lazy_rule / @c automaton_rule) via
+         * @c if constexpr (is_spawnable_rule<promise_rule_t>).
+         */
         class async_router : public traits::async_router_handle {
 
+            /// @brief Address of the coroutine frame this router manages.
             void* _address { nullptr };
 
         public:
 
+            /// @brief Default constructor — creates an unbound router.
             async_router() = default;
 
+            /**
+             * @brief Bind the router to a coroutine frame.
+             * @param coroutine  Coroutine whose frame address will be stored.
+             */
             explicit async_router(const coroutine_t& coroutine)
                 : _address(coroutine.address()) {}
 
+            /**
+             * @brief Cancel the managed coroutine.
+             * @details Forwards the cancellation to the active runner router (if
+             * any), releases it, and marks the promise status @c e_canceled.
+             */
             void cancel() noexcept override {
                 if (not _address) [[unlikely]] return;
                 auto handle = coroutine_t::from_address(_address);
@@ -304,6 +334,14 @@ namespace ace::core {
                 handle.promise().status(e_canceled);
             }
 
+            /**
+             * @brief Register a waiter that should be resumed when this async finishes.
+             * @details Only for spawnable rules (lazy / automaton): (re)creates the
+             * waiters queue and pushes the waiter node into it.  No-op for eager.
+             * @param undefined_waiter  Waiter node (@c omni_node) to register.
+             * @return @c false if the router is unbound or the waiter is null,
+             *         @c true otherwise.
+             */
             bool redirect(void* undefined_waiter) noexcept override {
                 if constexpr (is_spawnable_rule<promise_rule_t>) {
                     if (not _address or not undefined_waiter) [[unlikely]] return false;
@@ -315,6 +353,11 @@ namespace ace::core {
                 return true;
             }
 
+            /**
+             * @brief Copy the stored @c co_return value into caller-provided memory.
+             * @param mem_ptr  Pointer to a @c returnT slot that receives the value.
+             * @return @c false if the router is unbound, @c true otherwise.
+             */
             bool return_value(void* mem_ptr) noexcept override {
                 if constexpr (requires(promise_type promise_t) { promise_t._return_value; }) {
                     if (not _address) [[unlikely]] return false;
@@ -325,6 +368,15 @@ namespace ace::core {
                 return true;
             }
 
+            /**
+             * @brief Copy the pending @c co_yield value into caller-provided memory.
+             * @details Only for automaton rules and only while the promise status is
+             * @c e_executed_with_value; afterwards the status is reset to
+             * @c e_executed so the automaton can resume producing.
+             * @param mem_ptr  Pointer to a @c returnT slot that receives the value.
+             * @return @c false if unbound or no yield value is pending,
+             *         @c true otherwise.
+             */
             bool yield_value(void* mem_ptr) noexcept override {
                 if constexpr (is_automaton_rule<promise_rule_t>) {
                     if (not _address) [[unlikely]] return false;
@@ -337,6 +389,7 @@ namespace ace::core {
                 return true;
             }
 
+            /// @brief Whether a @c co_yield value is currently pending (automaton only).
             bool has_yield() noexcept override {
                 if constexpr (is_automaton_rule<promise_rule_t>) {
                     if (not _address) return false;
@@ -346,6 +399,11 @@ namespace ace::core {
                 return false;
             }
 
+            /**
+             * @brief Register a waiter for the next @c co_yield value (automaton only).
+             * @param node_ptr  Waiter node (@c omni_node) to wake on the next yield.
+             * @return @c false if unbound or the node is null, @c true otherwise.
+             */
             bool set_yield_waiter(void* node_ptr) noexcept override {
                 if constexpr (is_automaton_rule<promise_rule_t>) {
                     if (not _address or not node_ptr) return false;
@@ -355,6 +413,7 @@ namespace ace::core {
                 return true;
             }
 
+            /// @brief Drop the registered yield waiter (automaton only).
             bool cancel_yield() noexcept override {
                 if constexpr (is_automaton_rule<promise_rule_t>) {
                     if (not _address) return false;
@@ -364,12 +423,14 @@ namespace ace::core {
                 return true;
             }
 
+            /// @brief Destroy the coroutine frame via the stored address.
             void destroy() noexcept override {
                 if (not _address) [[unlikely]] return;
                 auto handle = coroutine_t::from_address(_address);
                 handle.destroy();
             }
 
+            /// @brief Defaulted destructor.
             ~async_router() override = default;
         };
 
@@ -381,18 +442,25 @@ namespace ace::core {
             omni_runner            _runner {nullptr};     ///< Pointer to the owning runner's MPSC task queue.  Set by @c runner::attach().
             // NOTE: Router to manage promise on suspended state.
             // NOTE: Context owns only one promise. Extra slot object is unnecessary
+            /// @brief Router installed into the control block for join / cancel.  Optional because the context owns only one promise.
             std::optional<async_router> _self_router;
+            /// @brief When @c true the balancer may migrate the task to another runner.
             bool _roaming { false };
+            /// @brief When @c true the runner holds the task in the low priority service pool.
             bool _polling { false };
         };
 
         /**
-         * @brief Mandatory promise type fields and extra fields for lazy coroutines
+         * @brief Mandatory promise type fields plus the @c _waiters queue for lazy coroutines.
+         * @details @c _waiters holds the asyncs waiting for this coroutine to
+         * finish; @c release_waiters() drains it on destruction.
          */
         struct lazy_locals : mandatory_locals { std::shared_ptr<runner_pool_t> _waiters; };
 
         /**
-         * @brief Mandatory promise type fields and extra fields for lazy and automaton coroutines
+         * @brief Mandatory promise type fields plus @c _waiters and the @c _yield_waiter node for automaton coroutines.
+         * @details @c _yield_waiter is the node woken when the next @c co_yield
+         * value is produced.
          */
         struct automaton_locals : lazy_locals { omni_node _yield_waiter; };
 
@@ -401,6 +469,13 @@ namespace ace::core {
          */
         struct full_locals : automaton_locals { };
 
+        /**
+         * @brief Rule-dependent field set selected for the promise type.
+         * @details @c lazy_rule → @c lazy_locals (adds @c _waiters),
+         * @c eager_rule → @c mandatory_locals, @c automaton_rule →
+         * @c automaton_locals (adds @c _yield_waiter), anything else →
+         * @c full_locals.
+         */
         typedef
             std::conditional_t<std::same_as<rule_t, lazy_rule<returnT>>,
                 lazy_locals,
@@ -422,17 +497,20 @@ namespace ace::core {
          *  |---|---|---|
          *  | @c _runner_router | @c runner_router_slot_t | In-place storage for the active router. |
          *  | @c _runner | @c omni_runner | Pointer to the owning runner / runner pool. |
-         *  | @c _waiters | @c shared_ptr<runner_pool_t> | Queue of asyncs waiting for this one to finish. |
          *  | @c _self_router | @c optional<async_router> | Router installed into the control block. |
          *  | @c _roaming | @c bool | When @c true the balancer may migrate the task to another runner. |
          *  | @c _polling | @c bool | When @c true the runner holds it in low priority task pool. |
+         *  | @c _waiters | @c shared_ptr<runner_pool_t> | Queue of asyncs waiting for this one to finish (lazy / automaton). |
+         *  | @c _yield_waiter | @c omni_node | Waiter to wake on the next @c co_yield value (automaton). |
          */
         struct promise_type : traits::promise_traits<promise_type, promise_rule_t, returnT>, promise_locals {
             DECLARE_PROMISE_TRAITS(promise_type, promise_rule_t, returnT)
             IMPORT_PROMISE_TRAITS_ENV
 
+            /// @brief Default constructor.
             promise_type() = default;
 
+            /// @brief Defaulted destructor.
             ~promise_type() = default;
 
             /**
@@ -493,10 +571,7 @@ namespace ace::core {
              * @details Retrieves the @c control_block prefix allocated before
              * this promise, constructs a @c async_router, and links them so
              * that @c control_block_handle::cancel() / @c redirect() work.
-             *
-             * Only available for lazy (@c differed) coroutines because eager
-             * coroutines may already be running by the time @c observe() is
-             * called.
+             * No-op if the block is already initialised.
              *
              * @tparam promise_t  Promise type of the coroutine handle.
              * @param self  Handle to the owning coroutine.
@@ -528,6 +603,7 @@ namespace ace::core {
                 return &promise_locals::_self_router.value();
             }
 
+            /// @brief Rule-dependent locals instance (see @c promise_locals).
             promise_locals _locals;
         };
 
@@ -537,8 +613,10 @@ namespace ace::core {
 
         /**
          * @brief C++20 awaitable protocol — check if coroutine is already done.
-         * @return @c true if the coroutine has finished and the outer coroutine
-         *         should not suspend.
+         * @details Returns @c true (no suspension) when the coroutine is done,
+         * cancelled, or has a pending @c co_yield value (which is consumed
+         * here).  Otherwise attempts a synchronous resume and re-checks.
+         * @return @c true if the outer coroutine should not suspend.
          */
         bool await_ready() override {
             if (_coroutine.done()) return true;
@@ -559,13 +637,14 @@ namespace ace::core {
 
         /**
          * @brief C++20 awaitable protocol — suspend the outer coroutine.
-         * @details On the first call (status @c e_inited), propagates the runner
-         * pool pointer from the outer promise.  In all cases, steals the
-         * router slot from the inner promise so the runner can find it.
+         * @details Copies the runner pool pointer from the outer promise (in
+         * case it was null), captures outer status references via
+         * @c setup_outer(), and propagates the inner promise's status back to
+         * the outer coroutine.
          * @tparam promiseT  Promise type of the outer coroutine.
          * @param outer      Handle to the outer (calling) coroutine.
-         * @return @c false if the inner coroutine finished synchronously (outer
-         *         should not suspend); @c true otherwise.
+         * @return Always @c true — the outer coroutine suspends and is resumed
+         *         later through the router installed by the runner.
          */
         template<typename promiseT>
         bool await_suspend(std::coroutine_handle<promiseT> outer) {
@@ -600,7 +679,7 @@ namespace ace::core {
          * pointer is non-null.
          *
          * @param _res  Optional output pointer that receives the
-         *              @c promise_touch_result value after the resume.
+         *              @c promise_lifecycle value after the resume.
          * @return The return value of the coroutine (only meaningful for
          *         non-@c void types after @c e_finished).
          */
@@ -632,22 +711,45 @@ namespace ace::core {
 
 namespace ace {
 
+    /**
+     * @brief Generic coroutine type — lazy by default (suspends at creation).
+     * @tparam returnT          Value type returned by @c co_return.
+     * @tparam promise_rule_t   Initial suspension / yield policy rule.
+     */
     // NOTE: Type alias for any type of coroutines (default: lazy)
     template<typename returnT =void, template <typename> typename promise_rule_t = core::lazy_rule>
     requires core::is_rule<promise_rule_t>
     using async = core::async<returnT, promise_rule_t>;
 
+    /**
+     * @brief Eager coroutine type — starts executing immediately on creation.
+     * @tparam returnT  Value type returned by @c co_return.
+     */
     // NOTE: Type alias for eager coroutines
     template<typename returnT =void>
     using promise = core::async<returnT, core::eager_rule>;
 
+    /**
+     * @brief Lazy generator type — eager start with @c co_yield support.
+     * @tparam returnT  Value type produced by @c co_yield / @c co_return.
+     */
     // NOTE: Type alias for lazy generators
     template<typename returnT =void>
     using automaton = core::async<returnT, core::automaton_rule>;
 
+    /**
+     * @brief Runner task type — lazy @c void coroutine for @c schedule() / @c spawn().
+     */
     // NOTE: Type alias for runner task coroutines
     using task = core::async<>;
 
+    /**
+     * @brief Wrap a typed coroutine into a @c task so it can be scheduled.
+     * @tparam async_return_t  Return type of the wrapped coroutine.
+     * @tparam async_rule_t    Rule of the wrapped coroutine.
+     * @param some_context     Typed coroutine to co_await and wrap.
+     * @return A @c task that awaits the wrapped coroutine to completion.
+     */
     // NOTE: Wrapper to spawn and manage coroutines in runner pool
     template <typename async_return_t, template <typename> typename async_rule_t>
     task task_wrap(core::async<async_return_t, async_rule_t> some_context) {
@@ -655,21 +757,27 @@ namespace ace {
         co_return;
     }
 
+    /// @brief Task pool queue type used by the runner (see @c core::async::runner_pool_t).
     // NOTE: Type of a pool for runner [Relates 'async' and 'runner']
     typedef task::runner_pool_t runner_pool_t;
 
+    /// @brief Queue type for cross-thread task insertion (see @c core::async::insert_pool_t).
     // NOTE: Type of a pool for task insertion [Relates 'async' and 'runner']
     typedef task::insert_pool_t insert_pool_t;
 
+    /// @brief Common transfer entity for an async task node (see @c core::async::omni_node).
     // NOTE: Common transfer entity for the async task
     typedef task::omni_node omni_node;
 
+    /// @brief Unified runner access pointer (see @c core::async::omni_runner).
     // NOTE: Unified runner access ptr
     typedef task::omni_runner omni_runner;
 
+    /// @brief Router interface used between runner and futures (see @c core::async::runner_router).
     // NOTE: Type of a router handler for runner and future objects [Relates 'future' and 'runner']
     typedef task::runner_router runner_router;
 
+    /// @brief Standard no-suspension point — alias of @c std::suspend_always.
     // NOTE: Type alias for std standard type
     typedef std::suspend_always suspend;
 }

@@ -59,9 +59,11 @@ namespace ace::cfg {
 
     namespace detail {
 
+        /// @brief Compile-time default value of a configuration tag.
         template <typename Tag>
         struct default_of;
 
+        /// @brief Default runner count — 1.
         template <>
         struct default_of<runners_amount> {
             static constexpr std::size_t value = 1;

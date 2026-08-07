@@ -42,7 +42,7 @@
 | **Future composition**       | Logical AND/OR combinators + monadic pipe (`operator>>`)    |
 | **Task control**             | External `async_handle` (join/cancel/done), roaming, reattach, polling |
 | **Async I/O (io_uring)**     | File, socket, console I/O — read/write/send/recv/accept via Linux `io_uring` |
-| **Background services**      | Vortex pattern — clock (timers), kernelic (io_uring polling) |
+| **Background services**      | Service pattern — clock (timers), kernelic (io_uring polling) |
 
 ---
 
@@ -53,8 +53,8 @@
 |---------------------|------------------------------------------------------------|
 | **core**            | Runtime engine: `runner`, `dispatcher`, `async`, `compose` |
 | **core/tools**      | Utilities: `queue`, `macro`, `moving_average`, `id_alloc`  |
-| **core/services**   | Vortex background services: `clock` (time wheel), `kernelic` (io_uring) |
-| **core/traits**     | Traits to define framework-compatible units: `future`, `promise`, `routing`, `vortex` |
+| **core/services**   | Background service routines: `clock` (time wheel), `kernelic` (io_uring) |
+| **core/traits**     | Traits to define framework-compatible units: `future`, `promise`, `routing`, `service` |
 | **futures**         | Synchronization & commands: `channel`, `cutex`, `timeout`, `spawn`, `post`, `reattach`, `roaming`, `polling`, `get_runner` |
 | **ace/ (top-level)**| Public API: `ace.h`, I/O: `io.h`, FS: `fs.h`, Net: `net.h`, Console: `console.h` |
 
@@ -91,7 +91,7 @@ graph TB
         GR["get_runner"]
     end
 
-    subgraph Services["Background Vortex Services"]
+    subgraph Services["Background Service Routines"]
         CLK["clock\ntime wheel"]
         IO["kernelic\nio_uring"]
     end
@@ -447,7 +447,7 @@ graph LR
     Level2 -->|"arrow wraps around"| More["...higher dials"]
 ```
 
-The clock runs as a **vortex** — a thread-local background coroutine that calls `ping()` each scheduler iteration to release expired tasks back to their runners.
+The clock runs as a **service** — a thread-local background coroutine that calls `ping()` each scheduler iteration to release expired tasks back to their runners.
 
 ---
 
@@ -616,7 +616,7 @@ ace::task migrate() {
 
 ```cpp
 ace::task background_worker() {
-    co_await ace::futures::polling{true};  // moved to vortex_pool
+    co_await ace::futures::polling{true};  // moved to service_pool
     while (not done) {
         do_background_work();
         co_await ace::suspend();
@@ -918,8 +918,8 @@ Open `docs/doxygen/html/index.html` in a browser.
 |---|---|
 | `ace` | `async<T>` `promise<T>` `task` `cutex` `guard`<br>`schedule()` `spawn()` `post()` `run()` `reload()` `interrupt()` `terminate()` `empty()` `reset_signal()` |
 | `ace::core` | `async<T,R>` `dispatcher` `runner` `control_block` `control_block_handle`<br>`omni_runner` `io_entity` `io_link` `io_query` `io_guard` `any` |
-| `ace::core::traits` | `future_traits` `busy_future_traits` `promise_traits` `promise_return_traits`<br>`runner_router_handle` `control_router_handle` `router_slot` `vortex_traits` |
-| `ace::core::services` | `clock` (multi_dial time wheel) `kernel_controller` (io_uring vortex) |
+| `ace::core::traits` | `future_traits` `busy_future_traits` `promise_traits` `promise_return_traits`<br>`runner_router_handle` `control_router_handle` `router_slot` `service_traits` |
+| `ace::core::services` | `clock` (multi_dial time wheel) `kernel_controller` (io_uring service) |
 | `ace::core::tools` | `queue` `q_node` `slab_mempool` `moving_average` `id_allocator` `lifetime` |
 | `ace::core::meta` | `is_future` `is_busy_future` `is_awaitable` `resume_type` `replace_type`<br>`unique_tuple_t` `tuple_to_variant_t` |
 | `ace::futures` | `channel` `channel_static` `cutex` `capture_future` `timeout` `expire` `spawn` `post`<br>`async_handle` `join_handler` `reattach` `roaming` `polling` `get_runner` |
@@ -965,7 +965,7 @@ void run();
 bool reload();
 
 // Send signals to the running dispatcher
-void interrupt();    // pause execution loop (vortex services)
+void interrupt();    // pause execution loop (service routines)
 void terminate();    // stop execution loop
 void reset_signal(); // clear pending signals
 ```

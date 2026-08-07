@@ -70,13 +70,15 @@ namespace ace::core {
 
         struct {
             uint32_t          _refcount   : 24 { 1 };                ///< Number of watchers (handles). Initial value: 1 (the coroutine itself).
-            promise_lifecycle _status     : 8  { e_inited };         ///< Flag that shows that Coroutines completed without cancellation
-            uint32_t          _frame_size : 32 { 0 };                ///< Coroutine frame size, including control block.
+            promise_lifecycle _status     : 8  { e_inited };         ///< Current lifecycle state of the coroutine (see @c promise_lifecycle).
+            uint32_t          _frame_size : 32 { 0 };                ///< Coroutine frame size, including control block; 0 means the frame is destroyed.
         };
         traits::async_router_handle* _control_router { nullptr };    ///< Optional router for external join/cancel; set by @c setup_control_block().
 
+        /// @brief Default constructor.
         control_block() = default;
 
+        /// @brief Default destructor.
         ~control_block() = default;
 
         /**
@@ -139,8 +141,13 @@ namespace ace::core {
      */
     class control_block_handle {
 
-        control_block* _block { nullptr };
+        control_block* _block { nullptr }; ///< Referenced control block; @c nullptr when idle.
 
+        /**
+         * @brief Releases the held reference.
+         * @details Decrements the weak refcount and destroys the coroutine
+         * frame (via the control router) when the block becomes untracked.
+         */
         void release() {
             if (control_block::untrack(_block))
                 _block->_control_router->destroy();
@@ -149,6 +156,7 @@ namespace ace::core {
 
     public:
 
+        /// @brief Default constructor — idle handle, references nothing.
         control_block_handle() = default;
 
         /**
@@ -209,8 +217,10 @@ namespace ace::core {
         [[nodiscard]] bool is_idle() const { return not _block; }
 
         /**
-         * @brief Checks if the associated coroutine stack frame is destroyed.
-         * @return @c false if @c is_idle(), otherwise not exists.
+         * @brief Checks if the associated coroutine has terminated.
+         * @details @c true when the status is @c e_failed, @c e_canceled or
+         * @c e_finished (i.e. the frame is no longer resumable).
+         * @return @c false if @c is_idle(), otherwise the termination state.
          */
         [[nodiscard]] bool done() const {
             if (is_idle()) [[unlikely]] return false;
@@ -220,8 +230,9 @@ namespace ace::core {
         }
 
         /**
-         * @brief Checks if the associated coroutine finished.
-         * @return @c true if status is @c finished, otherwise @c false and if handler @c is_idle() .
+         * @brief Checks if the associated coroutine finished successfully.
+         * @return @c true if the status is @c e_finished, @c false otherwise
+         *         (including when the handle is idle).
          */
         [[nodiscard]] bool finished() const {
             if (is_idle()) [[unlikely]] return false;
@@ -230,6 +241,7 @@ namespace ace::core {
 
         /**
          * @brief Taking return value from a task
+         * @param mem_ptr  Pointer to store the return value.
          * @return @c false if associated coroutine not finished, @c true if value captured
          */
         [[nodiscard]] bool return_value(void* mem_ptr) const {
@@ -258,11 +270,20 @@ namespace ace::core {
             return _block->_control_router->has_yield();
         }
 
+        /**
+         * @brief Registers a waiter to be notified of the next yielded value.
+         * @param node_ptr  Pointer to the waiter task node.
+         * @return @c true if the waiter was accepted by the router.
+         */
         bool set_yield_waiter(void* node_ptr) const {
             if (not _block or not _block->_control_router) [[unlikely]] return false;
             return _block->_control_router->set_yield_waiter(node_ptr);
         }
 
+        /**
+         * @brief Cancels a previously registered yield waiter.
+         * @return @c true if the waiter was unregistered by the router.
+         */
         bool cancel_yield() const {
             if (not _block or not _block->_control_router) [[unlikely]] return false;
             return _block->_control_router->cancel_yield();
@@ -312,6 +333,6 @@ namespace ace::core {
         return reinterpret_cast<control_block*>(static_cast<uint8_t*>(address) - control_block_size);
     }
 
-} // end namespace ace::coroutines
+} // end namespace ace::core
 
 #endif //ACE_CONTROL_H

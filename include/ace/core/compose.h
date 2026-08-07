@@ -77,10 +77,19 @@ namespace ace::core {
         typedef meta::resume_type<l_future_t> l_future_ret_t;
         typedef meta::resume_type<r_future_t> r_future_ret_t;
 
+        /**
+         * @brief Races two futures.
+         * @param l_future Left operand future.
+         * @param r_future Right operand future.
+         */
         or_await(l_future_t& l_future, r_future_t& r_future)
             : _l_future(l_future)
             , _r_future(r_future) {};
 
+        /**
+         * @brief Compile-time deduction of the race result type.
+         * @return A representative value whose type becomes @c return_t.
+         */
         static consteval auto define_return_type() {
             if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
                 return int();
@@ -95,13 +104,22 @@ namespace ace::core {
 
         typedef decltype(define_return_type()) return_t;
 
-        omni_node _waiter;
-        l_future_t& _l_future;
-        r_future_t& _r_future;
-        std::optional<async_handle<>> _l_future_observer;
-        std::optional<async_handle<>> _r_future_observer;
-        return_t _result;
+        omni_node _waiter;                                            ///< Suspended caller awaiting the race result.
+        l_future_t& _l_future;                                        ///< Left operand future.
+        r_future_t& _r_future;                                        ///< Right operand future.
+        std::optional<async_handle<>> _l_future_observer;             ///< Handle of the left observer task.
+        std::optional<async_handle<>> _r_future_observer;             ///< Handle of the right observer task.
+        return_t _result;                                             ///< Stored result of the winning future.
 
+        /**
+         * @brief Observer task that awaits one operand.
+         * @details On completion stores the result (if typed), cancels the
+         * opposite observer, and re-attaches the waiting caller.
+         * @tparam observer_idx      Index of this observer (0 = left, 1 = right).
+         * @tparam future_t          Operand future type.
+         * @param future             Operand future to await.
+         * @param opposite_observer  Handle of the other observer to cancel.
+         */
         template <size_t observer_idx, typename future_t>
         task observer(future_t& future, std::optional<async_handle<>>& opposite_observer) {
 
@@ -125,8 +143,17 @@ namespace ace::core {
                 _result = observer_idx;
         };
 
+        /**
+         * @brief Suspends the caller and starts both observers.
+         * @param external_coro Caller coroutine promise accessor.
+         * @return Always @c true — the caller is always suspended.
+         */
         bool await_suspend(auto);
 
+        /**
+         * @brief Returns the race result.
+         * @return @c int, @c std::optional<T> or @c std::variant — see class docs.
+         */
         return_t await_resume() { return _result; };
     };
 
@@ -158,10 +185,19 @@ namespace ace::core {
         typedef meta::resume_type<l_future_t> l_future_ret_t;
         typedef meta::resume_type<r_future_t> r_future_ret_t;
 
+        /**
+         * @brief Waits for both futures.
+         * @param l_future Left operand future.
+         * @param r_future Right operand future.
+         */
         and_await(l_future_t& l_future, r_future_t& r_future)
             : _l_future(l_future)
             , _r_future(r_future) {};
 
+        /**
+         * @brief Compile-time deduction of the combined result type.
+         * @return A representative value whose type becomes @c return_t.
+         */
         static consteval auto define_return_type() {
             if constexpr (std::same_as<void, l_future_ret_t> and std::same_as<void, r_future_ret_t>)
                 return std::monostate{}; /// 'await_resume()' will return void at this option
@@ -176,13 +212,22 @@ namespace ace::core {
 
         typedef decltype(define_return_type()) return_t;
 
-        omni_node _waiter;
-        l_future_t& _l_future;
-        r_future_t& _r_future;
-        std::optional<async_handle<>> _l_future_observer;
-        std::optional<async_handle<>> _r_future_observer;
-        return_t _result;
+        omni_node _waiter;                                            ///< Suspended caller awaiting both results.
+        l_future_t& _l_future;                                        ///< Left operand future.
+        r_future_t& _r_future;                                        ///< Right operand future.
+        std::optional<async_handle<>> _l_future_observer;             ///< Handle of the left observer task.
+        std::optional<async_handle<>> _r_future_observer;             ///< Handle of the right observer task.
+        return_t _result;                                             ///< Stored combined result.
 
+        /**
+         * @brief Observer task that awaits one operand.
+         * @details On completion stores its part of the result.  The second
+         * observer joins the first and re-attaches the waiting caller.
+         * @tparam observer_idx      Index of this observer (0 = left, 1 = right).
+         * @tparam future_t          Operand future type.
+         * @param future             Operand future to await.
+         * @param opposite_observer  Handle of the other observer to join.
+         */
         template <size_t observer_idx, typename future_t>
         task observer(future_t& future, std::optional<async_handle<>>& opposite_observer) {
 
@@ -204,10 +249,20 @@ namespace ace::core {
                 runner::reattach(_waiter);
         };
 
+        /**
+         * @brief Suspends the caller and starts both observers.
+         * @param external_coro Caller coroutine promise accessor.
+         * @return Always @c true — the caller is always suspended.
+         */
         bool await_suspend(auto);
 
+        /// @brief No-result completion for void operands.
         void await_resume() requires std::same_as<std::monostate, return_t> { }
 
+        /**
+         * @brief Returns the combined result.
+         * @return The non-void operand type or @c std::tuple — see class docs.
+         */
         return_t await_resume() requires (not std::same_as<std::monostate, return_t>) {
             return _result;
         };
@@ -237,9 +292,17 @@ namespace ace::core {
         static constexpr int futures_amount = sizeof...(future_ts);
         static constexpr int top_observer_idx = futures_amount - 1;
 
+        /**
+         * @brief Races N futures.
+         * @param futures Operand futures to race.
+         */
         explicit or_await_composed(future_ts&... futures)
             : _futures(futures...) {};
 
+        /**
+         * @brief Compile-time deduction of the race result type.
+         * @return A representative value whose type becomes @c return_t.
+         */
         static consteval auto define_return_type() {
             typedef std::tuple<meta::replace_type<meta::resume_type<future_ts>, void, std::monostate>...> temp_ret_t;
             typedef meta::unique_tuple_t<temp_ret_t> ret_tuple_t;
@@ -251,11 +314,19 @@ namespace ace::core {
 
         typedef decltype(define_return_type()) return_t;
 
-        omni_node _waiter;
-        std::tuple<future_ts&...> _futures;
-        std::array<std::optional<async_handle<>>, sizeof...(future_ts)> _observers;
-        return_t _result;
+        omni_node _waiter;                                                          ///< Suspended caller awaiting the race result.
+        std::tuple<future_ts&...> _futures;                                         ///< Tuple of operand futures.
+        std::array<std::optional<async_handle<>>, sizeof...(future_ts)> _observers; ///< Handles of the observer tasks.
+        return_t _result;                                                           ///< Stored result of the winning future.
 
+        /**
+         * @brief Observer task that awaits one operand.
+         * @details On completion stores the result (if typed), cancels all other
+         * observers, and re-attaches the waiting caller.
+         * @tparam observer_idx  Index of this observer.
+         * @tparam future_t      Operand future type.
+         * @param future         Operand future to await.
+         */
         template <size_t observer_idx, typename future_t>
         task observer(future_t& future) {
 
@@ -280,8 +351,17 @@ namespace ace::core {
                 _result = observer_idx;
         };
 
+        /**
+         * @brief Suspends the caller and starts all observers.
+         * @param external_coro Caller coroutine promise accessor.
+         * @return Always @c true — the caller is always suspended.
+         */
         bool await_suspend(auto);
 
+        /**
+         * @brief Returns the race result.
+         * @return @c int or @c std::variant — see class docs.
+         */
         return_t await_resume() { return _result; };
     };
 
@@ -308,9 +388,17 @@ namespace ace::core {
         static constexpr int futures_amount = sizeof...(future_ts);
         static constexpr int top_observer_idx = futures_amount - 1;
 
+        /**
+         * @brief Awaits all N futures.
+         * @param futures Operand futures to await.
+         */
         explicit and_await_composed(future_ts&... futures)
             : _futures(futures...) {};
 
+        /**
+         * @brief Compile-time deduction of the combined result type.
+         * @return A representative value whose type becomes @c return_t.
+         */
         static consteval auto define_return_type() {
             typedef std::tuple<meta::replace_type<meta::resume_type<future_ts>>...> temp_ret_t;
             typedef meta::unique_tuple_t<temp_ret_t> ret_tuple_t;
@@ -322,11 +410,19 @@ namespace ace::core {
 
         typedef decltype(define_return_type()) return_t;
 
-        omni_node _waiter;
-        std::tuple<future_ts&...> _futures;
-        std::array<std::optional<async_handle<>>, sizeof...(future_ts)> _observers;
-        return_t _result;
+        omni_node _waiter;                                                          ///< Suspended caller awaiting all results.
+        std::tuple<future_ts&...> _futures;                                         ///< Tuple of operand futures.
+        std::array<std::optional<async_handle<>>, sizeof...(future_ts)> _observers; ///< Handles of the observer tasks.
+        return_t _result;                                                           ///< Stored combined result.
 
+        /**
+         * @brief Observer task that awaits one operand.
+         * @details On completion stores its part of the result.  The last
+         * observer joins all others and re-attaches the waiting caller.
+         * @tparam observer_idx  Index of this observer.
+         * @tparam future_t      Operand future type.
+         * @param future         Operand future to await.
+         */
         template <size_t observer_idx, typename future_t>
         task observer(future_t& future) {
 
@@ -349,8 +445,17 @@ namespace ace::core {
                 runner::reattach(_waiter);
         };
 
+        /**
+         * @brief Suspends the caller and starts all observers.
+         * @param external_coro Caller coroutine promise accessor.
+         * @return Always @c true — the caller is always suspended.
+         */
         bool await_suspend(auto);
 
+        /**
+         * @brief Returns the combined result.
+         * @return @c void, a single type or @c std::tuple — see class docs.
+         */
         auto await_resume() {
             if constexpr (std::same_as<return_t, std::monostate>) return;
             else return _result;
@@ -397,7 +502,12 @@ namespace ace::core {
         typename async_return,
         template <typename> typename async_promise_rule_t = lazy_rule
     > requires std::same_as<meta::resume_type<sender_t>, void>
-    //
+    /**
+     * @brief Compose a @c void sender with an argument-less responder coroutine.
+     * @param sender     The upstream future to await first.
+     * @param responder  The responder coroutine (no arguments).
+     * @return An @c ace::promise<async_return> that represents the composed operation.
+     */
     promise<async_return>
     compose(sender_t&& sender, async<async_return, async_promise_rule_t>(responder)()) {
         co_await sender;
@@ -409,7 +519,12 @@ namespace ace::core {
         meta::is_future sender_t,
         typename foo_return, typename foo_input
     > requires (not std::same_as<meta::resume_type<sender_t>, void>)
-    //
+    /**
+     * @brief Compose a valued sender with a responder function taking one argument.
+     * @param sender     The upstream future to await first.
+     * @param responder  The responder function (takes sender's result as argument).
+     * @return An @c ace::promise<foo_return> that represents the composed operation.
+     */
     promise<foo_return>
     compose(sender_t&& sender, foo_return(responder)(foo_input)) {
         typedef meta::resume_type<sender_t> sender_resume_t;
@@ -422,7 +537,12 @@ namespace ace::core {
         meta::is_future sender_t,
         typename foo_return
     > requires std::same_as<meta::resume_type<sender_t>, void>
-    //
+    /**
+     * @brief Compose a @c void sender with an argument-less responder function.
+     * @param sender     The upstream future to await first.
+     * @param responder  The responder function (no arguments).
+     * @return An @c ace::promise<foo_return> that represents the composed operation.
+     */
     promise<foo_return>
     compose(sender_t&& sender, foo_return(responder)()) {
         co_await sender;
@@ -434,7 +554,12 @@ namespace ace::core {
         meta::is_future sender_t,
         typename callable_t
     > requires (not std::same_as<meta::resume_type<sender_t>, void>)
-    //
+    /**
+     * @brief Compose a valued sender with a generic callable (lambda, functor).
+     * @param sender     The upstream future to await first.
+     * @param responder  The callable (takes sender's result as argument).
+     * @return An @c ace::promise of the callable's result type.
+     */
     auto compose(sender_t&& sender, callable_t&& responder)
         -> promise<std::invoke_result_t<std::decay_t<callable_t>, meta::resume_type<sender_t>&&>>
     {
@@ -453,7 +578,12 @@ namespace ace::core {
         meta::is_future sender_t,
         typename callable_t
     > requires std::same_as<meta::resume_type<sender_t>, void>
-    //
+    /**
+     * @brief Compose a @c void sender with a generic callable (lambda, functor).
+     * @param sender     The upstream future to await first.
+     * @param responder  The callable (no arguments).
+     * @return An @c ace::promise of the callable's result type.
+     */
     auto compose(sender_t&& sender, callable_t&& responder)
         -> promise<std::invoke_result_t<std::decay_t<callable_t>>>
     {
@@ -519,13 +649,24 @@ struct ACE_OR_AWAIT_FUTURE_SPACE or_await_router final : runner_router {
 
     or_await_router() = delete;
 
+    /**
+     * @brief Binds the router to the owning @c or_await.
+     * @param or_await_ Pointer to the owning race combinator.
+     */
     explicit or_await_router(or_await* or_await_)
         : _or_await(or_await_) {};
 
+    /**
+     * @brief Stores the suspended caller until the race resolves.
+     * @param node Task node of the suspended caller.
+     */
     void redirect(omni_node node) override {
         _or_await->_waiter = node;
     }
 
+    /**
+     * @brief Cancels both observers and returns the stored waiter to its runner.
+     */
     void cancel() override {
         _or_await->_l_future_observer->cancel();
         _or_await->_r_future_observer->cancel();
@@ -537,11 +678,16 @@ struct ACE_OR_AWAIT_FUTURE_SPACE or_await_router final : runner_router {
 
     ~or_await_router() override = default;
 
-    or_await* _or_await;
+    or_await* _or_await; ///< Owning race combinator.
 };
 
 
 ACE_OR_AWAIT_FUTURE_MEMBER(bool)
+/**
+ * @brief Creates and posts both observer tasks, then registers the race router.
+ * @param external_coro Caller coroutine promise accessor.
+ * @return Always @c true — the caller is always suspended.
+ */
 await_suspend(auto external_coro) {
     auto* runner_ptr = external_coro.promise()._runner.template as<runner>();
     // NOTE: Creating observers for each futures
@@ -572,13 +718,24 @@ struct ACE_AND_AWAIT_FUTURE_SPACE and_await_router final : runner_router {
 
     and_await_router() = delete;
 
+    /**
+     * @brief Binds the router to the owning @c and_await.
+     * @param and_await_ Pointer to the owning AND combinator.
+     */
     explicit and_await_router(and_await* and_await_)
         : _and_await(and_await_) {};
 
+    /**
+     * @brief Stores the suspended caller until both futures finish.
+     * @param node Task node of the suspended caller.
+     */
     void redirect(omni_node node) override {
         _and_await->_waiter = node;
     }
 
+    /**
+     * @brief Cancels both observers and returns the stored waiter to its runner.
+     */
     void cancel() override {
         _and_await->_l_future_observer->cancel();
         _and_await->_r_future_observer->cancel();
@@ -590,11 +747,16 @@ struct ACE_AND_AWAIT_FUTURE_SPACE and_await_router final : runner_router {
 
     ~and_await_router() override = default;
 
-    and_await* _and_await;
+    and_await* _and_await; ///< Owning AND combinator.
 };
 
 
 ACE_AND_AWAIT_FUTURE_MEMBER(bool)
+/**
+ * @brief Creates and posts both observer tasks, then registers the AND router.
+ * @param external_coro Caller coroutine promise accessor.
+ * @return Always @c true — the caller is always suspended.
+ */
 await_suspend(auto external_coro) {
     auto* runner_ptr = external_coro.promise()._runner.template as<runner>();
     // NOTE: Creating observers for each futures
@@ -622,13 +784,24 @@ struct ACE_AND_AWAIT_COMPOSED_FUTURE_SPACE and_await_composed_router final : run
 
     and_await_composed_router() = delete;
 
+    /**
+     * @brief Binds the router to the owning @c and_await_composed.
+     * @param and_await_composed_ Pointer to the owning variadic AND combinator.
+     */
     explicit and_await_composed_router(and_await_composed* and_await_composed_)
         : _and_await_composed(and_await_composed_) {};
 
+    /**
+     * @brief Stores the suspended caller until all futures finish.
+     * @param node Task node of the suspended caller.
+     */
     void redirect(omni_node node) override {
         _and_await_composed->_waiter = node;
     }
 
+    /**
+     * @brief Cancels all observers and returns the stored waiter to its runner.
+     */
     void cancel() override {
         for (auto& opposite_observer : _and_await_composed->_observers) {
             opposite_observer->cancel();
@@ -641,11 +814,16 @@ struct ACE_AND_AWAIT_COMPOSED_FUTURE_SPACE and_await_composed_router final : run
 
     ~and_await_composed_router() override = default;
 
-    and_await_composed* _and_await_composed;
+    and_await_composed* _and_await_composed; ///< Owning variadic AND combinator.
 };
 
 
 ACE_AND_AWAIT_COMPOSED_FUTURE_MEMBER(bool)
+/**
+ * @brief Creates and posts all observer tasks, then registers the variadic AND router.
+ * @param external_coro Caller coroutine promise accessor.
+ * @return Always @c true — the caller is always suspended.
+ */
 await_suspend(auto external_coro) {
     auto* runner_ptr = external_coro.promise()._runner.template as<runner>();
     // NOTE: Creating observers for each futures
@@ -673,13 +851,24 @@ struct ACE_OR_AWAIT_COMPOSED_FUTURE_SPACE or_await_composed_router final : runne
 
     or_await_composed_router() = delete;
 
+    /**
+     * @brief Binds the router to the owning @c or_await_composed.
+     * @param or_await_composed_ Pointer to the owning variadic OR combinator.
+     */
     explicit or_await_composed_router(or_await_composed* or_await_composed_)
         : _or_await_composed(or_await_composed_) {};
 
+    /**
+     * @brief Stores the suspended caller until the race resolves.
+     * @param node Task node of the suspended caller.
+     */
     void redirect(omni_node node) override {
         _or_await_composed->_waiter = node;
     }
 
+    /**
+     * @brief Cancels all observers and returns the stored waiter to its runner.
+     */
     void cancel() override {
         for (auto& opposite_observer : _or_await_composed->_observers) {
             opposite_observer->cancel();
@@ -692,11 +881,16 @@ struct ACE_OR_AWAIT_COMPOSED_FUTURE_SPACE or_await_composed_router final : runne
 
     ~or_await_composed_router() override = default;
 
-    or_await_composed* _or_await_composed;
+    or_await_composed* _or_await_composed; ///< Owning variadic OR combinator.
 };
 
 
 ACE_OR_AWAIT_COMPOSED_FUTURE_MEMBER(bool)
+/**
+ * @brief Creates and posts all observer tasks, then registers the variadic OR router.
+ * @param external_coro Caller coroutine promise accessor.
+ * @return Always @c true — the caller is always suspended.
+ */
 await_suspend(auto external_coro) {
     auto* runner_ptr = external_coro.promise()._runner.template as<runner>();
     // NOTE: Creating observers for each futures

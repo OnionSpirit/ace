@@ -38,18 +38,32 @@
 
 namespace ace {
 
+    /**
+     * @brief Reconfigure the number of runners.
+     * @return @c true on success, @c false if runners are not empty.
+     */
     inline bool reload() noexcept;
 
+    /**
+     * @brief Schedule a task for execution.
+     * @param new_task Task to schedule.
+     * @param rnr      Target runner; @c nullptr for automatic selection.
+     */
     inline void schedule(task &&new_task, core::runner* = nullptr) noexcept;
 
+    /// @brief Execute all scheduled tasks — blocks until the queues are empty.
     inline void run() noexcept;
 
+    /// @brief Check whether all runners are empty (no pending tasks).
     inline bool empty() noexcept;
 
+    /// @brief Drain the signal pipe, discarding all pending signals.
     inline void reset_signal();
 
+    /// @brief Send an interruption signal to all service routines.
     inline void interrupt();
 
+    /// @brief Send a termination signal to all service routines.
     inline void terminate();
 
 }
@@ -68,14 +82,16 @@ namespace ace::core {
      */
     class dispatcher {
 
+        /// @brief Creates runners and worker states from the current configuration.
         dispatcher() {
             _runners_amount = cfg::g_config._runners_amount;
             _runners.resize(_runners_amount);
             _workers_states.resize(_runners_amount);
         };
 
-        static thread_local std::chrono::time_point<std::chrono::steady_clock> current_ts;
+        static thread_local std::chrono::time_point<std::chrono::steady_clock> current_ts; ///< Cached timestamp for the current thread.
 
+        /// @brief Refreshes the cached thread-local timestamp.
         static void fetch_time() { current_ts = std::chrono::steady_clock::now(); }
 
         /**
@@ -90,19 +106,25 @@ namespace ace::core {
 
         ACE_CACHE_LINE(0)
 
-        std::vector<runner>        _runners             { };
-        std::vector<worker_state>  _workers_states      { };
-        std::atomic<double>        _aggregate_velocity  { };
-        std::size_t                _runners_amount      {1};
+        std::vector<runner>        _runners             { };  ///< Per-thread runners (index == thread id).
+        std::vector<worker_state>  _workers_states      { };  ///< Per-thread worker status records.
+        std::atomic<double>        _aggregate_velocity  { };  ///< Sum of all runners' velocities.
+        std::size_t                _runners_amount      {1};  ///< Number of configured runners.
 
         ACE_CACHE_LINE(1)
 
-        std::atomic<uint64_t>      _runner_selector     { };
+        std::atomic<uint64_t>      _runner_selector     { };  ///< Round-robin atomic counter for task assignment.
 
         ACE_CACHE_LINE(2)
 
-        sig_pipe_t _sig_pipe{};
+        sig_pipe_t _sig_pipe{};  ///< Signal pipe shared with all service routines.
 
+        /**
+         * @brief Processes tasks on one runner for up to 1 ms.
+         * @details Tracks activity, updates velocity when multi-runner, and
+         * decides whether the thread should sleep (polling or idle).
+         * @param worker_id Zero-based index of the worker's runner.
+         */
         void worker_round(const int worker_id) {
             using namespace std::chrono_literals;
 
@@ -144,6 +166,11 @@ namespace ace::core {
             }
         }
 
+        /**
+         * @brief Worker thread entry — runs @c worker_round() until stop is requested.
+         * @param stoken    Stop token for thread shutdown.
+         * @param worker_id Zero-based index of the worker's runner.
+         */
         void worker_tf(const std::stop_token &stoken, const int worker_id) {
             _workers_states[worker_id]._worker_id = worker_id;
             _workers_states[worker_id]._pending = false;
@@ -151,18 +178,32 @@ namespace ace::core {
                 worker_round(worker_id);
         }
 
+        /// @brief Re-reads the runners amount from the global configuration.
         void fetch_config() noexcept { _runners_amount = cfg::g_config._runners_amount; }
 
+        /// @brief Minimum service rounds skipped before sleeping while only services are pending.
         static constexpr uint8_t _min_service_skips = 3;
 
+        /**
+         * @brief Assigns a task to the next runner in round-robin order.
+         * @param new_task Task to assign.
+         */
         void round_robin(task &&new_task) noexcept {
             const auto runner_id = _runner_selector.fetch_add(1, std::memory_order_relaxed);
             _runners[runner_id % _runners_amount].attach(std::forward<task>(new_task));
         }
 
+        /**
+         * @brief Returns the cached timestamp of the current thread.
+         * @return The cached @c steady_clock timepoint.
+         */
         static auto get_time()
             -> std::chrono::time_point<std::chrono::steady_clock> { return current_ts; }
 
+        /**
+         * @brief Returns the dispatcher singleton.
+         * @return Reference to the unique dispatcher instance.
+         */
         static dispatcher &get_instance() noexcept {
             static dispatcher instance;
             return instance;
@@ -170,6 +211,10 @@ namespace ace::core {
 
     public:
 
+        /**
+         * @brief Returns the dispatcher's signal pipe.
+         * @return Reference to the shared signal pipe.
+         */
         static sig_pipe_t &get_sig_pipe() noexcept {
             return get_instance()._sig_pipe;
         }
@@ -188,12 +233,16 @@ namespace ace::core {
 
         friend inline void ace::terminate();
 
+        /// @brief Copying a dispatcher is forbidden (singleton).
         dispatcher(const dispatcher &) = delete;
 
+        /// @brief Moving a dispatcher is forbidden (singleton).
         dispatcher(dispatcher &&) = delete;
 
+        /// @brief Copy assignment is forbidden (singleton).
         dispatcher &operator=(const dispatcher &) = delete;
 
+        /// @brief Move assignment is forbidden (singleton).
         dispatcher &operator=(dispatcher &&) = delete;
     };
 
@@ -329,14 +378,14 @@ namespace ace {
     }
 
     /**
-     * @brief Send an interruption signal to all vortex services.
+     * @brief Send an interruption signal to all service routines.
      */
     inline void interrupt() {
         core::dispatcher::get_sig_pipe().push(ace::core::make_signal(ace::core::interruption_signal{}));
     }
 
     /**
-     * @brief Send a termination signal to all vortex services.
+     * @brief Send a termination signal to all service routines.
      */
     inline void terminate() {
         core::dispatcher::get_sig_pipe().push(ace::core::make_signal(ace::core::termination_signal{}));

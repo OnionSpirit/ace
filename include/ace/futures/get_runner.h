@@ -14,7 +14,8 @@
  * }
  * @endcode
  *
- * The command never suspends (@c await_suspend returns @c false).
+ * The command suspends the coroutine once (@c await_suspend returns @c true)
+ * so the runner is captured while the task is parked in its queue.
  */
 #ifndef ACE_FUTURE_GET_RUNNER_H
 #define ACE_FUTURE_GET_RUNNER_H

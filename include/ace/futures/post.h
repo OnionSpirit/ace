@@ -10,8 +10,9 @@
  *  2. <b>No roaming</b> — both the poster and the posted task have @c _roaming
  *     set to @c false, preventing the balancer from migrating either.
  *
- * The @c await_suspend() returns @c false so the calling coroutine continues
- * executing immediately after the post — there is no suspension.
+ * The @c await_suspend() returns @c true, so the posting coroutine suspends
+ * once and resumes after the posted task has been enqueued at the front of
+ * the runner queue.
  *
  * @par Example
  * @code{.cpp}
@@ -50,8 +51,11 @@ namespace ace::futures {
 
         IMPORT_FUTURE_ENV(post)
 
+        /// @brief Default construction is forbidden — a task is required.
         post() = delete;
+        /// @brief Copying a post command is forbidden.
         post(const post&) = delete;
+        /// @brief Copy assignment is forbidden.
         post& operator=(const post&) = delete;
 
         /**
@@ -66,12 +70,12 @@ namespace ace::futures {
             , _handle(_task.observe()) {}
 
         /**
-         * @brief C++20 awaitable protocol — attach the task without suspending.
-         * @details Disables roaming on both tasks, attaches the child task to
-         * the current runner, and returns @c false so the calling coroutine
-         * is not suspended.
+         * @brief C++20 awaitable protocol — post the task to the front of the queue.
+         * @details Disables roaming on both tasks and attaches the child task to
+         * the front of the current runner's queue, then returns @c true so the
+         * calling coroutine suspends once (it is re-queued behind the posted task).
          * @param coroutine  Handle to the calling coroutine's promise.
-         * @return Always @c false — the caller is never suspended.
+         * @return Always @c true — the caller suspends once.
          */
         bool await_suspend(auto coroutine) {
             auto* runner_ptr = coroutine.promise()._runner.template as<core::runner>();

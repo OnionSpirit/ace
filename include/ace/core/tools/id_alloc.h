@@ -23,19 +23,30 @@ namespace ace::core::tools {
      */
     class id_allocator {
 
-        nukes::dynamic::mpmc_queue<std::size_t> _released {};
-        std::atomic<std::size_t> _pool {0};
+        nukes::dynamic::mpmc_queue<std::size_t> _released {}; ///< Queue of IDs returned by @c id_free() for recycling.
+        std::atomic<std::size_t> _pool {0};                   ///< Monotonic counter for fresh IDs.
 
     public:
 
+        /// @brief Default constructor.
         id_allocator() = default;
 
+        /**
+         * @brief Allocates a unique ID.
+         * @details Recycles a released ID when available, otherwise takes the
+         * next value from the atomic counter.
+         * @return The allocated ID.
+         */
         std::size_t id_alloc() {
             std::size_t id {};
             if (_released.pop(id)) return id;
             return _pool.fetch_add(1, std::memory_order_acq_rel); // NOTE: Post-increment
         }
 
+        /**
+         * @brief Returns an ID to the recycling pool.
+         * @param id ID to release.
+         */
         void id_free(const std::size_t id) {
             _released.push(id);
         }
@@ -49,10 +60,15 @@ namespace ace::core::tools {
      */
     class async_id_allocator : public id_allocator {
 
+        /// @brief Private constructor — singleton.
         async_id_allocator() = default;
 
     public:
 
+        /**
+         * @brief Returns the global ID allocator instance.
+         * @return Reference to the singleton.
+         */
         static async_id_allocator& get_instance() {
             static async_id_allocator instance;
             return instance;

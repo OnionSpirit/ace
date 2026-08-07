@@ -1,7 +1,8 @@
 /**
  * @file
- * @details This file contains a future_handler, future_trait classes and its
- * dispatching concepts: is_future_accept_promise, is_future_accept_coroutine,
+ * @details This file contains a future_handle, future_traits and
+ * busy_future_traits classes and their dispatching concepts: is_awaitable,
+ * is_future_accurate, is_busy_future_accurate, is_any_future_accurate,
  * is_future. Types are intended to be used to create derived future objects,
  * that will be processed by co_await operator, and make promises waits to its
  * result
@@ -43,6 +44,7 @@ namespace ace::core::traits {
     template <typename derivedT>
     struct future_traits : future_handle {
 
+        /// @brief The derived future type (CRTP).
         using derived_future_t = derivedT;
 
         /**
@@ -55,9 +57,11 @@ namespace ace::core::traits {
             return std::move(*static_cast<derived_future_t*>(this));
         }
 
+        /** @brief Never ready upfront — suspension always occurs. */
         bool await_ready() override { return false; };
     };
 
+    /** @brief Imports the @c future_traits environment: base alias and derived type. */
     #define IMPORT_FUTURE_ENV(future_t)                                      \
         typedef ace::core::traits::future_traits<future_t> future_traits_t;  \
         using typename future_traits_t::derived_future_t;
@@ -70,6 +74,7 @@ namespace ace::core::traits {
     template <typename derivedT>
     struct busy_future_traits : future_handle {
 
+        /// @brief The derived busy future type (CRTP).
         using derived_busy_future_t = derivedT;
 
         /**
@@ -99,6 +104,7 @@ namespace ace::core::traits {
         ~busy_future_traits() override = default;
     };
 
+    /** @brief Imports the @c busy_future_traits environment: base alias and derived type. */
     #define IMPORT_BUSY_FUTURE_ENV(future_t)                                           \
         typedef ace::core::traits::busy_future_traits<future_t> busy_future_traits_t;  \
         using typename busy_future_traits_t::derived_busy_future_t;
@@ -140,7 +146,7 @@ namespace ace::core::meta {
      * @details A type satisfies @c is_future if it:
      *  1. Exposes a nested @c future_traits_t alias.
      *  2. Is derived from @c future_traits_t (i.e., from
-     *     @c ace::futures::future_traits<Derived>).
+     *     @c ace::core::traits::future_traits<Derived>).
      *  3. Satisfies @c is_awaitable.
      *
      * When @c promise_traits::await_transform() detects this concept, it clears
@@ -161,7 +167,7 @@ namespace ace::core::meta {
      * @details A type satisfies @c is_busy_future if it:
      *  1. Exposes a nested @c busy_future_traits_t alias.
      *  2. Is derived from @c busy_future_traits_t (i.e., from
-     *     @c ace::futures::busy_future_traits<Derived>).
+     *     @c ace::core::traits::busy_future_traits<Derived>).
      *  3. Satisfies @c is_awaitable.
      *
      * When @c promise_traits::await_transform() detects this concept, it stores
@@ -190,15 +196,18 @@ namespace ace::core::meta {
     concept is_any_future_accurate = is_busy_future_accurate<futureT, promiseT> or is_future_accurate<futureT, promiseT>;
 
     /**
-     * @brief ACE future concept (router-based suspension).
+     * @brief ACE commonized future concept (router-based or active-polling suspension).
      *
      * @details A type satisfies @c is_future if it:
-     *  1. Exposes a nested @c future_traits_t alias.
-     *  2. Is derived from @c future_traits_t (i.e., from
-     *     @c ace::futures::future_traits<Derived>).
+     *  1. Exposes a nested @c future_traits_t or @c busy_future_traits_t alias.
+     *  2. Is derived from the corresponding traits base
+     *     (@c ace::core::traits::future_traits<Derived> or
+     *     @c ace::core::traits::busy_future_traits<Derived>).
+     *  3. Provides @c await_ready() returning @c bool and an @c await_resume().
      *
-     * When @c promise_traits::await_transform() detects this concept, it clears
-     * @c _busy_future so the runner uses the router for forwarding.
+     * When @c promise_traits::await_transform() detects the corresponding
+     * @c _accurate concept (@c is_future_accurate), it clears @c _busy_future
+     * so the runner uses the router for forwarding.
      *
      * @tparam futureT   Type to check.
      */
@@ -216,18 +225,23 @@ namespace ace::core::meta {
         awaitable_t.await_resume();
     };
 
+    /**
+     * @brief Result type of a future's @c await_resume().
+     * @tparam future_t  Future type (must satisfy @c is_future).
+     */
     template <is_future future_t>
     using resume_type = decltype(std::declval<future_t>().await_resume());
 
     /**
      * @tparam inspect_t - Type to analyze
      * @tparam expected_t - Type that you are looking for
-     * @tparam replace_with_t - Type to replace if @c inspect_t and @c current_t are same
+     * @tparam replace_with_t - Type to replace if @c inspect_t and @c expected_t are same
      */
     template <typename inspect_t, typename expected_t = void, typename replace_with_t = std::monostate>
     using replace_type = std::conditional_t<std::same_as<inspect_t, expected_t>, replace_with_t, inspect_t>;
 
     namespace details {
+        /** @brief Recursive helper that accumulates unique types from a tuple pack. */
         template <typename T, typename... Ts>
        struct unique_impl { using type = T; };
 
@@ -237,6 +251,7 @@ namespace ace::core::meta {
                                  unique_impl<Tuple<Ts...>, Us...>,
                                  unique_impl<Tuple<Ts..., U>, Us...>> {};
 
+        /** @brief Helper that deduplicates the types of a tuple. */
         template <class Tuple>
         struct unique_tuple;
 
@@ -244,31 +259,45 @@ namespace ace::core::meta {
         struct unique_tuple<Tuple<Ts...>> : unique_impl<Tuple<>, Ts...> {};
     }
 
+    /** @brief Removes duplicate types from a tuple. */
     template <class Tuple>
     using unique_tuple_t = details::unique_tuple<Tuple>::type;
 
     namespace details {
-        // Helper to convert tuple to variant
+        /**
+         * @brief Helper that converts a @c std::tuple into a @c std::variant
+         *        of its element types.
+         * @tparam Tuple  Tuple type to convert.
+         */
         template <typename Tuple>
         struct tuple_to_variant;
 
+        /** @brief @c std::tuple specialization of @c tuple_to_variant. */
         template <typename... Ts>
         struct tuple_to_variant<std::tuple<Ts...>> {
             using type = std::variant<Ts...>;
         };
     }
 
-    // Convenient alias
+    /** @brief Converts a @c std::tuple into a @c std::variant of its element types. */
     template <typename Tuple>
     using tuple_to_variant_t = details::tuple_to_variant<Tuple>::type;
 
+    /** @brief Trait: @c false for non-tuple types. */
     template <typename> struct is_tuple_t: std::false_type::type {};
 
+    /** @brief Trait: @c true for @c std::tuple types. */
     template <typename ...T> struct is_tuple_t<std::tuple<T...>>: std::true_type::type {};
 
+    /** @brief Variable template form of @c is_tuple_t. */
     template <typename type>
     inline constexpr bool is_tuple_v = is_tuple_t<type>::value;
 
+    /**
+     * @brief Type of the @c index -th element of a parameter pack, viewed as a tuple.
+     * @tparam index    Position in the pack.
+     * @tparam pack_ts  Parameter pack types.
+     */
     template <std::size_t index, typename ... pack_ts>
     using at_pack = std::decay_t<decltype(std::get<index>(std::declval<std::tuple<pack_ts...>>()))>;
 

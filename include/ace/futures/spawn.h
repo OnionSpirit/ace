@@ -50,8 +50,11 @@ namespace ace::futures {
 
         IMPORT_FUTURE_ENV(spawn)
 
+        /// @brief Default construction is forbidden — a task is required.
         spawn() = delete;
+        /// @brief Copying a spawn command is forbidden.
         spawn(const spawn&) = delete;
+        /// @brief Copy assignment is forbidden.
         spawn& operator=(const spawn&) = delete;
 
         /**

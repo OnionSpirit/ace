@@ -57,6 +57,14 @@ namespace ace::fs {
 
     protected:
 
+        /**
+         * @brief Writes a scatter-gather buffer to the file asynchronously.
+         * @details Tries to capture an @c io_hanged::command and submit a
+         * @c writev operation through @c kernel_controller; falls back to a
+         * blocking @c ::writev() when no runner context or command slot is
+         * available.  Failures are reported through @c io::hanged::fail_cb_handler.
+         * @param buff Buffer to write.
+         */
         void output_action(io::buffer&& buff) override {
             // NOTE: Trying to get current runner.
             // NOTE: Doing it manually for cases when classic 'runner::run()' is unused
@@ -80,20 +88,37 @@ namespace ace::fs {
             }
         };
 
+        /**
+         * @brief Reads data from the file into a buffer asynchronously.
+         * @param buff Destination buffer.
+         * @param len  Number of bytes to read.
+         * @return Awaitable resolving to the number of bytes read.
+         */
         promise<int> input_action(void *buff, const std::size_t len) override {
             co_return co_await io::read_query(_fd, buff, len);
         }
 
     public:
 
+        /// @brief Default constructor — produces an empty link.
         file_link() = default;
 
     };
 
 
+    /**
+     * @brief Specialisation of @c io::caster for @c ace::fs::file.
+     * @details Converts a consumed file entity into a ready-to-use @c file_link.
+     */
     template<>
     struct ace::io::caster<ace::fs::file> {
 
+        /**
+         * @brief Builds a @c file_link from a file entity's descriptor.
+         * @param fd        File descriptor of the opened file.
+         * @param is_closed Whether the descriptor is considered closed.
+         * @return The constructed @c file_link.
+         */
         static auto as_link(int fd, bool is_closed, fs::file&&) {
             return fs::file_link { fd, is_closed };
         }
@@ -112,8 +137,13 @@ namespace ace::fs {
 
         IMPORT_IO_ENTITY_ENV(file);
 
+        /// @brief Filesystem path of the file to open.
         std::filesystem::path _path;
 
+        /**
+         * @brief Constructs a file entity for the given path.
+         * @param path Path of the file.
+         */
         file(std::filesystem::path path)
             : _path(std::move(path)) {};
 
@@ -141,29 +171,57 @@ namespace ace::fs {
                 return services::kernel_controller::open(kwp, _path, _flags, _mode);
             }
 
+            /**
+             * @brief Consumes the entity with the opened descriptor.
+             * @return A @c file_link ready for I/O.
+             */
             [[nodiscard]] auto await_resume() const {
                 _entity._fd = _res;
                 return io::link::consume(_entity);
             }
 
-            file& _entity;
-            const char* _path;
-            const int _flags;
-            const mode_t _mode;
+            file& _entity;      ///< Entity being consumed by the open operation.
+            const char* _path;  ///< Path of the file to open.
+            const int _flags;   ///< Open flags (O_CREAT, O_RDWR, ...).
+            const mode_t _mode; ///< Permission bits for newly created files.
         };
 
+        /**
+         * @brief Opens the file with custom flags and mode.
+         * @param flags Open flags.
+         * @param mode  Permission bits for newly created files.
+         * @return Awaitable resolving to a @c file_link.
+         */
         ACE_AWAIT_NODISCARD auto open_impl(const int flags, const mode_t mode)
         { return open_query { std::move(*this), _path.c_str(), flags, mode}; }
 
+        /**
+         * @brief Opens the file for append + read/write, creating it if missing.
+         * @param flags Open flags (default: O_CREAT | O_APPEND | O_RDWR).
+         * @param mode  Permission bits (default: 0777).
+         * @return Awaitable resolving to a @c file_link.
+         */
         ACE_AWAIT_NODISCARD auto open(const int flags = O_CREAT | O_APPEND | O_RDWR, const mode_t mode = 0777)
         -> open_query { return open_query { std::move(*this), _path.c_str(), flags, mode }; }
 
+        /**
+         * @brief Opens the file for rewrite (truncate + read/write), creating it if missing.
+         * @return Awaitable resolving to a @c file_link.
+         */
         ACE_AWAIT_NODISCARD auto open_rewrite()
         -> open_query { return open_query { std::move(*this), _path.c_str(), O_CREAT | O_RDWR, 0777 }; }
 
+        /**
+         * @brief Opens the file read-only.
+         * @return Awaitable resolving to a @c file_link.
+         */
         ACE_AWAIT_NODISCARD auto open_rdonly()
         -> open_query { return open_query { std::move(*this), _path.c_str(), O_RDONLY, 0777 }; }
 
+        /**
+         * @brief Opens the file for append + write-only, creating it if missing.
+         * @return Awaitable resolving to a @c file_link.
+         */
         ACE_AWAIT_NODISCARD auto open_wronly()
         -> open_query { return open_query { std::move(*this), _path.c_str(), O_CREAT | O_APPEND | O_WRONLY, 0777 }; }
 

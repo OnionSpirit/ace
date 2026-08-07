@@ -72,7 +72,7 @@ namespace ace::io {
      * a @c setup_query() method that submits the operation to
      * @c kernel_controller.  The query is an awaitable: @c await_suspend()
      * registers the caller as a waiter and submits the I/O, while
-     * @c on_result() (called from the kernelic vortex on CQE arrival) stores
+     * @c on_result() (called from the kernelic service on CQE arrival) stores
      * the result and re-attaches the waiter.
      *
      * @tparam query_core_t  The concrete query type (CRTP).
@@ -172,7 +172,7 @@ namespace ace::io {
      * @details @c io_link combines an FD with a polymorphic @c output_action()
      * (write) / @c input_action() (read) interface and a set of convenience
      * @c write() / @c read() / @c read_buf() methods.
-     * Derived types example (@c ace::fs::file_link, @c ace::net::io_connection_link)
+     * Derived types example (@c ace::fs::file_link, @c ace::net::connection_link)
      * implement the @c output_action and @c input_action to perform the actual
      * I/O via @c io_uring or a fallback blocking call.
      */
@@ -186,6 +186,13 @@ namespace ace::io {
 
 }
 
+/**
+ * @def IMPORT_ERROR_HANDLING
+ * @brief Injects error-state helpers into a derived entity or link class.
+ * @details Defines @c operator bool() (true when the FD is valid or idle) and
+ * @c error() (throws on a successful/idle entity, otherwise returns
+ * @c strerror() of the negated FD value).
+ */
 #define IMPORT_ERROR_HANDLING                                                               \
                                                                                             \
     operator bool() const { return _fd > -1 or INT_MIN == _fd; }                            \
@@ -198,6 +205,11 @@ namespace ace::io {
         return strerror(-_fd);                                                              \
     }
 
+/**
+ * @def IMPORT_IO_ENTITY_ENV(class)
+ * @brief Injects @c io::entity<class> base aliases, protected FD members and
+ * the @c IMPORT_ERROR_HANDLING block into a derived @c io::entity class.
+ */
 #define IMPORT_IO_ENTITY_ENV(class)                                                         \
                                                                                             \
     using io_entity_t = ace::io::entity<class>;                                             \
@@ -213,8 +225,17 @@ public:                                                                         
                                                                                             \
     ~class() override = default;
 
+/**
+ * @def IMPORT_IO_ENTITY_FABRICATION
+ * @brief Injects the @c io::entity base constructors into a derived entity class.
+ */
 #define IMPORT_IO_ENTITY_FABRICATION using io_entity_t::io_entity_t;
 
+/**
+ * @def IMPORT_IO_LINK_ENV(class)
+ * @brief Injects @c io::link base aliases, protected members and the
+ * @c IMPORT_ERROR_HANDLING block into a derived @c io::link class.
+ */
 #define IMPORT_IO_LINK_ENV(class)                                                           \
                                                                                             \
     typedef ace::io::link io_link_t;                                                        \
@@ -232,8 +253,17 @@ public:                                                                         
                                                                                             \
     ~class() override = default;
 
+/**
+ * @def IMPORT_IO_LINK_FABRICATION
+ * @brief Injects the @c io::link base constructors into a derived link class.
+ */
 #define IMPORT_IO_LINK_FABRICATION using io_link_t::io_link_t;
 
+/**
+ * @def IMPORT_IO_QUERY_ENV(class)
+ * @brief Injects the @c io::query<class> base alias, protected members and a
+ * defaulted virtual destructor into a derived query class.
+ */
 #define IMPORT_IO_QUERY_ENV(class)                    \
     typedef ace::io::query<class> io_query_t;         \
     using io_query_t::_fd;                            \
@@ -246,6 +276,11 @@ public:                                                                         
 
         IMPORT_FUTURE_ENV(query_core_t);
 
+        /**
+         * @brief Constructs a query bound to a file descriptor.
+         * @param fd File descriptor to perform the I/O operation on.
+         * @note Static-asserts that @c query_core_t satisfies the @c is_query concept.
+         */
         explicit query(const int fd) : _fd(fd) {
             static_assert(is_query<query_core_t>,
                 "Query object shall implement 'bool setup_query(ace::core::kernel_waiter*)' method");
@@ -263,13 +298,24 @@ public:                                                                         
 
             query_router() = delete;
 
+            /**
+             * @brief Binds the router to its owning query.
+             * @param query_ Owning @c query instance.
+             */
             explicit query_router(query* query_)
                 : _query(query_) {};
 
+            /**
+             * @brief Stores the awaiting task node for later re-attachment.
+             * @param node Task node of the suspended coroutine.
+             */
             void redirect(omni_node node) override {
                 _query->_waiter = node;
             }
 
+            /**
+             * @brief Requests @c kernel_controller to cancel the submitted operation.
+             */
             void cancel() override {
                 // TODO: Improve cancel with pop from local submission queue
                 services::kernel_controller::cancel(_query, 0);
@@ -277,7 +323,7 @@ public:                                                                         
 
             ~query_router() override = default;
 
-            query* _query;
+            query* _query;                 ///< Owning query instance
         };
 
         omni_node _waiter;               ///< Awaited task storage
@@ -285,8 +331,19 @@ public:                                                                         
         const int _fd;                   ///< FD to interact with
         bool      _is_silent = false;    ///< Mark to detach and not suspend
 
+        /**
+         * @brief Queries never complete synchronously.
+         * @return Always @c false.
+         */
         bool await_ready() override { return false; };
 
+        /**
+         * @brief Submits the operation to @c kernel_controller and suspends the caller.
+         * @param coroutine Awaiting coroutine handle (provides the runner identity
+         *                  and the router slot to install the @c query_router into).
+         * @return @c true when the operation was submitted and the caller must suspend,
+         *         @c false when the query is silent (@c _is_silent) or submission failed.
+         */
         bool await_suspend(auto coroutine) {
             _runner_identity = coroutine.promise()._runner.template as<runner_pool_t>();
             if (_fd < 0)
@@ -302,12 +359,17 @@ public:                                                                         
             return false;
         }
 
+        /**
+         * @brief Stores the I/O result and re-attaches the waiting task.
+         * @param res Completion result from @c kernel_controller (negative errno on failure).
+         */
         void on_result(const int res) override {
             _res = res;
             if (_waiter)
                 core::runner::reattach(_waiter);
         }
 
+        /** @brief Virtual destructor (defaulted). */
         ~query() override = default;
     };
 
@@ -322,6 +384,13 @@ public:                                                                         
 
         read_query() = delete;
 
+        /**
+         * @brief Constructs a read query.
+         * @param fd File descriptor to read from.
+         * @param buf Destination buffer.
+         * @param nbytes Number of bytes to read.
+         * @param offset File offset (0 = current position).
+         */
         [[nodiscard]] explicit read_query(const int fd, void *buf, const unsigned nbytes, const uint64_t offset = 0)
             : query(fd)
             , _fd(fd)
@@ -329,20 +398,29 @@ public:                                                                         
             , _nbytes(nbytes)
             , _offset(offset) {}
 
+        /**
+         * @brief Submits the read operation to @c kernel_controller.
+         * @param kwp Kernel observer receiving the completion.
+         * @return @c true on successful submission.
+         */
         bool setup_query(kernel_observer* kwp) const {
             return services::kernel_controller::read(kwp, _fd, _buf, _nbytes, _offset);
         }
 
+        /**
+         * @brief Returns the read result, null-terminating the buffer on success.
+         * @return Number of bytes read, or a negative errno value.
+         */
         [[nodiscard]] int await_resume() const {
             // NOTE: Nul-termination for input
             if (_res > 0) static_cast<char*>(_buf)[_res] = '\0';
             return _res;
         }
 
-        const int _fd;
-        void *_buf;
-        const unsigned _nbytes;
-        const uint64_t _offset;
+        const int _fd;                ///< File descriptor to read from
+        void *_buf;                   ///< Destination buffer
+        const unsigned _nbytes;       ///< Number of bytes to read
+        const uint64_t _offset;       ///< File offset
     };
 
 
@@ -355,6 +433,13 @@ public:                                                                         
 
         write_query() = delete;
 
+        /**
+         * @brief Constructs a write query.
+         * @param fd File descriptor to write to.
+         * @param buf Source buffer.
+         * @param nbytes Number of bytes to write.
+         * @param offset File offset (0 = current position).
+         */
         explicit write_query(const int fd, const void *buf, const unsigned nbytes, const uint64_t offset = 0)
             : query(fd)
             , _fd(fd)
@@ -362,16 +447,25 @@ public:                                                                         
             , _nbytes(nbytes)
             , _offset(offset) {}
 
+        /**
+         * @brief Submits the write operation to @c kernel_controller.
+         * @param kwp Kernel observer receiving the completion.
+         * @return @c true on successful submission.
+         */
         bool setup_query(kernel_observer* kwp) const {
             return services::kernel_controller::write(kwp, _fd, _buf, _nbytes, _offset);
         }
 
+        /**
+         * @brief Returns the write result.
+         * @return Number of bytes written, or a negative errno value.
+         */
         [[nodiscard]] int await_resume() const { return _res; }
 
-        const int _fd;
-        const void *_buf;
-        const unsigned _nbytes;
-        const uint64_t _offset;
+        const int _fd;                ///< File descriptor to write to
+        const void *_buf;             ///< Source buffer
+        const unsigned _nbytes;       ///< Number of bytes to write
+        const uint64_t _offset;       ///< File offset
     };
 
     /**
@@ -385,12 +479,25 @@ public:                                                                         
 
         close_query() = delete;
 
+        /**
+         * @brief Constructs a close query.
+         * @param fd File descriptor to close.
+         */
         explicit close_query(const int fd) : io_query_t(fd) {}
 
+        /**
+         * @brief Submits the close operation to @c kernel_controller.
+         * @param kwp Kernel observer receiving the completion.
+         * @return @c true on successful submission.
+         */
         bool setup_query(kernel_observer* kwp) const noexcept {
             return services::kernel_controller::close(kwp, _fd);
         }
 
+        /**
+         * @brief Returns the close result.
+         * @return @c 0 on success, or a negative errno value.
+         */
         [[nodiscard]] int await_resume() const { return _res; }
     };
 
@@ -405,9 +512,14 @@ public:                                                                         
      */
     class ace::io::any {
 
-        void* _data = nullptr;
-        void(*_deleter)(void*) = nullptr;
+        void* _data = nullptr;                 ///< Heap-allocated managed value
+        void(*_deleter)(void*) = nullptr;      ///< Type-erased deleter for @c _data
 
+        /**
+         * @brief Destroys the stored value and frees its memory.
+         * @tparam target_t Stored value type.
+         * @param mem Raw heap pointer to destroy.
+         */
         template <typename target_t>
         static void deleter_impl(void* mem) {
             static_cast<target_t*>(mem)->~target_t();
@@ -416,16 +528,24 @@ public:                                                                         
 
     public:
 
+        /** @brief Constructs an empty (null) holder. */
         any() = default;
 
+        /** @brief Copying is not allowed — the managed value is owned. */
         any(const any&) = delete;
 
+        /**
+         * @brief Move constructor — transfers the managed value.
+         */
         any(any&& other) noexcept
             : _data(std::exchange(other._data, nullptr))
             , _deleter(std::exchange(other._deleter, nullptr)) {}
 
         any& operator=(const any&) = delete;
 
+        /**
+         * @brief Move assignment — releases the current value, then transfers.
+         */
         any& operator=(any&& other) noexcept {
             if (this != &other) {
                 if (_data && _deleter) _deleter(_data);
@@ -435,6 +555,11 @@ public:                                                                         
             return *this;
         }
 
+        /**
+         * @brief Constructs from an arbitrary value (heap-allocated copy/move).
+         * @tparam data_t Value type to store.
+         * @param data Value to store.
+         */
         template <typename data_t>
         any(data_t&& data) noexcept {
             if (void* mem = malloc(sizeof(data_t))) {
@@ -444,12 +569,18 @@ public:                                                                         
             }
         }
 
+        /**
+         * @brief Destroys the managed value without destroying the @c any itself.
+         */
         void release() noexcept {
             if (_data && _deleter) _deleter(_data);
             _data = nullptr;
             _deleter = nullptr;
         }
 
+        /**
+         * @brief Destroys the managed value if present.
+         */
         ~any() {
             if (_data != nullptr and _deleter != nullptr)
                 _deleter(_data);
@@ -457,23 +588,42 @@ public:                                                                         
     };
 
 
+    /**
+     * @brief Scatter-gather buffer built on a chain of @c iovec chunks.
+     *
+     * @details Each chunk carries a hidden control header (a pointer to the
+     * next chunk), so the whole chain can be assembled into a compact
+     * @c msghdr iovec array on demand.  Supports @c append()/@c prepend()/
+     * @c expand()/@c shape(), formatted writes, @c clone() and @c as<T>()
+     * conversions.
+     */
     class ace::io::buffer {
 
         ACE_CACHE_LINE(0)
 
+        /// @brief Assembled message header (@c msg_iov is null until @c assemble())
         msghdr _hdr {
             .msg_iov = nullptr,
             .msg_iovlen = 0
         };
+        /// @brief Tail chunk of the list (last appended or expanded)
         iovec*           _chunk_list_end     = nullptr;
 
         ACE_CACHE_LINE(1)
 
+        /// @brief Chunk preceding the tail (used by @c prepend() and @c shape())
         iovec*           _chunk_list_pre_end = nullptr;
+        /// @brief Head chunk of the list
         iovec*           _chunk_list_begin   = nullptr;
+        /// @brief Sum of payload lengths of all chunks
         std::size_t      _total_len          = 0;
 
 
+        /**
+         * @brief Allocates a new chunk of @p len payload bytes plus a control header.
+         * @param len Payload size of the new chunk.
+         * @return New chunk, or @c nullptr on allocation failure.
+         */
         iovec* allocate_buf(const size_t len) {
             // NOTE: Allocating and subscribing new buff to chunk set
             const auto buf = services::kernel_controller::iovec_allocate(len + control_hdr_len);
@@ -487,17 +637,29 @@ public:                                                                         
             return buf;
         }
 
+        /**
+         * @brief Returns a chunk to the iovec allocator and adjusts the total length.
+         * @param buf Chunk to deallocate.
+         */
         void deallocate_buf(iovec* buf) {
             _total_len -= buf->iov_len;
             buf->iov_len += control_hdr_len;
             services::kernel_controller::iovec_deallocate(buf);
         }
 
+        /**
+         * @brief Makes @p buf the sole chunk of the list.
+         * @param buf Chunk to install as both head and tail.
+         */
         void init_buf_list(iovec* buf) {
             _chunk_list_begin = _chunk_list_end = buf;
             ++_hdr.msg_iovlen;
         }
 
+        /**
+         * @brief Links @p buf after the current tail chunk.
+         * @param buf Chunk to append.
+         */
         void append_buf_list(iovec* buf) {
             auto** old_control_hdr = static_cast<iovec**>(_chunk_list_end->iov_base);
             *old_control_hdr = buf;
@@ -506,6 +668,10 @@ public:                                                                         
             ++_hdr.msg_iovlen;
         }
 
+        /**
+         * @brief Links @p buf before the current head chunk.
+         * @param buf Chunk to prepend.
+         */
         void prepend_buf_list(iovec* buf) {
             auto** new_control_hdr = static_cast<iovec**>(buf->iov_base);
             *new_control_hdr = _chunk_list_begin;
@@ -515,6 +681,11 @@ public:                                                                         
             ++_hdr.msg_iovlen;
         }
 
+        /**
+         * @brief Returns the payload pointer of a chunk, skipping its control header.
+         * @param buf Chunk to inspect.
+         * @return Pointer to the chunk payload.
+         */
         static void* announce_buf_mem(const iovec* buf) {
             return static_cast<char*>(buf->iov_base) + control_hdr_len;
         }
@@ -565,6 +736,14 @@ public:                                                                         
             return announce_buf_mem(buf);
         }
 
+        /**
+         * @brief Formats @p args into memory obtained from @p mem_selector.
+         * @tparam mem_selector Member function selecting append (@c memtail) or prepend (@c memhead) memory.
+         * @tparam Args Format argument types.
+         * @param fmt Format string.
+         * @param args Format arguments.
+         * @return @c true on success, @c false if allocation failed or the buffer was already assembled.
+         */
         template <void* (buffer::*mem_selector)(std::size_t), class... Args>
         requires (sizeof...(Args) > 0)
         bool emplace(std::format_string<Args...>&& fmt, Args&&... args) {
@@ -576,6 +755,12 @@ public:                                                                         
             return false;
         }
 
+        /**
+         * @brief Copies a string view into memory obtained from @p mem_selector.
+         * @tparam mem_selector Member function selecting memory location.
+         * @param str String to copy.
+         * @return @c true on success, @c false if allocation failed or the buffer was already assembled.
+         */
         template <void* (buffer::*mem_selector)(std::size_t)>
         bool emplace(const std::string_view&& str) {
             const size_t len = str.size();
@@ -586,6 +771,13 @@ public:                                                                         
             return false;
         }
 
+        /**
+         * @brief Copies a byte range [@p first, @p last) into memory obtained from @p mem_selector.
+         * @tparam mem_selector Member function selecting memory location.
+         * @param first Start of the byte range.
+         * @param last End of the byte range.
+         * @return @c true on success, @c false if allocation failed or the buffer was already assembled.
+         */
         template <void* (buffer::*mem_selector)(std::size_t)>
         bool emplace(const void *first, const void* last) {
             const size_t len = static_cast<const std::byte*>(last) - static_cast<const std::byte*>(first);
@@ -596,6 +788,13 @@ public:                                                                         
             return false;
         }
 
+        /**
+         * @brief Copies a POD vector into memory obtained from @p mem_selector.
+         * @tparam mem_selector Member function selecting memory location.
+         * @tparam data_t POD element type.
+         * @param buf Vector to copy.
+         * @return @c true on success, @c false if allocation failed or the buffer was already assembled.
+         */
         template <void* (buffer::*mem_selector)(std::size_t), typename data_t>
         requires std::is_pod_v<data_t>
         bool emplace(const std::vector<data_t>& buf) {
@@ -607,6 +806,14 @@ public:                                                                         
             return false;
         }
 
+        /**
+         * @brief Copies a POD array into memory obtained from @p mem_selector.
+         * @tparam mem_selector Member function selecting memory location.
+         * @tparam data_t POD element type.
+         * @tparam len_v Array length.
+         * @param buf Array to copy.
+         * @return @c true on success, @c false if allocation failed or the buffer was already assembled.
+         */
         template <void* (buffer::*mem_selector)(std::size_t), typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         bool emplace(const std::array<data_t, len_v>& buf) {
@@ -618,6 +825,14 @@ public:                                                                         
             return false;
         }
 
+        /**
+         * @brief Copies a POD span into memory obtained from @p mem_selector.
+         * @tparam mem_selector Member function selecting memory location.
+         * @tparam data_t POD element type.
+         * @tparam len_v Span length (or @c std::dynamic_extent).
+         * @param buf Span to copy.
+         * @return @c true on success, @c false if allocation failed or the buffer was already assembled.
+         */
         template <void* (buffer::*mem_selector)(std::size_t), typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         bool emplace(const std::span<data_t, len_v>& buf) {
@@ -636,11 +851,17 @@ public:                                                                         
 
     public:
 
+        /** @brief Constructs an empty buffer. */
         buffer() = default;
 
+        /** @brief Copying is not allowed — the chunk list is owned. */
         buffer(const buffer&) = delete;
+        /** @brief Copying is not allowed — the chunk list is owned. */
         buffer& operator=(const buffer&) = delete;
 
+        /**
+         * @brief Move constructor — transfers the chunk list and total length.
+         */
         buffer(buffer&& b) noexcept {
             _hdr = b._hdr;
             b._hdr = msghdr{};
@@ -654,6 +875,9 @@ public:                                                                         
             b._total_len = 0;
         }
 
+        /**
+         * @brief Move assignment — transfers the chunk list and total length.
+         */
         buffer& operator=(buffer&& b) noexcept {
             _hdr = b._hdr;
             b._hdr = msghdr{};
@@ -668,76 +892,164 @@ public:                                                                         
             return *this;
         }
 
+        /** @brief Size of the per-chunk control header (a pointer to the next chunk). */
         static constexpr std::size_t control_hdr_len = sizeof(void*);
 
+        /**
+         * @brief Formats and appends data to the buffer tail.
+         * @tparam Args Format argument types.
+         * @param fmt Format string.
+         * @param args Format arguments.
+         * @return @c true on success.
+         */
         template <class... Args>
         bool append(std::format_string<Args...>&& fmt, Args&&... args) {
             return emplace<&buffer::memtail>(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
+        /**
+         * @brief Appends a string view to the buffer tail.
+         * @param str String to append.
+         * @return @c true on success.
+         */
         bool append(const std::string_view&& str) {
             return emplace<&buffer::memtail>(std::forward<const std::string_view>(str));
         }
 
+        /**
+         * @brief Appends a byte range [@p first, @p last) to the buffer tail.
+         * @param first Start of the byte range.
+         * @param last End of the byte range.
+         * @return @c true on success.
+         */
         bool append(const void *first, const void* last) {
             return emplace<&buffer::memtail>(std::forward<const void*>(first), std::forward<const void*>(last));
         }
 
+        /**
+         * @brief Appends a POD vector to the buffer tail.
+         * @tparam data_t POD element type.
+         * @param buf Vector to append.
+         * @return @c true on success.
+         */
         template <typename data_t>
         requires std::is_pod_v<data_t>
         bool append(const std::vector<data_t>& buf) {
             return emplace<&buffer::memtail>(std::forward<const std::vector<data_t>>(buf));
         }
 
+        /**
+         * @brief Appends a POD array to the buffer tail.
+         * @tparam data_t POD element type.
+         * @tparam len_v Array length.
+         * @param buf Array to append.
+         * @return @c true on success.
+         */
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         bool append(const std::array<data_t, len_v>& buf) {
             return emplace<&buffer::memtail>(std::forward<const std::array<data_t, len_v>>(buf));
         }
 
+        /**
+         * @brief Appends a POD span to the buffer tail.
+         * @tparam data_t POD element type.
+         * @tparam len_v Span length (or @c std::dynamic_extent).
+         * @param buf Span to append.
+         * @return @c true on success.
+         */
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         bool append(const std::span<data_t, len_v>& buf) {
             return emplace<&buffer::memtail>(std::forward<const std::span<data_t, len_v>>(buf));
         }
 
+        /**
+         * @brief Appends formatted data followed by a newline to the buffer tail.
+         * @tparam Args Format argument types.
+         * @param args Format arguments.
+         * @return @c true on success.
+         */
         template <class... Args>
         bool appendln(Args&&... args) {
             return emplace<&buffer::memtail>(std::forward<Args>(args)...)
                 and emplace<&buffer::memtail>("\n");
         }
 
+        /**
+         * @brief Formats and prepends data to the buffer head.
+         * @tparam Args Format argument types.
+         * @param fmt Format string.
+         * @param args Format arguments.
+         * @return @c true on success.
+         */
         template <class... Args>
         bool prepend(std::format_string<Args...>&& fmt, Args&&... args) {
             return emplace<&buffer::memhead>(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
         }
 
+        /**
+         * @brief Prepends a string view to the buffer head.
+         * @param str String to prepend.
+         * @return @c true on success.
+         */
         bool prepend(const std::string_view&& str) {
             return emplace<&buffer::memhead>(std::forward<const std::string_view>(str));
         }
 
+        /**
+         * @brief Prepends a byte range [@p first, @p last) to the buffer head.
+         * @param first Start of the byte range.
+         * @param last End of the byte range.
+         * @return @c true on success.
+         */
         bool prepend(const void *first, const void* last) {
             return emplace<&buffer::memhead>(std::forward<const void*>(first), std::forward<const void*>(last));
         }
 
+        /**
+         * @brief Prepends a POD vector to the buffer head.
+         * @tparam data_t POD element type.
+         * @param buf Vector to prepend.
+         * @return @c true on success.
+         */
         template <typename data_t>
         requires std::is_pod_v<data_t>
         bool prepend(const std::vector<data_t>& buf) {
             return emplace<&buffer::memhead>(std::forward<const std::vector<data_t>>(buf));
         }
 
+        /**
+         * @brief Prepends a POD array to the buffer head.
+         * @tparam data_t POD element type.
+         * @tparam len_v Array length.
+         * @param buf Array to prepend.
+         * @return @c true on success.
+         */
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         bool prepend(const std::array<data_t, len_v>& buf) {
             return emplace<&buffer::memhead>(std::forward<const std::array<data_t, len_v>>(buf));
         }
 
+        /**
+         * @brief Prepends a POD span to the buffer head.
+         * @tparam data_t POD element type.
+         * @tparam len_v Span length (or @c std::dynamic_extent).
+         * @param buf Span to prepend.
+         * @return @c true on success.
+         */
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         bool prepend(const std::span<data_t, len_v>& buf) {
             return emplace<&buffer::memhead>(std::forward<const std::span<data_t, len_v>>(buf));
         }
 
+        /**
+         * @brief Converts the buffer contents into type @c T.
+         * @tparam T Target type (specialized for @c std::string and @c std::vector<std::byte>).
+         * @return Decayed default-constructed value when no specialization exists.
+         */
         template <typename T>
         T as() const {
             static_assert("No 'as()' specialization for passed type <T>");
@@ -776,7 +1088,7 @@ public:                                                                         
          * @brief Assembles buffer into @c msghdr .
          *
          * @c assemble(...) actually has effect once before @c disassemble(),
-         * @c clear(), @c clone() operations.
+         * @c clear() operations.
          *
          * - If you use @c io::buffer with @c ace::io interfaces then manual usage of this function overload has no point.
          *
@@ -817,7 +1129,8 @@ public:                                                                         
 
         /**
          * @brief Clones current buffer data to a brand-new instance of buffer
-         * @warning Disassembles buffer
+         * @note Does not modify the source buffer: the clone is built from a
+         * read-only walk of the chunk list.
          * @return Buffer instance with data copy
          */
         [[nodiscard]] buffer clone() const {
@@ -832,13 +1145,30 @@ public:                                                                         
             return std::forward<buffer>(cl);
         }
 
+        /**
+         * @brief Sets the destination/source address of the message header.
+         * @tparam addr_t Address type (e.g. @c sockaddr_in).
+         * @param addr Address object to reference.
+         */
         template <typename addr_t>
         void set_msg_name(addr_t& addr) { _hdr.msg_name = &addr; _hdr.msg_namelen = sizeof(addr_t); }
 
+        /**
+         * @brief Sets the control buffer of the message header.
+         * @param ptr Control buffer pointer.
+         */
         void set_msg_control(void* ptr) { _hdr.msg_control = ptr; }
 
+        /**
+         * @brief Sets the control buffer length of the message header.
+         * @param len Control buffer length.
+         */
         void set_msg_controllen(size_t len) { _hdr.msg_controllen = len; }
 
+        /**
+         * @brief Sets the flags of the message header.
+         * @param flags Message flags.
+         */
         void set_msg_flags(int flags) { _hdr.msg_flags = flags; }
 
         /**
@@ -864,15 +1194,24 @@ public:                                                                         
             _total_len = 0;
         }
 
+        /**
+         * @brief Total payload length of the buffer.
+         * @return Sum of all chunk payload lengths.
+         */
         [[nodiscard]] std::size_t len() const { return _total_len; }
 
+        /** @brief Releases all chunks and the assembled iovec array. */
         ~buffer() { clear(); }
 
-        friend class ace::io::link;
-        friend class std::formatter<buffer>;
+        friend class ace::io::link;            ///< I/O layer needs chunk list access
+        friend class std::formatter<buffer>;   ///< Formatting needs chunk list access
     };
 
 
+    /**
+     * @brief std::formatter specialization enabling @c std::format of an @c io::buffer.
+     * @details Writes the concatenated payloads of all chunks into the format context.
+     */
     template <>
     struct std::formatter<ace::io::buffer> {
         constexpr auto parse(std::format_parse_context& ctx) {
@@ -912,13 +1251,19 @@ public:                                                                         
          */
         struct command : services::kernel_observer {
 
-            buffer _buffer {};
-            std::span<const char> _user_data {};
+            buffer _buffer {};                    ///< Payload of the fire-and-forget command
+            std::span<const char> _user_data {};  ///< User data passed to the fail handler
 
+            /**
+             * @brief Handles the completion of a fire-and-forget command.
+             * @param res Operation result (negative errno on failure).
+             * @details Invokes the global @c fail_cb_handler on failure, then
+             * returns the command to the pool via @c raw_sync().
+             */
             void on_result(const int res) override {
                 if (res < 0 and fail_cb_handler) {
                     // NOTE: A throwing handler must not kill the kernel
-                    // vortex coroutine — otherwise the ring is never pinged
+                    // service coroutine — otherwise the ring is never pinged
                     // again and all subsequent I/O leaks.
                     try { fail_cb_handler(res, _user_data); }
                     catch (const std::exception& e) {
@@ -931,9 +1276,15 @@ public:                                                                         
                 _command_pool.raw_sync(this);
             }
 
+            /** @brief Virtual destructor (defaulted). */
             ~command() override = default;
         };
 
+        /**
+         * @brief Default fail handler — throws an exception describing the failed operation.
+         * @param res Negative errno value of the failed operation.
+         * @param user_data User data attached to the command.
+         */
         static void basic_fail_handler(const int res, const std::span<const char>& user_data) {
             throw std::runtime_error(std::format("io operation failed: {}\nuser data: {}",
                 strerror(-res), std::string{user_data.data(), user_data.size()}));
@@ -958,19 +1309,35 @@ public:                                                                         
      * scheduling a close task on the dispatcher.
      */
     struct ace::io::guard final {
+        /** @brief Guard must be bound to FD and closed-flag references. */
         guard() = delete;
+
+        /**
+         * @brief Binds the guard to the FD and closed-flag of an entity.
+         * @param fd Reference to the entity's file descriptor.
+         * @param closed Reference to the entity's closed flag.
+         */
         explicit guard(const int& fd, const bool& closed)
             : _fd(fd)
             , _closed(closed) {}
 
-        const int& _fd;
-        const bool& _closed;
+        const int& _fd;      ///< Referenced file descriptor
+        const bool& _closed; ///< Referenced closed flag
 
+        /**
+         * @brief Busy-path close task: awaits @c close_query for @p fd.
+         * @param fd File descriptor to close.
+         */
         static task pending_close(const int fd) noexcept {
             if (const int res = co_await close_query{fd}; res < 0)
                 std::cerr << strerror(res) << std::endl;
         }
 
+        /**
+         * @brief Asynchronously closes the referenced FD if it is still valid and open.
+         * @details Uses the @c io::hanged command pool when a runner identity is
+         * available, otherwise falls back to scheduling @c pending_close().
+         */
         ~guard() noexcept {
             if (_fd < 0 or _closed) return;
             // NOTE: Trying to get current runner.
@@ -1001,15 +1368,28 @@ public:                                                                         
     template <typename entity_t>
     struct ace::io::entity {
 
+        /** @brief Constructs an invalid (idle) entity with FD @c -1. */
         entity()
             : _fd(-1)
             , _is_closed(true) {}
 
+        /**
+         * @brief Constructs an entity from an FD and closed state.
+         * @param fd File descriptor to own.
+         * @param is_closed Initial closed flag.
+         */
         entity(const int fd, const bool is_closed)
             : _fd(fd)
             , _is_closed(is_closed) { };
 
         // NOTE: This method is made to never forget to move ownership
+        /**
+         * @brief Static factory: extracts the FD and closed flag from a source
+         * entity and creates the current entity type from them.
+         * @tparam entry_t Source entity type.
+         * @param io Source entity (consumed via @c extract()).
+         * @return New entity of type @c entity_t.
+         */
         template<typename entry_t>
         static entity_t consume(entry_t& io) noexcept {
             auto [fd, is_closed] = io.extract();
@@ -1017,6 +1397,9 @@ public:                                                                         
             return caster<entity_t>::from_entity(fd, is_closed, std::move(io));
         }
 
+        /**
+         * @brief Move constructor — transfers FD ownership and rebinds the guard.
+         */
         entity(entity&& io) noexcept {
             _fd = io._fd;
             _is_closed = io._is_closed;
@@ -1029,6 +1412,9 @@ public:                                                                         
             new (&_guard) guard(_fd, _is_closed);
         }
 
+        /**
+         * @brief Move assignment — transfers FD ownership and rebinds the guard.
+         */
         entity& operator=(entity&& io) noexcept {
             _fd = io._fd;
             _is_closed = io._is_closed;
@@ -1049,7 +1435,7 @@ public:                                                                         
 
         /**
          * @brief Extracts all data from @c io_entity object and invalidates it
-         * @return A tuple of FD, @c is_closed() result and set of underlying params
+         * @return A tuple of the FD and the @c is_closed() result
          */
         [[nodiscard]] auto extract() {
             return std::tuple {
@@ -1065,6 +1451,7 @@ public:                                                                         
         [[nodiscard]] auto close()
             -> io::close_query { _is_closed = true; return io::close_query{_fd}; }
 
+        /** @brief Virtual destructor (defaulted). */
         virtual ~entity() = default;
 
     protected:
@@ -1074,7 +1461,7 @@ public:                                                                         
 
     private:
 
-        guard _guard {_fd, _is_closed};
+        guard _guard {_fd, _is_closed}; ///< RAII guard rebinding FD/closed references on move
     };
 
 
@@ -1082,8 +1469,9 @@ public:                                                                         
      * @brief Common base for higher-level I/O abstractions.
      *
      * @details Owns an FD and an optional @c any data payload.  Provides
-     * @c writeln(), @c write(), @c read() (and variants like @c read_vec(),
-     * @c read_str()) as convenience methods.  Derived types implement
+     * @c writeln(), @c write() and @c read() overloads (raw buffer,
+     * @c std::string, POD vector/array/span) plus @c read_buf() as
+     * convenience methods.  Derived types implement
      * @c output_action() and @c input_action() for the actual I/O.
      */
     class ace::io::link {
@@ -1105,21 +1493,40 @@ public:                                                                         
 
     public:
 
+        /** @brief Constructs an invalid (idle) link. */
         link()
             : _fd(-1)
             , _is_closed(true)
             , _data() {}
 
+        /**
+         * @brief Constructs a link from an FD and closed state.
+         * @param fd File descriptor to own.
+         * @param is_closed Initial closed flag.
+         */
         link(const int fd, const bool is_closed)
             : _fd(fd)
             , _is_closed(is_closed) { };
 
+        /**
+         * @brief Constructs a link from an FD, closed state and payload data.
+         * @param fd File descriptor to own.
+         * @param is_closed Initial closed flag.
+         * @param data Custom payload associated with the FD.
+         */
         link(const int fd, const bool is_closed, any data)
             : _fd(fd)
             , _is_closed(is_closed)
             , _data(std::move(data)) { };
 
         // NOTE: This method is made to never forget to move ownership
+        /**
+         * @brief Static factory: extracts the FD and closed flag from a source
+         * entity and creates the current link type from them.
+         * @tparam entity_t Source entity type.
+         * @param io Source entity (consumed via @c extract()).
+         * @return New link instance.
+         */
         template<typename entity_t>
         static auto consume(entity_t& io) noexcept {
             auto [fd, is_closed] = io.extract();
@@ -1127,6 +1534,9 @@ public:                                                                         
             return caster<entity_t>::as_link(fd, is_closed, std::move(io));
         }
 
+        /**
+         * @brief Move constructor — transfers FD ownership and payload.
+         */
         link(link&& io) noexcept {
             _fd = io._fd;
             _is_closed = io._is_closed;
@@ -1135,6 +1545,9 @@ public:                                                                         
             io._is_closed = true;
         }
 
+        /**
+         * @brief Move assignment — transfers FD ownership and payload.
+         */
         link& operator=(link&& io) noexcept {
             _fd = io._fd;
             _is_closed = io._is_closed;
@@ -1144,8 +1557,15 @@ public:                                                                         
             return *this;
         }
 
+        /** @brief Virtual destructor (defaulted). */
         virtual ~link() = default;
 
+        /**
+         * @brief Formats data plus a newline and writes it to the link.
+         * @tparam Args Format argument types.
+         * @param fmt Format string.
+         * @param args Format arguments.
+         */
         template <class... Args>
         void writeln(std::format_string<Args...>&& fmt, Args&&... args) {
             buffer buff {};
@@ -1154,6 +1574,10 @@ public:                                                                         
             output_action(std::forward<buffer>(buff));
         }
 
+        /**
+         * @brief Writes a string view plus a newline to the link.
+         * @param str String to write.
+         */
         void writeln(const std::string_view&& str) {
             buffer buff {};
             buff.append(std::forward<const std::string_view>(str));
@@ -1161,11 +1585,21 @@ public:                                                                         
             output_action(std::forward<buffer>(buff));
         }
 
+        /**
+         * @brief Writes a buffer's contents plus a newline to the link.
+         * @param buf Buffer to write.
+         */
         void writeln(buffer&& buf) {
             buf.append("\n");
             output_action(std::forward<buffer>(buf));
         }
 
+        /**
+         * @brief Formats data and writes it to the link.
+         * @tparam Args Format argument types.
+         * @param fmt Format string.
+         * @param args Format arguments.
+         */
         template <class... Args>
         void write(std::format_string<Args...>&& fmt, Args&&... args) {
             buffer buff {};
@@ -1173,18 +1607,32 @@ public:                                                                         
             output_action(std::forward<buffer>(buff));
         }
 
+        /**
+         * @brief Writes a string view to the link.
+         * @param str String to write.
+         */
         void write(const std::string_view&& str) {
             buffer buff {};
             buff.append(std::forward<const std::string_view>(str));
             output_action(std::forward<buffer>(buff));
         }
 
+        /**
+         * @brief Writes a byte range [@p first, @p last) to the link.
+         * @param first Start of the byte range.
+         * @param last End of the byte range.
+         */
         void write(const void *first, const void* last) {
             buffer buff {};
             buff.append(first, last);
             output_action(std::forward<buffer>(buff));
         }
 
+        /**
+         * @brief Writes a POD vector to the link.
+         * @tparam data_t POD element type.
+         * @param buf Vector to write.
+         */
         template <typename data_t>
         requires std::is_pod_v<data_t>
         auto write(const std::vector<data_t>& buf) {
@@ -1193,6 +1641,12 @@ public:                                                                         
             output_action(std::forward<buffer>(buff));
         }
 
+        /**
+         * @brief Writes a POD array to the link.
+         * @tparam data_t POD element type.
+         * @tparam len_v Array length.
+         * @param buf Array to write.
+         */
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         auto write(const std::array<data_t, len_v>& buf) {
@@ -1201,6 +1655,12 @@ public:                                                                         
             output_action(std::forward<buffer>(buff));
         }
 
+        /**
+         * @brief Writes a POD span to the link.
+         * @tparam data_t POD element type.
+         * @tparam len_v Span length (or @c std::dynamic_extent).
+         * @param buf Span to write.
+         */
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         auto write(const std::span<data_t, len_v>& buf) {
@@ -1209,36 +1669,81 @@ public:                                                                         
             output_action(std::forward<buffer>(buff));
         }
 
+        /**
+         * @brief Writes a buffer to the link.
+         * @param buf Buffer to write.
+         */
         void write(buffer&& buf) {
             output_action(std::forward<buffer>(buf));
         }
 
+        /**
+         * @brief Reads up to @p len bytes into a raw buffer.
+         * @param buf Destination buffer.
+         * @param len Buffer size.
+         * @param flags Reserved for future use.
+         * @return Number of bytes read, or a negative errno value.
+         */
         ACE_AWAIT_NODISCARD async<int> read(void *buf, const size_t len, const int flags = 0) {
             co_return co_await input_action(buf, len);
         }
 
+        /**
+         * @brief Reads into a POD vector.
+         * @tparam data_t POD element type.
+         * @param buf Destination vector.
+         * @param flags Reserved for future use.
+         * @return Number of bytes read, or a negative errno value.
+         */
         template <typename data_t>
         requires std::is_pod_v<data_t>
         ACE_AWAIT_NODISCARD async<int> read(std::vector<data_t>& buf, const int flags = 0) {
             co_return co_await input_action(buf.data(), buf.size() * (sizeof(data_t) / sizeof(char)));
         }
 
+        /**
+         * @brief Reads into an existing string buffer.
+         * @param buf Destination string.
+         * @param flags Reserved for future use.
+         * @return Number of bytes read, or a negative errno value.
+         */
         ACE_AWAIT_NODISCARD async<int> read(std::string& buf, const int flags = 0) {
             co_return co_await input_action(buf.data(), buf.size());
         }
 
+        /**
+         * @brief Reads into a POD array.
+         * @tparam data_t POD element type.
+         * @tparam len_v Array length.
+         * @param buf Destination array.
+         * @param flags Reserved for future use.
+         * @return Number of bytes read, or a negative errno value.
+         */
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         ACE_AWAIT_NODISCARD async<int> read(std::array<data_t, len_v>& buf, const int flags = 0) {
             co_return co_await input_action(reinterpret_cast<void*>(buf.data()), len_v * (sizeof(data_t) / sizeof(char)));
         }
 
+        /**
+         * @brief Reads into a POD span.
+         * @tparam data_t POD element type.
+         * @tparam len_v Span length (or @c std::dynamic_extent).
+         * @param buf Destination span.
+         * @param flags Reserved for future use.
+         * @return Number of bytes read, or a negative errno value.
+         */
         template <typename data_t, size_t len_v>
         requires std::is_pod_v<data_t>
         ACE_AWAIT_NODISCARD async<int> read(std::span<data_t, len_v>& buf, const int flags = 0) {
             co_return co_await input_action(reinterpret_cast<void*>(buf.data()), buf.size_bytes());
         }
 
+        /**
+         * @brief Reads until a short read occurs, growing the buffer as needed.
+         * @param flags Reserved for future use.
+         * @return @c io::input_t holding the buffer on success, or @c std::unexpected with a negative errno.
+         */
         async<io::input_t> read_buf(const int flags = 0) {
             static constexpr int buf_len = 64;
 
@@ -1268,13 +1773,17 @@ public:                                                                         
 
     private:
 
-        guard _guard {_fd, _is_closed};
+        guard _guard {_fd, _is_closed}; ///< RAII guard rebinding FD/closed references on move
     };
 
 
 // ====================================- io::buffer::as<...> specialisations -====================================
 
 
+    /**
+     * @brief Specialization: converts the buffer contents into a @c std::string.
+     * @return Concatenated payloads of all chunks.
+     */
     template <>
     inline std::string ace::io::buffer::as<std::string>() const {
         std::string str;
@@ -1286,6 +1795,10 @@ public:                                                                         
         return str;
     }
 
+    /**
+     * @brief Specialization: converts the buffer contents into a @c std::vector<std::byte>.
+     * @return Byte vector holding the payloads of all chunks.
+     */
     template <>
     inline std::vector<std::byte> ace::io::buffer::as<std::vector<std::byte>>() const {
         std::vector<std::byte> buf;

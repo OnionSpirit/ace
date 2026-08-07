@@ -47,16 +47,19 @@ namespace ace::futures {
      * @brief Channel buffer allocation policy.
      */
     enum class allocation_type {
-        e_static,
-        e_on_init,
-        e_dynamic
+        e_static,   ///< Fixed-size buffer allocated statically (compile-time size).
+        e_on_init,  ///< Fixed-size buffer allocated on channel construction.
+        e_dynamic   ///< Fully dynamic buffer (heap-allocating).
     };
 
+    /**
+     * @brief Channel access mode — determines producer/consumer topology.
+     */
     enum class access_mode {
-        e_regular,
-        e_spsc,
-        e_mpsc,
-        e_mpmc,
+        e_regular,  ///< Single-threaded usage.
+        e_spsc,     ///< Single producer, single consumer.
+        e_mpsc,     ///< Many producers, single consumer.
+        e_mpmc,     ///< Many producers, many consumers.
     };
 
 /**
@@ -83,6 +86,13 @@ template
 class channel {
 
     template <typename storage_entity_t, allocation_type allocation_v, size_t buff_len_v>
+    /**
+     * @brief Compile-time selection of the storage queue type.
+     * @tparam storage_entity_t Element type stored in the queue.
+     * @tparam allocation_v     Allocation policy.
+     * @tparam buff_len_v       Static buffer size (for @c e_static policy).
+     * @return A representative value whose type becomes the storage type.
+     */
     static auto consteval define_storage() {
         if constexpr (allocation_v == allocation_type::e_dynamic) {
             if constexpr (access_mode_v == access_mode::e_mpmc)
@@ -112,10 +122,18 @@ class channel {
         }
     }
 
+    /**
+     * @brief Storage type for the transmitted data.
+     * @return Representative value whose type becomes @c data_storage_t.
+     */
     static auto consteval define_data_storage() {
         return define_storage<data_t, data_allocation_v, data_buffer_size_v>();
     }
 
+    /**
+     * @brief Storage type for the waiting tasks (always dynamic).
+     * @return Representative value whose type becomes @c waiters_storage_t.
+     */
     static auto consteval define_waiters_storage() {
         return define_storage<task, allocation_type::e_dynamic, data_buffer_size_v>();
     }
@@ -131,6 +149,9 @@ class channel {
     struct channel_router;
     friend channel_router;
 
+    /**
+     * @brief Wakes up one waiter, if any.
+     */
     void notify();
 
 public:
@@ -138,8 +159,13 @@ public:
     data_storage_t _container  {}; ///< Storage of transmitting data
     waiters_storage_t _waiters {}; ///< Storage of waiting contexts
 
+    /// @brief Default constructor.
     channel() = default;
 
+    /**
+     * @brief Channel emptiness check.
+     * @return @c true when no data is buffered.
+     */
     explicit operator bool() const { return empty(); };
 
     /**
@@ -283,40 +309,80 @@ ACE_FUTURE_CHANNEL_META returnT ACE_FUTURE_CHANNEL_SPACE
 
 
 ACE_FUTURE_CHANNEL_META
+/**
+ * @brief Awaitable pull operation — pops data from the channel on await.
+ *
+ * @details Returns immediately when data is available; otherwise registers
+ * the caller in the channel's waiter queue and resumes on the next push.
+ */
 class ACE_FUTURE_CHANNEL_SPACE pull_impl : public core::traits::busy_future_traits<pull_impl> {
 
-    data_t _output_data{};
+    data_t _output_data{}; ///< Storage for the pulled value.
 
 public:
 
     IMPORT_BUSY_FUTURE_ENV(pull_impl)
 
+    /// @brief Default construction is forbidden — queues are required.
     pull_impl() =delete;
 
+    /**
+     * @brief Binds the pull to the channel's waiter and data queues.
+     * @param waiters   Waiter queue to register on suspension.
+     * @param container Data queue to pop from.
+     */
     pull_impl(waiters_storage_t* waiters, data_storage_t* container)
             : _waiters(waiters), _container(container) {};
 
-    waiters_storage_t* _waiters;
+    waiters_storage_t* _waiters;  ///< Waiter queue of the owning channel.
+    data_storage_t* _container;   ///< Data queue of the owning channel.
 
-    data_storage_t* _container;
-
+    /**
+     * @brief @c true when data is already available (no suspension).
+     */
     bool await_ready() override;
 
+    /**
+     * @brief Registers the caller in the waiter queue when no data is available.
+     * @param ctx Caller coroutine promise accessor.
+     * @return @c true when suspended, @c false when data was available.
+     */
     bool await_suspend(auto ctx);
 
+    /**
+     * @brief Returns the pulled value.
+     * @return The value moved out of the pull storage.
+     */
     auto await_resume() { return std::forward<data_t>(_output_data); }
 
+    /// @brief Default destructor.
     ~pull_impl() override = default;
 };
 
 
 ACE_FUTURE_CHANNEL_META
+/**
+ * @brief Router that keeps suspended pullers in the channel's waiter queue.
+ *
+ * @details On @c redirect() the waiting task is enqueued into the waiter
+ * storage; on @c cancel() all waiters are woken (the nukes queues do not
+ * support single-node ejection).
+ */
 struct ACE_FUTURE_CHANNEL_SPACE channel_router : runner_router {
 
+    /// @brief Default construction is forbidden — a waiter queue is required.
     channel_router() = delete;
 
+    /**
+     * @brief Binds the router to the channel's waiter queue.
+     * @param waiters Waiter queue of the owning channel.
+     */
     explicit channel_router(waiters_storage_t* waiters) : _waiters(waiters) {};
 
+    /**
+     * @brief Registers the suspended task in the waiter queue.
+     * @param node Task node of the suspended puller.
+     */
     void redirect(omni_node node) override {
         using namespace nukes::details::nodes;
         // if constexpr (access_mode_v == access_mode::e_regular)
@@ -326,6 +392,11 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_router : runner_router {
         // }
     }
 
+    /**
+     * @brief Re-attaches all queued waiters to their runners.
+     * @details The nukes queues do not allow ejection of a single node, so on
+     * cancel all waiters are woken; the canceled task drops itself as detached.
+     */
     void cancel() override {
         // NOTE: Reattaching all tasks because mpmc-queue doesn't allow ejection.
         // NOTE: Target canceled task will be marked as detached and Runner will drop it
@@ -339,17 +410,27 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_router : runner_router {
 
     ~channel_router() override = default;
 
-    waiters_storage_t* _waiters;
+    waiters_storage_t* _waiters; ///< Waiter queue of the owning channel.
 };
 
 
-ACE_FUTURE_CHANNEL_MEMBER(void) notify() {
+ACE_FUTURE_CHANNEL_MEMBER(void)
+/**
+ * @brief Wakes up one waiter, if any.
+ */
+notify() {
     if (auto* node = _waiters.pop_node(); node) [[likely]]
         core::runner::reattach(node);
 }
 
 
-ACE_FUTURE_CHANNEL_MEMBER(bool) push(data_t& data) {
+ACE_FUTURE_CHANNEL_MEMBER(bool)
+/**
+ * @brief Pushes data to the channel (lvalue overload).
+ * @param data Data to push.
+ * @return @c false if the inner buffer overflowed.
+ */
+push(data_t& data) {
     if (_container.push(std::forward<data_t>(data))) [[likely]] {
         notify();
         return true;
@@ -358,7 +439,13 @@ ACE_FUTURE_CHANNEL_MEMBER(bool) push(data_t& data) {
 }
 
 
-ACE_FUTURE_CHANNEL_MEMBER(bool) push(data_t&& data) {
+ACE_FUTURE_CHANNEL_MEMBER(bool)
+/**
+ * @brief Pushes data to the channel (rvalue overload).
+ * @param data Data to push.
+ * @return @c false if the inner buffer overflowed.
+ */
+push(data_t&& data) {
     if (_container.push(std::forward<data_t>(data))) [[likely]] {
         notify();
         return true;
@@ -366,7 +453,12 @@ ACE_FUTURE_CHANNEL_MEMBER(bool) push(data_t&& data) {
     return false;
 }
 
-ACE_FUTURE_CHANNEL_MEMBER(ace::promise<>) pending_push(data_t data) {
+ACE_FUTURE_CHANNEL_MEMBER(ace::promise<>)
+/**
+ * @brief Pushes data, suspending until a vacant spot appears (lvalue overload).
+ * @param data Data to push.
+ */
+pending_push(data_t data) {
     while (not _container.push(std::forward<data_t>(data))) [[unlikely]]
         co_await suspend();
     notify();
@@ -374,7 +466,12 @@ ACE_FUTURE_CHANNEL_MEMBER(ace::promise<>) pending_push(data_t data) {
 }
 
 
-ACE_FUTURE_CHANNEL_MEMBER(ace::promise<>) pending_push(data_t&& data) {
+ACE_FUTURE_CHANNEL_MEMBER(ace::promise<>)
+/**
+ * @brief Pushes data, suspending until a vacant spot appears (rvalue overload).
+ * @param data Data to push.
+ */
+pending_push(data_t&& data) {
     while (not _container.push(std::forward<data_t>(data))) [[unlikely]]
         co_await suspend();
     notify();
@@ -384,16 +481,31 @@ ACE_FUTURE_CHANNEL_MEMBER(ace::promise<>) pending_push(data_t&& data) {
 
 ACE_FUTURE_CHANNEL_META
 ACE_FUTURE_CHANNEL_SPACE pull_impl
+/**
+ * @brief Constructs a pull operation bound to this channel.
+ * @return The awaitable pull implementation.
+ */
 ACE_FUTURE_CHANNEL_SPACE pull() {
     return pull_impl{&_waiters, &_container};
 }
 
 
-ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::await_ready() {
+ACE_FUTURE_CHANNEL_MEMBER(bool)
+/**
+ * @brief Pops data immediately when available.
+ * @return @c true when data was popped, @c false when the caller must suspend.
+ */
+pull_impl::await_ready() {
     return _container->pop(_output_data);
 }
 
-ACE_FUTURE_CHANNEL_MEMBER(bool) pull_impl::await_suspend(auto ctx) {
+ACE_FUTURE_CHANNEL_MEMBER(bool)
+/**
+ * @brief Pops data or registers the caller as a waiter.
+ * @param ctx Caller coroutine promise accessor.
+ * @return @c true when suspended, @c false when data was popped.
+ */
+pull_impl::await_suspend(auto ctx) {
     if (not _container->pop(_output_data)) {
         ctx.promise()._runner_router = channel_router{_waiters};
         return true;

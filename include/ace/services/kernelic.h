@@ -1,6 +1,6 @@
 /**
  * @file kernelic.h
- * @brief Thread-local @c io_uring controller vortex and observer interface.
+ * @brief Thread-local @c io_uring controller service and observer interface.
  *
  * @details This header defines the integration layer between ACE and the
  * Linux @c io_uring subsystem:
@@ -8,7 +8,7 @@
  *  - <b>@c kernel_observer </b>— polymorphic callback interface invoked when
  *    a completion queue entry (CQE) arrives.  Used as the @c user_data
  *    payload in SQE submissions.
- *  - <b>@c kernel_controller </b>— thread-local vortex that owns the
+ *  - <b>@c kernel_controller </b>— thread-local service that owns the
  *    @c io_uring ring.  Its @c ping() method dequeues and submits buffered
  *    SQEs, then processes incoming CQEs by calling @c on_result() on the
  *    associated observer.
@@ -18,12 +18,12 @@
  *
  * ### How it fits into ACE
  *
- * @c kernel_controller is a vortex (background polling service).  The
- * dispatcher calls @c yank_vortex() periodically, which invokes @c ping().
+ * @c kernel_controller is a service (background polling service).  The
+ * dispatcher calls @c yank_service() periodically, which invokes @c ping().
  * @c ping() submits pending SQEs, drains CQEs, and notifies waiting
  * coroutines via @c kernel_observer::on_result().
  *
- * @see ace::io::query, ace::io::entity, ace::core::traits::vortex_traits
+ * @see ace::io::query, ace::io::entity, ace::core::traits::service_traits
  */
 #ifndef ACE_SERVICES_KERNELIC_H
 #define ACE_SERVICES_KERNELIC_H
@@ -32,7 +32,7 @@
 #include <cstring>
 #include <liburing.h>
 
-#include "ace/core/traits/vortex.h"
+#include "ace/core/traits/service.h"
 #include "ace/core/tools/queue.h"
 #include "ace/core/tools/iovec_alloc.h"
 
@@ -70,44 +70,57 @@ namespace ace::services {
     };
 
     /**
-     * @brief Thread-local @c io_uring controller vortex.
+     * @brief Thread-local @c io_uring controller service.
      *
      * @details Each runner thread gets its own @c kernel_controller instance
-     * (via @c vortex_traits with @c e_thread_local).  It:
+     * (via @c service_traits with @c e_thread_local).  It:
      *  1. Initialises the @c io_uring ring on construction.
      *  2. Exposes static convenience methods (@c read(), @c write(),
      *     @c send(), @c accept(), etc.) that wrap @c submit().
-     *  3. Runs @c ping() from the vortex polling loop — submits buffered
+     *  3. Runs @c ping() from the service polling loop — submits buffered
      *     SQEs, drains CQEs, and calls @c observer->on_result() for each
      *     completion.
      *
      * The ring supports up to 4096 concurrent operations; overflow is
      * buffered in @c _submission_buffer (a queue of @c kernel_entity).
      */
-    struct kernel_controller : core::traits::vortex_traits<kernel_controller, core::vortex_spawn_mode::e_thread_local> {
+    struct kernel_controller : core::traits::service_traits<kernel_controller, core::service_spawn_mode::e_thread_local> {
 
     private:
 
         struct kernel_entity;
 
-        static thread_local io_uring_params _ring_params;
-        static thread_local io_uring _ring;
-        static thread_local int _queries;
-        static thread_local bool _need_submission;
+        static thread_local io_uring_params _ring_params; ///< io_uring ring parameters.
+        static thread_local io_uring _ring;               ///< The io_uring ring itself.
+        static thread_local int _queries;                 ///< Number of in-flight operations.
+        static thread_local bool _need_submission;        ///< Whether a submit is required on the next ping.
 
     public:
 
+        /// @brief Initialises the ring (declaration; definition below).
         kernel_controller();
 
+        /// @brief Tears the ring down (declaration; definition below).
         ~kernel_controller();
 
+        /// @brief Maximum number of concurrent operations (ring capacity).
         static constexpr unsigned max_entries = 4096;
 
+        /// @brief Overflow buffer for requests submitted while the ring is full.
         static thread_local core::tools::queue<kernel_entity> _submission_buffer;
+        /// @brief Thread-local iovec allocator.
         static thread_local core::tools::iovec_allocator _iovec_alloc;
 
+        /**
+         * @brief Service ping — submits pending SQEs and drains CQEs.
+         * @return @c true while operations remain in flight.
+         */
         static bool ping();
 
+        /**
+         * @brief Creates a controller observer for the current runner.
+         * @return Pointer to the new observer.
+         */
         static auto create_observer() noexcept;
 
         /**
@@ -158,61 +171,75 @@ namespace ace::services {
             return io_uring_unregister_files(&_ring);
         }
 
+        /// @brief Submits an @c io_uring_prep_nop operation.
         static bool nop(kernel_observer* observer) {
             return submit(io_uring_prep_nop, observer);
         }
 
+        /// @brief Submits an @c io_uring_prep_socket operation.
         static bool socket(kernel_observer* observer, const int domain, const int type,
             const int protocol, const unsigned int flags) {
             return submit(io_uring_prep_socket, observer, domain, type, protocol, flags);
         }
 
+        /// @brief Submits an @c io_uring_prep_cancel operation; marks the observer as canceling.
         static bool cancel(kernel_observer* observer, const int flags) {
             return observer->_on_cancel = submit(io_uring_prep_cancel, observer, observer, flags);
         }
 
+        /// @brief Submits an @c io_uring_prep_cancel_fd operation; marks the observer as canceling.
         static bool cancel_fd(kernel_observer* observer, const int fd, const int flags) {
             return observer->_on_cancel = submit(io_uring_prep_cancel_fd, observer, fd, flags);
         }
 
+        /// @brief Submits an @c io_uring_prep_open operation.
         static bool open(kernel_observer* observer, const char* path, const int flags, const mode_t mode) {
             return submit(io_uring_prep_open, observer, path, flags, mode);
         }
 
+        /// @brief Submits an @c io_uring_prep_close operation.
         static bool close(kernel_observer* observer, const int fd) noexcept {
             return submit(io_uring_prep_close, observer, fd);
         }
 
+        /// @brief Submits an @c io_uring_prep_bind operation.
         static bool bind(kernel_observer* observer, const int fd, const sockaddr *addr, const socklen_t addrlen) {
             return submit(io_uring_prep_bind, observer, fd, addr, addrlen);
         }
 
+        /// @brief Submits an @c io_uring_prep_connect operation.
         static bool connect(kernel_observer* observer, const int fd, const sockaddr *addr, const socklen_t addrlen) {
             return submit(io_uring_prep_connect, observer, fd, addr, addrlen);
         }
 
+        /// @brief Submits an @c io_uring_prep_listen operation.
         static bool listen(kernel_observer* observer, const int fd, const int backlog) {
             return submit(io_uring_prep_listen, observer, fd, backlog);
         }
 
+        /// @brief Submits an @c io_uring_prep_accept operation.
         static bool accept(kernel_observer* observer, const int fd, sockaddr *addr, socklen_t *addrlen, const int flags) {
             return submit(io_uring_prep_accept, observer, fd, addr, addrlen, flags);
         }
 
+        /// @brief Submits an @c io_uring_prep_send operation.
         static bool send(kernel_observer* observer, const int fd, const void *buf, const size_t len, const int flags) {
             return submit(io_uring_prep_send, observer, fd, buf, len, flags);
         }
 
+        /// @brief Submits an @c io_uring_prep_send_zc (zero-copy) operation.
         static bool send_zc(kernel_observer* observer, const int fd, const void *buf, const size_t len,
                             const int flags, const unsigned int zc_flags) {
             return submit(io_uring_prep_send_zc, observer, fd, buf, len, flags, zc_flags);
         }
 
+        /// @brief Submits an @c io_uring_prep_send_zc_fixed operation with a registered buffer.
         static bool send_zc_fixed(kernel_observer* observer, const int fd, const void *buf, const size_t len,
                             const int flags, const unsigned int zc_flags, const unsigned buf_index) {
             return submit(io_uring_prep_send_zc_fixed, observer, fd, buf, len, flags, zc_flags, buf_index);
         }
 
+        /// @brief Submits an @c io_uring_prep_sendto operation.
         static bool sendto(kernel_observer* observer, const int fd, const void *buf, const size_t len, const int flags,
             const sockaddr *addr, const socklen_t addrlen) {
             return submit(io_uring_prep_sendto, observer, fd, buf, len, flags, addr, addrlen);
@@ -240,44 +267,54 @@ namespace ace::services {
         /**
          * @brief Scatter-gather recv via io_uring_prep_recvmsg.
          */
+        /// @brief Submits an @c io_uring_prep_recvmsg operation.
         static bool recvmsg(kernel_observer* observer, const int fd, msghdr* msg, const int flags) {
             return submit(io_uring_prep_recvmsg, observer, fd, msg, flags);
         }
 
+        /// @brief Submits an @c io_uring_prep_recv operation.
         static bool recv(kernel_observer* observer, const int fd, void *buf, const size_t len, const int flags) {
             return submit(io_uring_prep_recv, observer, fd, buf, len, flags);
         }
 
+        /// @brief Submits an @c io_uring_prep_read operation.
         static bool read(kernel_observer* observer, const int fd, void *buf, const unsigned nbytes, const uint64_t offset) {
             return submit(io_uring_prep_read, observer, fd, buf, nbytes, offset);
         }
 
+        /// @brief Submits an @c io_uring_prep_write operation.
         static bool write(kernel_observer* observer, const int fd, const void *buf, const unsigned nbytes, const uint64_t offset) {
             return submit(io_uring_prep_write, observer, fd, buf, nbytes, offset);
         }
 
+        /// @brief Submits an @c io_uring_prep_writev2 (scatter-gather) operation.
         static bool writev(kernel_observer* observer, const int fd, const iovec *vec, const unsigned len, const uint64_t offset, const int flags) {
             return submit(io_uring_prep_writev2, observer, fd, vec, len, offset, flags);
         }
 
         // ── iovec allocator ───────────────────────────────────────────
 
+        /// @brief Allocates an iovec with a data buffer of the given size.
         static auto iovec_allocate(size_t size) noexcept -> iovec* {
             return _iovec_alloc.allocate(size);
         }
 
+        /// @brief Deallocates an iovec allocated with @c iovec_allocate().
         static auto iovec_deallocate(iovec* iov) noexcept -> void {
             _iovec_alloc.deallocate(iov);
         }
 
+        /// @brief Allocates a packed array of @c len iovecs from the pool.
         static auto iovec_pool_allocate(size_t len) noexcept -> iovec* {
             return _iovec_alloc.allocate_as<iovec>(len);
         }
 
+        /// @brief Deallocates a packed iovec array allocated with @c iovec_pool_allocate().
         static auto iovec_pool_deallocate(iovec* iov, size_t len) noexcept -> void {
             _iovec_alloc.deallocate_as(iov, sizeof(iovec) * len);
         }
 
+        /// @brief Direct access to the thread-local iovec allocator.
         static auto iovec_alloc() noexcept -> core::tools::iovec_allocator& { return _iovec_alloc; }
 
     };
@@ -292,27 +329,48 @@ namespace ace::services {
      */
     struct kernel_controller::kernel_entity {
 
+        /**
+         * @brief Captures an io_uring function and its parameters for deferred submission.
+         * @tparam io_uring_foo_t Type of the io_uring preparation function.
+         * @tparam Args           Parameter types.
+         * @param foo      io_uring preparation function pointer.
+         * @param observer Completion observer to attach on apply.
+         * @param args     Function parameters (without the SQE).
+         */
         template <typename io_uring_foo_t, typename ... Args>
         kernel_entity(io_uring_foo_t foo, kernel_observer* observer, Args... args);
 
         // NOTE: Polymorphic action handler
+        /**
+         * @brief Reconstructs and executes the captured io_uring call.
+         * @tparam io_uring_foo_t Type of the io_uring preparation function.
+         * @tparam Args           Parameter types.
+         * @param io_uring_foo  Function pointer (type-erased).
+         * @param sqe           Fresh SQE slot.
+         * @param params        Stored parameters.
+         */
         template <typename io_uring_foo_t, typename ... Args>
         static void action_templ(void* io_uring_foo, io_uring_sqe* sqe, const uintptr_t* params);
 
         // NOTE: Applies the buffered request.  Returns @c false when the ring
         // has no free SQE slot at the moment (the caller should re-queue).
+        /**
+         * @brief Submits the buffered request with a freshly fetched SQE.
+         * @return @c false when no SQE slot is free (caller must re-queue).
+         */
         bool apply();
 
         ACE_CACHE_LINE(0)
 
-        uintptr_t _params[8] = {};
+        uintptr_t _params[8] = {}; ///< Stored function parameters (as a tuple).
 
         ACE_CACHE_LINE(1)
 
-        void (*_action)(void*, io_uring_sqe*, const uintptr_t*) = nullptr;
-        kernel_observer* _observer = nullptr;
-        void* _io_uring_foo = nullptr;
+        void (*_action)(void*, io_uring_sqe*, const uintptr_t*) = nullptr; ///< Type-erased action handler.
+        kernel_observer* _observer = nullptr;                             ///< Completion observer.
+        void* _io_uring_foo = nullptr;                                    ///< Type-erased io_uring function pointer.
 
+        /// @brief Thread-local slab pool for kernel entities.
         static thread_local core::tools::slab_mempool<kernel_entity> _kernelic_entity_mempool;
     };
 

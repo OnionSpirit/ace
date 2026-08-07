@@ -108,7 +108,7 @@ echo "Report: coverage_report/index.html"
 | `core/traits/future.h` | 100% | compile-time |
 | `core/traits/promise.h` | 97.2% | операторы new/delete покрыты |
 | `core/traits/routing.h` | 89.5% | router_slot — полный набор |
-| `core/traits/vortex.h` | 100% | |
+| `core/traits/service.h` | 100% | |
 | `core/control.h` | 100% | |
 | `core/async.h` | 94.3% | |
 | `core/async_handle.h` | 85.5% | join/ping handler-ы |
@@ -264,20 +264,20 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 | R9 | `runner_router_handle_default_cancel` | cancel() по умолчанию — no-op | ✅ |
 | R10 | `redirect_not_overridden` | redirect() по умолчанию бросает logic_error | ✅ |
 
-#### `vortex.h` — `vortex_fixture` (не реализована)
+#### `service.h` — `service_fixture` (не реализована)
 
 | # | Тест | Что проверяет | Статус |
 |---|------|--------------|--------|
-| V1 | `vortex_touch_spawns` | Первый touch() создаёт инстанс и spawn-ит vortex | ⬜ |
-| V2 | `vortex_detach_reattach` | После detach_set(true) → touch() делает respawn | ⬜ |
-| V3 | `vortex_signal_break` | Сигнал e_break → vortex приостанавливается | ⬜ |
-| V4 | `vortex_signal_shutdown` | Сигнал e_shutdown → vortex завершается | ⬜ |
-| V5 | `vortex_signal_idle` | Сигнал e_idle → vortex продолжает работу | ⬜ |
-| V6 | `vortex_inspect` | inspect() возвращает инстанс без respawn | ⬜ |
-| V7 | `vortex_thread_local` | e_thread_local: разные потоки — разные инстансы | ⬜ |
-| V8 | `vortex_thread_shared` | e_thread_shared: все потоки — один инстанс | ⬜ |
-| V9 | `vortex_promise_ping` | is_vortex_promise: ping() возвращает promise<bool> | ⬜ |
-| V10 | `vortex_routine_ping` | is_vortex_routine: ping() возвращает bool | ⬜ |
+| V1 | `service_touch_spawns` | Первый touch() создаёт инстанс и spawn-ит service | ⬜ |
+| V2 | `service_detach_reattach` | После detach_set(true) → touch() делает respawn | ⬜ |
+| V3 | `service_signal_break` | Сигнал e_break → service приостанавливается | ⬜ |
+| V4 | `service_signal_shutdown` | Сигнал e_shutdown → service завершается | ⬜ |
+| V5 | `service_signal_idle` | Сигнал e_idle → service продолжает работу | ⬜ |
+| V6 | `service_inspect` | inspect() возвращает инстанс без respawn | ⬜ |
+| V7 | `service_thread_local` | e_thread_local: разные потоки — разные инстансы | ⬜ |
+| V8 | `service_thread_shared` | e_thread_shared: все потоки — один инстанс | ⬜ |
+| V9 | `service_promise_ping` | is_service_promise: ping() возвращает promise<bool> | ⬜ |
+| V10 | `service_routine_ping` | is_service_routine: ping() возвращает bool | ⬜ |
 
 ---
 
@@ -352,8 +352,8 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 | RN7 | `attach_front_increments_tasks` | attach_front() → ++_tasks_amount | ⬜ |
 | RN8 | `yank_non_resumable` | yank() задачи с e_detached → release_node, --_tasks_amount | ⬜ |
 | RN9 | `yank_with_router` | yank() задачи с router → redirect(node) | ⬜ |
-| RN10 | `yank_polling` | yank() задачи с _polling → vortex_pool | ⬜ |
-| RN11 | `yank_vortex` | yank_vortex() обрабатывает vortex-задачи | ⬜ |
+| RN10 | `yank_polling` | yank() задачи с _polling → service_pool | ⬜ |
+| RN11 | `yank_service` | yank_service() обрабатывает service-задачи | ⬜ |
 | RN12 | `fetch_task_node_local` | fetch из _pool когда _pull_source = e_local_pool | ⬜ |
 | RN13 | `fetch_task_node_insert` | fetch из _insert_pool когда _pool пуст | ⬜ |
 | RN14 | `fetch_task_node_empty` | Оба пула пусты → null omni_node | ⬜ |
@@ -403,8 +403,8 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 | S2 | `interruption_signal_action` | action() → e_break | ✅ |
 | S3 | `sig_pipe_push_pop` | push() → pop() возвращает тот же signal_handler | ✅ |
 | S4 | `sig_pipe_empty` | Пустой pipe: pop() возвращает null | ✅ |
-| S5 | `signal_in_vortex` | Сигнал e_shutdown останавливает vortex | ⬜ |
-| S6 | `signal_break_in_vortex` | Сигнал e_break приостанавливает vortex | ⬜ |
+| S5 | `signal_in_service` | Сигнал e_shutdown останавливает service | ⬜ |
+| S6 | `signal_break_in_service` | Сигнал e_break приостанавливает service | ⬜ |
 
 ---
 
@@ -649,7 +649,7 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 | SP5 | `reattach_router_redirect` | reattach_router::redirect обновляет _runner + reattach | ⬜ |
 | SP6 | `roaming_true` | roaming(true) → _roaming = true | ✅ |
 | SP7 | `roaming_false` | roaming(false) → _roaming = false | ✅ |
-| SP8 | `polling_true` | polling(true) → задача идёт в _vortex_pool | ✅ |
+| SP8 | `polling_true` | polling(true) → задача идёт в _service_pool | ✅ |
 | SP9 | `get_runner_inside_runner` | get_runner внутри runner → не-nullptr | ✅ |
 | SP10 | `check_valued_spawn_command` | spawn valued-таски (async<int>), join → возвращает значение, spawner и spawnee на одном раннере | ✅ |
 | SP11 | `check_valued_post_command` | post valued-тасок + and-композиция (4 таски) → правильный порядок значений, join возвращает std::optional<int> | ✅ |
@@ -730,7 +730,7 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 | X4 | `cancel_spawned_with_recv` | spawn → recv → cancel: io_uring запрос отменяется | ⬜ |
 | X5 | `reattach_during_timeout` | timeout → reattach на другой раннер → таймер срабатывает на новом раннере | ⬜ |
 | X6 | `roaming_with_spawn_and_cutex` | roaming + spawn на другом раннере + cutex: гонка с миграцией | ⬜ |
-| X7 | `polling_with_timeout` | polling(true) → timeout → задача в vortex + clock | ⬜ |
+| X7 | `polling_with_timeout` | polling(true) → timeout → задача в service + clock | ⬜ |
 | X8 | `or_compose_with_cancel` | timeout or recv → cancel ор-композиции → оба observer-а отменяются | ⬜ |
 | X9 | `and_compose_with_cancel` | spawn and channel → cancel → оба observer-а отменяются | ✅ |
 | X10 | `pipe_with_channel` | pusher >> channel.pull: значение передаётся через канал | ⬜ |
@@ -815,7 +815,7 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 **Итого:** 32 fixture-класса, **237 тестов** (из них 1 отключён → 236 активных по gtest;
 в meson-режиме 237 зарегистрированных прогонов, отключённый тест не регистрируется).
 
-> Примечание: `timer_parallel_fixture` и `vortex_fixture`/`io_query_fixture`/
+> Примечание: `timer_parallel_fixture` и `service_fixture`/`io_query_fixture`/
 > `kernelic_fixture`/`clock_fixture`/`entry_fixture` из ранней версии плана не
 > реализованы как отдельные fixture-классы — их сценарии покрыты внутри
 > `timer_fixture` (parallel) и `base_fixture` (io_query/kernelic/clock/udp/tcp).

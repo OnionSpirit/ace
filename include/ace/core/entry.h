@@ -79,13 +79,22 @@ namespace ace::cfg {
 // NOTE: Defining of entry result
 namespace ace {
 
+    /**
+     * @brief Exit code returned by @c co_main to the injected @c main().
+     */
     struct entry_result {
-        int code = 0;
+        int code = 0; ///< Process exit code.
+        /// @brief Default constructor — zero exit code.
         entry_result() = default;
+        /**
+         * @brief Constructs the result with an explicit exit code.
+         * @param code Process exit code.
+         */
         entry_result(const int code)
             : code(code) {}
     };
 
+    /// @brief Coroutine type of the framework entry point.
     using entry = async<entry_result>;
 }
 

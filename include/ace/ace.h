@@ -56,14 +56,27 @@
 
 namespace ace {
 
+    /**
+     * @brief Spawn a parallel task pinned to the current runner (must be co_awaited).
+     * @tparam resume_t         Task result type (@c void for fire-and-forget).
+     * @tparam promise_rule_t   Coroutine rule tag (must be spawnable).
+     */
     template <typename resume_t = void, template <typename> typename promise_rule_t = core::lazy_rule>
         requires ace::core::is_spawnable_rule<promise_rule_t>
     using spawn          = futures::spawn<resume_t, promise_rule_t>;
+    /**
+     * @brief Post a parallel task to the front of the current runner's queue.
+     * @tparam resume_t         Task result type (@c void for fire-and-forget).
+     * @tparam promise_rule_t   Coroutine rule tag (must be spawnable).
+     */
     template <typename resume_t = void, template <typename> typename promise_rule_t = core::lazy_rule>
         requires ace::core::is_spawnable_rule<promise_rule_t>
     using post           = futures::post<resume_t, promise_rule_t>;
+    /// @brief Enable/disable cross-runner migration for the current task.
     using roaming        = futures::roaming;
+    /// @brief Retrieve a pointer to the current runner.
     using get_runner     = futures::get_runner;
+    /// @brief Migrate the calling coroutine to a different runner.
     using reattach       = futures::reattach;
 
 }

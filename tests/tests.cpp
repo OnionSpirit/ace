@@ -1091,7 +1091,7 @@ TEST_F(promise_traits_fixture, differed_tag_action) {
 // Проверяет что automaton tag возвращает suspend_always
 TEST_F(promise_traits_fixture, automaton_tag_action) {
     // Почему проверяем automaton: используется для kernel_controller
-    // и clock vortex сервисов. Отсутствие control_block означает что
+    // и clock service. Отсутствие control_block означает что
     // деструктор async не вызывает cancel() — важно для сервисов
     // которые живут всё время работы программы.
     static_assert(
@@ -1464,7 +1464,7 @@ TEST_F(control_block_fixture, handle_destroy) {
 // Проверяет что termination_signal::action() возвращает e_shutdown.
 TEST_F(signal_fixture, termination_signal_action) {
     // Почему проверяем termination_signal: dispatcher посылает
-    // этот сигнал при вызове ace::terminate(). vortex должен
+    // этот сигнал при вызове ace::terminate(). service должен
     // получить e_shutdown и завершить работу.
     ace::futures::tunnel::dyn::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
@@ -1483,7 +1483,7 @@ TEST_F(signal_fixture, termination_signal_action) {
 // Проверяет что interruption_signal::action() возвращает e_break.
 TEST_F(signal_fixture, interruption_signal_action) {
     // Почему проверяем interruption_signal: dispatcher посылает
-    // этот сигнал при вызове ace::interrupt(). vortex должен
+    // этот сигнал при вызове ace::interrupt(). service должен
     // получить e_break и приостановиться.
     ace::futures::tunnel::dyn::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
@@ -1514,9 +1514,9 @@ TEST_F(signal_fixture, sig_pipe_push_pop) {
 
 // Проверяет что пустой sig_pipe возвращает false при pop.
 TEST_F(signal_fixture, sig_pipe_empty) {
-    // Почему проверяем пустой pop: vortex цикл проверяет
+    // Почему проверяем пустой pop: service цикл проверяет
     // sig_pipe.pop(sig) в условии if. Если пустая очередь
-    // возвращает true — vortex будет обрабатывать nullptr
+    // возвращает true — service будет обрабатывать nullptr
     // как сигнал → undefined behavior.
     ace::core::sig_pipe_t pipe;
     std::unique_ptr<ace::core::signal_handler> sig;
@@ -1607,7 +1607,7 @@ TEST_F(runner_fixture, suspending_task_run) {
     // корректно обрабатывать суспендированные задачи (не удалять их
     // и не терять).
     // Почему standalone-раннер + цикл со sleep: задача суспендится на
-    // таймере 1ms в thread_local clock, vortex которого раннер создаёт
+    // таймере 1ms в thread_local clock, service которого раннер создаёт
     // в СВОЁМ пуле. Таймер истекает только по прошествии реального
     // времени, поэтому между r.run() обязателен sleep — иначе цикл
     // завершится раньше истечения таймера, а задача останется висеть
@@ -2303,7 +2303,7 @@ TEST_F(context_fixture, task_wrap_works) {
 // Проверяет что ~async() не вызывает cancel на automaton корутине.
 TEST_F(context_fixture, automaton_no_cancel_in_dtor) {
     // Почему проверяем automaton в деструкторе: automaton используется
-    // для vortex сервисов (clock, kernel_controller). Их деструктор
+    // для service (clock, kernel_controller). Их деструктор
     // вызывается при завершении программы — cancel() в этот момент
     // не должен вызываться потому что io_uring уже может быть разрушен.
     static_assert(
@@ -2784,7 +2784,7 @@ TEST_F(spawn_extra_fixture, roaming_false) {
 // Проверяет что polling(true) не суспендит и устанавливает флаг.
 TEST_F(spawn_extra_fixture, polling_true) {
     // Почему проверяем polling: флаг _polling отправляет задачу
-    // в _vortex_pool для низкоприоритетного выполнения.
+    // в _service_pool для низкоприоритетного выполнения.
     ace::futures::tunnel::dyn::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         co_await ace::futures::polling(true);

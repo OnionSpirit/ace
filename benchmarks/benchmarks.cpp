@@ -182,11 +182,11 @@ BENCHMARK(bm_spawn_cancel)->Unit(benchmark::kMillisecond);
 static void bm_timer_ordering(benchmark::State& state) {
     using namespace std::chrono_literals;
 
-    // Прогрев clock vortex: первый вызов timeout() инициализирует
-    // clock::touch() → spawn vortex → hierarchical_time_wheel. Без прогрева
+    // Прогрев clock service: первый вызов timeout() инициализирует
+    // clock::touch() → spawn service → hierarchical_time_wheel. Без прогрева
     // первая итерация бенчмарка может иметь другой тайминг из-за
-    // холодного старта инфраструктуры (vortex корутина + io_uring ring).
-    // Почему schedule+run а не прямой вызов: vortex должен работать
+    // холодного старта инфраструктуры (service корутина + io_uring ring).
+    // Почему schedule+run а не прямой вызов: service должен работать
     // в контексте раннера для корректной инициализации.
     {
         ace::futures::tunnel::dyn::bus<int> warmup_ch;

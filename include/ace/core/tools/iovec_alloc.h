@@ -16,13 +16,28 @@
 
 namespace ace::core::tools {
 
+/**
+ * @brief Thread-local iovec allocator with a small-buffer pool.
+ *
+ * @details Buffers up to @c kMaxSize come from an internal pmr pool;
+ * larger ones are allocated with @c malloc().  Each iovec is embedded
+ * at offset 0 of its allocation, with the data area right after it.
+ */
 struct iovec_allocator {
 
+    /// @brief Largest size served from the small-buffer pool.
     static constexpr size_t kMaxSize = 4096;
 
+    /// @brief Default constructor.
     iovec_allocator() = default;
 
     // NOTE: Allocates requested size and puts it into the iovec struct
+    /**
+     * @brief Allocates an iovec with a data buffer of the requested size.
+     * @param size Data buffer size.
+     * @return Pointer to the iovec.
+     * @throws std::bad_alloc when the allocation fails.
+     */
     [[nodiscard]] auto allocate(size_t size) -> iovec* {
 
         iovec* iov = nullptr;
@@ -39,6 +54,10 @@ struct iovec_allocator {
         return iov;
     }
 
+    /**
+     * @brief Returns an iovec to the pool.
+     * @param iov Iovec to deallocate.
+     */
     auto deallocate(iovec* iov) -> void {
         if (!iov) return;
         if (iov->iov_len > kMaxSize)
@@ -47,6 +66,12 @@ struct iovec_allocator {
         iov->iov_len = 0;
     }
 
+    /**
+     * @brief Allocates a packed array of @c len elements of type @c data_t.
+     * @tparam data_t Element type.
+     * @param len Number of elements.
+     * @return Pointer to the array, or @c nullptr when too large for the pool.
+     */
     template <typename data_t>
     [[nodiscard]] auto allocate_as(size_t len = 1) noexcept -> data_t* {
         if ((sizeof(data_t) * len) > kMaxSize) return nullptr;
@@ -54,12 +79,23 @@ struct iovec_allocator {
         return data;
     }
 
+    /**
+     * @brief Deallocates a packed array allocated with @c allocate_as().
+     * @param mem Pointer returned by @c allocate_as().
+     * @param len Number of elements.
+     */
     auto deallocate_as(void* mem, const size_t len) noexcept -> void {
         _small_pool.deallocate(mem, len);
     }
 
 private:
 
+    /**
+     * @brief PMR resource backing the small-buffer pool.
+     * @details With @c is_debug (release builds, NDEBUG defined) deallocation
+     * is a no-op — the fine allocator never deallocates from itself.  In debug
+     * builds real deallocation is performed to keep sanitizers quiet.
+     */
     struct memory_controller : std::pmr::memory_resource {
 
         void* do_allocate(std::size_t bytes, std::size_t alignment) override {
@@ -81,8 +117,8 @@ private:
         }
     };
 
-    memory_controller                        _controller;
-    std::pmr::unsynchronized_pool_resource   _small_pool {&_controller};
+    memory_controller                        _controller;   ///< Backing memory resource.
+    std::pmr::unsynchronized_pool_resource   _small_pool {&_controller}; ///< Small-buffer pool.
 };
 
 } // namespace ace::core::tools

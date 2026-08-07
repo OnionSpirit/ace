@@ -1,6 +1,6 @@
 /**
  * @file clock.h
- * @brief Hierarchical time wheel and clock vortex for O(1) amortized timer management.
+ * @brief Hierarchical time wheel and clock service for O(1) amortized timer management.
  *
  * @details The clock module provides:
  *
@@ -14,7 +14,7 @@
  *    selection).  The default configuration uses 1ms ticks and 256-slot
  *    wheels, supporting timers up to the int64 millisecond range
  *    (~292 million years).
- *  - <b>@c clock</b> — a thread-local vortex that owns a
+ *  - <b>@c clock</b> — a thread-local service that owns a
  *    @c hierarchical_time_wheel and calls @c advance() on each @c ping() to
  *    expire timers.
  *
@@ -30,7 +30,7 @@
  *
  * @mermaid{ graph LR; Timeout[\"timeout(dur)\"]-->Router[\"timeout_router\"]; Router-->Subscribe[\"clock::subscribe\"]; Subscribe-->Wheel[\"hierarchical_time_wheel\"]; Wheel-->Slot[\"time_slot\"]; clock_ping[\"clock::ping()\"]-->Advance[\"wheel::advance\"]; Advance-->Reattach[\"runner::reattach\"]; }
  *
- * @see ace::futures::timeout, ace::core::traits::vortex_traits
+ * @see ace::futures::timeout, ace::core::traits::service_traits
  */
 #ifndef ACE_SERVICES_CLOCK_H
 #define ACE_SERVICES_CLOCK_H
@@ -38,25 +38,34 @@
 #include <chrono>
 
 #include "ace/core/async.h"
-#include "ace/core/traits/vortex.h"
+#include "ace/core/traits/service.h"
 #include "ace/core/tools/queue.h"
 
 namespace ace::services {
 
+    /// @brief Timepoint type of the wheel — millisecond-precision steady clock.
     using timepoint_t = decltype(
         std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
             std::chrono::steady_clock::now()
         )
     );
 
+    /// @brief Duration type of the wheel — milliseconds.
     using duration_t = decltype(
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::duration()
         )
     );
 
+    /**
+     * @brief Cached millisecond timepoint of the steady clock.
+     * @details The cache is refreshed every 16 calls or when older than 1 ms
+     * (one wheel tick), keeping timer release accuracy while avoiding a clock
+     * read on every call.
+     * @return The cached millisecond timepoint.
+     */
     inline auto cached_now() {
-        // NOTE: thread_local — the clock vortex is per-runner (per-thread), so the cached
+        // NOTE: thread_local — the clock service is per-runner (per-thread), so the cached
         // timestamp and refresh counter must not be shared across threads (data race otherwise).
         thread_local auto cached_ts = std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
             std::chrono::steady_clock::now()
@@ -80,30 +89,48 @@ namespace ace::services {
      * independent of the insertion phase and of wheel stalls.
      */
     struct timer_record {
-        timepoint_t _expires {};
-        omni_node _context {};
+        timepoint_t _expires {}; ///< Absolute expiry time (release-bound scale).
+        omni_node _context {};   ///< Task node to wake on expiry.
 
+        /// @brief Default constructor — empty record.
         timer_record() = default;
 
+        /// @brief Copying a timer record is forbidden.
         timer_record(const timer_record&) = delete;
 
+        /// @brief Copy assignment is forbidden.
         timer_record& operator=(const timer_record&) = delete;
 
+        /**
+         * @brief Move constructor.
+         * @param other Source record to move from.
+         */
         timer_record(timer_record&& other) noexcept {
             _expires = other._expires;
             _context = other._context;
         }
 
+        /**
+         * @brief Move assignment.
+         * @param other Source record to move from.
+         * @return Reference to this record.
+         */
         timer_record& operator=(timer_record&& other) noexcept {
             _expires = other._expires;
             _context = other._context;
             return *this;
         }
 
+        /**
+         * @brief Constructs a record bound to a task and a deadline.
+         * @param node    Task node to wake.
+         * @param expires Absolute expiry time.
+         */
         timer_record(const omni_node node, const timepoint_t expires)
             : _expires(expires)
             , _context(node) {}
 
+        /// @brief Thread-local slab pool for timer records.
         static thread_local core::tools::slab_mempool<timer_record> _timer_mempool;
     };
 
@@ -114,10 +141,13 @@ namespace ace::services {
      */
     struct time_slot {
 
+        /// @brief Default constructor — empty slot.
         time_slot() = default;
 
+        /// @brief Copying a slot is forbidden.
         time_slot(const time_slot&) = delete;
 
+        /// @brief Copy assignment is forbidden.
         time_slot& operator=(const time_slot&) = delete;
 
         /**
@@ -175,19 +205,30 @@ namespace ace::services {
 
         ACE_CACHE_LINE(0)
 
-        const std::size_t   _slot_count;
-        std::vector<time_slot> _slots;
-        const duration_t    _tick_duration;
-        int*                _release_budget_ptr;
-        std::size_t         _hand {0};
+        const std::size_t   _slot_count;         ///< Number of slots (power of two).
+        std::vector<time_slot> _slots;           ///< The slots themselves.
+        const duration_t    _tick_duration;      ///< Duration covered by one hand step.
+        int*                _release_budget_ptr; ///< Shared release budget for this advance.
+        std::size_t         _hand {0};           ///< Current hand position.
 
         ACE_CACHE_LINE(1)
 
-        time_wheel*              _upper_time_wheel;
-        hierarchical_time_wheel* _hierarchical;
+        time_wheel*              _upper_time_wheel;       ///< Coarser wheel above this one.
+        hierarchical_time_wheel* _hierarchical;           ///< Owning hierarchical wheel.
 
+        /// @brief Default construction is forbidden — parameters are required.
         time_wheel() = delete;
 
+        /**
+         * @brief Constructs one wheel level.
+         * @tparam rep_t     Duration representation type.
+         * @tparam period_t  Duration period type.
+         * @param tick_duration    Duration of one hand step.
+         * @param slot_count       Number of slots (rounded up to a power of two).
+         * @param release_budget_ptr Shared budget pointer (points into the owning wheel).
+         * @param hierarchical     Owning hierarchical wheel.
+         * @param upper_time_wheel Coarser wheel; @c nullptr for the top level.
+         */
         template <typename rep_t, typename period_t>
         explicit time_wheel(const std::chrono::duration<rep_t, period_t> tick_duration,
                             const std::size_t slot_count,
@@ -266,11 +307,21 @@ namespace ace::services {
         // NOTE: release_progress is the amount of base ticks the advance loop has already
         // NOTE: moved in the current advance() call — needed by cascades to compute the
         // NOTE: exact remaining time from the timer's absolute deadline.
+        /**
+         * @brief Cascades from the upper wheel when this wheel's hand wraps.
+         * @param offset          Hand offset to test the wrap condition.
+         * @param release_progress Base ticks already advanced in the current call.
+         */
         void cascade_on_wrap(const std::size_t offset = 0, const std::size_t release_progress = 0) {
             if ((_hand + offset) % _slot_count == 0 and _upper_time_wheel)
                 _upper_time_wheel->cascade_slot(this, release_progress);
         }
 
+        /**
+         * @brief Moves all timers of the current upper slot down to a lower wheel.
+         * @param lower_wheel     The wheel to cascade into.
+         * @param release_progress Base ticks already advanced in the current call.
+         */
         void cascade_slot(time_wheel* lower_wheel, const std::size_t release_progress);
     };
 
@@ -292,20 +343,26 @@ namespace ace::services {
 
         ACE_CACHE_LINE(0)
 
-        std::vector<time_wheel> _time_wheels;
-        timepoint_t             _current_ts;
+        std::vector<time_wheel> _time_wheels;                 ///< Wheel levels, finest first.
+        timepoint_t             _current_ts;                  ///< Last observed time.
         timepoint_t             _release_bound { cached_now() }; ///< Time lower bound, higher than all expired timers
-        const duration_t        _tick_duration;
-        const std::size_t       _slot_count;
-        int                     _release_budget { };
-        int                     _release_limit  { 1024 };
+        const duration_t        _tick_duration;               ///< Duration of one finest tick.
+        const std::size_t       _slot_count;                  ///< Number of slots per wheel.
+        int                     _release_budget { };          ///< Remaining expirations for this ping.
+        int                     _release_limit  { 1024 };     ///< Max expirations per ping.
 
         ACE_CACHE_LINE(1)
 
-        std::size_t             _pending_timer_count { 0 };
-        bool                    _stopped            { false };
+        std::size_t             _pending_timer_count { 0 };   ///< Number of timers currently subscribed.
+        bool                    _stopped            { false };///< Whether the wheel is empty and idle.
 
 
+        /**
+         * @brief Floor-log base 2.
+         * @param x Input value.
+         * @return The exponent of the largest power of two not exceeding @c x.
+         * @throws std::runtime_error when @c x is zero.
+         */
         static std::size_t fast_log2(std::size_t x) {
 
             if (x == 0) [[unlikely]]
@@ -315,6 +372,12 @@ namespace ace::services {
         }
 
         // NOTE: Base replaces with the less power of 2
+        /**
+         * @brief Floor-log with an arbitrary base.
+         * @param x    Input value.
+         * @param base Logarithm base (must be a power of two).
+         * @return Floor of @c log_base(x).
+         */
         static std::size_t fast_log(std::size_t x, std::size_t base = 2) {
             return (fast_log2(x) / fast_log2(base));
         }
@@ -372,6 +435,13 @@ namespace ace::services {
 
     public:
 
+        /**
+         * @brief Constructs the full hierarchical wheel.
+         * @tparam rep_t     Duration representation type.
+         * @tparam period_t  Duration period type.
+         * @param tick_duration Duration of one finest tick.
+         * @param slot_count    Number of slots per level (rounded up to a power of two).
+         */
         template <typename rep_t, typename period_t>
         explicit hierarchical_time_wheel(const std::chrono::duration<rep_t, period_t> tick_duration,
                                          const std::size_t slot_count)
@@ -512,6 +582,10 @@ namespace ace::services {
             return _stopped = _pending_timer_count == 0;
         }
 
+        /**
+         * @brief Cancels a subscribed timer and returns its task to the runner.
+         * @param node Timer node to detach.
+         */
         void detach(timer_node* node) {
             // NOTE: Pushing context back to the runner. It is already marked as canceled
             core::runner::reattach(node->data()->_context);
@@ -536,9 +610,8 @@ namespace ace::services {
 
         ++_hand;
     }
-
     /**
-     * @brief Thread-local vortex that manages a @c hierarchical_time_wheel.
+     * @brief Thread-local service that manages a @c hierarchical_time_wheel.
      *
      * @details On each @c ping(), calls @c hierarchical_time_wheel::advance() to
      * expire due timers.  Provides @c subscribe() (used by @c timeout future)
@@ -546,20 +619,40 @@ namespace ace::services {
      * static method returns the cached timepoint, updated every 16 calls
      * for performance.
      */
-    struct clock : core::traits::vortex_traits<clock, core::vortex_spawn_mode::e_thread_local> {
+    struct clock : core::traits::service_traits<clock, core::service_spawn_mode::e_thread_local> {
 
+        /// @brief Default constructor.
         clock() = default;
 
+        /// @brief Thread-local wheel instance.
         static thread_local hierarchical_time_wheel _wheel;
 
+        /**
+         * @brief Returns the cached current timepoint.
+         * @return The wheel's last observed time.
+         */
         static auto current_time() { return inspect()._wheel.current_time(); }
 
+        /**
+         * @brief Cancels a subscribed timer.
+         * @param node Timer node to detach.
+         */
         static auto detach(timer_node* node) { inspect()._wheel.detach(node); }
 
+        /**
+         * @brief Subscribes a task to expire after the given duration.
+         * @param node     Task node to wake.
+         * @param duration Wait duration.
+         * @return The inserted timer node, or @c nullptr for immediate expiry.
+         */
         [[nodiscard]] static timer_node* subscribe(omni_node node, const duration_t duration) {
             return touch(node->_data._coroutine.promise()._runner.as<runner_pool_t>())._wheel.subscribe(node, duration);
         }
 
+        /**
+         * @brief Service ping — advances the wheel and expires due timers.
+         * @return @c true while timers remain pending.
+         */
         static bool ping() {
             _wheel.advance();
             return not _wheel.empty();

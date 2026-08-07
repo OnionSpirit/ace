@@ -6,19 +6,20 @@
  * @details This file defines the building blocks that the C++20 coroutine
  * machinery requires from a promise type:
  *
- *  - <b>@c promise_touch_result</b> — lifecycle state enum shared between
+ *  - <b>@c promise_lifecycle</b> — lifecycle state enum shared between
  *    the runner and the coroutine.
- *  - <b>@c permanent / @c differed</b> — policy tags that control whether a
- *    coroutine suspends at creation (@c differed, used by @c ace::async) or
- *    runs immediately (@c permanent, used by @c ace::promise).
- *  - <b>@c promise_return_traits<P, T></b> — CRTP mixin that adds
- *    @c return_value() / @c yield_value() / @c return_void() to a promise type.
- *  - <b>@c promise_traits<T></b> — full promise base that aggregates return
- *    traits, @c await_transform() overloads for all future concepts,
+ *  - <b>@c lazy_rule / @c eager_rule / @c automaton_rule</b> — rule bases that
+ *    control whether a coroutine suspends at creation (@c lazy_rule, used by
+ *    @c ace::async) or runs immediately (@c eager_rule, used by
+ *    @c ace::promise), and that add @c return_value() / @c yield_value() /
+ *    @c return_void() to a promise type.
+ *  - <b>@c promise_traits<derived_t, promise_rule_t, return_t></b> — full
+ *    promise base that aggregates the rule base,
+ *    @c await_transform() overloads for all future concepts,
  *    intrusive @c operator new / @c operator delete for control-block
  *    prefix allocation, and optional tracing support.
  *
- * @see ace::coroutines::async, ace::coroutines::control_block
+ * @see ace::async, ace::core::control_block
  */
 #ifndef ACE_PROMISE_H
 #define ACE_PROMISE_H
@@ -36,16 +37,31 @@
 namespace ace::core {
 
 
+    /**
+     * @brief Base that exposes the control-block pointer and the lifecycle
+     *        status accessors to promise types.
+     */
     struct promise_primitives {
 
         control_block*     _block  { nullptr };  ///< Pointer to the intrusive control block (set on coroutine construction).
 
+        /**
+         * @brief Read the current lifecycle status from the control block.
+         * @return Current @c promise_lifecycle value.
+         * @throw std::runtime_error if the control block pointer is null.
+         */
         [[nodiscard]] promise_lifecycle status() {
             if (not _block)
                 throw std::runtime_error("trying to get status from a frame control block that is null");
             return _block->_status;
         }
 
+        /**
+         * @brief Write a new lifecycle status to the control block.
+         * @param status  New @c promise_lifecycle value.
+         * @return The stored status value.
+         * @throw std::runtime_error if the control block pointer is null.
+         */
         promise_lifecycle status(const promise_lifecycle status) {
             if (not _block)
                 throw std::runtime_error("trying to set status to a frame control block that is null");
@@ -96,7 +112,7 @@ namespace ace::core {
             return std::suspend_always{};
         }
 
-        /// @brief Returns @c std::suspend_never — no suspension at creation.
+        /// @brief Returns @c std::suspend_always — suspends at creation.
         consteval static auto initial_result() noexcept { return std::suspend_always{}; };
     };
 
@@ -130,7 +146,7 @@ namespace ace::core {
             return std::suspend_never{};
         }
 
-        /// @brief Returns @c std::suspend_never — suspension at creation.
+        /// @brief Returns @c std::suspend_always — suspends at creation (lazy).
         consteval static auto initial_result() noexcept { return std::suspend_always{}; };
     };
 
@@ -157,7 +173,7 @@ namespace ace::core {
             return std::suspend_never{};
         }
 
-        /// @brief Returns @c std::suspend_never — suspension at creation.
+        /// @brief Returns @c std::suspend_always — suspends at creation (lazy).
         consteval static auto initial_result() noexcept { return std::suspend_always{}; };
     };
 
@@ -224,8 +240,8 @@ namespace ace::core {
     /**
      * @brief Concept that validates a coroutine rule object.
      *
-     * @details A type satisfies @c is_promise_rule if:
-     *  1. It has @c _status member.
+     * @details A type satisfies @c is_rule if:
+     *  1. Its @c std::monostate instantiation derives from @c promise_primitives.
      *  2. Its static @c initial_result() returns either @c std::suspend_never or
      *     @c std::suspend_always.
      *
@@ -267,10 +283,11 @@ namespace ace::core::traits {
     /**
      * @brief Full promise base class for ACE coroutines.
      *
-     * @details @c promise_traits<T, U> combines:
-     *  - Return-value machinery from @c promise_return_traits.
+     * @details @c promise_traits<derived_t, promise_rule_t, return_t> combines:
+     *  - Return-value machinery from the rule base @c promise_rule_t<return_t>.
      *  - @c await_transform() overloads that route @c co_await expressions to
-     *    the appropriate future concept (@c is_future vs @c is_busy_future).
+     *    the appropriate future concept (@c is_future_accurate vs
+     *    @c is_busy_future_accurate).
      *  - <b>Intrusive memory layout</b>: @c operator new allocates a
      *    @c control_block immediately before the promise, enabling external
      *    handles without a separate allocation.
@@ -301,6 +318,7 @@ namespace ace::core::traits {
 
         using rule_t::status;
 
+        /** @brief Default constructor. */
         promise_traits() = default;
 
         /**
@@ -339,7 +357,7 @@ namespace ace::core::traits {
          * @brief @c await_transform for lvalue-ref futures (@c is_future concept).
          * @details Resets @c _busy_future because a regular future takes over
          * forwarding control via the router mechanism.
-         * @tparam futureT  A type satisfying @c ace::core::misc::dispatch::is_future.
+         * @tparam futureT  A type satisfying @c ace::core::meta::is_future_accurate.
          * @param future    The future to await.
          * @return          The same lvalue reference.
          */
@@ -353,7 +371,7 @@ namespace ace::core::traits {
 
         /**
          * @brief @c await_transform for rvalue-ref futures (@c is_future concept).
-         * @tparam futureT  A type satisfying @c ace::core::misc::dispatch::is_future.
+         * @tparam futureT  A type satisfying @c ace::core::meta::is_future_accurate.
          * @param future    The future to await.
          * @return          An rvalue reference to the future.
          */
@@ -369,7 +387,7 @@ namespace ace::core::traits {
          * @brief @c await_transform for lvalue-ref busy futures (@c is_busy_future).
          * @details Sets @c _busy_future so the runner can call @c await_ready()
          * repeatedly before re-queuing the task (active polling).
-         * @tparam futureT  A type satisfying @c ace::common::dispatch::is_busy_future.
+         * @tparam futureT  A type satisfying @c ace::core::meta::is_busy_future_accurate.
          * @param future    The busy future to await.
          * @return          The same lvalue reference.
          */
@@ -383,7 +401,7 @@ namespace ace::core::traits {
 
         /**
          * @brief @c await_transform for rvalue-ref busy futures (@c is_busy_future).
-         * @tparam futureT  A type satisfying @c ace::common::dispatch::is_busy_future.
+         * @tparam futureT  A type satisfying @c ace::core::meta::is_busy_future_accurate.
          * @param future    The busy future to await.
          * @return          An rvalue reference to the future.
          */
@@ -414,8 +432,8 @@ namespace ace::core::traits {
         }
 
         /**
-         * @brief Custom deallocator.  Decrements the control-block strong
-         * reference count and frees the whole allocation only when untracked.
+         * @brief Custom deallocator.  Frees the whole allocation once the
+         * control block is untracked (strong reference count already zero).
          * @param mem_ptr  Pointer to the promise area.
          * @param mem_size Memory size of the promise frame
          */
@@ -444,8 +462,10 @@ namespace ace::core::traits {
         std::optional<std::size_t>  _trace_id;                  ///< Optional debugging trace ID.
     };
 
+    /** @brief Declares a @c promise_traits_t typedef for a derived promise type. */
 #define DECLARE_PROMISE_TRAITS(derived_t, promise_rule_t, return_type_t) typedef ace::core::traits::promise_traits<derived_t, promise_rule_t, return_type_t> promise_traits_t;
 
+    /** @brief Imports the @c promise_traits environment: busy future pointer, control block and status. */
 #define IMPORT_PROMISE_TRAITS_ENV               \
     using promise_traits_t::_busy_future;       \
     using promise_traits_t::_block;             \

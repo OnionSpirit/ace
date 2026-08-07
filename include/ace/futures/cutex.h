@@ -53,6 +53,9 @@
 
 namespace ace::futures {
 
+    /**
+     * @brief Core cutex state — user counter and the waiter queue.
+     */
     struct cutex_control {
 
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
@@ -70,9 +73,9 @@ namespace ace::futures {
         /**
          * @brief Attempt to wake one waiter from @c _waiters.
          * @details Pops one context from the waiters queue and calls
-         * @c runner::reattach().  If @c _rescheduling is set and the waiter
-         * does not support roaming, updates @c _runner from the waiter's
-         * runner.
+         * @c runner::reattach().  When the waiter allows roaming, its runner
+         * is re-pointed to the current thread before waking (rescheduling);
+         * otherwise a thread-safe cross-runner reattach is used.
          * @return @c true if a waiter was successfully notified.
          */
         bool notify();
@@ -115,18 +118,24 @@ namespace ace::futures {
         struct cutex_router;
         friend cutex_router;
 
-        cutex_control* _control { nullptr };
+        cutex_control* _control { nullptr }; ///< Underlying cutex state.
 
     public:
 
-        omni_runner _runner {};
-        bool _roaming { false };
-        bool _roaming_state {};
+        omni_runner _runner {};      ///< Runner captured at suspension time.
+        bool _roaming { false };     ///< Whether the waiter may migrate while waiting.
+        bool _roaming_state {};      ///< Original roaming value of the caller, restored on resume.
 
         IMPORT_FUTURE_ENV(capture_future)
 
+        /// @brief Default construction is forbidden — a control block is required.
         capture_future() = delete;
 
+        /**
+         * @brief Binds the future to a cutex control block.
+         * @param control_  Cutex state to lock.
+         * @param roaming   Whether migration is allowed while waiting.
+         */
         explicit capture_future(cutex_control* control_, const bool roaming = false) noexcept
             : _control(control_)
             , _roaming(roaming) {}
@@ -145,6 +154,7 @@ namespace ace::futures {
 
         void await_resume() {} ///< No value produced; mutex is already acquired when resumed.
 
+        /// @brief Default destructor.
         ~capture_future() override = default;
 
     };
@@ -173,14 +183,23 @@ namespace ace::futures {
      */
     class cutex {
 
+        /**
+         * @brief Creates the lock future.
+         * @param roaming Whether the waiting task may migrate runners.
+         * @return The @c capture_future to @c co_await.
+         */
         [[nodiscard]] auto capture(bool roaming) noexcept -> capture_future;
 
+        /**
+         * @brief Unlocks the cutex and wakes the next waiter.
+         */
         void release() noexcept;
 
-        cutex_control _control { };
+        cutex_control _control { }; ///< Core mutex state.
 
     public:
 
+        /// @brief Default constructor — unlocked mutex.
         cutex() = default;
 
         class proxy;
@@ -188,6 +207,7 @@ namespace ace::futures {
         cutex(const cutex&) = delete; ///< Mutexes are not copyable.
         cutex(cutex&&) = delete;      ///< Mutexes are not movable.
 
+        /// @brief Default destructor.
         ~cutex() = default;
     };
 
@@ -206,16 +226,19 @@ namespace ace::futures {
      */
     class cutex::proxy {
 
-        cutex& _cutex;
-        omni_runner _runner {};
+        cutex& _cutex;                    ///< Managed mutex.
+        omni_runner _runner {};           ///< Original runner (for @c sync() restore).
         bool _is_released { true };    ///< @c Equals true when the mutex is not held.
         bool _is_manual { false };     ///< @c Equals true if requires manual @c release(). @c cutex captured by @c sync()
         bool _roaming_state { true };  ///< Task @c roaming value before interacting with @c cutex
 
     public:
 
+        /// @brief Default construction is forbidden — a cutex is required.
         proxy() = delete;
+        /// @brief Copying a proxy is forbidden.
         proxy(const proxy&) = delete;
+        /// @brief Moving a proxy is forbidden.
         proxy(proxy&&) = delete;
 
         /**
@@ -299,7 +322,9 @@ namespace ace::futures {
 } // end namespace ace::futures
 
 namespace ace {
+    /// @brief Namespace alias for the cutex type.
     using futures::cutex;
+    /// @brief RAII guard for a cutex — an alias for @c cutex::proxy.
     using guard = cutex::proxy;
 }
 
@@ -318,13 +343,29 @@ ace::futures::cutex_control::
 returnT ACE_FUTURE_CUTEX_CORE_SPACE
 
 
+/**
+ * @brief Router that enqueues waiting tasks into the cutex waiter queue.
+ *
+ * @details On @c redirect() the suspended task is pushed into the cutex's
+ * waiter storage; cancellation is a no-op (waiters are woken by
+ * @c cutex_control::notify() on release).
+ */
 struct ACE_FUTURE_CAPTURE_FUTURE_SPACE cutex_router : runner_router {
 
+    /// @brief Default construction is forbidden — a capture future is required.
     cutex_router() = delete;
 
+    /**
+     * @brief Binds the router to the owning capture future.
+     * @param cutex_ Pointer to the capture future.
+     */
     explicit cutex_router(capture_future* cutex_)
         : _cutex(cutex_) {};
 
+    /**
+     * @brief Enqueues the waiting task into the cutex's waiter queue.
+     * @param node Task node of the suspended waiter.
+     */
     void redirect(omni_node node) override {
         _cutex->_control->_waiters.push_node(node);
     }
@@ -337,17 +378,28 @@ struct ACE_FUTURE_CAPTURE_FUTURE_SPACE cutex_router : runner_router {
     // NOTE: Cutex can be interacted only via it's RAII proxy, so extra manual 'release()' not needed.
     // NOTE: Maybe... Sometimes... I will add ejecting from mpsc queue by node handle.
     // NOTE: But Im not sure that mpsc or mpmc would stay consistent
+    /**
+     * @brief Cancellation is a no-op — waiters are released via @c cutex_control::notify().
+     */
     void cancel() override {  }
 
     ~cutex_router() override = default;
 
-    capture_future* _cutex;
+    capture_future* _cutex; ///< Owning capture future.
 };
 
 ACE_FUTURE_CUTEX_CONTROL_MEMBER(bool)
+/**
+ * @brief Fast-path lock acquire.
+ * @return @c true when the lock was acquired (pre-increment value was 0).
+ */
 try_lock() noexcept { return _users.fetch_add(1, std::memory_order_acq_rel) == 0; }
 
 ACE_FUTURE_CUTEX_CONTROL_MEMBER(bool)
+/**
+ * @brief Wakes one waiter, migrating it if allowed.
+ * @return @c true when a waiter was notified, @c false when the queue was empty.
+ */
 notify() {
     typedef nukes::dynamic::roaming_mpsc_queue<task>::node_t waiter_node_t;
     waiter_node_t* waiter_node = _waiters.pop_node();
@@ -374,6 +426,9 @@ notify() {
 }
 
 ACE_FUTURE_CUTEX_CONTROL_MEMBER(ace::task)
+/**
+ * @brief Deadlock recovery — retries notification while users remain.
+ */
 pending_notify() noexcept {
     do {
         if (notify()) co_return;
@@ -383,6 +438,11 @@ pending_notify() noexcept {
 }
 
 ACE_FUTURE_CAPTURE_FUTURE_MEMBER(bool)
+/**
+ * @brief Installs the cutex router and stores the caller's context.
+ * @param coroutine Caller coroutine promise accessor.
+ * @return Always @c true — the caller always suspends on the slow path.
+ */
 await_suspend(auto coroutine) {
     // NOTE: Setting router for dispatch to the cutex waiters queue
     coroutine.promise()._runner_router = cutex_router{this};
@@ -403,9 +463,17 @@ returnT ACE_FUTURE_CUTEX_SPACE
 
 
 ACE_FUTURE_CUTEX_MEMBER(ace::futures::capture_future)
+/**
+ * @brief Creates the lock future for this cutex.
+ * @param roaming Whether the waiting task may migrate runners.
+ * @return The @c capture_future to @c co_await.
+ */
 capture(const bool roaming) noexcept { return capture_future{&_control, roaming}; }
 
 ACE_FUTURE_CUTEX_MEMBER(void)
+/**
+ * @brief Unlocks the cutex and wakes the next waiter.
+ */
 release() noexcept {
     // NOTE: Subtract users because leaving cutex
     // NOTE: If there are some waiters but fetching is failed

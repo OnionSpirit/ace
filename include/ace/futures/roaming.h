@@ -34,11 +34,11 @@ namespace ace::futures {
      * @brief Awaitable command that sets the @c _roaming flag on the current promise.
      *
      * @details Non-suspending — @c await_suspend() returns @c false immediately.
-     * @result @c resume_type - current runner pointer
+     * Captures the current runner and exposes it as the await result.
      */
     class ACE_AWAIT_NODISCARD roaming : public core::traits::future_traits<roaming> {
 
-        omni_runner _rnr {};       ///< Current runner
+        omni_runner _rnr {};       ///< Current runner captured at await time.
         bool _is_roaming { true }; ///< Target roaming state.
 
     public:
@@ -55,7 +55,9 @@ namespace ace::futures {
          */
         explicit roaming(const bool is_roaming) : _is_roaming{is_roaming} {};
 
+        /// @brief Copying a roaming command is forbidden.
         roaming(const roaming&) = delete;
+        /// @brief Copy assignment is forbidden.
         roaming& operator=(const roaming&) = delete;
 
         /**
@@ -69,6 +71,10 @@ namespace ace::futures {
             return false;
         }
 
+        /**
+         * @brief Returns the runner the task was on when the command was applied.
+         * @return The captured @c omni_runner.
+         */
         auto await_resume() noexcept { return _rnr; }
 
     };

@@ -3,7 +3,7 @@
  * @brief Timer futures: @c ace::futures::timeout and @c ace::futures::expire.
  *
  * @details Both types suspend the calling coroutine for a time interval and
- * resume it via the @c clock vortex service.
+ * resume it via the @c clock service.
  *
  * ### How it works
  *
@@ -75,6 +75,7 @@ public:
             _duration = services::duration_t::zero();
     };
 
+    /// @brief Default constructor — zero duration.
     timeout() = default;
 
     /**
@@ -108,6 +109,7 @@ struct ACE_AWAIT_NODISCARD expire : timeout {
     explicit expire(services::timepoint_t expires)
         : timeout(expires - services::clock::current_time()) {}
 
+    /// @brief Default constructor — zero duration.
     expire() = default;
 };
 
@@ -123,17 +125,36 @@ ace::futures::timeout::
 #define ACE_FUTURE_TIMEOUT_MEMBER(returnT) \
 returnT ACE_FUTURE_TIMEOUT_SPACE
 
+/**
+ * @brief Router that registers a suspended task in the clock service.
+ *
+ * @details On @c redirect() the task is subscribed to the clock's time wheel
+ * with the timeout's duration; on @c cancel() the pending timer is detached
+ * and the node returns to its runner.
+ */
 struct ACE_FUTURE_TIMEOUT_SPACE timeout_router : runner_router {
 
+    /// @brief Default construction is forbidden — a timeout owner is required.
     timeout_router() = delete;
 
+    /**
+     * @brief Binds the router to the owning timeout.
+     * @param timeout_ Pointer to the owning timeout future.
+     */
     explicit timeout_router(timeout* timeout_)
         : _timeout(timeout_) {};
 
+    /**
+     * @brief Subscribes the suspended task to the clock service.
+     * @param node Task node to schedule for wake-up.
+     */
     void redirect(const omni_node node) override {
         _injected_node = services::clock::subscribe(node, _timeout->_duration);
     }
 
+    /**
+     * @brief Cancels the pending timer and returns the node to its runner.
+     */
     void cancel() override {
         if (_injected_node) {
             services::clock::detach(_injected_node);
@@ -143,12 +164,17 @@ struct ACE_FUTURE_TIMEOUT_SPACE timeout_router : runner_router {
 
     ~timeout_router() override = default;
 
-    services::timer_node* _injected_node = nullptr;
-    timeout* const _timeout;
+    services::timer_node* _injected_node = nullptr; ///< Timer node registered in the clock wheel.
+    timeout* const _timeout;                        ///< Owning timeout future.
 };
 
 
 ACE_FUTURE_TIMEOUT_MEMBER(bool)
+/**
+ * @brief Installs the timeout router into the caller's promise.
+ * @param coroutine Caller coroutine promise accessor.
+ * @return Always @c true — the coroutine always suspends.
+ */
 await_suspend(auto coroutine) {
     coroutine.promise()._runner_router = timeout_router{this};
     return true;

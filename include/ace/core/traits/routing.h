@@ -49,10 +49,13 @@ namespace ace::core::traits {
     template <typename forwarded_node_t>
     struct runner_router_handle {
 
+        /** @brief Default constructor. */
         runner_router_handle() noexcept = default;
 
+        /** @brief Copy constructor. */
         runner_router_handle(const runner_router_handle&) noexcept = default;
 
+        /** @brief Move constructor. */
         runner_router_handle(runner_router_handle&&) noexcept = default;
 
         /**
@@ -64,12 +67,14 @@ namespace ace::core::traits {
         };
 
         /**
-         * @brief Cancel the pending operation and wake all associated waiters.
-         * @details The router marks the async as @c e_detached; the runner
-         * will drop it on the next @c yank() call.
+         * @brief Cancel the pending operation.
+         * @details The default implementation is a no-op; derived routers
+         * override it to cancel the pending operation and wake all associated
+         * waiters.
          */
         virtual void cancel() {};
 
+        /** @brief Default destructor. */
         virtual ~runner_router_handle() = default;
     };
 
@@ -86,6 +91,7 @@ namespace ace::core::traits {
      */
     struct async_router_handle {
 
+        /** @brief Default constructor. */
         async_router_handle() noexcept = default;
 
         /**
@@ -120,8 +126,17 @@ namespace ace::core::traits {
          */
         virtual bool has_yield() noexcept { return false; }
 
+        /**
+         * @brief Register a waiter to be resumed on the next yielded value.
+         * @param node_ptr  Pointer to the @c omni_node waiter to register.
+         * @return @c true if the waiter was registered, @c false otherwise.
+         */
         virtual bool set_yield_waiter(void* /* omni_node */) noexcept { return false; }
 
+        /**
+         * @brief Cancel a previously registered yield waiter.
+         * @return @c true if the yield waiter was canceled, @c false otherwise.
+         */
         virtual bool cancel_yield() noexcept { return false; }
 
         /**
@@ -129,6 +144,7 @@ namespace ace::core::traits {
          */
         virtual void destroy() noexcept = 0;
 
+        /** @brief Default destructor. */
         virtual ~async_router_handle() = default;
     };
 
@@ -248,6 +264,7 @@ namespace ace::core::traits {
         /// @brief @c true if a router is currently held.
         explicit operator bool() const { return _router != nullptr; };
 
+        /** @brief Destructor: releases the held router. */
         ~router_slot() { release(); };
 
         router_handle_t* _router {nullptr};                        ///< Pointer into @c _area (discriminant).

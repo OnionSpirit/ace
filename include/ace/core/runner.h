@@ -282,16 +282,7 @@ namespace ace::core {
              * @param coroutine Carrier's promise accessor.
              * @return Always @c true — the carrier always suspends.
              */
-            bool await_suspend(auto coroutine) {
-                // NOTE: Storing local value of roaming into outer
-                coroutine.promise()._roaming = _inner._coroutine.promise()._roaming;
-                // NOTE: Storing local value of status into outer
-                coroutine.promise().status(_inner._coroutine.promise().status());
-                // NOTE: No extra checks needed, because function would be called once before suspending.
-                // NOTE: Just coping router ptr. Outer task will destroy router before current promise stack
-                coroutine.promise()._runner_router << _inner._coroutine.promise()._runner_router;
-                return true;
-            }
+            bool await_suspend(auto coroutine) { return _inner.await_suspend(coroutine); }
 
             /// @brief No value produced.
             void await_resume() { }
@@ -327,7 +318,7 @@ namespace ace::core {
                     try_reattach_waiter();
                     return false;
                 }
-                bool inner_ready = _inner.await_ready();
+                const bool inner_ready = _inner.await_ready();
                 if (_inner._coroutine.done()) {
                     try_reattach_waiter();
                     return true;
@@ -354,12 +345,7 @@ namespace ace::core {
              * @param coroutine Carrier's promise accessor.
              * @return Always @c true — the carrier always suspends.
              */
-            bool await_suspend(auto coroutine) {
-                coroutine.promise()._roaming = _inner._coroutine.promise()._roaming;
-                coroutine.promise().status(_inner._coroutine.promise().status());
-                coroutine.promise()._runner_router << _inner._coroutine.promise()._runner_router;
-                return true;
-            }
+            bool await_suspend(auto coroutine) { return _inner.await_suspend(coroutine); }
 
             /// @brief No value produced.
             void await_resume() { }

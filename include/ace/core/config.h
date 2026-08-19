@@ -52,6 +52,10 @@ namespace ace::cfg {
     /// @brief Number of runner threads (including the main thread).
     struct runners_amount {};
 
+    /// @brief Default value of the coroutine @c _emergency flag (whether backup
+    ///        callbacks fire on unhandled exceptions).
+    struct emergency_default {};
+
     // ===================================================================
     // detail::default_of — internal compile-time defaults
     //     DO NOT specialise in user code.
@@ -67,6 +71,12 @@ namespace ace::cfg {
         template <>
         struct default_of<runners_amount> {
             static constexpr std::size_t value = 1;
+        };
+
+        /// @brief Default @c _emergency flag — @c true (backups fire on exceptions too).
+        template <>
+        struct default_of<emergency_default> {
+            static constexpr bool value = true;
         };
 
         // [NEW PARAM]:
@@ -106,8 +116,8 @@ namespace ace::cfg {
         /// @brief Number of runner threads. Default 1.
         std::size_t _runners_amount = detail::default_of<runners_amount>::value;
 
-        // [NEW PARAM]:
-        // int _max_tasks_per_yank = detail::default_of<max_tasks_per_yank>::value;
+        /// @brief Default value of the coroutine @c _emergency flag. Default @c true.
+        bool _emergency_default = detail::default_of<emergency_default>::value;
     };
 
     /// @brief Global singleton runtime configuration.

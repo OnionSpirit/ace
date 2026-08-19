@@ -65,6 +65,7 @@ ace::async<int> co_main(int argc, char** argv) {
 | Поле | Линия | По умолчанию |
 |------|-------|-------------|
 | `_runners_amount` | 105 | 1 |
+| `_emergency_default` | 110 | true — срабатывать ли backup-коллбекам на необработанных исключениях |
 
 Глобальный экземпляр: `ace::cfg::g_config` (line 112).
 
@@ -521,6 +522,21 @@ co_await ace::polling(true);  // пометить задачу как низко
 ```
 
 Не суспендит (`await_suspend` возвращает `false`).
+
+### backup / insure / emergency (`futures/backup.h`)
+
+```cpp
+co_await ace::backup([]{ cleanup(); });          // постоянный коллбек — fire при отмене (LIFO)
+co_await ace::backup(cleanup_task());            // payload может быть ace::task — co_await-ится до конца
+co_await ace::insure([]{ rollback(); });         // одноразовая страховка на СЛЕДУЮЩУЮ co_await/co_yield:
+                                                 //  - отмена на этой операции → коллбек выполняется
+                                                 //  - операция пройдена → страховка снимается
+                                                 //  - новая регистрация backup/insure вытесняет её
+co_await ace::emergency(false);                  // не срабатывать backup на исключениях (дефолт — true,
+                                                 // конфигурируется через ace::cfg::g_config._emergency_default)
+```
+
+**Fire:** все коллбеки (callable и task) складываются в одну fire task, планируемую в раннер отменённой корутины (`runner::attach`; нет runner → `ace::schedule`). Fire task идёт в обратном порядке: callable — вызов, `ace::task` — `co_await` до завершения. Точки fire: `async_router::cancel()` и `~async()` (гейт: `e_finished` — пропуск; `e_failed && !_emergency` — пропуск). При OOM при создании fire task — `throw std::runtime_error("failed to init backup context. out of memory.")`.
 
 ---
 
@@ -1087,13 +1103,22 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 
 9. **`automaton` coroutines** — `co_yield` значения потребляются через `ping()`. `join()` делает ping + cancel. Деструктор `async_handle<..., automaton_rule>` автоматически отменяет автоматон.
 
+10. **НЕ использовать лямбда-корутины (coroutine lambdas)** — `[&]() -> ace::task {...}()` и т.п. **запрещены**. GCC размещает closure лямбды в кадре корутины так, что он накладывается на поле `_block` promise: вызов `observe()` (через `setup_control_block()`) затирает захваченные ссылки, и корутина читает мусор (ASan: heap-use-after-free / stack-use-after-scope). Баг пред-существующий (воспроизводится на чистом HEAD), проявляется при `observe()` перед `schedule()`/spawn, а также у task-payload в backup/insure. Решение: оформлять корутины как именованные функции/helper-методы с параметрами-ссылками. Обычные (не-корутинные) лямбды — можно.
+
+    <!-- TODO (agent): реализовать поддержку лямбда-корутин — устранить коллизию
+         closure лямбды с полем _block promise (GCC размещает closure в кадре на
+         месте первого поля promise). Варианты: (а) явно хранить closure в promise
+         (как параметр), (б) вычислять смещение closure и переносить _block,
+         (в) вынести control_block в отдельную аллокацию. После фикса снять
+         ограничение 10 и переписать тесты backup_fixture на лямбды. -->
+
 ---
 
 ## Файловая карта
 
 | Файл | Что содержит |
 |------|-------------|
-| `ace.h` | Master include: entry, compose, spawn, post, reattach, get_runner, roaming. Алиасы: `spawn`, `post`, `roaming`, `get_runner`, `reattach`. |
+| `ace.h` | Master include: entry, compose, spawn, post, reattach, get_runner, roaming, backup. Алиасы: `spawn`, `post`, `roaming`, `get_runner`, `reattach`, `backup`, `insure`, `emergency`. |
 | `core/entry.h` | `co_main()`, `ace::cfg::init()`, `ace::entry`, `ace::entry_result` |
 | `core/config.h` | `ace::cfg::config`, `ace::cfg::g_config`, `ace::cfg::ace_param<Tag>`, `detail::resolve<Tag>()` |
 | `core/async.h` | `async<T>`, `promise<T>`, `automaton<T>`, `task`, `task_wrap`, `suspend`, promise_type, async_router, omni_node/omni_runner/runner_router aliases |
@@ -1127,6 +1152,7 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 | `futures/roaming.h` | `roaming(bool)` — флаг миграции |
 | `futures/get_runner.h` | `get_runner` — текущий раннер |
 | `futures/polling.h` | `polling(bool)` — флаг низкого приоритета |
+| `futures/backup.h` | `backup(payload)` — постоянный коллбек при отмене (callable/task, LIFO); `insure(payload)` — одноразовая страховка на следующую co_await/co_yield; `emergency(bool)` — флаг срабатывания на исключениях; fire task + `promise_type::fire_backups()` |
 | `services/kernelic.h` | `kernel_controller` (io_uring service), `kernel_observer`, `kernel_entity`, все `io_uring_prep_*`, iovec management |
 | `services/clock.h` | `clock` service, `hierarchical_time_wheel`, `time_wheel`, `time_slot`, `timer_record`, `cached_now`, `clock::subscribe()`, `clock::ping()` |
 

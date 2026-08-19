@@ -3744,3 +3744,468 @@ TEST_F(base_fixture, tcp_sendmsg_recvmsg_echo) {
     ASSERT_GE(res.size(), 1u);
     EXPECT_EQ(1, res[0]);
 }
+
+// ==========================================================================
+// backup_fixture — backup / insure / emergency callback tests
+
+// ==========================================================================
+// backup_fixture — backup / insure / emergency callback tests
+// ==========================================================================
+
+// Проверяет: при отмене корутины зарегистрированные backup-коллбеки
+// выполняются в обратном порядке регистрации (LIFO).
+TEST_F(backup_fixture, backup_cancel_fires_lifo) {
+    // Почему проверяю именно так: три коллбека записывают номера в общий
+    // вектор; если порядок выполнения обратный — получим [3,2,1]. Отмену делаем
+    // через async_handle спавн-нутой задачи (observe()-из-main на лямбда-задачах
+    // портит захваты — pre-existing баг, поэтому драйвер-корутина спавнит задачу
+    // и отменяет её изнутри).
+    std::vector<int> order;
+    ace::schedule([&order, this]() -> ace::task {
+        auto handle = co_await ace::spawn(triple_backup_sleeper(order));
+        co_await ace::futures::timeout(std::chrono::milliseconds(10));
+        handle.cancel();
+        auto joined = co_await handle.join();
+        _ch << (joined ? 0 : 1);
+        co_return;
+    }());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+    auto res = fetch(_ch);
+    ASSERT_EQ(1u, res.size());
+    EXPECT_EQ(1, res[0]);
+    ASSERT_EQ(3u, order.size());
+    EXPECT_EQ(3, order[0]);
+    EXPECT_EQ(2, order[1]);
+    EXPECT_EQ(1, order[2]);
+}
+
+// Проверяет: корутина, дошедшая до co_return, НЕ выполняет backup-коллбеки.
+TEST_F(backup_fixture, backup_normal_completion_no_fire) {
+    // Почему проверяю именно так: задача с двумя backup-коллбеками просто
+    // завершается; если fire сработает при обычном завершении — это баг
+    // (страховка нужна только при «не дошла до выхода»).
+    std::vector<int> order;
+    ace::schedule([&order]() -> ace::task {
+        co_await ace::backup([&order] { order.push_back(1); });
+        co_await ace::backup([&order] { order.push_back(2); });
+        co_return;
+    }());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+    EXPECT_TRUE(order.empty());
+}
+
+// Проверяет: eager promise, зарегистрировавший backup и суспендированный в main
+// (без раннера), при уничтожении объекта вызывает fire через ~async() и
+// ace::schedule fallback.
+TEST_F(backup_fixture, backup_destroy_incomplete_fires) {
+    // Почему проверяю именно так: у корутины нет _runner (создана вне run()),
+    // поэтому fire_backups обязан запланировать fire task через ace::schedule;
+    // до следующего run() коллбеки выполняться не должны.
+    std::vector<int> order;
+    {
+        auto p = [&order]() -> ace::promise<int> {
+            co_await ace::backup([&order] { order.push_back(7); });
+            base_fixture::once_suspend blocker;
+            co_await blocker;
+            co_return 42;
+        }();
+        EXPECT_TRUE(order.empty());
+    }
+    EXPECT_TRUE(order.empty());
+    ace::run();
+    ASSERT_EQ(1u, order.size());
+    EXPECT_EQ(7, order[0]);
+}
+
+// Проверяет: fire выполняется НЕ инлайн в контексте cancel, а планируется в
+// раннер — драйвер продолжает работу раньше, чем выполняются коллбеки.
+TEST_F(backup_fixture, backup_fire_scheduled_not_inline) {
+    // Почему проверяю именно так: пользовательская семантика — все коллбеки
+    // выполняются в рамках одной задачи на раннере (LIFO, с возможностью
+    // co_await task-коллбеков). Если бы fire был инлайновым, коллбек записал
+    // бы 1 в канал ДО маркера 100 драйвера; при планировании в раннер порядок
+    // обратный: сначала маркер драйвера, затем коллбек.
+    ace::schedule([this]() -> ace::task {
+        auto handle = co_await ace::spawn([this]() -> ace::task {
+            co_await ace::backup([this] { _ch << 1; });
+            co_await ace::futures::timeout(std::chrono::seconds(10));
+            co_return;
+        }());
+        co_await ace::futures::timeout(std::chrono::milliseconds(10));
+        handle.cancel();
+        _ch << 100;
+        auto joined = co_await handle.join();
+        _ch << (joined ? 0 : 1);
+        co_return;
+    }());
+    ace::run();
+    auto res = fetch(_ch);
+    ASSERT_EQ(3u, res.size());
+    EXPECT_EQ(100, res[0]);
+    EXPECT_EQ(1, res[1]);
+    EXPECT_EQ(1, res[2]);
+}
+
+// Проверяет: task-коллбеки co_await-ятся до завершения (включая их собственные
+// приостановки), а порядок выполнения смеси callable/task остаётся LIFO.
+TEST_F(backup_fixture, backup_task_payload_awaited) {
+    // Почему проверяю именно так: регистрируем callable, потом task с таймером,
+    // потом callable. При fire первым должен выполниться последний callable (3),
+    // затем task (2 — с ожиданием её таймера 5ms внутри run()), затем (1).
+    std::vector<int> order;
+    ace::schedule([&order, this]() -> ace::task {
+        auto handle = co_await ace::spawn([&order]() -> ace::task {
+            co_await ace::backup([&order] { order.push_back(1); });
+            co_await ace::backup(task_payload_two(order));
+            co_await ace::backup([&order] { order.push_back(3); });
+            co_await ace::futures::timeout(std::chrono::seconds(10));
+            co_return;
+        }());
+        co_await ace::futures::timeout(std::chrono::milliseconds(10));
+        handle.cancel();
+        auto joined = co_await handle.join();
+        _ch << (joined ? 0 : 1);
+        co_return;
+    }());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+    auto res = fetch(_ch);
+    ASSERT_EQ(1u, res.size());
+    EXPECT_EQ(1, res[0]);
+    ASSERT_EQ(3u, order.size());
+    EXPECT_EQ(3, order[0]);
+    EXPECT_EQ(2, order[1]);
+    EXPECT_EQ(1, order[2]);
+}
+
+// Проверяет: insure срабатывает, если корутина отменена во время защищаемой
+// приостановки (следующая co_await после insure).
+TEST_F(backup_fixture, insure_fires_when_cancelled_during_protected_await) {
+    // Почему проверяю именно так: insure защищает конкретную co_await; отмена
+    // на ней означает «не дошла до выхода» — страховка обязана сработать.
+    std::vector<int> order;
+    ace::schedule([&order, this]() -> ace::task {
+        auto handle = co_await ace::spawn([&order]() -> ace::task {
+            co_await ace::insure([&order] { order.push_back(1); });
+            co_await ace::futures::timeout(std::chrono::seconds(10));
+            co_return;
+        }());
+        co_await ace::futures::timeout(std::chrono::milliseconds(10));
+        handle.cancel();
+        auto joined = co_await handle.join();
+        _ch << (joined ? 0 : 1);
+        co_return;
+    }());
+    ace::run();
+    auto res = fetch(_ch);
+    ASSERT_EQ(1u, res.size());
+    EXPECT_EQ(1, res[0]);
+    ASSERT_EQ(1u, order.size());
+    EXPECT_EQ(1, order[0]);
+}
+
+// Проверяет: insure удаляется, если защищаемая co_await успешно пройдена;
+// отмена на более поздней приостановке страховку не выполняет.
+TEST_F(backup_fixture, insure_dropped_after_passing_protected_await) {
+    // Почему проверяю именно так: корутина проходит защищаемый таймер (5ms —
+    // pass_op снимает страховку), затем висит на 10s таймере. Cancel должен
+    // найти пустой набор коллбеков.
+    std::vector<int> order;
+    ace::schedule([&order, this]() -> ace::task {
+        auto handle = co_await ace::spawn([&order]() -> ace::task {
+            co_await ace::insure([&order] { order.push_back(1); });
+            co_await ace::futures::timeout(std::chrono::milliseconds(5));
+            co_await ace::futures::timeout(std::chrono::seconds(10));
+            co_return;
+        }());
+        co_await ace::futures::timeout(std::chrono::milliseconds(20));
+        handle.cancel();
+        auto joined = co_await handle.join();
+        _ch << (joined ? 0 : 1);
+        co_return;
+    }());
+    ace::run();
+    auto res = fetch(_ch);
+    ASSERT_EQ(1u, res.size());
+    EXPECT_EQ(1, res[0]);
+    EXPECT_TRUE(order.empty());
+}
+
+// Проверяет: если следующая операция после insure готова синхронно (не
+// суспендирует), страховка снимается при старте следующей за ней операции
+// (механизм _insured_prev в begin_op).
+TEST_F(backup_fixture, insure_dropped_when_next_op_ready) {
+    // Почему проверяю именно так: roaming — готовая операция (await_suspend
+    // возвращает false). Страховка обязана пережить её старт, но исчезнуть
+    // после её прохождения — до начала следующей приостановки. Без бита
+    // _insured_prev она либо снялась бы на старте roaming (раньше времени),
+    // либо ложно сработала при отмене на следующем таймере.
+    std::vector<int> order;
+    ace::schedule([&order, this]() -> ace::task {
+        auto handle = co_await ace::spawn([&order]() -> ace::task {
+            co_await ace::insure([&order] { order.push_back(1); });
+            co_await ace::roaming(false);
+            co_await ace::futures::timeout(std::chrono::seconds(10));
+            co_return;
+        }());
+        co_await ace::futures::timeout(std::chrono::milliseconds(10));
+        handle.cancel();
+        auto joined = co_await handle.join();
+        _ch << (joined ? 0 : 1);
+        co_return;
+    }());
+    ace::run();
+    auto res = fetch(_ch);
+    ASSERT_EQ(1u, res.size());
+    EXPECT_EQ(1, res[0]);
+    EXPECT_TRUE(order.empty());
+}
+
+// Проверяет: регистрация backup при активной страховке вытесняет предыдущий
+// insure из набора — при отмене срабатывает только новый backup.
+TEST_F(backup_fixture, insure_replaced_by_backup) {
+    // Почему проверяю именно так: «следующий co_await backup() сбросит
+    // предыдущий insure» — foo вынимается из _backups, флаг сбрасывается;
+    // при отмене выполняется только baz.
+    std::vector<int> order;
+    ace::schedule([&order, this]() -> ace::task {
+        auto handle = co_await ace::spawn([&order]() -> ace::task {
+            co_await ace::insure([&order] { order.push_back(1); });
+            co_await ace::backup([&order] { order.push_back(2); });
+            co_await ace::futures::timeout(std::chrono::seconds(10));
+            co_return;
+        }());
+        co_await ace::futures::timeout(std::chrono::milliseconds(10));
+        handle.cancel();
+        auto joined = co_await handle.join();
+        _ch << (joined ? 0 : 1);
+        co_return;
+    }());
+    ace::run();
+    auto res = fetch(_ch);
+    ASSERT_EQ(1u, res.size());
+    EXPECT_EQ(1, res[0]);
+    ASSERT_EQ(1u, order.size());
+    EXPECT_EQ(2, order[0]);
+}
+
+// Проверяет: регистрация нового insure вытесняет предыдущий insure.
+TEST_F(backup_fixture, insure_replaced_by_insure) {
+    // Почему проверяю именно так: страховать можно только одну операцию;
+    // новая страховка заменяет старую — при отмене выполняется только bar.
+    std::vector<int> order;
+    ace::schedule([&order, this]() -> ace::task {
+        auto handle = co_await ace::spawn([&order]() -> ace::task {
+            co_await ace::insure([&order] { order.push_back(1); });
+            co_await ace::insure([&order] { order.push_back(2); });
+            co_await ace::futures::timeout(std::chrono::seconds(10));
+            co_return;
+        }());
+        co_await ace::futures::timeout(std::chrono::milliseconds(10));
+        handle.cancel();
+        auto joined = co_await handle.join();
+        _ch << (joined ? 0 : 1);
+        co_return;
+    }());
+    ace::run();
+    auto res = fetch(_ch);
+    ASSERT_EQ(1u, res.size());
+    EXPECT_EQ(1, res[0]);
+    ASSERT_EQ(1u, order.size());
+    EXPECT_EQ(2, order[0]);
+}
+
+// Проверяет: insure в automaton срабатывает при отмене, когда генератор
+// приостановлен на защищаемом co_yield.
+TEST_F(backup_fixture, insure_automaton_yield_fires) {
+    // Почему проверяю именно так: co_yield — операция, которую защищает insure;
+    // отмена на yield (значение не «пройдено» генератором) обязана выполнить
+    // страховку. Генератор оформлен helper-функцией (не лямбдой) из-за
+    // observe() на лямбда-корутинах.
+    std::vector<int> order;
+    ace::schedule([&order, this]() -> ace::task {
+        auto at = yield_after_insure(order);
+        auto handle = at.observe();
+        _ch << (co_await at);
+        handle.cancel();
+        (void)co_await at;
+        _ch << 99;
+        co_return;
+    }());
+    ace::run();
+    auto res = fetch(_ch);
+    ASSERT_EQ(2u, res.size());
+    EXPECT_EQ(10, res[0]);
+    EXPECT_EQ(99, res[1]);
+    ASSERT_EQ(1u, order.size());
+    EXPECT_EQ(1, order[0]);
+}
+
+// Проверяет: insure в automaton удаляется, когда co_yield успешно пройден
+// генератором; отмена позже страховку не выполняет.
+TEST_F(backup_fixture, insure_automaton_yield_dropped) {
+    // Почему проверяю именно так: первое co_await at потребляет значение yield
+    // без resume, второе — возобновляет генератор (pass_op снимает страховку),
+    // после чего генератор висит на 10s таймере. Cancel по handle находит пустой
+    // набор. Маркер 10 в канале подтверждает, что yield был потреблён.
+    std::vector<int> order;
+    ace::schedule([&order, this]() -> ace::task {
+        auto at = yield_insure_then_timeout(order);
+        auto handle = at.observe();
+        _ch << (co_await at);
+        (void)co_await at;
+        handle.cancel();
+        _ch << 99;
+        co_return;
+    }());
+    ace::run();
+    auto res = fetch(_ch);
+    ASSERT_EQ(2u, res.size());
+    EXPECT_EQ(10, res[0]);
+    EXPECT_EQ(99, res[1]);
+    EXPECT_TRUE(order.empty());
+}
+
+// Проверяет: в цикле «insure + co_await» каждая страховка снимается при
+// прохождении своей операции — при отмене срабатывает только последняя,
+// контейнер не накапливает записи.
+TEST_F(backup_fixture, insure_loop_bounded) {
+    // Почему проверяю именно так: если бы insure не удалялись при прохождении
+    // операций, при отмене выполнились бы ВСЕ 10 коллбеков; bounded-семантика
+    // оставляет только страховку для непройденной 10s приостановки.
+    std::vector<int> order;
+    ace::schedule([&order, this]() -> ace::task {
+        auto handle = co_await ace::spawn([&order]() -> ace::task {
+            for (int i = 0; i < 9; ++i) {
+                co_await ace::insure([&order, i] { order.push_back(i); });
+                co_await ace::futures::timeout(std::chrono::milliseconds(5));
+            }
+            co_await ace::insure([&order] { order.push_back(99); });
+            co_await ace::futures::timeout(std::chrono::seconds(10));
+            co_return;
+        }());
+        co_await ace::futures::timeout(std::chrono::milliseconds(100));
+        handle.cancel();
+        auto joined = co_await handle.join();
+        _ch << (joined ? 0 : 1);
+        co_return;
+    }());
+    ace::run();
+    auto res = fetch(_ch);
+    ASSERT_EQ(1u, res.size());
+    EXPECT_EQ(1, res[0]);
+    ASSERT_EQ(1u, order.size());
+    EXPECT_EQ(99, order[0]);
+}
+
+// Проверяет: по умолчанию (флаг _emergency = true) backup-коллбеки срабатывают
+// и при необработанном исключении.
+TEST_F(backup_fixture, emergency_default_exception_fires) {
+    // Почему проверяю именно так: unhandled_exception → e_failed → раннер
+    // снимает задачу → ~async() с гейтом «e_failed и _emergency» — дефолт из
+    // конфигурации (true) → fire выполняется в том же run().
+    std::vector<int> order;
+    ace::schedule(throwing_backup(order));
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+    ASSERT_EQ(1u, order.size());
+    EXPECT_EQ(1, order[0]);
+}
+
+// Проверяет: явный emergency(true) даёт срабатывание backup-коллбеков при
+// необработанном исключении.
+TEST_F(backup_fixture, emergency_true_exception_fires) {
+    std::vector<int> order;
+    ace::schedule([&order]() -> ace::task {
+        co_await ace::emergency(true);
+        co_await ace::backup([&order] { order.push_back(1); });
+        throw std::runtime_error("backup_fixture: intentional exception");
+        co_return;
+    }());
+    ace::run();
+    ASSERT_EQ(1u, order.size());
+    EXPECT_EQ(1, order[0]);
+}
+
+// Проверяет: emergency(false) запрещает срабатывание backup-коллбеков при
+// необработанном исключении (только при отмене).
+TEST_F(backup_fixture, emergency_false_exception_no_fire) {
+    // Почему проверяю именно так: гейт в ~async() — e_failed без _emergency
+    // пропускает fire. Отмена при этом по-прежнему выполняет коллбеки.
+    std::vector<int> order;
+    ace::schedule([&order]() -> ace::task {
+        co_await ace::emergency(false);
+        co_await ace::backup([&order] { order.push_back(1); });
+        throw std::runtime_error("backup_fixture: intentional exception");
+        co_return;
+    }());
+    ace::run();
+    EXPECT_TRUE(order.empty());
+}
+
+// Проверяет: дефолт _emergency конфигурируется через ace::cfg::g_config.
+TEST_F(backup_fixture, emergency_config_default) {
+    // Почему проверяю именно так: promise читает g_config._emergency_default
+    // при создании корутины; false в конфиге → новые корутины не срабатывают
+    // на исключениях. TearDown восстанавливает дефолт.
+    ace::cfg::g_config._emergency_default = false;
+    std::vector<int> order;
+    ace::schedule(throwing_backup(order));
+    ace::run();
+    EXPECT_TRUE(order.empty());
+}
+
+// Проверяет: backup-коллбеки automaton-генератора срабатывают при cancel,
+// пока генератор приостановлен на co_yield.
+TEST_F(backup_fixture, backup_in_automaton_cancel) {
+    // Почему проверяю именно так: automaton — корутина с контрол-блоком;
+    // cancel идёт через async_router::cancel → fire. Генератор висит на yield
+    // (значение потреблено, resume не было) — «не дошёл до выхода».
+    std::vector<int> order;
+    ace::schedule([&order, this]() -> ace::task {
+        auto at = yield_after_backup(order);
+        auto handle = at.observe();
+        _ch << (co_await at);
+        handle.cancel();
+        (void)co_await at;
+        _ch << 99;
+        co_return;
+    }());
+    ace::run();
+    auto res = fetch(_ch);
+    ASSERT_EQ(2u, res.size());
+    EXPECT_EQ(10, res[0]);
+    EXPECT_EQ(99, res[1]);
+    ASSERT_EQ(1u, order.size());
+    EXPECT_EQ(1, order[0]);
+}
+
+// Проверяет: cancel через async_handle спавн-нутой задачи выполняет
+// backup-коллбеки.
+TEST_F(backup_fixture, backup_cancel_via_spawn_handle) {
+    // Почему проверяю именно так: spawn + async_handle::cancel — основной
+    // сценарий отмены из «внешнего мира»; join должен вернуть false
+    // (не finished), а backup — сработать в том же run().
+    std::vector<int> order;
+    ace::schedule([&order, this]() -> ace::task {
+        auto handle = co_await ace::spawn([&order]() -> ace::task {
+            co_await ace::backup([&order] { order.push_back(1); });
+            co_await ace::futures::timeout(std::chrono::seconds(10));
+            co_return;
+        }());
+        co_await ace::futures::timeout(std::chrono::milliseconds(10));
+        handle.cancel();
+        auto joined = co_await handle.join();
+        _ch << (joined ? 0 : 1);
+        co_return;
+    }());
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+    auto res = fetch(_ch);
+    ASSERT_EQ(1u, res.size());
+    EXPECT_EQ(1, res[0]);
+    ASSERT_EQ(1u, order.size());
+    EXPECT_EQ(1, order[0]);
+}

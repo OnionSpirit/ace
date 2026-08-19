@@ -34,6 +34,9 @@
 #include <cstring>
 #include <expected>
 #include <iostream>
+#include <functional>
+#include <variant>
+#include <vector>
 
 #include <nukes/dynamic/regular_queue.h>
 #include <nukes/details/prefetch.h>
@@ -43,6 +46,7 @@
 #include "ace/core/tools/macro.h"
 #include "ace/core/control.h"
 #include "ace/core/traits/routing.h"
+#include "ace/core/config.h"
 #include "nukes/dynamic/mpsc_queue.h"
 #include "tools/omniptr.h"
 
@@ -53,6 +57,9 @@
 namespace ace::core {
 
     struct runner;
+
+    /// @brief Forward declaration — full definition at the bottom of this header.
+    struct backup_record;
 
     /**
      * @brief Core coroutine async type.
@@ -197,6 +204,11 @@ namespace ace::core {
                     _coroutine.promise()._runner_router->cancel();
                     _coroutine.promise()._runner_router.release();
                 }
+                // NOTE: Firing backup callbacks for coroutines that did not reach
+                // co_return.  Unhandled exceptions fire only when _emergency is set.
+                const promise_lifecycle final_status = _coroutine.promise().status();
+                if (final_status not_eq e_finished and (final_status not_eq e_failed or _coroutine.promise()._emergency))
+                    _coroutine.promise().fire_backups();
                 // NOTE: Destroying stack only if it is become untracked
                 if (control_block::untrack(_coroutine.promise()._block))
                     _coroutine.destroy();
@@ -322,7 +334,8 @@ namespace ace::core {
             /**
              * @brief Cancel the managed coroutine.
              * @details Forwards the cancellation to the active runner router (if
-             * any), releases it, and marks the promise status @c e_canceled.
+             * any), releases it, marks the promise status @c e_canceled and fires
+             * the registered backup callbacks.
              */
             void cancel() noexcept override {
                 if (not _address) [[unlikely]] return;
@@ -332,6 +345,7 @@ namespace ace::core {
                     handle.promise()._runner_router.release();
                 }
                 handle.promise().status(e_canceled);
+                handle.promise().fire_backups();
             }
 
             /**
@@ -444,10 +458,22 @@ namespace ace::core {
             // NOTE: Context owns only one promise. Extra slot object is unnecessary
             /// @brief Router installed into the control block for join / cancel.  Optional because the context owns only one promise.
             std::optional<async_router> _self_router;
+            /// @brief Registered backup callbacks (callables and tasks).  Executed in reverse order on cancel.
+            // TODO: Replace std::function / std::vector with a custom stack allocator
+            // when the framework gets one — each backup/insure call performs a heap allocation.
+            std::vector<backup_record> _backups {};
             /// @brief When @c true the balancer may migrate the task to another runner.
             bool _roaming { false };
             /// @brief When @c true the runner holds the task in the low priority service pool.
             bool _polling { false };
+            /// @brief When @c true backup callbacks fire on unhandled exceptions too.
+            ///        Default value is read from the framework configuration (@c ace::cfg::g_config).
+            bool _emergency { ace::cfg::g_config._emergency_default };
+            /// @brief When @c true the last element of @c _backups is a one-shot insure record.
+            bool _insured { false };
+            /// @brief Snapshot of @c _insured taken at the previous co_await start.
+            ///        Used to defer the insure removal past synchronously completed (ready) operations.
+            bool _insured_prev { false };
         };
 
         /**
@@ -603,6 +629,68 @@ namespace ace::core {
                 return &promise_locals::_self_router.value();
             }
 
+            // -----------------------------------------------------------------------
+            // Backup / insure callbacks (fire-and-forget safety net on cancel)
+            // -----------------------------------------------------------------------
+
+            /**
+             * @brief Register a permanent backup callback.
+             * @details A pending one-shot insure (flag @c _insured) is discarded
+             * first, then the new record is appended.  The record is executed on
+             * cancel together with all other backups, in reverse registration order.
+             * @param record  Backup payload (callable or task).
+             * @note Defined in <ace/futures/backup.h> — the record type is only
+             * complete there.
+             */
+            void register_backup(backup_record record);
+
+            /**
+             * @brief Register a one-shot insure callback.
+             * @details Same as @c register_backup, but arms the @c _insured flag:
+             * the record protects exactly the next co_await / co_yield operation
+             * and is removed once that operation completes.
+             * @param record  Backup payload (callable or task).
+             * @note Defined in <ace/futures/backup.h>.
+             */
+            void register_insure(backup_record record);
+
+            /**
+             * @brief Called at the start of every co_await operation.
+             * @details Removes an armed insure when the operation it protected
+             * completed synchronously (without suspending): the snapshot
+             * @c _insured_prev tells that the flag was already set when the
+             * previous operation started, so the current one is a fresh op and
+             * the protected one is done.
+             */
+            void begin_op() {
+                if (promise_locals::_insured_prev and promise_locals::_insured) {
+                    promise_locals::_backups.pop_back();
+                    promise_locals::_insured = false;
+                }
+                promise_locals::_insured_prev = promise_locals::_insured;
+            }
+
+            /**
+             * @brief Called when the coroutine resumes past a suspension point.
+             * @details The suspended operation was passed successfully, so an
+             * armed insure (protecting it) is removed.
+             */
+            void pass_op() {
+                if (promise_locals::_insured) {
+                    promise_locals::_backups.pop_back();
+                    promise_locals::_insured = false;
+                }
+            }
+
+            /**
+             * @brief Fire all registered backup callbacks in reverse order.
+             * @details Moves the records into a fire task scheduled on the owning
+             * runner (or the dispatcher when no runner is assigned).  Defined in
+             * <ace/futures/backup.h> — a TU that cancels or destroys coroutines
+             * must include it (via ace/ace.h).
+             */
+            void fire_backups();
+
             /// @brief Rule-dependent locals instance (see @c promise_locals).
             promise_locals _locals;
         };
@@ -628,6 +716,7 @@ namespace ace::core {
             }
             if (is_resumable()) {
                 release_future();
+                _coroutine.promise().pass_op();
                 _coroutine.resume();
                 propagate();
                 return _coroutine.done();
@@ -695,6 +784,7 @@ namespace ace::core {
             // NOTE: Releasing future and resume async
             if (is_ready) {
                 release_future();
+                _coroutine.promise().pass_op();
                 _coroutine.resume();
             }
             // NOTE: For user provided touch result ptr
@@ -705,6 +795,17 @@ namespace ace::core {
             else return;
         }
 
+    };
+
+    /**
+     * @brief One entry in the coroutine's backup callback list.
+     * @details The payload is either a synchronous callable or a lazy
+     * @c ace::task.  Tasks are co_awaited to completion when fired; callables
+     * are invoked directly.  Records execute in reverse registration order.
+     */
+    struct backup_record {
+        /// @brief Payload: index 0 — callable, index 1 — task.
+        std::variant<std::function<void()>, async<>> _payload {};
     };
 
 }

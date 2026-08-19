@@ -1079,6 +1079,71 @@ struct cutex_extra_fixture : base_fixture {
 };
 
 // ==========================================================================
+// backup_fixture — backup / insure / emergency callback tests
+// ==========================================================================
+
+struct backup_fixture : base_fixture {
+    void TearDown() override {
+        ace::cfg::g_config._emergency_default = true;
+    }
+
+    ace::futures::tunnel::dyn::bus<int> _ch {};
+
+    // Корутина с тремя постоянными backup-коллбеками и вечной приостановкой.
+    // Используется тестами отмены: cancel через handle → fire в обратном порядке.
+    // ВАЖНО: корутина оформлена НЕ лямбдой — observe() на lambda-корутине
+    // портит захваченные ссылки (pre-existing баг фреймворка, см. примечание
+    // в TEST_PLAN.md), поэтому тесты отмены используют helper-функции.
+    static ace::task triple_backup_sleeper(std::vector<int>& order) {
+        co_await ace::backup([&order] { order.push_back(1); });
+        co_await ace::backup([&order] { order.push_back(2); });
+        co_await ace::backup([&order] { order.push_back(3); });
+        co_await ace::futures::timeout(std::chrono::seconds(10));
+        co_return;
+    }
+
+    // Корутина, которая бросает исключение после регистрации backup-коллбека.
+    // Возвращает ссылку на order для наблюдения за срабатыванием.
+    static ace::task throwing_backup(std::vector<int>& order) {
+        co_await ace::backup([&order] { order.push_back(1); });
+        throw std::runtime_error("backup_fixture: intentional exception");
+        co_return;
+    }
+
+    // Automaton: insure защищает co_yield. Не-лямбда — из-за observe().
+    static ace::automaton<int> yield_after_insure(std::vector<int>& order) {
+        co_await ace::insure([&order] { order.push_back(1); });
+        co_yield 10;
+        co_return 42;
+    }
+
+    // Automaton: insure защищает co_yield, затем генератор висит на таймере.
+    // Не-лямбда — из-за observe().
+    static ace::automaton<int> yield_insure_then_timeout(std::vector<int>& order) {
+        co_await ace::insure([&order] { order.push_back(1); });
+        co_yield 10;
+        co_await ace::futures::timeout(std::chrono::milliseconds(100));
+        co_return 42;
+    }
+
+    // Automaton: постоянный backup, затем co_yield. Не-лямбда — из-за observe().
+    static ace::automaton<int> yield_after_backup(std::vector<int>& order) {
+        co_await ace::backup([&order] { order.push_back(1); });
+        co_yield 10;
+        co_return 42;
+    }
+
+    // Task-payload для backup/insure: собственная приостановка на таймере,
+    // затем запись маркера. Не-лямбда — closure лямбда-таски не переживает
+    // перенос в fire task (pre-existing баг), helper-функция лишена этой проблемы.
+    static ace::task task_payload_two(std::vector<int>& order) {
+        co_await ace::futures::timeout(std::chrono::milliseconds(5));
+        order.push_back(2);
+        co_return;
+    }
+};
+
+// ==========================================================================
 // get_runner_fixture — get_runner tests
 // ==========================================================================
 

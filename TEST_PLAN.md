@@ -45,6 +45,7 @@
    - [3.18 ace_entry.cpp](#318-ace_entrycpp)
    - [3.19 fs.h](#319-fsh)
    - [3.20 console.h](#320-consoleh)
+   - [3.21 futures/backup.h](#321-futuresbackuph)
 4. [Кросс-механизмы (взаимодействия)](#кросс-механизмы)
 5. [Обновление meson.build и discover_tests.py](#обновление-сборки)
 6. [Карта fixture-классов (итоговая)](#карта-fixture-классов)
@@ -712,6 +713,48 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 
 ---
 
+### 3.21 futures/backup.h — backup / insure / emergency (добавлен)
+
+#### `backup_fixture` (добавлен)
+
+Механика страховки: `co_await backup(callable|task)` регистрирует коллбек,
+выполняемый при отмене корутины (не дошла до `co_return`) в обратном порядке
+(LIFO); `co_await insure(...)` — одноразовая страховка на следующую
+co_await/co_yield операцию (снимается при её успешном прохождении, сбрасывается
+новой регистрацией); `co_await emergency(bool)` — флаг срабатывания на
+необработанных исключениях (дефолт из `ace::cfg::g_config._emergency_default`).
+
+| # | Тест | Что проверяет | Статус |
+|---|------|--------------|--------|
+| BK1 | `backup_cancel_fires_lifo` | 3 backup + cancel → выполнение в обратном порядке [3,2,1] | ✅ |
+| BK2 | `backup_normal_completion_no_fire` | `co_return` → коллбеки не выполнены | ✅ |
+| BK3 | `backup_destroy_incomplete_fires` | eager promise в main (без runner): ~async() → fire через `ace::schedule` fallback | ✅ |
+| BK4 | `backup_fire_scheduled_not_inline` | fire НЕ инлайновый: маркер драйвера (100) до коллбека (1) в канале | ✅ |
+| BK5 | `backup_task_payload_awaited` | task-коллбек co_await-ится до завершения (с его таймером), LIFO-смесь callable/task | ✅ |
+| BK6 | `insure_fires_when_cancelled_during_protected_await` | отмена на защищаемой co_await → страховка сработала | ✅ |
+| BK7 | `insure_dropped_after_passing_protected_await` | защищаемая co_await пройдена → страховка снята | ✅ |
+| BK8 | `insure_dropped_when_next_op_ready` | следующая операция готова синхронно (roaming) → страховка снята (механизм `_insured_prev`) | ✅ |
+| BK9 | `insure_replaced_by_backup` | регистрация backup вытесняет insure → при отмене только backup | ✅ |
+| BK10 | `insure_replaced_by_insure` | регистрация insure вытесняет insure → при отмене только новый | ✅ |
+| BK11 | `insure_automaton_yield_fires` | automaton: отмена на co_yield → страховка сработала | ✅ |
+| BK12 | `insure_automaton_yield_dropped` | automaton: co_yield пройден (resume) → страховка снята | ✅ |
+| BK13 | `insure_loop_bounded` | цикл 9x{insure+co_await} → при отмене срабатывает только последняя страховка (bounded-память) | ✅ |
+| BK14 | `emergency_default_exception_fires` | исключение, дефолт true → коллбеки сработали (путь ~async) | ✅ |
+| BK15 | `emergency_true_exception_fires` | явный emergency(true) + исключение → сработали | ✅ |
+| BK16 | `emergency_false_exception_no_fire` | emergency(false) + исключение → не сработали | ✅ |
+| BK17 | `emergency_config_default` | `g_config._emergency_default = false` → новые корутины не срабатывают на исключениях | ✅ |
+| BK18 | `backup_in_automaton_cancel` | automaton: backup + cancel на co_yield → сработал | ✅ |
+| BK19 | `backup_cancel_via_spawn_handle` | spawn + `async_handle::cancel` → backup сработал, join=false | ✅ |
+
+> ⚠️ **Pre-existing баг фреймворка (не связан с этой фичей):** `observe()` на
+> лямбда-корутине перед `schedule()`/spawn портит захваченные ссылки — GCC
+> размещает closure лямбды в кадре так, что он накладывается на поле `_block`
+> promise, и `setup_control_block()` затирает захват. Поэтому тесты отмены
+> используют helper-функции (не лямбды) и отмену изнутри раннера
+> (spawn + async_handle). Баг воспроизводится на чистом HEAD.
+
+---
+
 ## Кросс-механизмы
 
 Тесты взаимодействия нескольких подсистем одновременно.
@@ -811,9 +854,10 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 | `channel_extra_fixture` | `base_fixture` | ✅ | —→4 (✅ 4) |
 | `cutex_extra_fixture` | `base_fixture` | ✅ | —→5 (✅ 5) |
 | `get_runner_fixture` | `base_fixture` | ✅ | —→1 (✅ 1) |
+| `backup_fixture` | `base_fixture` | ✅ **добавлен** (backup/insure/emergency) | —→19 (✅ 19) |
 
-**Итого:** 32 fixture-класса, **237 тестов** (из них 1 отключён → 236 активных по gtest;
-в meson-режиме 237 зарегистрированных прогонов, отключённый тест не регистрируется).
+**Итого:** 33 fixture-класса, **256 тестов** (из них 1 отключён → 255 активных по gtest;
+в meson-режиме 256 зарегистрированных прогонов, отключённый тест не регистрируется).
 
 > Примечание: `timer_parallel_fixture` и `service_fixture`/`io_query_fixture`/
 > `kernelic_fixture`/`clock_fixture`/`entry_fixture` из ранней версии плана не
@@ -871,6 +915,7 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 | 1049–1060 | `channel_extra_fixture` | channel |
 | 1062–1083 | `cutex_extra_fixture` | cutex |
 | 1085–1093 | `get_runner_fixture` | futures |
+| 1082–1140 | `backup_fixture` | futures (backup/insure/emergency) |
 
 ### Расположение тестов в `tests/tests.cpp`
 
@@ -914,6 +959,7 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 | 3321–3400 | `fs_fixture` (fs ext) | 3 |
 | 3401–3470 | `base_fixture` (kernelic: nop, pipe r/w, close, iovec, register_files, overflow) | 6 |
 | 3471–3650 | `base_fixture` (channel bounded/pending/spsc/mpmc, get_current_pool, router, reattach×3, udp, tcp) | 14 |
+| 3749–4215 | `backup_fixture` | 19 |
 
 > ⚠️ Номера строк приблизительные и сдвигаются при правках. Источник истины —
 > `grep -n '^TEST' tests/tests.cpp`.

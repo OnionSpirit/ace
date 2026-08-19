@@ -53,6 +53,7 @@
 #include "ace/futures/reattach.h"
 #include "futures/get_runner.h"
 #include "futures/roaming.h"
+#include "futures/backup.h"
 
 namespace ace {
 
@@ -78,6 +79,12 @@ namespace ace {
     using get_runner     = futures::get_runner;
     /// @brief Migrate the calling coroutine to a different runner.
     using reattach       = futures::reattach;
+    /// @brief Register a permanent backup callback (callable or task).
+    using backup         = futures::backup;
+    /// @brief Register a one-shot callback for the next co_await / co_yield operation.
+    using insure         = futures::insure;
+    /// @brief Toggle whether backups fire on unhandled exceptions.
+    using emergency      = futures::emergency;
 
 }
 

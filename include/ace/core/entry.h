@@ -69,6 +69,7 @@ namespace ace::cfg {
      */
     inline void init() {
         g_config._runners_amount = detail::resolve<runners_amount>();
+        g_config._emergency_default = detail::resolve<emergency_default>();
 
         // [NEW PARAM]:
         // g_config._max_tasks_per_yank = detail::resolve<max_tasks_per_yank>();

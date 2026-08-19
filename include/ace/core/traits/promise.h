@@ -339,6 +339,7 @@ namespace ace::core::traits {
         std::suspend_always await_transform(const std::suspend_always& e) {
             status(e_executed);
             _busy_future = nullptr;
+            static_cast<derived_t*>(this)->begin_op();
             return e;
         }
 
@@ -350,6 +351,7 @@ namespace ace::core::traits {
         std::suspend_never await_transform(const std::suspend_never& e) {
             status(e_executed);
             _busy_future = nullptr;
+            static_cast<derived_t*>(this)->begin_op();
             return e;
         }
 
@@ -366,6 +368,7 @@ namespace ace::core::traits {
         futureT& await_transform(futureT& future) {
             status(e_executed);
             _busy_future = nullptr;
+            static_cast<derived_t*>(this)->begin_op();
             return future;
         }
 
@@ -380,6 +383,7 @@ namespace ace::core::traits {
         futureT&& await_transform(futureT&& future) {
             status(e_executed);
             _busy_future = nullptr;
+            static_cast<derived_t*>(this)->begin_op();
             return future;
         }
 
@@ -396,6 +400,7 @@ namespace ace::core::traits {
         futureT& await_transform(futureT& future) {
             status(e_executed);
             _busy_future = &future;
+            static_cast<derived_t*>(this)->begin_op();
             return future;
         }
 
@@ -410,6 +415,7 @@ namespace ace::core::traits {
         futureT&& await_transform(futureT&& future) {
             status(e_executed);
             _busy_future = &future;
+            static_cast<derived_t*>(this)->begin_op();
             return std::forward<futureT>(future);
         }
 

@@ -94,4 +94,19 @@ namespace ace::futures {
 
 }
 
+// NOTE: The short alias ace::post is only exposed when ace/ace.h (quick-start
+// header) was included before this file — its ACE_H guard switches aliases on.
+#ifdef ACE_H
+namespace ace {
+    /**
+     * @brief Short alias for @c ace::futures::post.
+     * @tparam resume_t         Task result type (@c void for fire-and-forget).
+     * @tparam promise_rule_t   Coroutine rule tag (must be spawnable).
+     */
+    template <typename resume_t = void, template <typename> typename promise_rule_t = core::lazy_rule>
+        requires ace::core::is_spawnable_rule<promise_rule_t>
+    using post = futures::post<resume_t, promise_rule_t>;
+}
+#endif
+
 #endif // ACE_FUTURE_POST_H

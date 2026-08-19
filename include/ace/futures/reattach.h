@@ -147,4 +147,15 @@ await_suspend(auto coroutine) {
 
 #undef ACE_FUTURE_REATTACH_SPACE
 #undef ACE_FUTURE_REATTACH_MEMBER
+
+// NOTE: The short alias ace::reattach is only exposed when ace/ace.h
+// (quick-start header) was included before this file — its ACE_H guard
+// switches aliases on.
+#ifdef ACE_H
+namespace ace {
+    /// @brief Short alias for @c ace::futures::reattach.
+    using reattach = futures::reattach;
+}
+#endif
+
 #endif // ACE_FUTURE_REATTACH_H

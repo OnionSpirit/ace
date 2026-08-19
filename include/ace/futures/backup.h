@@ -232,6 +232,20 @@ namespace ace::futures {
 
 } // end namespace ace::futures
 
+// NOTE: The short aliases ace::backup / ace::insure / ace::emergency are only
+// exposed when ace/ace.h (quick-start header) was included before this file —
+// its ACE_H guard switches aliases on.
+#ifdef ACE_H
+namespace ace {
+    /// @brief Short alias for @c ace::futures::backup.
+    using backup = futures::backup;
+    /// @brief Short alias for @c ace::futures::insure.
+    using insure = futures::insure;
+    /// @brief Short alias for @c ace::futures::emergency.
+    using emergency = futures::emergency;
+}
+#endif
+
 
 //==============================- DEFINITIONS -==================================
 

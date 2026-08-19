@@ -48,6 +48,9 @@
 #include <ace/core/runner.h>
 #include <ace/core/async.h>
 
+#include <ace/futures/reattach.h>
+#include <ace/futures/roaming.h>
+
 #include "ace/console.h"
 
 
@@ -321,12 +324,23 @@ namespace ace::futures {
 
 } // end namespace ace::futures
 
+// NOTE: The short aliases ace::cutex / ace::guard / ace::cutex_control /
+// ace::capture_future are only exposed when ace/ace.h (quick-start header) was
+// included before this file — its ACE_H guard switches aliases on. The guard
+// also makes ace::reattach visible (from futures/reattach.h), which is
+// referenced by cutex::proxy::release().
+#ifdef ACE_H
 namespace ace {
-    /// @brief Namespace alias for the cutex type.
-    using futures::cutex;
+    /// @brief Short alias for the cutex type.
+    using cutex = futures::cutex;
     /// @brief RAII guard for a cutex — an alias for @c cutex::proxy.
     using guard = cutex::proxy;
+    /// @brief Core cutex state (user counter and the waiter queue).
+    using cutex_control = futures::cutex_control;
+    /// @brief Awaitable returned by @c cutex::proxy::capture() / sync().
+    using capture_future = futures::capture_future;
 }
+#endif
 
 //==============================- DEFINITIONS -==================================
 

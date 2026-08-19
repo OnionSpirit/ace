@@ -115,6 +115,18 @@ struct ACE_AWAIT_NODISCARD expire : timeout {
 
 } // end namespace ace::futures
 
+// NOTE: The short aliases ace::timeout / ace::expire are only exposed when
+// ace/ace.h (quick-start header) was included before this file — its ACE_H
+// guard switches aliases on.
+#ifdef ACE_H
+namespace ace {
+    /// @brief Short alias for @c ace::futures::timeout.
+    using timeout = futures::timeout;
+    /// @brief Short alias for @c ace::futures::expire.
+    using expire = futures::expire;
+}
+#endif
+
 
 //==============================- DEFINITIONS -==================================
 

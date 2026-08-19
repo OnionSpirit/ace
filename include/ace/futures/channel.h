@@ -291,6 +291,32 @@ namespace tunnel::dyn {
 
 } // namespace ace::futures
 
+// NOTE: The short aliases ace::channel / ace::allocation_type / ace::access_mode
+// and the ace::tunnel namespace are only exposed when ace/ace.h (quick-start
+// header) was included before this file — its ACE_H guard switches aliases on.
+#ifdef ACE_H
+namespace ace {
+    /// @brief Short alias for @c ace::futures::allocation_type.
+    using allocation_type = futures::allocation_type;
+    /// @brief Short alias for @c ace::futures::access_mode.
+    using access_mode = futures::access_mode;
+    /**
+     * @brief Short alias for @c ace::futures::channel.
+     * @tparam data_t               Storable data type.
+     * @tparam data_allocation_v    Allocation policy: @c e_dynamic, @c e_static, or @c e_on_init.
+     * @tparam access_mode_v        Producer/consumer topology.
+     * @tparam data_buffer_size_v   Bounded data buffer size (for static policy).
+     */
+    template <typename data_t,
+              futures::allocation_type data_allocation_v = futures::allocation_type::e_dynamic,
+              futures::access_mode access_mode_v = futures::access_mode::e_mpmc,
+              size_t data_buffer_size_v = 1ul>
+    using channel = futures::channel<data_t, data_allocation_v, access_mode_v, data_buffer_size_v>;
+    /// @brief Short alias for @c ace::futures::tunnel (bounded/dyn variants).
+    namespace tunnel = futures::tunnel;
+}
+#endif
+
 //==============================DEFINITIONS==================================
 
 #define ACE_FUTURE_CHANNEL_META                        \

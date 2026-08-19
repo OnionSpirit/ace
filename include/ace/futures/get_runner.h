@@ -59,4 +59,14 @@ namespace ace::futures {
 
 } // end namespace ace::futures
 
+// NOTE: The short alias ace::get_runner is only exposed when ace/ace.h
+// (quick-start header) was included before this file — its ACE_H guard
+// switches aliases on.
+#ifdef ACE_H
+namespace ace {
+    /// @brief Short alias for @c ace::futures::get_runner.
+    using get_runner = futures::get_runner;
+}
+#endif
+
 #endif // ACE_FUTURE_GET_RUNNER_H

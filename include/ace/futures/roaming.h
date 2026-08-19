@@ -81,4 +81,14 @@ namespace ace::futures {
 
 }
 
+// NOTE: The short alias ace::roaming is only exposed when ace/ace.h
+// (quick-start header) was included before this file — its ACE_H guard
+// switches aliases on.
+#ifdef ACE_H
+namespace ace {
+    /// @brief Short alias for @c ace::futures::roaming.
+    using roaming = futures::roaming;
+}
+#endif
+
 #endif // ACE_FUTURE_ROAMING_ROAMING_H

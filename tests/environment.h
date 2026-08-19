@@ -9,7 +9,9 @@
 #include <gtest/gtest.h>
 #include <ace/ace.h>
 #include <ace/core/compose.h>
-#include <ace/futures/get_runner.h>
+#include "ace/futures/get_runner.h"
+#include "ace/futures/roaming.h"
+#include "ace/futures/backup.h"
 #include <ace/futures/channel.h>
 #include <ace/futures/timeout.h>
 #include <ace/futures/cutex.h>
@@ -39,7 +41,7 @@ struct base_fixture : ::testing::Test {
     };
 
     template <typename T>
-    static ace::task channel_fetcher(ace::futures::tunnel::dyn::bus<T>& ch, std::vector<T>& output) {
+    static ace::task channel_fetcher(ace::tunnel::dyn::bus<T>& ch, std::vector<T>& output) {
         std::vector<T> res {};
         while (not ch.empty()) { res.emplace_back(co_await ch.pull()); }
         output = std::move(res);
@@ -48,7 +50,7 @@ struct base_fixture : ::testing::Test {
 
     template <typename Rep, typename Period>
     static ace::task sleeper(std::chrono::duration<Rep, Period> wait_time) {
-        co_await ace::futures::timeout(wait_time);
+        co_await ace::timeout(wait_time);
         co_return;
     }
 
@@ -62,7 +64,7 @@ struct base_fixture : ::testing::Test {
     }
 
     template <typename T>
-    std::vector<T> fetch(ace::futures::tunnel::dyn::bus<T>& ch) {
+    std::vector<T> fetch(ace::tunnel::dyn::bus<T>& ch) {
         std::vector<T> res;
         ace::schedule(channel_fetcher(ch, res));
         ace::run();
@@ -115,7 +117,7 @@ struct channel_fixture : base_fixture {
         co_return;
     }
 
-    ace::futures::tunnel::dyn::bus<std::string> _channel {};
+    ace::tunnel::dyn::bus<std::string> _channel {};
 };
 
 // ==========================================================================
@@ -125,9 +127,9 @@ struct channel_fixture : base_fixture {
 struct timer_fixture : base_fixture {
     template <typename Rep, typename Period>
     ace::task timer_waiter_valued(std::chrono::duration<Rep, Period> dur,
-                                  ace::futures::tunnel::dyn::bus<int>& ch) {
+                                  ace::tunnel::dyn::bus<int>& ch) {
         ace::console::println("Timeout launched for: {}", dur);
-        co_await ace::futures::timeout(dur);
+        co_await ace::timeout(dur);
         ace::console::println("Timeout released after: {}", dur);
         ch << dur.count();
         co_return;
@@ -135,45 +137,45 @@ struct timer_fixture : base_fixture {
 
     template <typename Rep, typename Period>
     ace::task timer_waiter(std::chrono::duration<Rep, Period> dur,
-                           ace::futures::tunnel::dyn::bus<int>& ch) {
+                           ace::tunnel::dyn::bus<int>& ch) {
         const auto start = ace::services::clock::current_time();
-        co_await ace::futures::timeout(dur);
+        co_await ace::timeout(dur);
         const auto end = ace::services::clock::current_time();
         ch << (end - start).count();
         co_return;
     }
 
     ace::task expire_waiter_valued(ace::services::timepoint_t tp,
-                                   ace::futures::tunnel::dyn::bus<ace::services::timepoint_t>& ch) {
+                                   ace::tunnel::dyn::bus<ace::services::timepoint_t>& ch) {
         ace::console::println("Expires at: {}", fancy(tp));
-        co_await ace::futures::expire(tp);
+        co_await ace::expire(tp);
         ace::console::println("Expired at: {}", fancy(tp));
         ch << tp;
         co_return;
     }
 
     ace::task timer_or_timer() {
-        auto long_timeout = ace::futures::timeout(10s);
-        co_await (long_timeout or ace::futures::timeout(100ms));
+        auto long_timeout = ace::timeout(10s);
+        co_await (long_timeout or ace::timeout(100ms));
         co_return;
     }
 
     ace::task timer_and_timer() {
-        auto long_timeout = ace::futures::timeout(100ms);
-        co_await (long_timeout and ace::futures::timeout(10ms));
+        auto long_timeout = ace::timeout(100ms);
+        co_await (long_timeout and ace::timeout(10ms));
         co_return;
     }
 
     ace::promise<int> wait_timer() {
         const auto wd = tool::lifetime("some_promise");
         ace::console::println("some_promise working...");
-        co_await ace::futures::timeout(5ms);
+        co_await ace::timeout(5ms);
         ace::console::println("{} finished", wd.mark());
         co_return 1;
     }
 
     ace::task or_with_async() {
-        auto res = co_await (wait_timer() or ace::futures::timeout(1ms));
+        auto res = co_await (wait_timer() or ace::timeout(1ms));
         if (not res)
             ace::console::println("timeout of promise");
     }
@@ -183,8 +185,8 @@ struct timer_fixture : base_fixture {
         ace::reload();
     }
 
-    ace::futures::tunnel::dyn::bus<int> _int_channel {};
-    ace::futures::tunnel::dyn::bus<ace::services::timepoint_t> _tp_channel {};
+    ace::tunnel::dyn::bus<int> _int_channel {};
+    ace::tunnel::dyn::bus<ace::services::timepoint_t> _tp_channel {};
 };
 
 // ==========================================================================
@@ -235,9 +237,9 @@ struct yield_fixture : base_fixture {
 
     static ace::automaton<int> yield_with_timeout() {
         co_yield 10;
-        co_await ace::futures::timeout(5ms);
+        co_await ace::timeout(5ms);
         co_yield 20;
-        co_await ace::futures::timeout(5ms);
+        co_await ace::timeout(5ms);
         co_yield 30;
         co_return 99;
     }
@@ -294,7 +296,7 @@ struct yield_fixture : base_fixture {
         ace::reload();
     }
 
-    static inline ace::futures::tunnel::dyn::bus<int> _int_channel {};
+    static inline ace::tunnel::dyn::bus<int> _int_channel {};
 
     static auto push_to_channel (std::optional<int>&& val) -> std::optional<int> {
         _int_channel << val.value(); val.reset(); return val;
@@ -351,7 +353,7 @@ struct cutex_fixture : base_fixture {
         const auto wd = tool::lifetime("'cutex_parallel'");
         ace::guard crx(_cutex);
         co_await crx.capture();
-        co_await ace::futures::timeout(50ms);
+        co_await ace::timeout(50ms);
         _runner_channel << co_await ace::get_runner();
         ace::console::println("{} finished", wd.mark());
     }
@@ -362,14 +364,14 @@ struct cutex_fixture : base_fixture {
         ace::guard crx(_cutex);
         co_await crx.capture();
         ace::console::println("'cutex_carry' captured cutex");
-        co_await ace::futures::timeout(100ms);
+        co_await ace::timeout(100ms);
         _runner_channel << co_await ace::get_runner();
         ace::console::println("{} finished", wd.mark());
     }
 
     ace::task cutex_checker() {
         ace::guard crx(_cutex);
-        if (co_await (crx.capture() or ace::futures::timeout(50ms)) == 0) {
+        if (co_await (crx.capture() or ace::timeout(50ms)) == 0) {
             ace::console::println("'cutex_checker' captured cutex");
             _runner_channel << co_await ace::get_runner();
             ace::console::println("'cutex_checker' finished");
@@ -380,12 +382,12 @@ struct cutex_fixture : base_fixture {
 
     ace::task cutex_spawner() {
         ace::console::println("'cutex_spawner' started");
-        co_await ace::futures::timeout(10ms);
+        co_await ace::timeout(10ms);
         auto handle = co_await ace::spawn(cutex_carry());
-        co_await ace::futures::timeout(75ms);
+        co_await ace::timeout(75ms);
         ace::console::println("'cutex_spawner' awake, canceling...");
         handle.cancel();
-        co_await ace::futures::timeout(10ms);
+        co_await ace::timeout(10ms);
         if (not co_await handle.join())
             ace::console::println("'cutex_carry' canceled. Joining is 'false'");
         else
@@ -396,12 +398,12 @@ struct cutex_fixture : base_fixture {
 
     ace::task cutex_spawner_permanent() {
         ace::console::println("'cutex_spawner_permanent' started");
-        co_await ace::futures::timeout(10ms);
+        co_await ace::timeout(10ms);
         auto handle = co_await ace::spawn(cutex_carry());
-        co_await ace::futures::timeout(25ms);
+        co_await ace::timeout(25ms);
         ace::console::println("'cutex_spawner_permanent' awake, canceling...");
         handle.cancel();
-        co_await ace::futures::timeout(10ms);
+        co_await ace::timeout(10ms);
         if (not co_await handle.join())
             ace::console::println("'cutex_carry' canceled. Joining is 'false'");
         else
@@ -411,7 +413,7 @@ struct cutex_fixture : base_fixture {
     }
 
     ace::cutex _cutex {};
-    ace::futures::tunnel::dyn::bus<ace::core::runner*> _runner_channel {};
+    ace::tunnel::dyn::bus<ace::core::runner*> _runner_channel {};
     int _runners = 1;
 };
 
@@ -424,7 +426,7 @@ struct spawn_fixture : base_fixture {
 
     ace::task to_spawn() {
         auto curr_runner = co_await ace::get_runner();
-        co_await ace::futures::timeout(100ms);
+        co_await ace::timeout(100ms);
         ace::console::println("'spawned' runned out");
         _runner_channel << curr_runner;
         co_return;
@@ -436,14 +438,14 @@ struct spawn_fixture : base_fixture {
         const auto handle = co_await ace::spawn(to_spawn());
         while (not handle.done()) {
             ace::console::println("'spawned' not done");
-            co_await ace::futures::timeout(10ms);
+            co_await ace::timeout(10ms);
         }
         ace::console::println("'spawned' done!!!");
     }
 
     ace::async<int> valued_to_spawn() {
         auto curr_runner = co_await ace::get_runner();
-        co_await ace::futures::timeout(100ms);
+        co_await ace::timeout(100ms);
         ace::console::println("'spawned' runned out");
         _runner_channel << curr_runner;
         co_return 123;
@@ -455,7 +457,7 @@ struct spawn_fixture : base_fixture {
         auto handle = co_await ace::spawn(valued_to_spawn());
         while (not handle.done()) {
             ace::console::println("'spawned' not done");
-            co_await ace::futures::timeout(10ms);
+            co_await ace::timeout(10ms);
         }
         ace::console::println("'spawned' done with {} !!!", (co_await handle.join()).value());
     }
@@ -474,7 +476,7 @@ struct spawn_fixture : base_fixture {
     ace::promise<> to_spawn_nested() {
         const auto wd = tool::lifetime("'parallel-nested'");
         ace::console::print("'parallel-nested' started\n");
-        co_await ace::futures::timeout(1000ms);
+        co_await ace::timeout(1000ms);
         _runner_channel << co_await ace::get_runner();
         ace::console::println("{} finished", wd.mark());
         co_return;
@@ -484,7 +486,7 @@ struct spawn_fixture : base_fixture {
         const auto wd = tool::lifetime("'parallel'");
         ace::console::print("'parallel' started\n");
         co_await to_spawn_nested();
-        co_await ace::futures::timeout(1000ms);
+        co_await ace::timeout(1000ms);
         _runner_channel << co_await ace::get_runner();
         ace::console::println("{} finished", wd.mark());
         co_return;
@@ -493,7 +495,7 @@ struct spawn_fixture : base_fixture {
     ace::task spawner_cancel() {
         ace::console::println("'spawner' started");
         auto handle = co_await ace::spawn(to_spawn_cancel());
-        co_await ace::futures::timeout(100ms);
+        co_await ace::timeout(100ms);
         ace::console::println("'spawner' awake, canceling...");
         handle.cancel();
         _runner_channel << co_await ace::get_runner();
@@ -503,7 +505,7 @@ struct spawn_fixture : base_fixture {
     ace::task spawner_join_canceled() {
         ace::console::println("'spawner' started");
         auto handle = co_await ace::spawn(to_spawn_cancel());
-        co_await ace::futures::timeout(100ms);
+        co_await ace::timeout(100ms);
         ace::console::println("'spawner' awake, canceling...");
         handle.cancel();
         if (not co_await handle.join())
@@ -517,13 +519,13 @@ struct spawn_fixture : base_fixture {
 
     ace::async<int> valued_long() {
         // Долгая valued-таска для тестирования cancel
-        co_await ace::futures::timeout(100ms);
+        co_await ace::timeout(100ms);
         co_return 999;
     }
 
-    ace::task valued_spawner_cancel(ace::futures::tunnel::dyn::bus<int>& ch) {
+    ace::task valued_spawner_cancel(ace::tunnel::dyn::bus<int>& ch) {
         auto handle = co_await ace::spawn(valued_long());
-        co_await ace::futures::timeout(10ms);
+        co_await ace::timeout(10ms);
         handle.cancel();
         auto joined = co_await handle.join();
         // После cancel join должен вернуть nullopt
@@ -538,10 +540,10 @@ struct spawn_fixture : base_fixture {
         co_return 42;
     }
 
-    ace::task valued_spawner_join(ace::futures::tunnel::dyn::bus<int>& ch) {
+    ace::task valued_spawner_join(ace::tunnel::dyn::bus<int>& ch) {
         auto handle = co_await ace::spawn(valued_fast());
         while (not handle.done()) {
-            co_await ace::futures::timeout(1ms);
+            co_await ace::timeout(1ms);
         }
         auto res = co_await handle.join();
         // join должен вернуть optional<int> со значением 42
@@ -551,13 +553,13 @@ struct spawn_fixture : base_fixture {
 
     // ── post / compose ──
 
-    ace::task spawn_post(int idx, ace::futures::tunnel::dyn::bus<int>& ch) {
+    ace::task spawn_post(int idx, ace::tunnel::dyn::bus<int>& ch) {
         ace::console::println("Placing {} to channel", idx);
         ch << idx;
         co_return;
     }
 
-    ace::task imposter(ace::futures::tunnel::dyn::bus<int>& ch) {
+    ace::task imposter(ace::tunnel::dyn::bus<int>& ch) {
         auto res = co_await (
                     (co_await ace::spawn(spawn_post(1, ch))).join()
                 and (co_await ace::post (spawn_post(3, ch))).join()
@@ -573,13 +575,13 @@ struct spawn_fixture : base_fixture {
         co_return;
     }
 
-    ace::async<int> valued_spawn_post(int idx, ace::futures::tunnel::dyn::bus<int>& ch) {
+    ace::async<int> valued_spawn_post(int idx, ace::tunnel::dyn::bus<int>& ch) {
         ace::console::println("Placing {} to channel", idx);
         ch << idx;
         co_return idx;
     }
 
-    ace::task valued_imposter(ace::futures::tunnel::dyn::bus<int>& ch) {
+    ace::task valued_imposter(ace::tunnel::dyn::bus<int>& ch) {
         auto res = co_await (
                     (co_await ace::spawn(valued_spawn_post(1, ch))).join()
                 and (co_await ace::post (valued_spawn_post(3, ch))).join()
@@ -601,7 +603,7 @@ struct spawn_fixture : base_fixture {
 
     // ── pipe / compose ──
 
-    ace::promise<int> pusher(int idx, ace::futures::tunnel::dyn::bus<int>& ch) {
+    ace::promise<int> pusher(int idx, ace::tunnel::dyn::bus<int>& ch) {
         ch << idx;
         co_return idx;
     }
@@ -619,7 +621,7 @@ struct spawn_fixture : base_fixture {
         ace::console::println("Pipe finished");
     }
 
-    ace::task composed_output(ace::futures::tunnel::dyn::bus<int>& ch) {
+    ace::task composed_output(ace::tunnel::dyn::bus<int>& ch) {
         co_await (
                 pusher(1, ch) >> printer >> congrats
             and
@@ -633,8 +635,8 @@ struct spawn_fixture : base_fixture {
         );
     }
 
-    ace::futures::tunnel::dyn::bus<ace::core::runner*> _runner_channel {};
-    ace::futures::tunnel::dyn::bus<int> _int_channel {};
+    ace::tunnel::dyn::bus<ace::core::runner*> _runner_channel {};
+    ace::tunnel::dyn::bus<int> _int_channel {};
 };
 
 // ==========================================================================
@@ -876,10 +878,10 @@ struct runner_fixture : base_fixture {
         co_return;
     }
 
-    ace::task suspending_task(ace::futures::tunnel::dyn::bus<int>& ch) {
+    ace::task suspending_task(ace::tunnel::dyn::bus<int>& ch) {
         // проверяем, что задача корректно обрабатывается раннером
         // ждём очень короткий таймаут чтобы гарантировать суспендирование
-        co_await ace::futures::timeout(std::chrono::milliseconds(1));
+        co_await ace::timeout(std::chrono::milliseconds(1));
         ch << 1;
         co_return;
     }
@@ -957,16 +959,16 @@ struct cross_mechanic_fixture : base_fixture {
     // or-гонки ping в цикле без потери значений
     static ace::automaton<int> gen_delayed_seq(int a, int b, int c, int d) {
         co_yield a;
-        co_await ace::futures::timeout(std::chrono::milliseconds(1));
+        co_await ace::timeout(std::chrono::milliseconds(1));
         co_yield b;
-        co_await ace::futures::timeout(std::chrono::milliseconds(1));
+        co_await ace::timeout(std::chrono::milliseconds(1));
         co_yield c;
-        co_await ace::futures::timeout(std::chrono::milliseconds(1));
+        co_await ace::timeout(std::chrono::milliseconds(1));
         co_return d;
     }
 
     static ace::task or_ping_two_in_loop(
-        ace::futures::tunnel::dyn::bus<int>& result)
+        ace::tunnel::dyn::bus<int>& result)
     {
         auto ha = co_await ace::spawn(gen_delayed_seq(10, 20, 30, 40));
         auto hb = co_await ace::spawn(gen_delayed_seq(100, 200, 300, 400));
@@ -1004,15 +1006,15 @@ struct cross_mechanic_fixture : base_fixture {
 // ==========================================================================
 
 struct spawn_extra_fixture : base_fixture {
-    ace::futures::tunnel::dyn::bus<ace::core::runner*> _runner_channel {};
+    ace::tunnel::dyn::bus<ace::core::runner*> _runner_channel {};
 
-    ace::task post_checker(ace::futures::tunnel::dyn::bus<int>& ch) {
+    ace::task post_checker(ace::tunnel::dyn::bus<int>& ch) {
         // post task: должна быть обработана раньше spawn task
         ch << -1;
         co_return;
     }
 
-    ace::task spawn_checker(int val, ace::futures::tunnel::dyn::bus<int>& ch) {
+    ace::task spawn_checker(int val, ace::tunnel::dyn::bus<int>& ch) {
         ch << val;
         co_return;
     }
@@ -1024,12 +1026,12 @@ struct spawn_extra_fixture : base_fixture {
 
 struct compose_extra_fixture : base_fixture {
     ace::promise<int> valued(int v) {
-        co_await ace::futures::timeout(std::chrono::milliseconds(1));
+        co_await ace::timeout(std::chrono::milliseconds(1));
         co_return v;
     }
 
     ace::task voided() {
-        co_await ace::futures::timeout(std::chrono::milliseconds(1));
+        co_await ace::timeout(std::chrono::milliseconds(1));
         co_return;
     }
 
@@ -1037,7 +1039,7 @@ struct compose_extra_fixture : base_fixture {
     static int double_it(int v) { return v * 2; }
 
     static ace::promise<int> double_async(int v) {
-        co_await ace::futures::timeout(std::chrono::milliseconds(1));
+        co_await ace::timeout(std::chrono::milliseconds(1));
         co_return v * 2;
     }
 };
@@ -1047,7 +1049,7 @@ struct compose_extra_fixture : base_fixture {
 // ==========================================================================
 
 struct channel_extra_fixture : base_fixture {
-    ace::futures::tunnel::dyn::bus<int> _ch {};
+    ace::tunnel::dyn::bus<int> _ch {};
 
     ace::task pusher(int v) {
         _ch << v;
@@ -1067,7 +1069,7 @@ struct cutex_extra_fixture : base_fixture {
     }
 
     ace::cutex _cutex {};
-    ace::futures::tunnel::dyn::bus<int> _ch {};
+    ace::tunnel::dyn::bus<int> _ch {};
 
     ace::task cutex_user(int id) {
         auto g = ace::guard(_cutex);
@@ -1087,7 +1089,7 @@ struct backup_fixture : base_fixture {
         ace::cfg::g_config._emergency_default = true;
     }
 
-    ace::futures::tunnel::dyn::bus<int> _ch {};
+    ace::tunnel::dyn::bus<int> _ch {};
 
     // Корутина с тремя постоянными backup-коллбеками и вечной приостановкой.
     // Используется тестами отмены: cancel через handle → fire в обратном порядке.
@@ -1098,7 +1100,7 @@ struct backup_fixture : base_fixture {
         co_await ace::backup([&order] { order.push_back(1); });
         co_await ace::backup([&order] { order.push_back(2); });
         co_await ace::backup([&order] { order.push_back(3); });
-        co_await ace::futures::timeout(std::chrono::seconds(10));
+        co_await ace::timeout(std::chrono::seconds(10));
         co_return;
     }
 
@@ -1122,7 +1124,7 @@ struct backup_fixture : base_fixture {
     static ace::automaton<int> yield_insure_then_timeout(std::vector<int>& order) {
         co_await ace::insure([&order] { order.push_back(1); });
         co_yield 10;
-        co_await ace::futures::timeout(std::chrono::milliseconds(100));
+        co_await ace::timeout(std::chrono::milliseconds(100));
         co_return 42;
     }
 
@@ -1137,7 +1139,7 @@ struct backup_fixture : base_fixture {
     // затем запись маркера. Не-лямбда — closure лямбда-таски не переживает
     // перенос в fire task (pre-existing баг), helper-функция лишена этой проблемы.
     static ace::task task_payload_two(std::vector<int>& order) {
-        co_await ace::futures::timeout(std::chrono::milliseconds(5));
+        co_await ace::timeout(std::chrono::milliseconds(5));
         order.push_back(2);
         co_return;
     }
@@ -1148,7 +1150,7 @@ struct backup_fixture : base_fixture {
 // ==========================================================================
 
 struct get_runner_fixture : base_fixture {
-    ace::futures::tunnel::dyn::bus<int> _ch {};
+    ace::tunnel::dyn::bus<int> _ch {};
 
     ace::task runner_gatherer() {
         auto r = co_await ace::get_runner();

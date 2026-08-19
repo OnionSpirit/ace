@@ -60,4 +60,14 @@ namespace ace::futures {
 
 }
 
+// NOTE: The short alias ace::polling is only exposed when ace/ace.h
+// (quick-start header) was included before this file — its ACE_H guard
+// switches aliases on.
+#ifdef ACE_H
+namespace ace {
+    /// @brief Short alias for @c ace::futures::polling.
+    using polling = futures::polling;
+}
+#endif
+
 #endif //ACE_FUTURE_POLLING_H

@@ -43,9 +43,10 @@ int main() {
 **Альтернативный вход через `co_main`** (при `-Dentry_mode=weak` в meson):
 ```cpp
 #include <ace/ace.h>
+#include <ace/futures/timeout.h>  // ace::timeout (короткий алиас, требует ace.h раньше)
 
 ace::async<int> co_main(int argc, char** argv) {
-    co_await ace::futures::timeout(500ms);
+    co_await ace::timeout(500ms);
     co_return 0;
 }
 ```
@@ -376,24 +377,30 @@ ace::task udp_client() {
 
 ## Таймауты
 
-### ace::futures::timeout / expire (`futures/timeout.h`)
+### ace::timeout / ace::expire (`futures/timeout.h`)
 
 ```cpp
-co_await ace::futures::timeout(500ms);     // относительный
-co_await ace::futures::timeout(5s);
+co_await ace::timeout(500ms);     // относительный
+co_await ace::timeout(5s);
 
 auto deadline = clock::current_time() + 2s;
-co_await ace::futures::expire(deadline);   // абсолютный
+co_await ace::expire(deadline);   // абсолютный
 ```
 
 **Внутреннее устройство:** `timeout` (line 51) принимает `duration<I,T>` (требует `std::is_integral_v<I>`). `timeout_router` (line 122) помещает задачу в `clock::subscribe()`. Когда время истекает, `clock::ping()` возвращает задачу через `runner::reattach()`. При отмене `cancel()` вызывает `clock::detach()` и `runner::reattach()` ноды. `expire` (line 98) наследует `timeout` и вычисляет duration от дедлайна.
+
+> Короткие алиасы `ace::timeout` / `ace::expire` определены в `futures/timeout.h`
+> под guard `ACE_H` — доступны, если `ace/ace.h` подключён раньше
+> `ace/futures/timeout.h`. Без `ace.h` доступны только `ace::futures::timeout` /
+> `ace::futures::expire`. То же правило для `ace::channel`, `ace::cutex`,
+> `ace::tunnel`, `ace::polling` и остальных futures-типов.
 
 ### Гонка recv с таймаутом
 
 ```cpp
 auto result = co_await (
     conn.recv(buf, sizeof(buf)) or
-    ace::futures::timeout(5s)
+    ace::timeout(5s)
 );
 // result: std::variant<int,int>
 // index 0 = recv выиграл, index 1 = таймаут выиграл
@@ -542,7 +549,7 @@ co_await ace::emergency(false);                  // не срабатывать 
 
 ## Каналы и мьютексы
 
-### channel\<T\> (`futures/channel.h:83`)
+### channel\<T\> — `ace::channel` / `futures/channel.h:83`
 
 MPMC (multi-producer/multi-consumer) канал. Шаблонные параметры: `data_t`, `data_allocation_v` (по умолчанию `e_dynamic`), `access_mode_v` (`e_mpmc`), `data_buffer_size_v` (1).
 
@@ -555,7 +562,7 @@ MPMC (multi-producer/multi-consumer) канал. Шаблонные параме
 | `pending_push(T)` | 163 | `promise<>` — асинхронный push, ждёт пока появится место |
 | `notify()` (private) | 134 | Пробуждает одного ожидающего |
 
-**Алиасы в `ace::futures::tunnel::dyn`:**
+**Алиасы в `ace::tunnel::dyn` (доступны при подключённом раньше `ace.h`):**
 | Алиас | Тип |
 |-------|-----|
 | `dyn::local<T>` | `channel<T, e_dynamic, e_regular>` |
@@ -564,7 +571,7 @@ MPMC (multi-producer/multi-consumer) канал. Шаблонные параме
 | `dyn::bus<T>` | `channel<T, e_dynamic, e_mpmc>` |
 
 ```cpp
-ace::futures::tunnel::dyn::bus<int> ch;
+ace::tunnel::dyn::bus<int> ch;
 ch.push(42);
 ch << 99;
 int val = co_await ch.pull();
@@ -1105,6 +1112,8 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 
 10. **НЕ использовать лямбда-корутины (coroutine lambdas)** — `[&]() -> ace::task {...}()` и т.п. **запрещены**. GCC размещает closure лямбды в кадре корутины так, что он накладывается на поле `_block` promise: вызов `observe()` (через `setup_control_block()`) затирает захваченные ссылки, и корутина читает мусор (ASan: heap-use-after-free / stack-use-after-scope). Баг пред-существующий (воспроизводится на чистом HEAD), проявляется при `observe()` перед `schedule()`/spawn, а также у task-payload в backup/insure. Решение: оформлять корутины как именованные функции/helper-методы с параметрами-ссылками. Обычные (не-корутинные) лямбды — можно.
 
+11. **Короткие алиасы futures-типов** (`ace::timeout`, `ace::expire`, `ace::channel`, `ace::allocation_type`, `ace::access_mode`, `ace::tunnel::*`, `ace::polling`, `ace::cutex`, `ace::guard`, `ace::capture_future`, `ace::cutex_control`) определены в самих `futures/*.h` под `#ifdef ACE_H` — они доступны только если `ace/ace.h` включён **до** соответствующего futures-хидера. Иначе — только полные имена `ace::futures::X`.
+
     <!-- TODO (agent): реализовать поддержку лямбда-корутин — устранить коллизию
          closure лямбды с полем _block promise (GCC размещает closure в кадре на
          месте первого поля promise). Варианты: (а) явно хранить closure в promise
@@ -1118,7 +1127,7 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 
 | Файл | Что содержит |
 |------|-------------|
-| `ace.h` | Master include: entry, compose, spawn, post, reattach, get_runner, roaming, backup. Алиасы: `spawn`, `post`, `roaming`, `get_runner`, `reattach`, `backup`, `insure`, `emergency`. |
+| `ace.h` | Quick-start: entry, compose, spawn, post, reattach, get_runner, roaming, backup. Определяет guard `ACE_H` — короткие алиасы (`ace::timeout`, `ace::channel`, `ace::cutex`, `ace::tunnel`, ...) определяются в самих `futures/*.h` под `#ifdef ACE_H` и доступны только при включении `ace.h` раньше. |
 | `core/entry.h` | `co_main()`, `ace::cfg::init()`, `ace::entry`, `ace::entry_result` |
 | `core/config.h` | `ace::cfg::config`, `ace::cfg::g_config`, `ace::cfg::ace_param<Tag>`, `detail::resolve<Tag>()` |
 | `core/async.h` | `async<T>`, `promise<T>`, `automaton<T>`, `task`, `task_wrap`, `suspend`, promise_type, async_router, omni_node/omni_runner/runner_router aliases |

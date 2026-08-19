@@ -18,7 +18,7 @@
  *  - @c ace/futures/timeout.h  — timer futures
  *  - @c ace/futures/polling.h  — low-priority task flag
  *
- * This header defines the @c ACE_H guard. Every @c ace/futures/*.h file and
+ * This header defines the @c ACE_H guard. Every @c ace/futures/X.h file and
  * @c ace/console.h re-exports its types under short @c ace::X aliases
  * (@c ace::timeout, @c ace::channel, @c ace::cutex, @c ace::println, ...) only
  * when @c ACE_H is already defined, i.e. when @c ace/ace.h is included

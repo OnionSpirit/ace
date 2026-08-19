@@ -24,7 +24,7 @@ namespace ace::fs {
     /**
      * @brief @c io_link for open files — async read/write via @c io_uring.
      *
-     * @details @c output_action() writes via @c io_hanged (fallback to
+     * @details @c output_action() writes via @c io::outcast (fallback to
      * blocking @c ::write()).  @c input_action() reads via
      * @c core::read_query.
      */
@@ -47,7 +47,7 @@ namespace ace::fs {
      * @brief @c io_link for open files.
      *
      * @details Implements @c output_action() via async write through
-     * @c io_hanged::command (with blocking @c ::write() fallback).
+     * @c io::outcast::command (with blocking @c ::write() fallback).
      * @c input_action() uses @c core::read_query for async reads.
      */
     struct ace::fs::file_link : io::link {
@@ -59,10 +59,10 @@ namespace ace::fs {
 
         /**
          * @brief Writes a scatter-gather buffer to the file asynchronously.
-         * @details Tries to capture an @c io_hanged::command and submit a
+         * @details Tries to capture an @c io::outcast::command and submit a
          * @c writev operation through @c kernel_controller; falls back to a
          * blocking @c ::writev() when no runner context or command slot is
-         * available.  Failures are reported through @c io::hanged::fail_cb_handler.
+         * available.  Failures are reported through @c io::outcast::fail_cb_handler.
          * @param buff Buffer to write.
          */
         void output_action(io::buffer&& buff) override {
@@ -70,22 +70,18 @@ namespace ace::fs {
             // NOTE: Doing it manually for cases when classic 'runner::run()' is unused
             auto* runner_identity = core::runner::get().as<runner_pool_t>();
             // NOTE: Pushing data to slot, and setting identity for kernelic
-            if (io::hanged::command* cmd {}; runner_identity and io::hanged::_command_pool.capture(cmd)) [[likely]]
-            {
+            if (io::outcast::command* cmd {}; runner_identity and io::outcast::_command_pool.capture(cmd)) [[likely]] {
                 cmd->_runner_identity = runner_identity;
                 cmd->_buffer = std::move(buff);
+                cmd->_description = "fs::file_link lazy-write";
                 const auto* assembled = cmd->_buffer.assemble();
-                if (not services::kernel_controller::writev(cmd, _fd,
-                    assembled->msg_iov, assembled->msg_iovlen, 0, 0) and io::hanged::fail_cb_handler)
-                    io::hanged::fail_cb_handler(EAGAIN, "file_link lazy-write failure"); // Maybe EIO?
+                if (services::kernel_controller::writev(cmd, _fd, assembled->msg_iov, assembled->msg_iovlen, 0, 0))
+                    return;
             }
             // NOTE: If can not get slot or identity not found -> using busy behavior
-            else
-            {
-                const auto* assembled = buff.assemble();
-                if (::writev(_fd, assembled->msg_iov, static_cast<int>(assembled->msg_iovlen)) < 0 and io::hanged::fail_cb_handler)
-                    io::hanged::fail_cb_handler(errno, "file_link busy-write failure");
-            }
+            const auto* assembled = buff.assemble();
+            if (::writev(_fd, assembled->msg_iov, static_cast<int>(assembled->msg_iovlen)) < 0 and io::outcast::fail_cb_handler)
+                io::outcast::fail_cb_handler(errno, "fs::file_link busy-write");
         };
 
         /**

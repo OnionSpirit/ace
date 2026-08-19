@@ -47,7 +47,7 @@ namespace ace::services {
      * the waiting coroutine.
      *
      * Derived types include @c io_query (coroutine awaitable) and
-     * @c io_hanged::command (fire-and-forget).
+     * @c io::outcast::command (fire-and-forget).
      */
     struct kernel_observer {
 

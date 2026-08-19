@@ -5,7 +5,7 @@
  * @details This header defines a type-safe, coroutine-friendly I/O framework
  * that wraps Linux @c io_uring operations.  The key building blocks are:
  *
- *  - <b>@c io_entity<T> </b> — CRTP base for file-descriptor owners.  Provides
+ *  - <b>@c io::entity<T> </b> — CRTP base for file-descriptor owners.  Provides
  *    RAII FD lifecycle (via @c io_guard), move semantics, and async @c close().
  *  - <b>@c io_query<T> </b> — CRTP base for individual I/O requests (read,
  *    write, close, etc.).  Each query is an awaitable that suspends the caller
@@ -14,7 +14,7 @@
  *    @c write() / @c read() methods and a polymorphic @c any data payload.
  *  - <b>@c io_guard </b> — RAII guard that asynchronously closes the FD on
  *    destruction if still open.
- *  - <b>@c io_hanged </b> — Fire-and-forget command queue for I/O operations
+ *  - <b>@c io::outcast </b> — Fire-and-forget command queue for I/O operations
  *    that must run even outside a coroutine context (used internally by guards).
  *  - <b>@c any </b> — Minimal type-erased value holder for carrying custom data
  *    alongside an FD.
@@ -100,7 +100,7 @@ namespace ace::io {
      * @brief RAII guard that asynchronously closes an FD on destruction.
      *
      * @details When the guard goes out of scope, it submits an async close
-     * request to @c kernel_controller via the @c io_hanged mechanism.  If
+     * request to @c kernel_controller via the @c io::outcast mechanism.  If
      * the current thread is not running a runner, it falls back to scheduling
      * a close task on the dispatcher.
      */
@@ -149,12 +149,12 @@ namespace ace::io {
     /**
      * @brief Encapsulated set of global entities for fire-and-forget I/O.
      *
-     * @details @c io_hanged provides a thread-local pool of @c command objects
+     * @details @c io::outcast provides a thread-local pool of @c command objects
      * that can submit I/O operations without a coroutine context.  Used by
      * @c io_guard to issue async @c close() even when the current thread is
      * not running inside @c runner::run().
      */
-    struct hanged;
+    struct outcast;
 
     /**
      * @brief Minimal type-erased value holder for custom data associated with an FD.
@@ -1239,7 +1239,7 @@ public:                                                                         
      * This is used by @c io_guard to close FDs asynchronously even
      * when the destructor runs outside @c runner::run().
      */
-    struct ace::io::hanged {
+    struct ace::io::outcast {
 
         /**
          * @brief A single fire-and-forget I/O command.
@@ -1251,8 +1251,8 @@ public:                                                                         
          */
         struct command : services::kernel_observer {
 
-            buffer _buffer {};                    ///< Payload of the fire-and-forget command
-            std::span<const char> _user_data {};  ///< User data passed to the fail handler
+            buffer _buffer {};                                              ///< Payload of the fire-and-forget command
+            std::span<const char> _description { "<not specified>" };  ///< User data passed to the fail handler
 
             /**
              * @brief Handles the completion of a fire-and-forget command.
@@ -1265,12 +1265,12 @@ public:                                                                         
                     // NOTE: A throwing handler must not kill the kernel
                     // service coroutine — otherwise the ring is never pinged
                     // again and all subsequent I/O leaks.
-                    try { fail_cb_handler(res, _user_data); }
+                    try { fail_cb_handler(res, _description); }
                     catch (const std::exception& e) {
-                        std::cerr << "io command fail handler threw: " << e.what() << std::endl;
+                        std::cerr << "outcast-io-failure : {\n" << e.what() << "\n}" << std::endl;
                     }
                     catch (...) {
-                        std::cerr << "io command fail handler threw (unknown)" << std::endl;
+                        std::cerr << "outcast-io-failure : { <unknown> }" << std::endl;
                     }
                 }
                 _command_pool.raw_sync(this);
@@ -1283,21 +1283,23 @@ public:                                                                         
         /**
          * @brief Default fail handler — throws an exception describing the failed operation.
          * @param res Negative errno value of the failed operation.
-         * @param user_data User data attached to the command.
+         * @param description User data attached to the command.
          */
-        static void basic_fail_handler(const int res, const std::span<const char>& user_data) {
-            throw std::runtime_error(std::format("io operation failed: {}\nuser data: {}",
-                strerror(-res), std::string{user_data.data(), user_data.size()}));
+        static void basic_fail_handler(const int res, const std::span<const char>& description) {
+            throw std::runtime_error(std::format(
+                "\tio-result-code : {},\n\tio-result-description : {},\n\tio-description : {}",
+                -res, strerror(-res), std::string{description.data(), description.size()}
+            ));
         }
 
         static void(*fail_cb_handler)(int, const std::span<const char>&); ///< Fail handler for commands errors handling
 
-        static thread_local nukes::dynamic::reg_freelist<command> _command_pool; ///< Pool of command to start hanged processing wo @c co_await usage
+        static thread_local nukes::dynamic::reg_freelist<command> _command_pool; ///< Pool of command to start outcast processing wo @c co_await usage
     };
 
-    inline thread_local nukes::dynamic::reg_freelist<ace::io::hanged::command> ace::io::hanged::_command_pool {};
+    inline thread_local nukes::dynamic::reg_freelist<ace::io::outcast::command> ace::io::outcast::_command_pool {};
 
-    inline void(*ace::io::hanged::fail_cb_handler)(int, const std::span<const char>&) = basic_fail_handler;
+    inline void(*ace::io::outcast::fail_cb_handler)(int, const std::span<const char>&) = basic_fail_handler;
 
 
     /**
@@ -1305,7 +1307,7 @@ public:                                                                         
      *
      * @details Constructed with a reference to the FD and closed flag.  On
      * destruction, if the FD is still valid and not already closed, it
-     * submits an async @c close() via @c io_hanged or falls back to
+     * submits an async @c close() via @c io::outcast or falls back to
      * scheduling a close task on the dispatcher.
      */
     struct ace::io::guard final {
@@ -1335,7 +1337,7 @@ public:                                                                         
 
         /**
          * @brief Asynchronously closes the referenced FD if it is still valid and open.
-         * @details Uses the @c io::hanged command pool when a runner identity is
+         * @details Uses the @c io::outcast command pool when a runner identity is
          * available, otherwise falls back to scheduling @c pending_close().
          */
         ~guard() noexcept {
@@ -1344,14 +1346,15 @@ public:                                                                         
             // NOTE: Doing it manually for cases when classic 'runner::run()' is unused
             auto* runner_identity = core::runner::get().as<runner_pool_t>();
             // NOTE: Pushing data to slot, and setting identity for kernelic
-            if (io::hanged::command* cmd; runner_identity and io::hanged::_command_pool.capture(cmd)) [[likely]]
+            if (outcast::command* cmd; runner_identity and outcast::_command_pool.capture(cmd)) [[likely]]
             {
                 cmd->_runner_identity = runner_identity;
-                if (not services::kernel_controller::close(cmd, _fd) and hanged::fail_cb_handler)
-                    hanged::fail_cb_handler(EAGAIN, "FD guard failure"); // Maybe EIO?
+                cmd->_description = "io::guard file descriptor close";
+                if (services::kernel_controller::close(cmd, _fd))
+                    return;
             }
             // NOTE: If can not get slot or identity not found -> using busy behavior
-            else schedule(pending_close(_fd));
+            schedule(pending_close(_fd));
         }
     };
 

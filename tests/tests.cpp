@@ -2198,7 +2198,7 @@ TEST_F(io_hanged_fixture, hanged_basic_fail_handler) {
     const char msg[] = "test error";
     std::span<const char> user_data(msg, sizeof(msg));
     EXPECT_THROW(
-        ace::io::hanged::basic_fail_handler(-EINVAL, user_data),
+        ace::io::outcast::basic_fail_handler(-EINVAL, user_data),
         std::runtime_error
     );
 }
@@ -2211,7 +2211,7 @@ TEST_F(io_hanged_fixture, hanged_fail_handler_positive) {
     const char msg[] = "ok";
     std::span<const char> user_data(msg, sizeof(msg));
     EXPECT_THROW(
-        ace::io::hanged::basic_fail_handler(0, user_data),
+        ace::io::outcast::basic_fail_handler(0, user_data),
         std::runtime_error
     );
 }
@@ -2228,12 +2228,12 @@ TEST_F(io_hanged_fixture, hanged_command_pool_capture) {
     // Почему проверяем capture: команды аллоцируются из пула при
     // необходимости выполнить I/O вне корутины (например, закрытие FD
     // в деструкторе guard).
-    ace::io::hanged::command* cmd = nullptr;
-    bool captured = ace::io::hanged::_command_pool.capture(cmd);
+    ace::io::outcast::command* cmd = nullptr;
+    bool captured = ace::io::outcast::_command_pool.capture(cmd);
     if (captured) {
         ASSERT_NE(nullptr, cmd);
         // Возвращаем команду обратно в пул
-        ace::io::hanged::_command_pool.raw_sync(cmd);
+        ace::io::outcast::_command_pool.raw_sync(cmd);
     }
     SUCCEED();
 }
@@ -2243,10 +2243,10 @@ TEST_F(io_hanged_fixture, hanged_command_defaults) {
     // Почему проверяем доступность команды: команда из пула
     // не гарантирует нулевое состояние (buffer/user_data
     // не обнуляются при raw_sync).
-    ace::io::hanged::command* cmd = nullptr;
-    if (ace::io::hanged::_command_pool.capture(cmd)) {
+    ace::io::outcast::command* cmd = nullptr;
+    if (ace::io::outcast::_command_pool.capture(cmd)) {
         ASSERT_NE(nullptr, cmd);
-        ace::io::hanged::_command_pool.raw_sync(cmd);
+        ace::io::outcast::_command_pool.raw_sync(cmd);
     }
     SUCCEED();
 }

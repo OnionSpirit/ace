@@ -60,5 +60,6 @@
 #include "ace/futures/spawn.h"
 #include "ace/futures/post.h"
 #include "ace/futures/reattach.h"
+#include "ace/futures/backup.h"
 
 #endif // ACE_H

@@ -699,12 +699,19 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 
 #### `console_fixture`
 
+Тесты вывода идут через **короткие алиасы** `ace::println` / `ace::print`
+(свободные функции в `ace`, определены в `console.h` под `#ifdef ACE_H` —
+доступны, т.к. `tests/environment.h` включает `ace/ace.h` раньше `ace/console.h`).
+`ace::println("{}", 42)` ≡ `ace::console::println("{}", 42)` — покрывается тот
+же код консоли. Алиас `ace::input` (≡ `ace::console::input`) в тестах не
+используется (stdin не покрыт).
+
 | # | Тест | Что проверяет | Статус |
 |---|------|--------------|--------|
 | CN1 | `println_format` | println(fmt, args...) | ⬜ |
-| CN2 | `println_string_view` | println(string_view) | ✅ |
+| CN2 | `println_string_view` | println(string_view) через `ace::println` | ✅ |
 | CN3 | `println_empty` | println() — пустая строка | ✅ |
-| CN4 | `print_format` | print(fmt, args...) без newline | ✅ |
+| CN4 | `print_format` | print(fmt, args...) без newline через `ace::print` | ✅ |
 | CN5 | `print_string_view` | print(string_view) | ✅ |
 | CN6 | `stdin_link` | stdin_link() возвращает валидный link | ⬜ |
 | CN7 | `stdout_link` | stdout_link() возвращает валидный link | ⬜ |

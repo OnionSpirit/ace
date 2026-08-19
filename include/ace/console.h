@@ -153,6 +153,49 @@ namespace ace {
 
 }
 
+// NOTE: The short aliases ace::print / ace::println / ace::input are only
+// exposed when ace/ace.h (quick-start header) was included before this file —
+// its ACE_H guard switches aliases on. Without ace.h only
+// ace::console::print / ace::console::println / ace::console::input exist.
+#ifdef ACE_H
+namespace ace {
+    /// @brief Short alias for @c ace::console::println — format + newline.
+    template <class... Args>
+    inline void println(std::format_string<Args...>&& fmt, Args&&... args) {
+        console::println(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+    }
+    /// @brief Short alias for @c ace::console::println — string + newline.
+    inline void println(const std::string_view&& str) {
+        console::println(std::forward<const std::string_view>(str));
+    }
+    /// @brief Short alias for @c ace::console::println — empty line.
+    inline void println() {
+        console::println();
+    }
+    /// @brief Short alias for @c ace::console::println — buffer + newline.
+    inline void println(io::buffer&& buf) {
+        console::println(std::forward<io::buffer>(buf));
+    }
+    /// @brief Short alias for @c ace::console::print — format without newline.
+    template <class... Args>
+    inline void print(std::format_string<Args...>&& fmt, Args&&... args) {
+        console::print(std::forward<std::format_string<Args...>>(fmt), std::forward<Args>(args)...);
+    }
+    /// @brief Short alias for @c ace::console::print — string without newline.
+    inline void print(const std::string_view&& str) {
+        console::print(std::forward<const std::string_view>(str));
+    }
+    /// @brief Short alias for @c ace::console::print — buffer without newline.
+    inline void print(io::buffer&& buf) {
+        console::print(std::forward<io::buffer>(buf));
+    }
+    /// @brief Short alias for @c ace::console::input — async stdin read.
+    [[nodiscard]] inline async<io::input_t> input() {
+        return console::input();
+    }
+}
+#endif
+
 #undef std
 
 #endif //ACE_CONSOLE_H

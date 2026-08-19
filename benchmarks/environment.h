@@ -8,6 +8,7 @@
 
 #include <benchmark/benchmark.h>
 #include <ace/ace.h>
+#include <ace/futures/backup.h>
 #include <ace/futures/channel.h>
 #include <ace/futures/timeout.h>
 #include <ace/futures/cutex.h>

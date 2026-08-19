@@ -2252,34 +2252,36 @@ TEST_F(io_hanged_fixture, hanged_command_defaults) {
 }
 
 // ==========================================================================
-// console — console output tests
+// console — console output tests (через короткие алиасы ace::println / ace::print,
+// определенные в console.h под guard ACE_H — ≡ ace::console::println / print)
 // ==========================================================================
 
 // Проверяет что println(string_view) не падает.
 TEST_F(console_fixture, println_string_view) {
-    // Почему проверяем println: это основной метод вывода в консоль.
-    // Не должен падать при передаче обычной строки.
-    EXPECT_NO_THROW(ace::console::println("test println"));
+    // Почему проверяем println через алиас: ace::println — короткое имя
+    // свободной функции (using console::println), покрывает тот же код
+    // консоли, что и полное ace::console::println.
+    EXPECT_NO_THROW(ace::println("test println"));
 }
 
 // Проверяет что println() без аргументов не падает.
 TEST_F(console_fixture, println_empty) {
     // Почему проверяем пустой println: перегрузка без аргументов
     // выводит пустую строку (только \n). Проверяем что не крашится.
-    EXPECT_NO_THROW(ace::console::println());
+    EXPECT_NO_THROW(ace::println());
 }
 
 // Проверяет что print(string_view) не падает.
 TEST_F(console_fixture, print_string_view) {
     // Почему проверяем print: как println но без newline в конце.
-    EXPECT_NO_THROW(ace::console::print("test print"));
+    EXPECT_NO_THROW(ace::print("test print"));
 }
 
 // Проверяет что print с форматированием не падает.
 TEST_F(console_fixture, print_format) {
     // Почему проверяем format: ACE использует std::format под
     // капотом. Проверяем что строка форматирования обрабатывается.
-    EXPECT_NO_THROW(ace::console::print("value = {}", 42));
+    EXPECT_NO_THROW(ace::print("value = {}", 42));
 }
 
 // ==========================================================================
@@ -3223,7 +3225,7 @@ TEST_F(fs_fixture, file_write_and_read) {
             auto result = co_await f_entity.read_buf();
             if (result) {
                 auto content = result.value().as<std::string>();
-                ace::console::println("read: '{}'", content);
+                ace::println("read: '{}'", content);
             }
         }
         co_return;

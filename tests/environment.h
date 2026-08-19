@@ -81,13 +81,13 @@ struct context_fixture : base_fixture {
     ace::promise<bool> simple_context_test() {
         base_fixture::once_suspend tests_future;
         co_await tests_future;
-        ace::console::println("One suspend complete");
+        ace::println("One suspend complete");
         co_return true;
     }
 
     ace::task nested_context_suspender() {
         co_await simple_context_test();
-        ace::console::println("Nested call complete");
+        ace::println("Nested call complete");
         co_return;
     }
 };
@@ -102,18 +102,18 @@ struct channel_fixture : base_fixture {
         co_await tests_future;
         std::string msg = "Ping";
         _channel.push(msg);
-        ace::console::println("Channel send complete");
+        ace::println("Channel send complete");
         co_await ace::suspend();
         const auto received = co_await _channel.pull();
-        ace::console::println("Channel received answer. DATA: {}", received);
+        ace::println("Channel received answer. DATA: {}", received);
         co_return;
     }
 
     ace::task channel_receiver() {
         const auto received = co_await _channel.pull();
-        ace::console::println("Channel receive complete. DATA: {}", received);
+        ace::println("Channel receive complete. DATA: {}", received);
         _channel << "Pong";
-        ace::console::println("Channel send answer");
+        ace::println("Channel send answer");
         co_return;
     }
 
@@ -128,9 +128,9 @@ struct timer_fixture : base_fixture {
     template <typename Rep, typename Period>
     ace::task timer_waiter_valued(std::chrono::duration<Rep, Period> dur,
                                   ace::bus<int>& ch) {
-        ace::console::println("Timeout launched for: {}", dur);
+        ace::println("Timeout launched for: {}", dur);
         co_await ace::timeout(dur);
-        ace::console::println("Timeout released after: {}", dur);
+        ace::println("Timeout released after: {}", dur);
         ch << dur.count();
         co_return;
     }
@@ -147,9 +147,9 @@ struct timer_fixture : base_fixture {
 
     ace::task expire_waiter_valued(ace::services::timepoint_t tp,
                                    ace::bus<ace::services::timepoint_t>& ch) {
-        ace::console::println("Expires at: {}", fancy(tp));
+        ace::println("Expires at: {}", fancy(tp));
         co_await ace::expire(tp);
-        ace::console::println("Expired at: {}", fancy(tp));
+        ace::println("Expired at: {}", fancy(tp));
         ch << tp;
         co_return;
     }
@@ -168,16 +168,16 @@ struct timer_fixture : base_fixture {
 
     ace::promise<int> wait_timer() {
         const auto wd = tool::lifetime("some_promise");
-        ace::console::println("some_promise working...");
+        ace::println("some_promise working...");
         co_await ace::timeout(5ms);
-        ace::console::println("{} finished", wd.mark());
+        ace::println("{} finished", wd.mark());
         co_return 1;
     }
 
     ace::task or_with_async() {
         auto res = co_await (wait_timer() or ace::timeout(1ms));
         if (not res)
-            ace::console::println("timeout of promise");
+            ace::println("timeout of promise");
     }
 
     void TearDown() override {
@@ -196,35 +196,35 @@ struct timer_fixture : base_fixture {
 struct yield_fixture : base_fixture {
 
     ace::automaton<int> num_auto() {
-        ace::console::println("Yielding value: {}", 1);
+        ace::println("Yielding value: {}", 1);
         co_yield 1;
-        ace::console::println("Yielding value: {}", 2);
+        ace::println("Yielding value: {}", 2);
         co_yield 2;
-        ace::console::println("Yielding value: {}", 3);
+        ace::println("Yielding value: {}", 3);
         co_yield 3;
-        ace::console::println("Yielding value: {}", 4);
+        ace::println("Yielding value: {}", 4);
         co_yield 4;
-        ace::console::println("Yielding value: {}", 5);
+        ace::println("Yielding value: {}", 5);
         co_return 5;
     }
 
     ace::task auto_user() {
         auto at = num_auto();
-        ace::console::println("Automaton inited");
+        ace::println("Automaton inited");
         int res = co_await at;
-        ace::console::println("Get from automaton: {}", res);
+        ace::println("Get from automaton: {}", res);
         _int_channel << res;
         res = co_await at;
-        ace::console::println("Get from automaton: {}", res);
+        ace::println("Get from automaton: {}", res);
         _int_channel << res;
         res = co_await at;
-        ace::console::println("Get from automaton: {}", res);
+        ace::println("Get from automaton: {}", res);
         _int_channel << res;
         res = co_await at;
-        ace::console::println("Get from automaton: {}", res);
+        ace::println("Get from automaton: {}", res);
         _int_channel << res;
         res = co_await at;
-        ace::console::println("Get from automaton: {}", res);
+        ace::println("Get from automaton: {}", res);
         _int_channel << res;
     }
 
@@ -331,7 +331,7 @@ struct cutex_fixture : base_fixture {
             co_await crx.release(); // no-op check
         }
         co_await crx.capture();
-        ace::console::println("'racer' finished");
+        ace::println("'racer' finished");
     }
 
     ace::task sync_racer(const int max, std::string& counter) {
@@ -343,73 +343,73 @@ struct cutex_fixture : base_fixture {
             co_await crx.release(); // no-op check
         }
         co_await crx.capture();
-        ace::console::println("'racer' finished");
+        ace::println("'racer' finished");
     }
 
     // ── cancel helpers ──
 
     ace::task cutex_parallel() {
-        ace::console::println("'cutex_parallel' started");
+        ace::println("'cutex_parallel' started");
         const auto wd = tool::lifetime("'cutex_parallel'");
         ace::guard crx(_cutex);
         co_await crx.capture();
         co_await ace::timeout(50ms);
         _runner_channel << co_await ace::get_runner();
-        ace::console::println("{} finished", wd.mark());
+        ace::println("{} finished", wd.mark());
     }
 
     ace::task cutex_carry() {
-        ace::console::println("'cutex_carry' started");
+        ace::println("'cutex_carry' started");
         const auto wd = tool::lifetime("'cutex_carry'");
         ace::guard crx(_cutex);
         co_await crx.capture();
-        ace::console::println("'cutex_carry' captured cutex");
+        ace::println("'cutex_carry' captured cutex");
         co_await ace::timeout(100ms);
         _runner_channel << co_await ace::get_runner();
-        ace::console::println("{} finished", wd.mark());
+        ace::println("{} finished", wd.mark());
     }
 
     ace::task cutex_checker() {
         ace::guard crx(_cutex);
         if (co_await (crx.capture() or ace::timeout(50ms)) == 0) {
-            ace::console::println("'cutex_checker' captured cutex");
+            ace::println("'cutex_checker' captured cutex");
             _runner_channel << co_await ace::get_runner();
-            ace::console::println("'cutex_checker' finished");
+            ace::println("'cutex_checker' finished");
             co_return;
         }
-        ace::console::println("'cutex_checker' can't capture cutex. FAILED");
+        ace::println("'cutex_checker' can't capture cutex. FAILED");
     }
 
     ace::task cutex_spawner() {
-        ace::console::println("'cutex_spawner' started");
+        ace::println("'cutex_spawner' started");
         co_await ace::timeout(10ms);
         auto handle = co_await ace::spawn(cutex_carry());
         co_await ace::timeout(75ms);
-        ace::console::println("'cutex_spawner' awake, canceling...");
+        ace::println("'cutex_spawner' awake, canceling...");
         handle.cancel();
         co_await ace::timeout(10ms);
         if (not co_await handle.join())
-            ace::console::println("'cutex_carry' canceled. Joining is 'false'");
+            ace::println("'cutex_carry' canceled. Joining is 'false'");
         else
-            ace::console::println("'cutex_carry' joined as alive. Failure");
+            ace::println("'cutex_carry' joined as alive. Failure");
         _runner_channel << co_await ace::get_runner();
-        ace::console::println("'cutex_spawner' finished");
+        ace::println("'cutex_spawner' finished");
     }
 
     ace::task cutex_spawner_permanent() {
-        ace::console::println("'cutex_spawner_permanent' started");
+        ace::println("'cutex_spawner_permanent' started");
         co_await ace::timeout(10ms);
         auto handle = co_await ace::spawn(cutex_carry());
         co_await ace::timeout(25ms);
-        ace::console::println("'cutex_spawner_permanent' awake, canceling...");
+        ace::println("'cutex_spawner_permanent' awake, canceling...");
         handle.cancel();
         co_await ace::timeout(10ms);
         if (not co_await handle.join())
-            ace::console::println("'cutex_carry' canceled. Joining is 'false'");
+            ace::println("'cutex_carry' canceled. Joining is 'false'");
         else
-            ace::console::println("'cutex_carry' joined as alive. Failure");
+            ace::println("'cutex_carry' joined as alive. Failure");
         _runner_channel << co_await ace::get_runner();
-        ace::console::println("'cutex_spawner_permanent' finished");
+        ace::println("'cutex_spawner_permanent' finished");
     }
 
     ace::cutex _cutex {};
@@ -427,7 +427,7 @@ struct spawn_fixture : base_fixture {
     ace::task to_spawn() {
         auto curr_runner = co_await ace::get_runner();
         co_await ace::timeout(100ms);
-        ace::console::println("'spawned' runned out");
+        ace::println("'spawned' runned out");
         _runner_channel << curr_runner;
         co_return;
     }
@@ -437,16 +437,16 @@ struct spawn_fixture : base_fixture {
         _runner_channel << curr_runner;
         const auto handle = co_await ace::spawn(to_spawn());
         while (not handle.done()) {
-            ace::console::println("'spawned' not done");
+            ace::println("'spawned' not done");
             co_await ace::timeout(10ms);
         }
-        ace::console::println("'spawned' done!!!");
+        ace::println("'spawned' done!!!");
     }
 
     ace::async<int> valued_to_spawn() {
         auto curr_runner = co_await ace::get_runner();
         co_await ace::timeout(100ms);
-        ace::console::println("'spawned' runned out");
+        ace::println("'spawned' runned out");
         _runner_channel << curr_runner;
         co_return 123;
     }
@@ -456,63 +456,63 @@ struct spawn_fixture : base_fixture {
         _runner_channel << curr_runner;
         auto handle = co_await ace::spawn(valued_to_spawn());
         while (not handle.done()) {
-            ace::console::println("'spawned' not done");
+            ace::println("'spawned' not done");
             co_await ace::timeout(10ms);
         }
-        ace::console::println("'spawned' done with {} !!!", (co_await handle.join()).value());
+        ace::println("'spawned' done with {} !!!", (co_await handle.join()).value());
     }
 
     ace::task join_spawner() {
         auto curr_runner = co_await ace::get_runner();
         _runner_channel << curr_runner;
         auto handle = co_await ace::spawn(to_spawn());
-        ace::console::println("'spawned' is spawned");
-        if (co_await handle.join()) ace::console::println("'spawned' done!!!");
-        else ace::console::println("'spawned' broken!!!");
+        ace::println("'spawned' is spawned");
+        if (co_await handle.join()) ace::println("'spawned' done!!!");
+        else ace::println("'spawned' broken!!!");
     }
 
     // ── cancel ──
 
     ace::promise<> to_spawn_nested() {
         const auto wd = tool::lifetime("'parallel-nested'");
-        ace::console::print("'parallel-nested' started\n");
+        ace::print("'parallel-nested' started\n");
         co_await ace::timeout(1000ms);
         _runner_channel << co_await ace::get_runner();
-        ace::console::println("{} finished", wd.mark());
+        ace::println("{} finished", wd.mark());
         co_return;
     }
 
     ace::task to_spawn_cancel() {
         const auto wd = tool::lifetime("'parallel'");
-        ace::console::print("'parallel' started\n");
+        ace::print("'parallel' started\n");
         co_await to_spawn_nested();
         co_await ace::timeout(1000ms);
         _runner_channel << co_await ace::get_runner();
-        ace::console::println("{} finished", wd.mark());
+        ace::println("{} finished", wd.mark());
         co_return;
     }
 
     ace::task spawner_cancel() {
-        ace::console::println("'spawner' started");
+        ace::println("'spawner' started");
         auto handle = co_await ace::spawn(to_spawn_cancel());
         co_await ace::timeout(100ms);
-        ace::console::println("'spawner' awake, canceling...");
+        ace::println("'spawner' awake, canceling...");
         handle.cancel();
         _runner_channel << co_await ace::get_runner();
-        ace::console::println("'spawner' finished");
+        ace::println("'spawner' finished");
     }
 
     ace::task spawner_join_canceled() {
-        ace::console::println("'spawner' started");
+        ace::println("'spawner' started");
         auto handle = co_await ace::spawn(to_spawn_cancel());
         co_await ace::timeout(100ms);
-        ace::console::println("'spawner' awake, canceling...");
+        ace::println("'spawner' awake, canceling...");
         handle.cancel();
         if (not co_await handle.join())
-            ace::console::println("'parallel' canceled. Joining is 'false'");
-        else ace::console::println("'parallel' joined as alive. Failure");
+            ace::println("'parallel' canceled. Joining is 'false'");
+        else ace::println("'parallel' joined as alive. Failure");
         _runner_channel << co_await ace::get_runner();
-        ace::console::println("'spawner' finished");
+        ace::println("'spawner' finished");
     }
 
     // ── valued cancel ──
@@ -554,7 +554,7 @@ struct spawn_fixture : base_fixture {
     // ── post / compose ──
 
     ace::task spawn_post(int idx, ace::bus<int>& ch) {
-        ace::console::println("Placing {} to channel", idx);
+        ace::println("Placing {} to channel", idx);
         ch << idx;
         co_return;
     }
@@ -568,15 +568,15 @@ struct spawn_fixture : base_fixture {
         );
         static_assert(std::same_as<decltype(res), std::tuple<bool, bool, bool, bool>>, "Must be tuple of bools");
         #if defined(__clang__) && __clang_major__ >= 22
-            ace::console::println("spawn, post, spawn, post - finished {}", res);
+            ace::println("spawn, post, spawn, post - finished {}", res);
         #endif
-        ace::console::println("Placing {} to channel", 5);
+        ace::println("Placing {} to channel", 5);
         ch << 5;
         co_return;
     }
 
     ace::async<int> valued_spawn_post(int idx, ace::bus<int>& ch) {
-        ace::console::println("Placing {} to channel", idx);
+        ace::println("Placing {} to channel", idx);
         ch << idx;
         co_return idx;
     }
@@ -590,14 +590,14 @@ struct spawn_fixture : base_fixture {
         );
         static_assert(std::same_as<decltype(res), std::tuple<std::optional<int>, std::optional<int>, std::optional<int>, std::optional<int>>>, "Must be tuple of std::optional<int>s");
         #if defined(__clang__) && __clang_major__ >= 22
-                ace::console::println("spawn, post, spawn, post - finished {}", res);
+                ace::println("spawn, post, spawn, post - finished {}", res);
         #endif
-        ace::console::println("Placing {} to channel", 5);
+        ace::println("Placing {} to channel", 5);
         ch << 5;
-        ace::console::println("From 1'st: {}", std::get<0>(res).value());
-        ace::console::println("From 2'st: {}", std::get<1>(res).value());
-        ace::console::println("From 3'st: {}", std::get<2>(res).value());
-        ace::console::println("From 4'st: {}", std::get<3>(res).value());
+        ace::println("From 1'st: {}", std::get<0>(res).value());
+        ace::println("From 2'st: {}", std::get<1>(res).value());
+        ace::println("From 3'st: {}", std::get<2>(res).value());
+        ace::println("From 4'st: {}", std::get<3>(res).value());
         co_return;
     }
 
@@ -609,16 +609,16 @@ struct spawn_fixture : base_fixture {
     }
 
     static void printer(const int& idx) {
-        ace::console::println("Placing {} to channel", idx);
+        ace::println("Placing {} to channel", idx);
     }
 
     static ace::promise<> printer_promise(const int idx) {
-        ace::console::println("Placing {} to channel", idx);
+        ace::println("Placing {} to channel", idx);
         co_return;
     }
 
     static void congrats() {
-        ace::console::println("Pipe finished");
+        ace::println("Pipe finished");
     }
 
     ace::task composed_output(ace::bus<int>& ch) {
@@ -659,8 +659,8 @@ struct socket_echo_fixture : base_fixture {
         if (not connection) { co_return; }
         for (int i = 0; i < 5; ++i) {
             if (auto result = co_await connection.recv_buf())
-                ace::console::println("Server received: '{}'", result.value().as<std::string>());
-            else ace::console::println("Server failed: '{}'", strerror(result.error()));
+                ace::println("Server received: '{}'", result.value().as<std::string>());
+            else ace::println("Server failed: '{}'", strerror(result.error()));
         }
         co_return;
     }
@@ -675,7 +675,7 @@ struct socket_echo_fixture : base_fixture {
         for (int i = 1; i < 6; ++i) {
             std::string msg = "Echo message " + std::to_string(i);
             if (co_await connection.send(msg))
-                ace::console::println("Client sent: '{}'", msg);
+                ace::println("Client sent: '{}'", msg);
         }
         co_return;
     }
@@ -691,9 +691,9 @@ struct socket_echo_fixture : base_fixture {
         if (not connection) { co_return; }
         for (int i = 0; i < 5; ++i) {
             if (auto buf = co_await connection.recv_buf())
-                ace::console::println("Server [zc] received: '{}'", buf.value());
+                ace::println("Server [zc] received: '{}'", buf.value());
             else
-                ace::console::println("Server [zc] failed. error: {}", strerror(buf.error()));
+                ace::println("Server [zc] failed. error: {}", strerror(buf.error()));
         }
         co_return;
     }
@@ -709,7 +709,7 @@ struct socket_echo_fixture : base_fixture {
             ace::io::buffer buf;
             buf.append("Echo message {}", i);
             if (co_await connection.send(buf) == EXIT_SUCCESS)
-                ace::console::println("Client [zc] sent: '{}'", buf);
+                ace::println("Client [zc] sent: '{}'", buf);
         }
         co_return;
     }
@@ -977,7 +977,7 @@ struct cross_mechanic_fixture : base_fixture {
         auto grab_value = [&] (std::optional<int> val) -> std::optional<int> {
             if (val) {
                 result << *val; ++collected;
-                ace::console::println("Grabbed value form automaton - {}", *val);
+                ace::println("Grabbed value form automaton - {}", *val);
             }
             return val;
         };

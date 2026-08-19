@@ -362,6 +362,12 @@ ace::task udp_client() {
 | `print(string_view)` | 69 | `static void` |
 | `print(io::buffer&&)` | 73 | `static void` |
 
+**Короткие алиасы:** `ace::println`, `ace::print`, `ace::input` — все перегрузки
+`console::println()` / `console::print()` / `console::input()` доступны как
+свободные функции в `ace` под guard `ACE_H` (требуется подключённый раньше
+`ace/ace.h`), т.е. `ace::println("{}", 42)` ≡ `ace::console::println("{}", 42)`.
+Без `ace.h` — только полные имена `ace::console::X`.
+
 ### ace::fs (`fs.h`)
 
 | Тип | Линия | Описание |
@@ -1112,7 +1118,7 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 
 10. **НЕ использовать лямбда-корутины (coroutine lambdas)** — `[&]() -> ace::task {...}()` и т.п. **запрещены**. GCC размещает closure лямбды в кадре корутины так, что он накладывается на поле `_block` promise: вызов `observe()` (через `setup_control_block()`) затирает захваченные ссылки, и корутина читает мусор (ASan: heap-use-after-free / stack-use-after-scope). Баг пред-существующий (воспроизводится на чистом HEAD), проявляется при `observe()` перед `schedule()`/spawn, а также у task-payload в backup/insure. Решение: оформлять корутины как именованные функции/helper-методы с параметрами-ссылками. Обычные (не-корутинные) лямбды — можно.
 
-11. **Короткие алиасы futures-типов** (`ace::timeout`, `ace::expire`, `ace::channel`, `ace::allocation_type`, `ace::access_mode`, `ace::polling`, `ace::cutex`, `ace::guard`, `ace::capture_future`, `ace::cutex_control`) определены в самих `futures/*.h` под `#ifdef ACE_H` — они доступны только если `ace/ace.h` включён **до** соответствующего futures-хидера. Иначе — только полные имена `ace::futures::X`.
+11. **Короткие алиасы futures-типов** (`ace::timeout`, `ace::expire`, `ace::channel`, `ace::allocation_type`, `ace::access_mode`, `ace::tunnel::*`, `ace::polling`, `ace::cutex`, `ace::guard`, `ace::capture_future`, `ace::cutex_control`) и консольных функций (`ace::println`, `ace::print`, `ace::input`) определены в самих `futures/*.h` / `console.h` под `#ifdef ACE_H` — они доступны только если `ace/ace.h` включён **до** соответствующего хидера. Иначе — только полные имена `ace::futures::X` / `ace::console::X`.
 
     <!-- TODO (agent): реализовать поддержку лямбда-корутин — устранить коллизию
          closure лямбды с полем _block promise (GCC размещает closure в кадре на
@@ -1127,7 +1133,7 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 
 | Файл | Что содержит |
 |------|-------------|
-| `ace.h` | Quick-start: entry, compose, spawn, post, reattach, get_runner, roaming, backup. Определяет guard `ACE_H` — короткие алиасы (`ace::timeout`, `ace::channel`, `ace::cutex`, ...) определяются в самих `futures/*.h` под `#ifdef ACE_H` и доступны только при включении `ace.h` раньше. |
+| `ace.h` | Quick-start: entry, compose, spawn, post, reattach. Определяет guard `ACE_H` — короткие алиасы (`ace::timeout`, `ace::channel`, `ace::cutex`, `ace::println`, ...) определяются в самих `futures/*.h` и `console.h` под `#ifdef ACE_H` и доступны только при включении `ace.h` раньше. |
 | `core/entry.h` | `co_main()`, `ace::cfg::init()`, `ace::entry`, `ace::entry_result` |
 | `core/config.h` | `ace::cfg::config`, `ace::cfg::g_config`, `ace::cfg::ace_param<Tag>`, `detail::resolve<Tag>()` |
 | `core/async.h` | `async<T>`, `promise<T>`, `automaton<T>`, `task`, `task_wrap`, `suspend`, promise_type, async_router, omni_node/omni_runner/runner_router aliases |
@@ -1150,7 +1156,7 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 | `core/tools/lifetime.h` | `lifetime` (RAII debug tracer) |
 | `net.h` | Все TCP/UDP типы: `socket`, `socket_entity`, `stream_mode_entity`, `listener_entity`, `transport_entity`, `connection_link`, все query-типы, `is_inet_domain`, `is_stream_type` |
 | `io.h` | `io::query`, `io::entity`, `io::link`, `io::guard`, `io::hanged`, `io::buffer`, `io::any`, read/write/close_query, `is_query<E>`, `is_entity<E>` concepts |
-| `console.h` | `ace::console::input()`, `println()`, `print()` |
+| `console.h` | `ace::console::input()`, `println()`, `print()`; короткие алиасы `ace::input`, `ace::println`, `ace::print` под guard `ACE_H` |
 | `fs.h` | `ace::fs::file`, `ace::fs::file_link`, `file::open_query` |
 | `futures/channel.h` | `channel<T>` (MPMC), `pull_impl`, `channel_router` |
 | `futures/cutex.h` | `cutex` (cooperative mutex), `cutex::proxy`, `capture_future`, `cutex_router`, `ace::guard()` алиас |
@@ -1205,7 +1211,7 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 | `io_entity_fixture` | `::testing::Test` | — | 9: entity lifecycle, move, extract, close, guard |
 | `io_any_fixture` | `::testing::Test` | — | 6: type-erased any construction/move/destructor |
 | `io_hanged_fixture` | `::testing::Test` | — | 5: fire-and-forget command pool |
-| `console_fixture` | `::testing::Test` | — | 4: console print/println |
+| `console_fixture` | `::testing::Test` | — | 4: console print/println (через короткие алиасы `ace::println`/`ace::print`) |
 | `cross_mechanic_fixture` | `base_fixture` | reset runners + signal | 17: cross-subsystem integration (spawn + timeout + channel + cutex + or_ping_automaton + cancel_channel) |
 | `spawn_extra_fixture` | `base_fixture` | — | 8: spawn join, cancel, done, post priority, roaming, polling |
 | `compose_extra_fixture` | `base_fixture` | — | 3: or_await, and_await, operator>> pipe tests |

@@ -393,7 +393,7 @@ co_await ace::expire(deadline);   // абсолютный
 > под guard `ACE_H` — доступны, если `ace/ace.h` подключён раньше
 > `ace/futures/timeout.h`. Без `ace.h` доступны только `ace::futures::timeout` /
 > `ace::futures::expire`. То же правило для `ace::channel`, `ace::cutex`,
-> `ace::tunnel`, `ace::polling` и остальных futures-типов.
+> `ace::polling` и остальных futures-типов.
 
 ### Гонка recv с таймаутом
 
@@ -562,16 +562,16 @@ MPMC (multi-producer/multi-consumer) канал. Шаблонные параме
 | `pending_push(T)` | 163 | `promise<>` — асинхронный push, ждёт пока появится место |
 | `notify()` (private) | 134 | Пробуждает одного ожидающего |
 
-**Алиасы в `ace::tunnel::dyn` (доступны при подключённом раньше `ace.h`):**
+**Алиасы в `ace::channel` (доступны при подключённом раньше `ace.h`):**
 | Алиас | Тип |
 |-------|-----|
-| `dyn::local<T>` | `channel<T, e_dynamic, e_regular>` |
-| `dyn::bridge<T>` | `channel<T, e_dynamic, e_spsc>` |
-| `dyn::funnel<T>` | `channel<T, e_dynamic, e_mpsc>` |
-| `dyn::bus<T>` | `channel<T, e_dynamic, e_mpmc>` |
+| `local<T>` | `channel<T, e_dynamic, e_regular>` |
+| `bridge<T>` | `channel<T, e_dynamic, e_spsc>` |
+| `funnel<T>` | `channel<T, e_dynamic, e_mpsc>` |
+| `bus<T>` | `channel<T, e_dynamic, e_mpmc>` |
 
 ```cpp
-ace::tunnel::dyn::bus<int> ch;
+ace::bus<int> ch;
 ch.push(42);
 ch << 99;
 int val = co_await ch.pull();
@@ -1112,7 +1112,7 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 
 10. **НЕ использовать лямбда-корутины (coroutine lambdas)** — `[&]() -> ace::task {...}()` и т.п. **запрещены**. GCC размещает closure лямбды в кадре корутины так, что он накладывается на поле `_block` promise: вызов `observe()` (через `setup_control_block()`) затирает захваченные ссылки, и корутина читает мусор (ASan: heap-use-after-free / stack-use-after-scope). Баг пред-существующий (воспроизводится на чистом HEAD), проявляется при `observe()` перед `schedule()`/spawn, а также у task-payload в backup/insure. Решение: оформлять корутины как именованные функции/helper-методы с параметрами-ссылками. Обычные (не-корутинные) лямбды — можно.
 
-11. **Короткие алиасы futures-типов** (`ace::timeout`, `ace::expire`, `ace::channel`, `ace::allocation_type`, `ace::access_mode`, `ace::tunnel::*`, `ace::polling`, `ace::cutex`, `ace::guard`, `ace::capture_future`, `ace::cutex_control`) определены в самих `futures/*.h` под `#ifdef ACE_H` — они доступны только если `ace/ace.h` включён **до** соответствующего futures-хидера. Иначе — только полные имена `ace::futures::X`.
+11. **Короткие алиасы futures-типов** (`ace::timeout`, `ace::expire`, `ace::channel`, `ace::allocation_type`, `ace::access_mode`, `ace::polling`, `ace::cutex`, `ace::guard`, `ace::capture_future`, `ace::cutex_control`) определены в самих `futures/*.h` под `#ifdef ACE_H` — они доступны только если `ace/ace.h` включён **до** соответствующего futures-хидера. Иначе — только полные имена `ace::futures::X`.
 
     <!-- TODO (agent): реализовать поддержку лямбда-корутин — устранить коллизию
          closure лямбды с полем _block promise (GCC размещает closure в кадре на
@@ -1127,7 +1127,7 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 
 | Файл | Что содержит |
 |------|-------------|
-| `ace.h` | Quick-start: entry, compose, spawn, post, reattach, get_runner, roaming, backup. Определяет guard `ACE_H` — короткие алиасы (`ace::timeout`, `ace::channel`, `ace::cutex`, `ace::tunnel`, ...) определяются в самих `futures/*.h` под `#ifdef ACE_H` и доступны только при включении `ace.h` раньше. |
+| `ace.h` | Quick-start: entry, compose, spawn, post, reattach, get_runner, roaming, backup. Определяет guard `ACE_H` — короткие алиасы (`ace::timeout`, `ace::channel`, `ace::cutex`, ...) определяются в самих `futures/*.h` под `#ifdef ACE_H` и доступны только при включении `ace.h` раньше. |
 | `core/entry.h` | `co_main()`, `ace::cfg::init()`, `ace::entry`, `ace::entry_result` |
 | `core/config.h` | `ace::cfg::config`, `ace::cfg::g_config`, `ace::cfg::ace_param<Tag>`, `detail::resolve<Tag>()` |
 | `core/async.h` | `async<T>`, `promise<T>`, `automaton<T>`, `task`, `task_wrap`, `suspend`, promise_type, async_router, omni_node/omni_runner/runner_router aliases |
@@ -1152,7 +1152,7 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 | `io.h` | `io::query`, `io::entity`, `io::link`, `io::guard`, `io::hanged`, `io::buffer`, `io::any`, read/write/close_query, `is_query<E>`, `is_entity<E>` concepts |
 | `console.h` | `ace::console::input()`, `println()`, `print()` |
 | `fs.h` | `ace::fs::file`, `ace::fs::file_link`, `file::open_query` |
-| `futures/channel.h` | `channel<T>` (MPMC), `pull_impl`, `channel_router`, aliases в `tunnel::dyn` и `tunnel::bounded` |
+| `futures/channel.h` | `channel<T>` (MPMC), `pull_impl`, `channel_router` |
 | `futures/cutex.h` | `cutex` (cooperative mutex), `cutex::proxy`, `capture_future`, `cutex_router`, `ace::guard()` алиас |
 | `futures/timeout.h` | `timeout(duration)`, `expire(deadline)`, `timeout_router` |
 | `futures/spawn.h` | `spawn(task)` — параллельный запуск (back of queue) |

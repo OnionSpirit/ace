@@ -99,12 +99,12 @@ static void bm_timer_parallel(benchmark::State& state) {
 
     for (auto _ : state) {
         configure_runners(runners);
-        ace::futures::tunnel::dyn::bus<long> ch;
+        ace::bus<long> ch;
 
         // timer_waiter: ждёт duration и пишет elapsed в канал
-        auto timer_waiter = [](auto dur, ace::futures::tunnel::dyn::bus<long>& ch) -> ace::task {
+        auto timer_waiter = [](auto dur, ace::bus<long>& ch) -> ace::task {
             const auto start = ace::services::clock::current_time();
-            co_await ace::futures::timeout(dur);
+            co_await ace::timeout(dur);
             const auto end = ace::services::clock::current_time();
             ch << (end - start).count();
             co_return;
@@ -143,12 +143,12 @@ static void bm_spawn_cancel(benchmark::State& state) {
     const int spawn_count = 100;
 
     for (auto _ : state) {
-        ace::futures::tunnel::dyn::bus<int> result;
+        ace::bus<int> result;
 
-        auto spawner = [](int n, ace::futures::tunnel::dyn::bus<int>& result) -> ace::task {
+        auto spawner = [](int n, ace::bus<int>& result) -> ace::task {
             for (int i = 0; i < n; ++i) {
                 auto handle = co_await ace::spawn([&result, i]() -> ace::task {
-                    co_await ace::futures::timeout(std::chrono::seconds(10));
+                    co_await ace::timeout(std::chrono::seconds(10));
                     int v = i;
                     result << v;
                     co_return;
@@ -189,9 +189,9 @@ static void bm_timer_ordering(benchmark::State& state) {
     // Почему schedule+run а не прямой вызов: service должен работать
     // в контексте раннера для корректной инициализации.
     {
-        ace::futures::tunnel::dyn::bus<int> warmup_ch;
+        ace::bus<int> warmup_ch;
         auto warmup = [&warmup_ch]() -> ace::task {
-            co_await ace::futures::timeout(1ms);
+            co_await ace::timeout(1ms);
             co_return;
         };
         ace::schedule(warmup());
@@ -199,10 +199,10 @@ static void bm_timer_ordering(benchmark::State& state) {
     }
 
     for (auto _ : state) {
-        ace::futures::tunnel::dyn::bus<int> ch;
+        ace::bus<int> ch;
 
-        auto timer_valued = [](auto dur, ace::futures::tunnel::dyn::bus<int>& ch) -> ace::task {
-            co_await ace::futures::timeout(dur);
+        auto timer_valued = [](auto dur, ace::bus<int>& ch) -> ace::task {
+            co_await ace::timeout(dur);
             int v = static_cast<int>(
                 std::chrono::duration_cast<std::chrono::milliseconds>(dur).count()
             );
@@ -322,15 +322,15 @@ static void bm_channel_push_pull(benchmark::State& state) {
     constexpr int messages = 100000;
 
     for (auto _ : state) {
-        ace::futures::tunnel::dyn::bus<int> ch;
+        ace::bus<int> ch;
 
-        auto producer = [](int n, ace::futures::tunnel::dyn::bus<int>& ch) -> ace::task {
+        auto producer = [](int n, ace::bus<int>& ch) -> ace::task {
             for (int i = 0; i < n; ++i)
                 ch << i;
             co_return;
         };
 
-        auto consumer = [](int n, ace::futures::tunnel::dyn::bus<int>& ch) -> ace::task {
+        auto consumer = [](int n, ace::bus<int>& ch) -> ace::task {
             int sum = 0;
             for (int i = 0; i < n; ++i)
                 sum += co_await ch.pull();
@@ -364,9 +364,9 @@ static void bm_spawn_join(benchmark::State& state) {
     constexpr int tasks = 20000;
 
     for (auto _ : state) {
-        ace::futures::tunnel::dyn::bus<int> result;
+        ace::bus<int> result;
 
-        auto spawner = [](int n, ace::futures::tunnel::dyn::bus<int>& result) -> ace::task {
+        auto spawner = [](int n, ace::bus<int>& result) -> ace::task {
             for (int i = 0; i < n; ++i) {
                 auto handle = co_await ace::spawn([&result, i]() -> ace::task {
                     int v = i;
@@ -404,10 +404,10 @@ static void bm_timeout_short(benchmark::State& state) {
     constexpr int timers = 20000;
 
     for (auto _ : state) {
-        ace::futures::tunnel::dyn::bus<int> ch;
+        ace::bus<int> ch;
 
-        auto waiter = [](auto dur, ace::futures::tunnel::dyn::bus<int>& ch) -> ace::task {
-            co_await ace::futures::timeout(dur);
+        auto waiter = [](auto dur, ace::bus<int>& ch) -> ace::task {
+            co_await ace::timeout(dur);
             int v = 1;
             ch << v;
             co_return;
@@ -454,7 +454,7 @@ static void bm_compose_and(benchmark::State& state) {
     for (auto _ : state) {
         auto composer = [](int n) -> ace::task {
             for (int i = 0; i < n; ++i)
-                co_await (ace::futures::timeout(0ms) and ace::futures::timeout(0ms));
+                co_await (ace::timeout(0ms) and ace::timeout(0ms));
             co_return;
         };
 
@@ -477,7 +477,7 @@ static void bm_compose_or(benchmark::State& state) {
     for (auto _ : state) {
         auto composer = [](int n) -> ace::task {
             for (int i = 0; i < n; ++i)
-                co_await (ace::futures::timeout(0ms) or ace::futures::timeout(0ms));
+                co_await (ace::timeout(0ms) or ace::timeout(0ms));
             co_return;
         };
 
@@ -622,15 +622,15 @@ static void bm_channel_pending_push(benchmark::State& state) {
     constexpr int messages = 20000;
 
     for (auto _ : state) {
-        ace::futures::tunnel::dyn::bus<int> ch;
+        ace::bus<int> ch;
 
-        auto producer = [](int n, ace::futures::tunnel::dyn::bus<int>& ch) -> ace::task {
+        auto producer = [](int n, ace::bus<int>& ch) -> ace::task {
             for (int i = 0; i < n; ++i)
                 co_await ch.pending_push(i);
             co_return;
         };
 
-        auto consumer = [](int n, ace::futures::tunnel::dyn::bus<int>& ch) -> ace::task {
+        auto consumer = [](int n, ace::bus<int>& ch) -> ace::task {
             int sum = 0;
             for (int i = 0; i < n; ++i)
                 sum += co_await ch.pull();
@@ -655,7 +655,7 @@ BENCHMARK(bm_channel_pending_push)->Unit(benchmark::kMillisecond);
 // BM16 — reattach_migration: миграция корутины между раннерами
 // ==========================================================================
 // Задача N раз переключается между двумя раннерами через
-// co_await ace::futures::reattach{runner*}. Характеризует стоимость
+// co_await ace::reattach{runner*}. Характеризует стоимость
 // кросс-раннерной передачи узла (insert_pool + reattach_router).
 
 static void bm_reattach_migration(benchmark::State& state) {
@@ -663,9 +663,9 @@ static void bm_reattach_migration(benchmark::State& state) {
 
     for (auto _ : state) {
         configure_runners(2);
-        ace::futures::tunnel::dyn::bus<ace::core::runner*> rch;
+        ace::bus<ace::core::runner*> rch;
 
-        auto gather = [](ace::futures::tunnel::dyn::bus<ace::core::runner*>& rch) -> ace::task {
+        auto gather = [](ace::bus<ace::core::runner*>& rch) -> ace::task {
             auto* r = co_await ace::get_runner();
             rch << r;
             co_return;
@@ -686,8 +686,8 @@ static void bm_reattach_migration(benchmark::State& state) {
 
         auto hopper = [](int n, ace::core::runner* r0, ace::core::runner* r1) -> ace::task {
             for (int i = 0; i < n; ++i) {
-                co_await ace::futures::reattach{r0};
-                co_await ace::futures::reattach{r1};
+                co_await ace::reattach{r0};
+                co_await ace::reattach{r1};
             }
             co_return;
         };
@@ -715,9 +715,9 @@ static void bm_spawn_fire_forget(benchmark::State& state) {
     constexpr int tasks = 50000;
 
     for (auto _ : state) {
-        ace::futures::tunnel::dyn::bus<int> result;
+        ace::bus<int> result;
 
-        auto spawner = [](int n, ace::futures::tunnel::dyn::bus<int>& result) -> ace::task {
+        auto spawner = [](int n, ace::bus<int>& result) -> ace::task {
             for (int i = 0; i < n; ++i) {
                 co_await ace::spawn([&result, i]() -> ace::task {
                     int v = i;
@@ -751,9 +751,9 @@ static void bm_automaton_ping(benchmark::State& state) {
     constexpr int automata = 5000;
 
     for (auto _ : state) {
-        ace::futures::tunnel::dyn::bus<int> ch;
+        ace::bus<int> ch;
 
-        auto user = [](int n, ace::futures::tunnel::dyn::bus<int>& ch) -> ace::task {
+        auto user = [](int n, ace::bus<int>& ch) -> ace::task {
             auto handle = co_await ace::spawn([](int n) -> ace::automaton<int> {
                 for (int i = 0; i < n; ++i)
                     co_yield i;
@@ -784,7 +784,7 @@ BENCHMARK(bm_automaton_ping)->Unit(benchmark::kMillisecond);
 // ==========================================================================
 // BM19 — expire_absolute: таймеры с абсолютными дедлайнами
 // ==========================================================================
-// N таймеров через ace::futures::expire(deadline) с короткими дедлайнами.
+// N таймеров через ace::expire(deadline) с короткими дедлайнами.
 // Характеризует путь абсолютных дедлайнов clock (expire → timeout).
 // NOTE: Дедлайны в пределах 1..20ms — проверяет подписку в нижний диск
 // колеса и корректность подсчёта.
@@ -793,10 +793,10 @@ static void bm_expire_absolute(benchmark::State& state) {
     constexpr int timers = 5000;
 
     for (auto _ : state) {
-        ace::futures::tunnel::dyn::bus<int> ch;
+        ace::bus<int> ch;
 
-        auto waiter = [](ace::services::timepoint_t deadline, ace::futures::tunnel::dyn::bus<int>& ch) -> ace::task {
-            co_await ace::futures::expire(deadline);
+        auto waiter = [](ace::services::timepoint_t deadline, ace::bus<int>& ch) -> ace::task {
+            co_await ace::expire(deadline);
             int v = 1;
             ch << v;
             co_return;
@@ -834,12 +834,12 @@ static void bm_compose_variadic(benchmark::State& state) {
     for (auto _ : state) {
         auto composer = [](int n) -> ace::task {
             for (int i = 0; i < n; ++i) {
-                co_await (ace::futures::timeout(0ms)
-                    and ace::futures::timeout(0ms)
-                    and ace::futures::timeout(0ms));
-                co_await (ace::futures::timeout(0ms)
-                    or ace::futures::timeout(0ms)
-                    or ace::futures::timeout(0ms));
+                co_await (ace::timeout(0ms)
+                    and ace::timeout(0ms)
+                    and ace::timeout(0ms));
+                co_await (ace::timeout(0ms)
+                    or ace::timeout(0ms)
+                    or ace::timeout(0ms));
             }
             co_return;
         };

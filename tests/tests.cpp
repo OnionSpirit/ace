@@ -362,7 +362,7 @@ TEST_F(spawn_fixture, check_valued_post_command) {
 // Почему это важно: cancel должен обрывать корутину до co_return, поэтому
 // _status не становится e_finished и return_value() возвращает false.
 TEST_F(spawn_fixture, check_valued_spawn_cancel) {
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule(valued_spawner_cancel(ch));
     ace::run();
     ASSERT_TRUE(ace::empty());
@@ -375,7 +375,7 @@ TEST_F(spawn_fixture, check_valued_spawn_cancel) {
 // Проверяет что join() на завершённой valued-таске возвращает правильное значение.
 // Почему это важно: return_value должен вернуть то что передано в co_return.
 TEST_F(spawn_fixture, check_valued_spawn_join_value) {
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule(valued_spawner_join(ch));
     ace::run();
     ASSERT_TRUE(ace::empty());
@@ -1114,7 +1114,7 @@ TEST_F(promise_traits_fixture, return_traits_typed) {
     // Почему проверяем через schedule+run: promise_return_traits::return_value
     // вызывается компилятором C++20 при co_return expr. Проверяем что
     // значение сохраняется и доступно через _return_value поля.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule(ace::task_wrap(simple_valued_coroutine()));
     ace::run();
     EXPECT_TRUE(ace::empty());
@@ -1466,7 +1466,7 @@ TEST_F(signal_fixture, termination_signal_action) {
     // Почему проверяем termination_signal: dispatcher посылает
     // этот сигнал при вызове ace::terminate(). service должен
     // получить e_shutdown и завершить работу.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         ace::core::termination_signal sig;
         auto result = co_await sig.action();
@@ -1485,7 +1485,7 @@ TEST_F(signal_fixture, interruption_signal_action) {
     // Почему проверяем interruption_signal: dispatcher посылает
     // этот сигнал при вызове ace::interrupt(). service должен
     // получить e_break и приостановиться.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         ace::core::interruption_signal sig;
         auto result = co_await sig.action();
@@ -1612,7 +1612,7 @@ TEST_F(runner_fixture, suspending_task_run) {
     // времени, поэтому между r.run() обязателен sleep — иначе цикл
     // завершится раньше истечения таймера, а задача останется висеть
     // в clock (загрязняя wheel для последующих тестов процесса).
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::core::runner r;
     r.attach(suspending_task(ch));
     for (int i = 0; i < 10; ++i) {
@@ -1634,7 +1634,7 @@ TEST_F(dispatcher_fixture, schedule_and_run) {
     // Почему проверяем schedule+run: это основной API фреймворка.
     // Если schedule не добавляет задачу или run не выполняет её —
     // фреймворк не работает.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         ch << 42;
         co_return;
@@ -1705,7 +1705,7 @@ TEST_F(dispatcher_fixture, multiple_schedule_run) {
     // может вызывать run() несколько раз (например в игровом цикле).
     // Каждый run() должен обрабатывать только задачи добавленные
     // до его вызова.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         ch << 1;
         co_return;
@@ -2391,7 +2391,7 @@ TEST_F(context_fixture, async_prefetch) {
 TEST_F(spawn_extra_fixture, spawn_and_join) {
     // Почему проверяем spawn+join: основной паттерн параллельного
     // запуска. spawn запускает задачу, join ждёт её завершения.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         auto handle = co_await ace::spawn([&ch]() -> ace::task {
             ch << 42;
@@ -2416,7 +2416,7 @@ TEST_F(spawn_extra_fixture, join_after_cancel) {
     // Почему проверяем join после cancel: cancel() помечает
     // корутину как e_detached. join() должен вернуть false
     // потому что корутина не завершилась успешно.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         auto handle = co_await ace::spawn([&ch]() -> ace::task {
             co_await ace::timeout(std::chrono::milliseconds(500));
@@ -2440,7 +2440,7 @@ TEST_F(spawn_extra_fixture, handle_done) {
     // Почему проверяем done: spawner в петле опрашивает done()
     // чтобы дождаться завершения. Если done всегда false —
     // бесконечный цикл.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         auto handle = co_await ace::spawn([&ch]() -> ace::task {
             ch << 7;
@@ -2470,7 +2470,7 @@ TEST_F(compose_extra_fixture, or_await_left_wins) {
     // NOTE: при запуске с другими тестами clock может накопить задержку,
     // поэтому используем большую разницу (10ms vs 2000ms) и допускаем
     // что любой может выиграть при экстремальной загрузке.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         auto res = co_await (
             ace::timeout(std::chrono::milliseconds(10)) or
@@ -2491,7 +2491,7 @@ TEST_F(compose_extra_fixture, or_await_left_wins) {
 TEST_F(compose_extra_fixture, and_await_both_succeed) {
     // Почему проверяем and: and ждёт оба future параллельно.
     // Результат должен быть кортежем с обоими значениями.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         co_await (
             ace::timeout(std::chrono::milliseconds(1)) and
@@ -2514,7 +2514,7 @@ TEST_F(compose_extra_fixture, operator_pipe) {
     // корутины должно передаваться во вторую.
     // NOTE: используем две timeout операции для проверки pipe без
     // возвращаемых значений (void >> void).
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         // pipe из двух void-корутин с паузой между ними
         co_await ace::timeout(std::chrono::milliseconds(1));
@@ -2538,7 +2538,7 @@ TEST_F(channel_extra_fixture, push_pull_single) {
     // между корутинами. Данные должны передаваться без потерь.
     _ch.push(42);
     ASSERT_FALSE(_ch.empty());
-    ace::tunnel::dyn::bus<int> result_ch;
+    ace::bus<int> result_ch;
     ace::schedule([this, &result_ch]() -> ace::task {
         int val = co_await _ch.pull();
         result_ch << val;
@@ -2557,7 +2557,7 @@ TEST_F(channel_extra_fixture, operator_left_shift) {
     // Должен работать идентично прямому вызову push().
     _ch << 77;
     EXPECT_FALSE(_ch.empty());
-    ace::tunnel::dyn::bus<int> result_ch;
+    ace::bus<int> result_ch;
     ace::schedule([this, &result_ch]() -> ace::task {
         result_ch << co_await _ch.pull();
         co_return;
@@ -2582,7 +2582,7 @@ TEST_F(channel_extra_fixture, channel_empty) {
 TEST_F(channel_extra_fixture, mpsc_channel) {
     // Почему проверяем MPSC: базовый сценарий где несколько
     // корутин отправляют данные одному потребителю.
-    ace::tunnel::dyn::bus<int> result_ch;
+    ace::bus<int> result_ch;
     ace::schedule([this]() -> ace::task {
         _ch << 1;
         _ch << 2;
@@ -2612,7 +2612,7 @@ TEST_F(cutex_extra_fixture, try_lock_free) {
     // атомарный fetch_add. На свободном мьютексе должен вернуть true.
     // Проверяем через schedule потому что capture_future доступен только
     // через proxy::capture() которая требует корутинного контекста.
-    ace::tunnel::dyn::bus<bool> result;
+    ace::bus<bool> result;
     ace::schedule([this, &result]() -> ace::task {
         auto guard = ace::guard(_cutex);
         auto fut = guard.capture();
@@ -2655,7 +2655,7 @@ TEST_F(cutex_extra_fixture, proxy_destructor_sync) {
     // если корутина забыла вызвать sync(), деструктор proxy сделает
     // это автоматически. Без этого мьютекс останется заблокированным
     // навсегда.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([this, &ch]() -> ace::task {
         {
             auto g = ace::guard(_cutex);
@@ -2684,7 +2684,7 @@ TEST_F(cutex_extra_fixture, proxy_destructor_sync) {
 TEST_F(spawn_extra_fixture, spawn_returns_handle) {
     // Почему проверяем spawn: spawn немедленно возвращает
     // async_handle (await_suspend → false), не суспендя вызывающего.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         auto handle = co_await ace::spawn([&ch]() -> ace::task {
             ch << 1;
@@ -2706,7 +2706,7 @@ TEST_F(spawn_extra_fixture, post_uses_attach_front) {
     // Почему проверяем post vs spawn: post использует attach_front()
     // для приоритетной вставки в начало очереди. post-задачи должны
     // выполняться раньше spawn-задач добавленных в тот же раннер.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         co_await ace::spawn([&ch]() -> ace::task {
             ch << 1;
@@ -2734,7 +2734,7 @@ TEST_F(get_runner_fixture, get_runner_inside_runner) {
     // Почему проверяем get_runner: возвращает указатель на текущий
     // раннер. Внутри корутины запущенной через schedule должен
     // быть не-nullptr.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         auto r = co_await ace::get_runner();
         ch << (r != nullptr ? 1 : 0);
@@ -2751,7 +2751,7 @@ TEST_F(get_runner_fixture, get_runner_inside_runner) {
 TEST_F(spawn_extra_fixture, roaming_true) {
     // Почему проверяем roaming: флаг _roaming разрешает
     // диспетчеру мигрировать задачу между раннерами.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         co_await ace::roaming(true);
         ch << 1;
@@ -2768,7 +2768,7 @@ TEST_F(spawn_extra_fixture, roaming_true) {
 TEST_F(spawn_extra_fixture, roaming_false) {
     // Почему проверяем roaming(false): отключает миграцию,
     // привязывая задачу к текущему раннеру.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         co_await ace::roaming(false);
         ch << 1;
@@ -2785,7 +2785,7 @@ TEST_F(spawn_extra_fixture, roaming_false) {
 TEST_F(spawn_extra_fixture, polling_true) {
     // Почему проверяем polling: флаг _polling отправляет задачу
     // в _service_pool для низкоприоритетного выполнения.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         co_await ace::polling(true);
         ch << 1;
@@ -2807,7 +2807,7 @@ TEST_F(cross_mechanic_fixture, cancel_spawned_with_timeout) {
     // Почему проверяем cancel+timeout: при отмене корутины которая
     // ждёт таймер, cancel должен освободить clock::subscribe ноду
     // и вернуть корутину раннеру для удаления.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         auto handle = co_await ace::spawn([&ch]() -> ace::task {
             co_await ace::timeout(std::chrono::seconds(10));
@@ -2831,8 +2831,8 @@ TEST_F(cross_mechanic_fixture, cancel_spawned_with_timeout) {
 // находится в channel.pull() на момент cancel(). Channel_router::cancel()
 // не всегда пробуждает задачу корректно при определённом порядке гонки.
 TEST_F(cross_mechanic_fixture, cancel_spawned_with_channel) {
-    ace::tunnel::dyn::bus<std::string> ch;
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<std::string> ch;
+    ace::bus<int> result;
     ace::schedule([&ch, &result]() -> ace::task {
         auto handle = co_await ace::spawn([&ch, &result]() -> ace::task {
             result << 1;
@@ -2859,7 +2859,7 @@ TEST_F(cross_mechanic_fixture, cancel_spawned_with_channel) {
 TEST_F(cross_mechanic_fixture, channel_with_timeout) {
     // Почему проверяем channel or timeout: паттерн гонки с таймаутом.
     // Используем or двух timeout чтобы проверить механизм гонки в целом.
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> result;
     ace::schedule([&result]() -> ace::task {
         auto res = co_await (
             ace::timeout(std::chrono::milliseconds(5)) or
@@ -2880,7 +2880,7 @@ TEST_F(cross_mechanic_fixture, cutex_with_timeout) {
     // Почему проверяем cutex or timeout: типичный сценарий —
     // попытка захватить мьютекс с таймаутом.
     ace::cutex mtx;
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> result;
     ace::schedule([&mtx]() -> ace::task {
         auto g = ace::guard(mtx);
         co_await g.capture();
@@ -2907,7 +2907,7 @@ TEST_F(cross_mechanic_fixture, multi_runner_spawn) {
     // Почему проверяем multi-runner spawn: с несколькими раннерами
     // задачи должны распределяться и выполняться параллельно.
     configure_runners(4);
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     for (int val = 0; val < 8; ++val) {
         ace::schedule([&ch, val]() -> ace::task {
             int v = val;
@@ -2929,7 +2929,7 @@ TEST_F(cross_mechanic_fixture, interrupt_during_timeout) {
     // NOTE: interrupt вызывается ПОСЛЕ schedule но ПЕРЕД run,
     // что может привести к тому что сигнал обработается раньше задачи.
     // Поэтому проверяем только что run() завершается без ошибок.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         co_await ace::timeout(std::chrono::milliseconds(10));
         ch << 1;
@@ -2948,7 +2948,7 @@ TEST_F(cross_mechanic_fixture, interrupt_during_timeout) {
 TEST_F(cross_mechanic_fixture, terminate_during_run) {
     // Почему проверяем terminate: terminate() посылает e_shutdown
     // всем вортекс-сервисам. Раннеры должны остановиться.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         ace::terminate();
         ch << 1;
@@ -2991,7 +2991,7 @@ TEST_F(cross_mechanic_fixture, multi_runner_cutex_count) {
 // NOTE: Закомментирован — and_compose создаёт observer-задачи которые
 // не всегда корректно отменяются при cancel родительской задачи.
 TEST_F(cross_mechanic_fixture, and_compose_with_cancel) {
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> result;
     ace::schedule([&result]() -> ace::task {
         auto handle = co_await ace::spawn([&result]() -> ace::task {
             co_await (
@@ -3016,7 +3016,7 @@ TEST_F(cross_mechanic_fixture, and_compose_with_cancel) {
 
 // Проверяет or-композицию из трёх future.
 TEST_F(cross_mechanic_fixture, or_await_composed_3) {
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> result;
     ace::schedule([&result]() -> ace::task {
         auto res = co_await (
             ace::timeout(std::chrono::milliseconds(100)) or
@@ -3039,7 +3039,7 @@ TEST_F(cross_mechanic_fixture, spawn_post_interaction) {
     // должен выполняться раньше spawn (attach) в том же раннере.
     // NOTE: Из-за недерминированности порядка выполнения в одном раннере
     // проверяем только что обе задачи завершаются и данные доставляются.
-    ace::tunnel::dyn::bus<int> ch;
+    ace::bus<int> ch;
     ace::schedule([&ch]() -> ace::task {
         co_await ace::spawn([&ch]() -> ace::task {
             int val = 1;
@@ -3076,7 +3076,7 @@ TEST_F(cross_mechanic_fixture, stress_spawn_cancel) {
     // Почему проверяем stress: при массовом spawn+cancel не должно
     // быть утечек памяти (control block, ноды, роутеры).
     constexpr int N = 100;
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> result;
     ace::schedule([&result]() -> ace::task {
         for (int idx = 0; idx < N; ++idx) {
             auto handle = co_await ace::spawn([&result, idx]() -> ace::task {
@@ -3102,8 +3102,8 @@ TEST_F(cross_mechanic_fixture, stress_spawn_cancel) {
 TEST_F(cross_mechanic_fixture, channel_clean_after_run) {
     // Почему проверяем чистоту канала: после run все waiters
     // должны быть вычитаны. Оставшиеся waiter'ы = утечка нод.
-    ace::tunnel::dyn::bus<int> ch;
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> ch;
+    ace::bus<int> result;
     ace::schedule([&ch, &result]() -> ace::task {
         ch << 42;
         result << co_await ch.pull();
@@ -3128,7 +3128,7 @@ TEST_F(cross_mechanic_fixture, or_ping_automaton_loop_no_value_loss) {
     // co_yield значения не должны теряться при отмене проигравшего ping —
     // cancel_yield должен очищать только ожидающего (yield_waiter), но не
     // разрушать сам автоматон и не затирать e_executed_with_value статус.
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> result;
     ace::schedule(or_ping_two_in_loop(result));
     ace::run();
     EXPECT_TRUE(ace::empty());
@@ -3190,7 +3190,7 @@ TEST_F(timer_fixture, timeout_multiple_concurrent) {
     // Почему проверяем concurrent timers: clock должен корректно
     // обрабатывать множество таймеров в одном цикле ping.
     constexpr int N = 20;
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> result;
     for (int idx = 0; idx < N; ++idx) {
         ace::schedule([&result, idx]() -> ace::task {
             co_await ace::timeout(std::chrono::milliseconds(idx));
@@ -3236,7 +3236,7 @@ TEST_F(fs_fixture, file_write_and_read) {
 TEST_F(fs_fixture, file_open_fail) {
     // Почему проверяем ошибку открытия: при открытии несуществующего
     // файла на чтение open_query должен вернуть невалидный file_link.
-    ace::tunnel::dyn::bus<bool> ch;
+    ace::bus<bool> ch;
     ace::schedule([&ch]() -> ace::task {
         auto f = ace::fs::file("nonexistent_file_12345.txt");
         if (auto f_entity = co_await f.open(O_RDONLY)) {
@@ -3334,7 +3334,7 @@ TEST_F(base_fixture, kernelic_overflow_buffer_stress) {
     constexpr int readers = 6000;
     int fds[2] = {-1, -1};
     ASSERT_EQ(0, ::pipe(fds));
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> result;
     for (int i = 0; i < readers; ++i) {
         ace::schedule([fds, &result]() -> ace::task {
             char buf[1] = {0};
@@ -3420,7 +3420,7 @@ TEST_F(base_fixture, kernel_register_files) {
 TEST_F(base_fixture, channel_bounded_full) {
     // Почему bounded: e_static канал имеет фиксированный буфер — push
     // должен вернуть false при переполнении (в отличие от dyn).
-    ace::tunnel::bounded::bus<int, 2> ch;
+    ace::bus<int, 2> ch;
     EXPECT_TRUE(ch.push(1));
     EXPECT_TRUE(ch.push(2));
     EXPECT_FALSE(ch.push(3)); // буфер переполнен
@@ -3438,8 +3438,8 @@ TEST_F(base_fixture, channel_bounded_full) {
 TEST_F(base_fixture, channel_pending_push_waits) {
     // Почему pending_push: асинхронный push суспендится пока буфер полон.
     // Покрывает pending_push + notify путь в channel.
-    ace::tunnel::bounded::bus<int, 1> ch;
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int, 1> ch;
+    ace::bus<int> result;
     ch.push(1); // буфер заполнен
 
     auto pusher = [&ch, &result]() -> ace::task {
@@ -3467,7 +3467,7 @@ TEST_F(base_fixture, channel_pending_push_waits) {
 // Проверяет SPSC (bridge) канал: push/pull в одном раннере.
 TEST_F(base_fixture, channel_spsc_bridge) {
     // Почему spsc: bridge использует e_spsc — специализированная очередь.
-    ace::tunnel::dyn::bridge<int> ch;
+    ace::bridge<int> ch;
     ch.push(10);
     ch.push(20);
     auto drain = [&ch]() -> ace::task {
@@ -3483,8 +3483,8 @@ TEST_F(base_fixture, channel_spsc_bridge) {
 // Проверяет MPMC (bus) канал с несколькими producer/consumer.
 TEST_F(base_fixture, channel_mpmc_parallel) {
     // Почему mpmc: dyn::bus с несколькими продюсерами — атомарность push.
-    ace::tunnel::dyn::bus<int> ch;
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> ch;
+    ace::bus<int> result;
     constexpr int producers = 4;
     constexpr int per_producer = 100;
 
@@ -3535,7 +3535,7 @@ TEST_F(base_fixture, get_current_pool_outside_runner) {
 TEST_F(base_fixture, async_router_return_value) {
     // Почему return_value: control_block_handle::return_value читает
     // _return_value через async_router — путь для valued join().
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> result;
     auto worker = [&result]() -> ace::task {
         auto inner = []() -> ace::async<int> {
             co_return 42;
@@ -3566,7 +3566,7 @@ TEST_F(base_fixture, reattach_resumes_on_other_runner) {
     // Почему reattach: futures/reattach.h — явная миграция корутины.
     // Мигрируем на текущий раннер (no-op путь) и проверяем что
     // reattach_router::redirect корректно вернул ноду в раннер.
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> result;
     auto worker = [&result]() -> ace::task {
         auto* current = co_await ace::get_runner{};
         EXPECT_NE(nullptr, current);
@@ -3588,7 +3588,7 @@ TEST_F(base_fixture, reattach_nullptr_noop) {
     // Почему nullptr: reattach::await_ready() возвращает true при пустом
     // целевом раннере — единственный способ покрыть эту ветку без
     // обращения к внутренностям dispatcher-а.
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> result;
     auto worker = [&result]() -> ace::task {
         co_await ace::reattach(nullptr);
         result << 1;
@@ -3613,7 +3613,7 @@ TEST_F(base_fixture, reattach_cross_runner_migration) {
     ace::cfg::g_config._runners_amount = 2;
     ace::reload();
 
-    ace::tunnel::dyn::bus<ace::core::runner*> runner_ch;
+    ace::bus<ace::core::runner*> runner_ch;
     auto gather = [&runner_ch]() -> ace::task {
         runner_ch << co_await ace::get_runner{};
         co_return;
@@ -3625,7 +3625,7 @@ TEST_F(base_fixture, reattach_cross_runner_migration) {
     ASSERT_EQ(2u, runners.size());
     ASSERT_NE(runners[0], runners[1]);
 
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> result;
     auto migrator = [&result](ace::core::runner* r0, ace::core::runner* r1) -> ace::task {
         co_await ace::reattach(r0);
         result << ((co_await ace::get_runner{}) == r0 ? 1 : 0);
@@ -3657,7 +3657,7 @@ TEST_F(base_fixture, udp_sendto_recv_loop) {
     // Локальный loopback UDP — без внешних зависимостей. Порт берём
     // фиксированный с привязкой к PID, чтобы избежать коллизий.
     const int server_port = 23000 + (static_cast<int>(::getpid()) % 1000);
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> result;
     auto server = [server_port, &result]() -> ace::task {
         auto sock = co_await ace::net::socket_udp();
         if (not sock) { int v = 0; result << v; co_return; }
@@ -3699,7 +3699,7 @@ TEST_F(base_fixture, tcp_sendmsg_recvmsg_echo) {
     // Почему sendmsg: send(io::buffer) использует sendmsg_query — отдельный
     // путь kernelic. recv(io::buffer) — recvmsg_query.
     const int server_port = 24000 + (static_cast<int>(::getpid()) % 1000);
-    ace::tunnel::dyn::bus<int> result;
+    ace::bus<int> result;
     auto server = [server_port, &result]() -> ace::task {
         auto sock = co_await ace::net::socket_tcp();
         if (not sock) { int v = 0; result << v; co_return; }

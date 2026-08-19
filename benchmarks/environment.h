@@ -36,7 +36,7 @@ inline void configure_runners(int n) {
 
 // Дренирует канал через публичный API (schedule + run)
 template <typename T>
-inline std::vector<T> fetch(ace::futures::tunnel::dyn::bus<T>& ch) {
+inline std::vector<T> fetch(ace::bus<T>& ch) {
     std::vector<T> res;
     ace::schedule([&ch, &res]() -> ace::task {
         while (not ch.empty())

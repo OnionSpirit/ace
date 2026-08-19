@@ -232,63 +232,6 @@ public:
     ACE_AWAIT_NODISCARD task operator >> (data_t&& data) { data = std::move(co_await pull()); }
 };
 
-namespace tunnel::bounded {
-
-    /**
-     * @brief Bounded size Channel for thread local usage
-     */
-    template <typename Type, size_t DataBufferSize = 1ul>
-    using local = channel<Type, allocation_type::e_static, access_mode::e_regular, DataBufferSize>;
-
-    /**
-     * @brief Bounded size Channel for one thread to another thread usage
-     */
-    template <typename Type, size_t DataBufferSize = 1ul>
-    using bridge = channel<Type, allocation_type::e_static, access_mode::e_spsc, DataBufferSize>;
-
-    /**
-     * @brief Bounded size Channel for many threads to single thread usage
-     */
-    template <typename Type, size_t DataBufferSize = 1ul>
-    using funnel = channel<Type, allocation_type::e_static, access_mode::e_mpsc, DataBufferSize>;
-
-    /**
-     * @brief Bounded size Channel for many to many threads usage
-     */
-    template <typename Type, size_t DataBufferSize = 1ul>
-    using bus = channel<Type, allocation_type::e_static, access_mode::e_mpmc, DataBufferSize>;
-
-}
-
-namespace tunnel::dyn {
-
-    /**
-     * @brief Dynamic Channel for thread local usage
-     */
-    template <typename Type>
-    using local = channel<Type, allocation_type::e_dynamic, access_mode::e_regular>;
-
-    /**
-     * @brief Dynamic Channel for one thread to another thread usage
-     */
-    template <typename Type>
-    using bridge = channel<Type, allocation_type::e_dynamic, access_mode::e_spsc>;
-
-    /**
-     * @brief Dynamic Channel for many threads to single thread usage
-     */
-    template <typename Type>
-    using funnel = channel<Type, allocation_type::e_dynamic, access_mode::e_mpsc>;
-
-    /**
-     * @brief Dynamic Channel for many to many threads usage
-     */
-    template <typename Type>
-    using bus = channel<Type, allocation_type::e_dynamic, access_mode::e_mpmc>;
-
-}
-
-
 } // namespace ace::futures
 
 // NOTE: The short aliases ace::channel / ace::allocation_type / ace::access_mode
@@ -312,8 +255,51 @@ namespace ace {
               futures::access_mode access_mode_v = futures::access_mode::e_mpmc,
               size_t data_buffer_size_v = 1ul>
     using channel = futures::channel<data_t, data_allocation_v, access_mode_v, data_buffer_size_v>;
-    /// @brief Short alias for @c ace::futures::tunnel (bounded/dyn variants).
-    namespace tunnel = futures::tunnel;
+
+    /**
+     * @brief Channel alias for thread local usage
+     */
+    template <typename Type, size_t DataBufferSize = 0ul>
+    using local = channel<
+        Type,
+        (DataBufferSize == 0ul) ? allocation_type::e_dynamic : allocation_type::e_static,
+        access_mode::e_regular,
+        DataBufferSize
+    >;
+
+    /**
+     * @brief Channel alias for one thread to another thread usage
+     */
+    template <typename Type, size_t DataBufferSize = 0ul>
+    using bridge = channel<
+        Type,
+        (DataBufferSize == 0ul) ? allocation_type::e_dynamic : allocation_type::e_static,
+        access_mode::e_spsc,
+        DataBufferSize
+    >;
+
+    /**
+     * @brief Channel alias for many threads to single thread usage
+     */
+    template <typename Type, size_t DataBufferSize = 0ul>
+    using funnel = channel<
+        Type,
+        (DataBufferSize == 0ul) ? allocation_type::e_dynamic : allocation_type::e_static,
+        access_mode::e_mpsc,
+        DataBufferSize
+    >;
+
+    /**
+     * @brief Channel alias for many to many threads usage
+     */
+    template <typename Type, size_t DataBufferSize = 0ul>
+    using bus = channel<
+        Type,
+        (DataBufferSize == 0ul) ? allocation_type::e_dynamic : allocation_type::e_static,
+        access_mode::e_mpmc,
+        DataBufferSize
+    >;
+
 }
 #endif
 

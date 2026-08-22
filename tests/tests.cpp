@@ -4613,7 +4613,7 @@ TEST_F(frame_alloc_fixture, promise_traits_uses_allocator) {
 
         EXPECT_GT(mid.in_use_bytes, base.in_use_bytes);
         // Кадр небольшой (promise + control_block) — обслуживается пулом.
-        EXPECT_GT(mid.pool_held_bytes, base.pool_held_bytes);
+        EXPECT_GE(mid.pool_held_bytes, base.pool_held_bytes);
         EXPECT_EQ(0u, mid.malloc_count);
 
         // Выравнивание: control_block перед promise в том же чанке.

@@ -56,6 +56,14 @@ namespace ace::cfg {
     ///        callbacks fire on unhandled exceptions).
     struct emergency_default {};
 
+    /// @brief Application-wide memory limit for the coroutine frame allocator
+    ///        (0 = no limit).  Per-arena limit = value / runners_amount.
+    struct max_allocation_size {};
+
+    /// @brief Behaviour when the per-arena limit is reached:
+    ///        true = fallback to malloc (with a stderr notice), false = throw std::bad_alloc.
+    struct breach_memory_limit {};
+
     // ===================================================================
     // detail::default_of — internal compile-time defaults
     //     DO NOT specialise in user code.
@@ -76,6 +84,18 @@ namespace ace::cfg {
         /// @brief Default @c _emergency flag — @c true (backups fire on exceptions too).
         template <>
         struct default_of<emergency_default> {
+            static constexpr bool value = true;
+        };
+
+        /// @brief Default application-wide frame allocator limit — 0 (no limit).
+        template <>
+        struct default_of<max_allocation_size> {
+            static constexpr std::size_t value = 0;
+        };
+
+        /// @brief Default breach behaviour — fallback to malloc.
+        template <>
+        struct default_of<breach_memory_limit> {
             static constexpr bool value = true;
         };
 
@@ -118,6 +138,15 @@ namespace ace::cfg {
 
         /// @brief Default value of the coroutine @c _emergency flag. Default @c true.
         bool _emergency_default = detail::default_of<emergency_default>::value;
+
+        /// @brief Application-wide memory limit for the coroutine frame allocator.
+        ///        Default 0 — no limit.  Per-arena limit = value / runners_amount.
+        std::size_t _max_allocation_size = detail::default_of<max_allocation_size>::value;
+
+        /// @brief Behaviour when the per-arena limit is reached.
+        ///        Default @c true — fallback to malloc with a stderr notice;
+        ///        @c false — throw @c std::bad_alloc.
+        bool _breach_memory_limit = detail::default_of<breach_memory_limit>::value;
     };
 
     /// @brief Global singleton runtime configuration.

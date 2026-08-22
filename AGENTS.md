@@ -65,8 +65,10 @@ ace::async<int> co_main(int argc, char** argv) {
 
 | Поле | Линия | По умолчанию |
 |------|-------|-------------|
-| `_runners_amount` | 105 | 1 |
-| `_emergency_default` | 110 | true — срабатывать ли backup-коллбекам на необработанных исключениях |
+| `_runners_amount` | 137 | 1 |
+| `_emergency_default` | 140 | true — срабатывать ли backup-коллбекам на необработанных исключениях |
+| `_max_allocation_size` | 144 | 0 — предельный размер памяти для `frame_allocator` (0 = без лимита; лимит арены = значение / `_runners_amount`) |
+| `_breach_memory_limit` | 149 | true — fallback на malloc при превышении лимита арены; false — `std::bad_alloc` |
 
 Глобальный экземпляр: `ace::cfg::g_config` (line 112).
 
@@ -1079,6 +1081,25 @@ RAII debug tracer: логирует конструирование/разруш�
 
 Thread-local аллокатор iovec буферов через `std::pmr`. `allocate(size_t)` (26), `deallocate(iovec*)` (42), `allocate_as<T>(n)` (50), `deallocate_as(void*, n)` (57). Внутренний `memory_controller` (63) с debug/release режимами.
 
+### frame_allocator (`core/tools/frame_alloc.h`)
+
+Thread-local арена для стек-фреймов корутин (используется `promise_traits::operator new/delete`).
+
+| Метод | Линия | Описание |
+|-------|-------|----------|
+| `get_instance()` | 86 | `static thread_local` синглтон арены (одна на тред) |
+| `allocate(size)` | 97 | Чанк ≤ 4096 → `std::pmr::unsynchronized_pool_resource`; больше → transient `malloc` |
+| `deallocate(ptr, size)` | 110 | Transient → `free` сразу (не в канал!); чужой чанк → `push` в канал владельца; свой → в пул |
+| `stats()` | 148 | Debug-only наблюдаемость: `in_use_bytes`, `pool_held_bytes`, `malloc_count`, `op_counter`, `drain_count`, `live_system_chunks` (глобальный атомарный) |
+
+**Устройство:**
+- Чанк: `[chunk_header(16B) | payload]` — заголовок = указатель на канал владельца + размер (бит 63 = transient-флаг).
+- Пул (`unsynchronized_pool_resource` + собственный `memory_resource` по аналогии с `iovec_alloc.h`): освобождённые чанки остаются в пуле, системе возвращаются **только при деструкции арены** (выход треда). `do_deallocate` всегда реально освобождает (в отличие от iovec_alloc) — контракт деструктора.
+- Кросс-тредный возврат: чужой тред кладёт чанк в `nukes::dynamic::mpsc_queue` владельца (указатель на канал в заголовке). Дренаж канала — по формуле утилизации: `N = max_allocation_size / occupied`, каждую N-ю операцию (alloc/dealloc); при `max==0` или `occupied==0` — на каждой аллокации. Канал дренируется обычным `pop()` в цикле (`pop_batch()` из nukes нерабочий — итератор стартует с dummy-ноды).
+- Лимит арены = `g_config._max_allocation_size / g_config._runners_amount` (пересчёт на каждой операции); при достижении: fallback на transient-malloc с notify в `std::cerr` (один раз на арену) либо `throw std::bad_alloc` — по `g_config._breach_memory_limit`.
+- Счётчик операций инкрементируется только в ветке формулы (ветки «max==0»/«occupied==0» его не двигают).
+- `stats()`-код доступен только в debug-сборках (guard `if constexpr (not is_debug)` — флаг инвертирован, см. macro.h:82-85).
+
 ### Макросы (`core/tools/macro.h`)
 
 | Макрос | Линия | Значение |
@@ -1127,6 +1148,8 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
          (в) вынести control_block в отдельную аллокацию. После фикса снять
          ограничение 10 и переписать тесты backup_fixture на лямбды. -->
 
+12. **Кросс-тредные чанки `frame_allocator`** — чанк, освобождённый на чужом треде, возвращается владельцу через его `mpsc_queue`-канал. Transient-чанки (> 4096 и breach-fallback) канал **не используют** — освобождаются сразу. Инвариант: все runner-треды джойнятся до завершения программы, поэтому чужие чанки не пишутся в канал уже уничтоженной арены. Примечание: transient-чанк, освобождённый на чужом треде, не уменьшает `_occupied` арены-владельца (счётчик дрейфует вверх — приближённая метрика, допустимо).
+
 ---
 
 ## Файловая карта
@@ -1151,6 +1174,7 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 | `core/tools/queue.h` | `queue<T>`, `q_node<T>`, `slab_mempool<T>` |
 | `core/tools/id_alloc.h` | `id_allocator`, `async_id_allocator` |
 | `core/tools/iovec_alloc.h` | `iovec_allocator` — thread-local pmr-based iovec allocator |
+| `core/tools/frame_alloc.h` | `frame_allocator` — thread-local арена стек-фреймов корутин (pmr pool + кросс-тредный возврат чанков через mpsc_queue) |
 | `core/tools/macro.h` | `ACE_CACHE_LINE_SIZE`, `ACE_ROUTER_MEM_SIZE`, `ACE_AWAIT_NODISCARD`, `ACE_INLINE`, `ACE_WEAK` |
 | `core/tools/moving_average.h` | `moving_average` (sliding window 4) |
 | `core/tools/lifetime.h` | `lifetime` (RAII debug tracer) |
@@ -1181,9 +1205,9 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 |------|-----------|
 | `tests/main.cpp` | GTest main |
 | `tests/environment.h` | Все fixture-классы с хелпер-тасками (1098 строк) |
-| `tests/tests.cpp` | `TEST_F` тесты (3746 строк, 237 тестов; отключённых нет — `cancel_spawned_with_channel` переоткрыт после фикса B7 в `BUGS_AND_BENCHMARKS.md`) |
+| `tests/tests.cpp` | `TEST_F` тесты (4570 строк, 295 тестов; отключённых нет — `cancel_spawned_with_channel` переоткрыт после фикса B7 в `BUGS_AND_BENCHMARKS.md`) |
 
-### Fixture-классы (32 fixture)
+### Fixture-классы (34 fixture)
 
 | Fixture | Наследует | TearDown | Тесты |
 |---------|----------|----------|-------|
@@ -1218,6 +1242,7 @@ Thread-local аллокатор iovec буферов через `std::pmr`. `all
 | `channel_extra_fixture` | `base_fixture` | — | 4: push/pull, shift operator, mpsc |
 | `cutex_extra_fixture` | `base_fixture` | reset runners + signal | 5: proxy double capture/sync/destructor, try_lock |
 | `get_runner_fixture` | `base_fixture` | — | 1: get_runner inside runner |
+| `frame_alloc_fixture` | `::testing::Test` | — | 12: пул (alloc/free/reuse/retention), transient-malloc, thread_local арены, кросс-тредный возврат чанков, каденс дренажа (N=2), лимит + breach, деструктор, интеграция promise_traits |
 
 ### Бенчмарки
 

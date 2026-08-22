@@ -5,6 +5,8 @@
 #include <memory>
 #include <cstring>
 #include <span>
+#include <thread>
+#include <future>
 #include <unistd.h>
 #include <gtest/gtest.h>
 #include <ace/ace.h>
@@ -1155,6 +1157,44 @@ struct get_runner_fixture : base_fixture {
         auto r = co_await ace::get_runner();
         _ch << (r != nullptr ? 1 : 0);
         co_return;
+    }
+};
+
+// ==========================================================================
+// frame_alloc_fixture — coroutine frame allocator tests
+// ==========================================================================
+
+struct frame_alloc_fixture : ::testing::Test {
+
+    std::size_t _saved_max { 0 };
+    bool _saved_breach { true };
+    std::size_t _saved_runners { 1 };
+
+    void SetUp() override {
+        // Почему сохраняем конфиг: g_config глобальный — при запуске всего
+        // набора тестов в одном процессе (без --gtest_filter) каждый тест
+        // обязан вернуть конфигурацию в исходное состояние.
+        _saved_max = ace::cfg::g_config._max_allocation_size;
+        _saved_breach = ace::cfg::g_config._breach_memory_limit;
+        _saved_runners = ace::cfg::g_config._runners_amount;
+    }
+
+    void TearDown() override {
+        ace::cfg::g_config._max_allocation_size = _saved_max;
+        ace::cfg::g_config._breach_memory_limit = _saved_breach;
+        ace::cfg::g_config._runners_amount = _saved_runners;
+    }
+
+    // Выполняет fn на выделенном треде: у треда своя thread_local арена,
+    // поэтому stats детерминированы (арена рождается пустой).
+    template <typename Fn>
+    static void on_fresh_arena(Fn&& fn) {
+        std::thread(std::forward<Fn>(fn)).join();
+    }
+
+    // Простая eager-корутина для проверки интеграции promise_traits.
+    ace::promise<int> simple_valued_coroutine() {
+        co_return 42;
     }
 };
 

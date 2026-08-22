@@ -3676,14 +3676,11 @@ TEST_F(base_fixture, udp_sendto_recv_loop) {
     auto client = [server_port, &result]() -> ace::task {
         auto sock = co_await ace::net::socket_udp();
         if (not sock) { int v = 0; result << v; co_return; }
-        auto udp = co_await sock.bind("127.0.0.1", 0);
-        if (not udp) { int v = 0; result << v; co_return; }
-        sockaddr_in server_addr {};
-        server_addr.sin_family = AF_INET;
-        server_addr.sin_port = htons(static_cast<uint16_t>(server_port));
-        ::inet_pton(AF_INET, "127.0.0.1", &server_addr.sin_addr);
-        const int s = co_await udp.sendto(std::string_view("ping-udp"), 0,
-            reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr));
+        auto udp_sock = co_await sock.bind("127.0.0.1", 0);
+        if (not udp_sock) { int v = 0; result << v; co_return; }
+        const auto udp_peer = co_await udp_sock.connect("127.0.0.1", static_cast<uint16_t>(server_port));
+        if (not udp_peer) { int v = 0; result << v; co_return; }
+        const int s = co_await udp_peer.send("ping-udp");
         EXPECT_EQ(8, s);
         co_return;
     };
@@ -3727,7 +3724,7 @@ TEST_F(base_fixture, tcp_sendmsg_recvmsg_echo) {
         if (not sock) { int v = 0; result << v; co_return; }
         auto stream = co_await sock.bind("127.0.0.1", 0);
         if (not stream) { int v = 0; result << v; co_return; }
-        auto conn = co_await stream.connect("127.0.0.1", static_cast<uint16_t>(server_port));
+        const auto conn = co_await stream.connect("127.0.0.1", static_cast<uint16_t>(server_port));
         if (not conn) { int v = 0; result << v; co_return; }
         ace::io::buffer wbuf;
         wbuf.append("msg-buffer");

@@ -1349,7 +1349,7 @@ public:                                                                         
             if (outcast::command* cmd; runner_identity and outcast::_command_pool.capture(cmd)) [[likely]]
             {
                 cmd->_runner_identity = runner_identity;
-                cmd->_description = "io::guard file descriptor close";
+                cmd->_description = "io::guard file descriptor lazy-close";
                 if (services::kernel_controller::close(cmd, _fd))
                     return;
             }

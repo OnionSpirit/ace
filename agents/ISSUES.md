@@ -132,7 +132,7 @@
 
 ### B27. Out-of-class definitions `cutex` нарушают ODR и блокируют Clang 22
 
-- **Статус:** Открыто.
+- **Статус:** Решено.
 - **Приоритет:** Высокий.
 - **Файлы:** `include/ace/futures/cutex.h`,
   `tests/cross_mechanic_fixture.cpp`, `tests/cutex_extra_fixture.cpp`,
@@ -142,10 +142,32 @@
   обходят duplicate symbols через GCC/Itanium `.weak` asm, который Clang 22
   отвергает с `changed binding to STB_GLOBAL`.
 - **Корневая причина:** ODR-нарушение маскируется compiler- и ABI-specific asm.
-- **Предлагаемое решение:** пометить пять определений `inline` и удалить `.weak`
-  asm из трёх fixtures.
-- **Проверка решения:** собрать и запустить единый test executable GCC и Clang,
-  дополнительно слинковать двух-TU consumer, включающий `cutex.h` в обоих TU.
+- **Решение:** пять определений помечены `inline`, а `.weak` asm удалён из трёх
+  test fixtures. Header-only реализация теперь использует стандартный ODR-safe
+  механизм weak/COMDAT emission.
+- **Проверка решения:** Clang 22 собрал все четыре затронутых fixture TU;
+  `ld -r` объединил их без `STB_GLOBAL` conflict. Полная сборка `ace_tests`
+  дошла до независимой ошибки B35 в `spawn_fixture.cpp`.
+
+### B35. Clang не собирает диагностику tuple через `std::format`
+
+- **Статус:** Решено.
+- **Приоритет:** Средний.
+- **Файл:** `tests/spawn_fixture.cpp:184`.
+- **Симптом:** Clang 22 с libstdc++ 16 останавливает сборку на передаче
+  `std::tuple<std::optional<int>, ...>` в `ace::println()`; libstdc++ не имеет
+  применимого `std::formatter` для tuple.
+- **Корневая причина:** диагностический вызов использует `std::format` для типа,
+  для которого стандартный C++23 не предоставляет formatter. Это не связано с
+  runtime API `spawn` и не относится к исправлению B27.
+- **Решение:** Meson выполняет compile-time feature probe для обоих tuple типов и
+  передаёт результат через `ACE_TEST_HAS_TUPLE_FORMATTER`. Тестовые `#if` теперь
+  зависят от capability-макроса, а не от номера Clang; при отсутствии formatter
+  пропускается только необязательная диагностика.
+- **Проверка решения:** Clang 22 + libstdc++ 16 корректно получают probe result
+  `false`; `ninja -C build ace_tests` успешно компилирует и линкует target.
+  Runtime-запуск связанных тестов отдельно выявил независимый `io_uring` null-ring
+  failure в окружении, поэтому он не используется как проверка B35.
 
 ### B28. Meson принимает argument syntax за compiler identity
 

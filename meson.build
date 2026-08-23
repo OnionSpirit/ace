@@ -108,8 +108,8 @@ if tests_enabled
     )
 
     # NOTE: Defining compiler-dependent args
-    compiler = meson.get_compiler('cpp')
-    compiler = compiler.get_argument_syntax()
+    cpp_compiler = meson.get_compiler('cpp')
+    compiler = cpp_compiler.get_argument_syntax()
 
     compile_args = []
     if compiler == 'gcc'
@@ -128,6 +128,33 @@ if tests_enabled
 #            '-Wno-invalid-offsetof'
         ]
     endif
+
+    tuple_formatter_probe = '''
+        #include <format>
+        #include <optional>
+        #include <tuple>
+
+        int main() {
+            const auto bool_values = std::tuple<bool, bool, bool, bool>{};
+            const auto optional_values = std::tuple<
+                std::optional<int>, std::optional<int>,
+                std::optional<int>, std::optional<int>>{};
+            (void)std::format("{}", bool_values);
+            (void)std::format("{}", optional_values);
+            return 0;
+        }
+    '''
+    has_tuple_formatter = cpp_compiler.compiles(
+        tuple_formatter_probe,
+        name: 'tuple std::formatter support',
+        args: ['-std=c++23'],
+    )
+    if has_tuple_formatter
+        compile_args += ['-DACE_TEST_HAS_TUPLE_FORMATTER=1']
+    else
+        compile_args += ['-DACE_TEST_HAS_TUPLE_FORMATTER=0']
+    endif
+    message('Tuple std::formatter support: ', has_tuple_formatter)
 
     message('Arguments for @0@ compiler: '.format(compiler), compile_args)
 

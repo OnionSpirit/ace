@@ -175,7 +175,7 @@ meson test -C build-cov
 | GCC 16 + ASan + coverage, `ace_entry=false` | 292 | 291/292; тот же единственный B29 failure |
 | GCC 16 + ASan, `ace_entry=true` | 293 (default set + `ace_entry.fallback`) | weak-entry конфигурация добавляет fallback test; полный успешный результат здесь не заявляется |
 | Clang 22, weak-entry fallback target | — | Target скомпилирован; проверка `tests/check_entry_fallback.py` завершилась успешно |
-| Clang 22, полный `ace_tests` | — | Сборка остаётся заблокирована открытыми B27/B28; полный suite не запускался |
+| Clang 22, полный `ace_tests` | — | Target успешно собирается с Meson formatter probe; runtime subset блокирован независимым `io_uring` null-ring failure |
 
 ### Финальная проверка стабильности
 

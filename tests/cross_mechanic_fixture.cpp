@@ -10,13 +10,6 @@
 #include <ace/futures/spawn.h>
 #include <ace/futures/timeout.h>
 
-// cutex.h currently emits non-inline definitions; keep split-test copies weak.
-asm(".weak _ZN3ace7futures13cutex_control8try_lockEv\n"
-    ".weak _ZN3ace7futures13cutex_control6notifyEv\n"
-    ".weak _ZN3ace7futures13cutex_control14pending_notifyEv\n"
-    ".weak _ZN3ace7futures5cutex7captureEb\n"
-    ".weak _ZN3ace7futures5cutex7releaseEv");
-
 namespace {
 
 struct cross_mechanic_fixture : base_fixture {

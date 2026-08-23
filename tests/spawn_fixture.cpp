@@ -153,7 +153,7 @@ struct spawn_fixture : base_fixture {
         static_assert(
             std::same_as<decltype(res), std::tuple<bool, bool, bool, bool>>,
             "Must be tuple of bools");
-#if defined(__clang__) && __clang_major__ >= 22
+#if defined(ACE_TEST_HAS_TUPLE_FORMATTER) && ACE_TEST_HAS_TUPLE_FORMATTER
         ace::println("spawn, post, spawn, post - finished {}", res);
 #endif
         ace::println("Placing {} to channel", 5);
@@ -180,7 +180,7 @@ struct spawn_fixture : base_fixture {
                 std::tuple<std::optional<int>, std::optional<int>,
                            std::optional<int>, std::optional<int>>>,
             "Must be tuple of std::optional<int>s");
-#if defined(__clang__) && __clang_major__ >= 22
+#if defined(ACE_TEST_HAS_TUPLE_FORMATTER) && ACE_TEST_HAS_TUPLE_FORMATTER
         ace::println("spawn, post, spawn, post - finished {}", res);
 #endif
         ace::println("Placing {} to channel", 5);

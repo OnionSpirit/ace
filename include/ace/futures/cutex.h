@@ -402,14 +402,14 @@ struct ACE_FUTURE_CAPTURE_FUTURE_SPACE cutex_router : runner_router {
     capture_future* _cutex; ///< Owning capture future.
 };
 
-ACE_FUTURE_CUTEX_CONTROL_MEMBER(bool)
+inline ACE_FUTURE_CUTEX_CONTROL_MEMBER(bool)
 /**
  * @brief Fast-path lock acquire.
  * @return @c true when the lock was acquired (pre-increment value was 0).
  */
 try_lock() noexcept { return _users.fetch_add(1, std::memory_order_acq_rel) == 0; }
 
-ACE_FUTURE_CUTEX_CONTROL_MEMBER(bool)
+inline ACE_FUTURE_CUTEX_CONTROL_MEMBER(bool)
 /**
  * @brief Wakes one waiter, migrating it if allowed.
  * @return @c true when a waiter was notified, @c false when the queue was empty.
@@ -439,7 +439,7 @@ notify() {
     return true;
 }
 
-ACE_FUTURE_CUTEX_CONTROL_MEMBER(ace::task)
+inline ACE_FUTURE_CUTEX_CONTROL_MEMBER(ace::task)
 /**
  * @brief Deadlock recovery — retries notification while users remain.
  */
@@ -476,7 +476,7 @@ ace::futures::cutex::
 returnT ACE_FUTURE_CUTEX_SPACE
 
 
-ACE_FUTURE_CUTEX_MEMBER(ace::futures::capture_future)
+inline ACE_FUTURE_CUTEX_MEMBER(ace::futures::capture_future)
 /**
  * @brief Creates the lock future for this cutex.
  * @param roaming Whether the waiting task may migrate runners.
@@ -484,7 +484,7 @@ ACE_FUTURE_CUTEX_MEMBER(ace::futures::capture_future)
  */
 capture(const bool roaming) noexcept { return capture_future{&_control, roaming}; }
 
-ACE_FUTURE_CUTEX_MEMBER(void)
+inline ACE_FUTURE_CUTEX_MEMBER(void)
 /**
  * @brief Unlocks the cutex and wakes the next waiter.
  */

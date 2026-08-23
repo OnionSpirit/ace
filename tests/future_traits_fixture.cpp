@@ -12,13 +12,6 @@
 #include <ace/futures/cutex.h>
 #include <ace/futures/timeout.h>
 
-// cutex_fixture.cpp owns the strong definitions emitted by cutex.h.
-asm(".weak _ZN3ace7futures13cutex_control8try_lockEv\n"
-    ".weak _ZN3ace7futures13cutex_control6notifyEv\n"
-    ".weak _ZN3ace7futures13cutex_control14pending_notifyEv\n"
-    ".weak _ZN3ace7futures5cutex7captureEb\n"
-    ".weak _ZN3ace7futures5cutex7releaseEv");
-
 struct future_traits_fixture : ::testing::Test {
     struct once_suspend : ace::core::traits::busy_future_traits<once_suspend> {
         IMPORT_BUSY_FUTURE_ENV(once_suspend)

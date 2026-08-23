@@ -377,6 +377,9 @@ meson compile -C build-bench ace_benchmarks
 ./build-bench/ace_benchmarks
 ```
 
+The benchmark target is compiled as a release target (`-O3` with `NDEBUG`), so
+`is_debug` is `false` in benchmark code.
+
 For an existing build directory, use
 `meson setup build-bench --reconfigure -Dbenchmarks=true`. Benchmark results are
 not correctness tests and should be compared across repeated runs in the same

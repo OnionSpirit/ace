@@ -29,7 +29,10 @@ ninja -C build-bench ace_benchmarks
 ```
 
 Бенчмарки используют Google Benchmark. Опция `-Dbenchmarks=true` добавляет
-wrap-зависимость `google-benchmark` и цель `ace_benchmarks`.
+wrap-зависимость `google-benchmark` и цель `ace_benchmarks`. Цель собирается как
+release-путь: `debug=false`, `optimization=3` и `b_ndebug=true`; поэтому
+`is_debug == false`. `benchmarks/environment.h` содержит compile-time проверку
+этого контракта.
 
 ## Правила реализации
 

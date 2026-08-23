@@ -76,12 +76,11 @@ typedef struct {} ACE_EMPTY_TYPE;
 /// @brief Maximum number of chunks an @c io::buffer may keep assembled.
 #define ACE_IO_BUFFER_CHUNK_LIMIT 16
 
-#ifdef NDEBUG
-/// @brief @c true in release builds (NDEBUG defined).  Note the inverted naming:
-///        it flags the release-optimised path, e.g. skipping allocator deallocation.
+#ifndef NDEBUG
+/// @brief @c true in debug builds (NDEBUG is not defined).
 inline constexpr bool is_debug = true;
 #else
-/// @brief @c true in debug builds (no NDEBUG).
+/// @brief @c false in release builds (NDEBUG is defined).
 inline constexpr bool is_debug = false;
 #endif
 

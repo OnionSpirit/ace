@@ -40,6 +40,15 @@ struct arena_fixture : ::testing::Test {
     }
 };
 
+// Verifies that is_debug is true without NDEBUG and false when NDEBUG is defined.
+TEST_F(arena_fixture, is_debug_matches_build_configuration) {
+#ifdef NDEBUG
+    EXPECT_FALSE(is_debug);
+#else
+    EXPECT_TRUE(is_debug);
+#endif
+}
+
 ace::promise<int> arena_valued_coroutine() {
     co_return 42;
 }

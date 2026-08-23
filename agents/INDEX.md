@@ -447,7 +447,7 @@ fallback, либо бросает `std::bad_alloc` согласно `_breach_mem
 | `include/ace/core/tools/id_alloc.h` | `id_allocator`, `async_id_allocator`. |
 | `include/ace/core/tools/moving_average.h` | Fixed-window moving average. |
 | `include/ace/core/tools/lifetime.h` | Debug lifetime tracer. |
-| `include/ace/core/tools/macro.h` | Cache-line, router storage, diagnostics и inline macros. |
+| `include/ace/core/tools/macro.h` | Cache-line, router storage, diagnostics, `is_debug` и inline macros. |
 
 ## Критические ограничения
 

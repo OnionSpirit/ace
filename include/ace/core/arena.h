@@ -48,7 +48,7 @@ namespace ace::core {
     struct extern_release_release;
 
     /// @brief Build-specific external release state used by chunk headers.
-    using extern_release = std::conditional_t<not is_debug, extern_release_debug, extern_release_release>;
+    using extern_release = std::conditional_t<is_debug, extern_release_debug, extern_release_release>;
 
     /// @brief Per-chunk header: owner release context + size/flags.
     struct chunk_header {
@@ -76,8 +76,7 @@ namespace ace::core {
      * @brief Debug-only observability counters (empty in release builds).
      *
      * @details Enabled in debug builds only.  Tests are built with
-     * @c debug=true (no NDEBUG), which maps to @c is_debug == false — note the
-     * inverted naming of the flag in @c macro.h (is_debug == true means RELEASE).
+     * @c debug=true (no NDEBUG), which maps to @c is_debug == true.
      */
     template <bool Enabled>
     struct arena_stats {
@@ -108,7 +107,7 @@ namespace ace::core {
      * @c extern_release, whose queue and counters are accessed atomically by
      * foreign threads.
      */
-    struct arena : arena_stats<not is_debug> {
+    struct arena : arena_stats<is_debug> {
 
         /// @brief Largest total chunk size served from the pmr pool.
         static constexpr std::size_t kMaxSize = 4096;
@@ -184,7 +183,7 @@ namespace ace::core {
                     release->_released_bytes.fetch_add(size, std::memory_order_relaxed);
                 note_malloc_deallocate(*release);
                 std::free(chunk);
-                if constexpr (not is_debug) {
+                if constexpr (is_debug) {
                     live_system_chunks.fetch_sub(1, std::memory_order_relaxed);
                 }
             } else if (release != &_extern_release) {
@@ -313,7 +312,7 @@ namespace ace::core {
                 mem = std::malloc(total);
                 if (not mem) throw std::bad_alloc();
                 note_malloc_allocate(_extern_release);
-                if constexpr (not is_debug) {
+                if constexpr (is_debug) {
                     live_system_chunks.fetch_add(1, std::memory_order_relaxed);
                 }
             } else {
@@ -376,7 +375,7 @@ namespace ace::core {
                 : _arena(arena) {}
 
             void* do_allocate(std::size_t bytes, std::size_t alignment) override {
-                if constexpr (not is_debug) {
+                if constexpr (is_debug) {
                     _arena->note_pool_allocate(bytes);
                     live_system_chunks.fetch_add(1, std::memory_order_relaxed);
                 }
@@ -384,7 +383,7 @@ namespace ace::core {
             }
 
             void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override {
-                if constexpr (not is_debug) {
+                if constexpr (is_debug) {
                     _arena->note_pool_deallocate(bytes);
                     live_system_chunks.fetch_sub(1, std::memory_order_relaxed);
                 }

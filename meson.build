@@ -262,6 +262,7 @@ if benchmarks_enabled
         override_options: [
             'debug=false',
             'optimization=3',
+            'b_ndebug=true',
         ],
     )
 

@@ -17,6 +17,8 @@
 
 using namespace std::chrono_literals;
 
+static_assert(not is_debug, "benchmarks must be built without debug mode");
+
 // ==========================================================================
 // Helpers shared by benchmark scenarios.
 // ==========================================================================

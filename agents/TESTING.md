@@ -3,9 +3,10 @@
 Цель: 95-100% покрытия кодовой базы + проверка всех механик и их взаимодействий.
 
 > **Статус (2026-08-23):** GCC 16 coverage union покрывает **2262/2398 =
-> 94.33%** уникальных исполняемых строк `include/ace/**`. В обычной GCC/ASan и
-> coverage-конфигурациях проходят 291 из 292 зарегистрированных Meson-тестов;
-> единственный сбой — открытый B29 из `agents/ISSUES.md`.
+> 94.33%** уникальных исполняемых строк `include/ace/**`. Текущая default
+> конфигурация после добавления AR19 регистрирует 293 Meson-теста; последний
+> зафиксированный до AR19 прогон прошёл 291 из 292 тестов, единственный сбой —
+> открытый B29 из `agents/ISSUES.md`.
 
 ## Требования к генерации тестов (agent instructions)
 
@@ -162,11 +163,11 @@ meson test -C build-cov
 # executable/covered line numbers по каноническим путям include/ace/**.
 ```
 
-Зафиксированный coverage-прогон не является полностью успешным: 291/292,
-падает только B29 regression. Coverage union включает данные всех fixture TU,
+Зафиксированный до добавления AR19 coverage-прогон не является полностью
+успешным: 291/292, падает только B29 regression. Coverage union включает данные всех fixture TU,
 в том числе TU с этим запущенным, но упавшим тестом.
 
-### Фактическая проверка конфигураций
+### Фактическая проверка конфигураций (зафиксировано до AR19)
 
 | Конфигурация | Зарегистрировано | Результат |
 |--------------|------------------|-----------|
@@ -872,6 +873,7 @@ framework containers. Чанки ≤ 4096 обслуживаются `std::pmr::
 | AR16 | `arena_allocator_list_storage` | `std::list` nodes выделяются и освобождаются через arena | ✅ |
 | AR17 | `iovec_uses_shared_arena` | kernel iovec API меняет статистику того же singleton | ✅ |
 | AR18 | `cross_thread_iovec_release` | iovec storage безопасно возвращается owner arena с другого треда | ✅ |
+| AR19 | `is_debug_matches_build_configuration` | `is_debug` соответствует наличию `NDEBUG` | ✅ |
 
 > 📝 Замечания по реализации:
 > - `pop_batch()` из nukes оказался нерабочим для вычитывания (итератор стартует с
@@ -963,7 +965,7 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 
 | Fixture source | Fixture | GTests |
 |----------------|---------|-------:|
-| `tests/arena_fixture.cpp` | `arena_fixture` | 18 |
+| `tests/arena_fixture.cpp` | `arena_fixture` | 19 |
 | `tests/backup_fixture.cpp` | `backup_fixture` | 20 |
 | `tests/base_fixture.cpp` | `base_fixture` | 18 |
 | `tests/channel_extra_fixture.cpp` | `channel_extra_fixture` | 4 |
@@ -996,12 +998,12 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/spawn_fixture.cpp` | `spawn_fixture` | 10 |
 | `tests/timer_fixture.cpp` | `timer_fixture` | 9 |
 | `tests/yield_fixture.cpp` | `yield_fixture` | 8 |
-| **Итого: 33 файла** | | **290** |
+| **Итого: 33 файла** | | **291** |
 
-Default Meson configuration (`ace_entry=false`) регистрирует **292** теста:
-290 GTests, `discover_tests.unit` и `ace_tests.discovery_consistency`. Конфигурация
-`ace_entry=true` дополнительно регистрирует `ace_entry.fallback`, всего 293.
-Наличие 290 discovered GTests не означает 290 successful GTests: B29 остаётся
+Default Meson configuration (`ace_entry=false`) регистрирует **293** теста:
+291 GTests, `discover_tests.unit` и `ace_tests.discovery_consistency`. Конфигурация
+`ace_entry=true` дополнительно регистрирует `ace_entry.fallback`, всего 294.
+Наличие 291 discovered GTests не означает 291 successful GTests: B29 остаётся
 единственным известным failure текущих GCC-прогонов.
 
 ---
@@ -1028,7 +1030,7 @@ Default Meson configuration (`ace_entry=false`) регистрирует **292**
 python3 discover_tests.py discover tests/*_fixture.cpp
 ```
 
-Команда возвращает 290 уникальных active GTest names. Meson выполняет эту же
+Команда возвращает 291 уникальное active GTest name. Meson выполняет эту же
 команду при setup, регистрирует каждый name отдельным `--gtest_filter`, а
 `ace_tests.discovery_consistency` через `verify` подтверждает совпадение списка
 source declarations с `ace_tests --gtest_list_tests`.

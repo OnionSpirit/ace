@@ -56,7 +56,7 @@ namespace ace::cfg {
     ///        callbacks fire on unhandled exceptions).
     struct emergency_default {};
 
-    /// @brief Application-wide memory limit for the coroutine frame allocator
+    /// @brief Application-wide memory limit for the framework arena
     ///        (0 = no limit).  Per-arena limit = value / runners_amount.
     struct max_allocation_size {};
 
@@ -87,7 +87,7 @@ namespace ace::cfg {
             static constexpr bool value = true;
         };
 
-        /// @brief Default application-wide frame allocator limit — 0 (no limit).
+        /// @brief Default application-wide arena limit — 0 (no limit).
         template <>
         struct default_of<max_allocation_size> {
             static constexpr std::size_t value = 0;
@@ -139,7 +139,7 @@ namespace ace::cfg {
         /// @brief Default value of the coroutine @c _emergency flag. Default @c true.
         bool _emergency_default = detail::default_of<emergency_default>::value;
 
-        /// @brief Application-wide memory limit for the coroutine frame allocator.
+        /// @brief Application-wide memory limit shared by all arena clients.
         ///        Default 0 — no limit.  Per-arena limit = value / runners_amount.
         std::size_t _max_allocation_size = detail::default_of<max_allocation_size>::value;
 

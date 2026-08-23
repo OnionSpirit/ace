@@ -30,11 +30,12 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <liburing.h>
 
+#include "ace/core/arena.h"
 #include "ace/core/traits/service.h"
 #include "ace/core/tools/queue.h"
-#include "ace/core/tools/iovec_alloc.h"
 
 namespace ace::services {
 
@@ -108,9 +109,6 @@ namespace ace::services {
 
         /// @brief Overflow buffer for requests submitted while the ring is full.
         static thread_local core::tools::queue<kernel_entity> _submission_buffer;
-        /// @brief Thread-local iovec allocator.
-        static thread_local core::tools::iovec_allocator _iovec_alloc;
-
         /**
          * @brief Service ping — submits pending SQEs and drains CQEs.
          * @return @c true while operations remain in flight.
@@ -292,30 +290,32 @@ namespace ace::services {
             return submit(io_uring_prep_writev2, observer, fd, vec, len, offset, flags);
         }
 
-        // ── iovec allocator ───────────────────────────────────────────
+        // ── Arena-backed iovec allocation ─────────────────────────────
 
         /// @brief Allocates an iovec with a data buffer of the given size.
-        static auto iovec_allocate(size_t size) noexcept -> iovec* {
-            return _iovec_alloc.allocate(size);
+        static auto iovec_allocate(size_t size) -> iovec* {
+            if (size > std::numeric_limits<size_t>::max() - sizeof(iovec))
+                throw std::bad_alloc();
+            auto* iov = static_cast<iovec*>(core::arena::get_instance().allocate(sizeof(iovec) + size));
+            iov->iov_base = reinterpret_cast<std::byte*>(iov) + sizeof(iovec);
+            iov->iov_len = size;
+            return iov;
         }
 
         /// @brief Deallocates an iovec allocated with @c iovec_allocate().
         static auto iovec_deallocate(iovec* iov) noexcept -> void {
-            _iovec_alloc.deallocate(iov);
+            core::arena::get_instance().deallocate(iov, 0);
         }
 
-        /// @brief Allocates a packed array of @c len iovecs from the pool.
-        static auto iovec_pool_allocate(size_t len) noexcept -> iovec* {
-            return _iovec_alloc.allocate_as<iovec>(len);
+        /// @brief Allocates a packed array of @c len iovecs from the arena.
+        static auto iovec_pool_allocate(size_t len) -> iovec* {
+            return core::arena::get_instance().allocate_as<iovec>(len);
         }
 
         /// @brief Deallocates a packed iovec array allocated with @c iovec_pool_allocate().
         static auto iovec_pool_deallocate(iovec* iov, size_t len) noexcept -> void {
-            _iovec_alloc.deallocate_as(iov, sizeof(iovec) * len);
+            core::arena::get_instance().deallocate_as(iov, len);
         }
-
-        /// @brief Direct access to the thread-local iovec allocator.
-        static auto iovec_alloc() noexcept -> core::tools::iovec_allocator& { return _iovec_alloc; }
 
     };
 
@@ -381,8 +381,6 @@ namespace ace::services {
     inline thread_local core::tools::queue<kernel_controller::kernel_entity> kernel_controller::_submission_buffer {
         kernel_entity::_kernelic_entity_mempool
     };
-
-    inline thread_local core::tools::iovec_allocator kernel_controller::_iovec_alloc {};
 
     inline thread_local io_uring_params kernel_controller::_ring_params {};
     inline thread_local io_uring kernel_controller::_ring {};

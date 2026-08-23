@@ -523,7 +523,7 @@ BENCHMARK(bm_schedule_throughput)->Unit(benchmark::kMillisecond);
 // ==========================================================================
 // N раз: append нескольких чанков + assemble() + disassemble() + clear().
 // Характеризует аллокацию чанков io::buffer и построение msghdr.
-// NOTE: Количество чанков ограничено (iovec_pool лимит — 256 iovec).
+// Большие массивы iovec обслуживаются transient-путём общей arena.
 
 static void bm_io_buffer_append(benchmark::State& state) {
     constexpr int messages = 20000;

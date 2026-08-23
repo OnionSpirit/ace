@@ -33,7 +33,7 @@
 #include "ace/core/control.h"
 #include "ace/core/tools/macro.h"
 #include "ace/core/tools/id_alloc.h"
-#include "ace/core/tools/frame_alloc.h"
+#include "ace/core/arena.h"
 
 namespace ace::core {
 
@@ -423,7 +423,7 @@ namespace ace::core::traits {
         /**
          * @brief Custom allocator that prepends a @c control_block before the promise.
          * @details Allocates @c mem_size + sizeof(control_block) bytes through the
-         * thread-local frame allocator, constructs a @c control_block at the
+         * thread-local arena, constructs a @c control_block at the
          * beginning, then returns a pointer offset by @c sizeof(control_block).
          * This enables external handles without a separate heap allocation.
          * @param mem_size  Requested size for the promise itself.
@@ -431,7 +431,7 @@ namespace ace::core::traits {
          */
         void* operator new(size_t mem_size) noexcept {
             const auto frame_size = mem_size + control_block_size;
-            const auto ptr = static_cast<uint8_t*>(tools::frame_allocator::get_instance().allocate(frame_size));
+            const auto ptr = static_cast<uint8_t*>(arena::get_instance().allocate(frame_size));
             void* mem_ptr = ptr + control_block_size;
             new (ptr) control_block();
             static_cast<control_block*>(mem_ptr)->_frame_size = frame_size;
@@ -450,7 +450,7 @@ namespace ace::core::traits {
                 // NOTE: Using true frame size with control block
                 mem_size += sizeof(control_block);
                 block->~control_block();
-                tools::frame_allocator::get_instance().deallocate(block, mem_size);
+                arena::get_instance().deallocate(block, mem_size);
             }
         }
 

@@ -461,7 +461,9 @@ elapsed отсчитывается от разных стартов задач �
 1. **Бенчмарки вынесены** в отдельный executable (`benchmarks/`, 21 шт., BM1-BM20).
 2. **B6-B9, B12 исправлены** — критичные баги clock, channel-cancel, kernelic overflow,
    meson-фильтр.
-3. **Запускать `--gtest_shuffle`** в CI для обнаружения скрытых зависимостей между тестами
-   (прогнано 21+ seed, стабильно).
-4. **Coverage**: 94.3% (gcov, meson per-test режим), отчёт — `build-cov` + gcov.
+3. **Запускать `--gtest_shuffle`** в CI для обнаружения скрытых зависимостей. Затронутые
+   arena/backup/iovec/io_buffer тесты стабильны на 20 seed; полный repeated suite всё ещё
+   выявляет старые зависимости timer/trace/dispatcher state между итерациями одного процесса.
+4. **Coverage**: 94.4% (2226/2357 уникальных строк, gcov, meson per-test режим),
+   отчёт — `build-cov` + gcov.
    Остаточные пробелы: multishot CQE-пути kernelic, error-пути compose/router.

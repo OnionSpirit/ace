@@ -35,8 +35,9 @@
 #include <expected>
 #include <iostream>
 #include <functional>
+#include <list>
+#include <stack>
 #include <variant>
-#include <vector>
 
 #include <nukes/dynamic/regular_queue.h>
 #include <nukes/details/prefetch.h>
@@ -60,6 +61,11 @@ namespace ace::core {
 
     /// @brief Forward declaration — full definition at the bottom of this header.
     struct backup_record;
+
+    /// @brief Arena-backed storage for backup stack nodes.
+    using backup_list = std::list<backup_record, arena_allocator<backup_record>>;
+    /// @brief LIFO backup storage used by every coroutine promise.
+    using backup_stack = std::stack<backup_record, backup_list>;
 
     /**
      * @brief Core coroutine async type.
@@ -458,10 +464,8 @@ namespace ace::core {
             // NOTE: Context owns only one promise. Extra slot object is unnecessary
             /// @brief Router installed into the control block for join / cancel.  Optional because the context owns only one promise.
             std::optional<async_router> _self_router;
-            /// @brief Registered backup callbacks (callables and tasks).  Executed in reverse order on cancel.
-            // TODO: Replace std::function / std::vector with a custom stack allocator
-            // when the framework gets one — each backup/insure call performs a heap allocation.
-            std::vector<backup_record> _backups {};
+            /// @brief Arena-backed backup callbacks executed in LIFO order on cancel.
+            backup_stack _backups {};
             /// @brief When @c true the balancer may migrate the task to another runner.
             bool _roaming { false };
             /// @brief When @c true the runner holds the task in the low priority service pool.
@@ -469,7 +473,7 @@ namespace ace::core {
             /// @brief When @c true backup callbacks fire on unhandled exceptions too.
             ///        Default value is read from the framework configuration (@c ace::cfg::g_config).
             bool _emergency { ace::cfg::g_config._emergency_default };
-            /// @brief When @c true the last element of @c _backups is a one-shot insure record.
+            /// @brief When @c true the top element of @c _backups is a one-shot insure record.
             bool _insured { false };
             /// @brief Snapshot of @c _insured taken at the previous co_await start.
             ///        Used to defer the insure removal past synchronously completed (ready) operations.
@@ -664,7 +668,7 @@ namespace ace::core {
              */
             void begin_op() {
                 if (promise_locals::_insured_prev and promise_locals::_insured) {
-                    promise_locals::_backups.pop_back();
+                    promise_locals::_backups.pop();
                     promise_locals::_insured = false;
                 }
                 promise_locals::_insured_prev = promise_locals::_insured;
@@ -677,7 +681,7 @@ namespace ace::core {
              */
             void pass_op() {
                 if (promise_locals::_insured) {
-                    promise_locals::_backups.pop_back();
+                    promise_locals::_backups.pop();
                     promise_locals::_insured = false;
                 }
             }

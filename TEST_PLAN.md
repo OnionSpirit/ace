@@ -2,7 +2,7 @@
 
 Цель: 95-100% покрытия кодовой базы + проверка всех механик и их взаимодействий.
 
-> **Статус (2026-08-07):** покрытие **94.3%** (2054/2179 уникальных строк по
+> **Статус (2026-08-23):** покрытие **94.4%** (2226/2357 уникальных строк по
 > `include/ace/**`, gcov + meson per-test). Отдельные модули — 85-100%.
 > План ниже актуализирован под фактическое состояние тестов.
 
@@ -46,7 +46,7 @@
    - [3.19 fs.h](#319-fsh)
    - [3.20 console.h](#320-consoleh)
    - [3.21 futures/backup.h](#321-futuresbackuph)
-   - [3.22 frame_alloc.h (frame_alloc_fixture)](#322-frame_alloch-frame_alloc_fixture)
+   - [3.22 core/arena.h (arena_fixture)](#322-corearenah-arena_fixture)
 4. [Кросс-механизмы (взаимодействия)](#кросс-механизмы)
 5. [Обновление meson.build и discover_tests.py](#обновление-сборки)
 6. [Карта fixture-классов (итоговая)](#карта-fixture-классов)
@@ -96,42 +96,43 @@ echo "Report: coverage_report/index.html"
 
 ## Текущее покрытие
 
-**Измерение (2026-08-07):** gcov по ACE-заголовкам, режим meson per-test (237 прогонов),
-уникальные строки (множественные include не учитываются повторно).
+**Измерение (2026-08-23):** gcov по ACE-заголовкам, чистый режим meson per-test
+(276 прогонов), уникальные строки (множественные include и template-инстанцирования
+не учитываются повторно).
 
-**Итог: 2054/2179 = 94.3%**
+**Итог: 2226/2357 = 94.4%**
 
 | Модуль | Покрыто | Примечания |
 |--------|---------|-----------|
-| `core/tools/queue.h` | 96.9% | slab_mempool, queue, q_node — полный набор |
+| `core/tools/queue.h` | 95.0% | slab_mempool, queue, q_node — полный набор |
 | `core/tools/omniptr.h` | 100% | + lifetime 100% |
 | `core/tools/id_alloc.h` | 100% | |
 | `core/tools/moving_average.h` | 100% | |
 | `core/traits/future.h` | 100% | compile-time |
-| `core/traits/promise.h` | 97.2% | операторы new/delete покрыты |
+| `core/traits/promise.h` | 97.4% | операторы new/delete покрыты |
 | `core/traits/routing.h` | 89.5% | router_slot — полный набор |
 | `core/traits/service.h` | 100% | |
 | `core/control.h` | 100% | |
-| `core/async.h` | 94.3% | |
+| `core/async.h` | 99.0% | |
 | `core/async_handle.h` | 85.5% | join/ping handler-ы |
-| `core/runner.h` | 92.3% | |
+| `core/runner.h` | 92.0% | |
 | `core/dispatcher.h` | 89.0% | |
 | `core/signal.h` | 100% | |
 | `core/compose.h` | 86.9% | or/and/composed, operator>> |
-| `io.h` | 95.1% | query/buffer/entity/guard/hanged/any |
-| `net.h` | 95.1% | TCP echo, UDP, sendmsg/recvmsg |
-| `services/kernelic.h` | 90%+ | включая overflow-буфер (6000 запросов) |
+| `io.h` | 94.1% | query/buffer/entity/guard/hanged/any |
+| `net.h` | 94.9% | TCP echo, UDP, sendmsg/recvmsg |
+| `services/kernelic.h` | 91.5% | включая overflow-буфер (6000 запросов) |
 | `services/clock.h` | 97.6% | включая expire |
 | `futures/timeout.h` | 95.5% | |
 | `futures/channel.h` | 95.3% | включая cancel и pending_push |
-| `futures/cutex.h` | 96.9% | |
+| `futures/cutex.h` | 92.2% | |
+| `futures/backup.h` | 97.7% | callable/task payload, insure, emergency, LIFO stack |
 | `futures/spawn.h` / `post.h` | 100% / 100% | |
 | `futures/reattach.h` | 100% | включая кросс-раннерную миграцию |
 | `futures/roaming.h` / `polling.h` / `get_runner.h` | 100% | |
-| `fs.h` | 93.9% | |
+| `fs.h` | 96.9% | |
 | `console.h` | 100% | |
-| `iovec_alloc.h` | 93.5% | |
-| `frame_alloc.h` | новый (покрыт FA1-FA13) | |
+| `core/arena.h` | 95.5% | AR1-AR18; coroutine frames + I/O + framework containers |
 
 **Не покрыто (остаточные пробелы):** multishot CQE-пути kernelic (accept-multishot не
 используется в тестах), error-пути compose (несовместимые типы — compile-time),
@@ -489,6 +490,7 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 | B24 | `buffer_move_assign` | Move-присваивание: данные переносятся, источник очищается | ✅ |
 | B25 | `buffer_prepend_raw` | prepend(void*, void*) — prepend байтового диапазона | ✅ |
 | B26 | `buffer_append_span_dynamic` | append(span<int>) — копирование POD span с dynamic_extent | ✅ |
+| B27 | `buffer_expand_overflow` | `len + control_hdr_len` проверяется до allocation, buffer остаётся пустым | ✅ |
 
 #### `IoQueryFixture` (не реализована)
 
@@ -754,6 +756,7 @@ co_await/co_yield операцию (снимается при её успешн�
 | BK17 | `emergency_config_default` | `g_config._emergency_default = false` → новые корутины не срабатывают на исключениях | ✅ |
 | BK18 | `backup_in_automaton_cancel` | automaton: backup + cancel на co_yield → сработал | ✅ |
 | BK19 | `backup_cancel_via_spawn_handle` | spawn + `async_handle::cancel` → backup сработал, join=false | ✅ |
+| BK20 | `backup_stack_many_records_fires_lifo` | 64 arena-backed list nodes → callbacks выполняются строго в обратном порядке | ✅ |
 
 > ⚠️ **Pre-existing баг фреймворка (не связан с этой фичей):** `observe()` на
 > лямбда-корутине перед `schedule()`/spawn портит захваченные ссылки — GCC
@@ -764,36 +767,37 @@ co_await/co_yield операцию (снимается при её успешн�
 
 ---
 
-### 3.22 frame_alloc.h — frame_alloc_fixture (добавлен)
+### 3.22 core/arena.h — arena_fixture
 
-Аллокатор стек-фреймов корутин (thread-local арена на `std::pmr::unsynchronized_pool_resource`,
-по аналогии с `iovec_alloc.h`): чанки ≤ 4096 обслуживаются пулом (освобождённые остаются в
-пуле, системе возвращаются только при деструкции арены), большие — transient-malloc'ом
-(возвращаются системе сразу, через канал не идут). Заголовок чанка хранит указатель на
-`extern_release`: pooled-чанки возвращаются владельцу через его
-`nukes::dynamic::mpsc_queue`, а foreign transient-free атомарно добавляет размер в
-`released_bytes`. Владелец при обработке `extern_release` забирает байты через
-`exchange(0)` и корректирует локальный `_occupied`. Дренаж канала — по формуле
-утилизации `N = max_allocation_size / occupied` каждую
-N-ю операцию; при лимите 0 — на каждой аллокации. Лимит арены = `max_allocation_size /
-runners_amount`; при достижении — fallback на malloc (+notify в stderr) либо `bad_alloc`
-(параметр `breach_memory_limit`).
+`ace::core::arena` — единая thread-local арена для coroutine frames, I/O/iovec и
+framework containers. Чанки ≤ 4096 обслуживаются `std::pmr::unsynchronized_pool_resource`,
+большие — transient-malloc. `allocate_as<T>(count)` поддерживает оба пути и проверяет
+переполнение. `arena_allocator<T>` подключает arena к стандартным контейнерам; backup
+использует `std::stack` поверх `std::list<backup_record, arena_allocator<backup_record>>`.
+Заголовок чанка хранит владельца, поэтому pooled foreign-free возвращается через MPSC
+канал, а transient foreign-free освобождается сразу с отложенной коррекцией accounting.
+Лимит `_max_allocation_size` общий для всех клиентов arena.
 
 | # | Тест | Что проверяет | Статус |
 |---|------|--------------|--------|
-| FA1 | `small_alloc_served_from_pool` | alloc ≤ 4080: выравнивание 16, in_use учтён, пул вырос, transient не использован; после free память остаётся в пуле | ✅ |
-| FA2 | `big_alloc_goes_to_malloc` | alloc 5000: transient (malloc_count+1, пул не тронут), после free системе вернулось всё | ✅ |
-| FA3 | `chunk_reuse_after_free` | alloc→free→alloc того же размера → тот же адрес (LIFO пула), без роста пула | ✅ |
-| FA4 | `pool_never_returns_to_system` | 8 классов: после free системе ничего не вернулось, повторные аллокации без роста | ✅ |
-| FA5 | `arena_is_thread_local` | у каждого треда свой экземпляр арены | ✅ |
-| FA6 | `cross_thread_free_returns_to_owner` | чужой тред освобождает пуловый чанк → возврат владельцу через канал → переиспользование адреса | ✅ |
-| FA7 | `channel_drain_cadence` | max=L, occupied=L/2 → N=2: счётчик 7%2≠0 без дренажа, 8%2==0 дренаж + адрес-реюз | ✅ |
-| FA8 | `limit_zero_drains_every_alloc` | max=0 → канал дренируется на каждой аллокации | ✅ |
-| FA9 | `occupied_zero_drains_every_alloc` | max>0, occupied==0 → дренаж на каждой аллокации (нет деления на ноль), затем формула | ✅ |
-| FA10 | `limit_breach_fallback_malloc` | лимит арены достигнут → transient fallback; при `breach_memory_limit=false` → `bad_alloc` | ✅ |
-| FA11 | `destructor_returns_everything` | деструктор арены (выход треда) вернул системе пул, канал и transient | ✅ |
-| FA12 | `promise_traits_uses_allocator` | кадр корутины аллоцируется через frame_allocator (in_use растёт/падает), выравнивание promise | ✅ |
-| FA13 | `foreign_transient_free_updates_owner_accounting` | foreign transient-free: атомарный malloc_count исправляется сразу, released_bytes через exchange(0) корректирует `_occupied` владельца на drain | ✅ |
+| AR1 | `small_alloc_served_from_pool` | малая аллокация, выравнивание, accounting и retention пула | ✅ |
+| AR2 | `big_alloc_goes_to_malloc` | большая аллокация использует transient и сразу освобождается | ✅ |
+| AR3 | `chunk_reuse_after_free` | повторная аллокация переиспользует pooled chunk | ✅ |
+| AR4 | `pool_never_returns_to_system` | освобождённые pooled chunks удерживаются до деструктора arena | ✅ |
+| AR5 | `arena_is_thread_local` | у каждого треда свой singleton arena | ✅ |
+| AR6 | `cross_thread_free_returns_to_owner` | foreign pooled-free возвращается владельцу через канал | ✅ |
+| AR7 | `channel_drain_cadence` | формула `N=max/occupied` управляет drain cadence | ✅ |
+| AR8 | `limit_zero_drains_every_alloc` | max=0 дренирует канал перед каждой аллокацией | ✅ |
+| AR9 | `occupied_zero_drains_every_alloc` | occupied=0 не делит на ноль и дренирует канал | ✅ |
+| AR10 | `limit_breach_fallback_malloc` | общий лимит: transient fallback или `bad_alloc` | ✅ |
+| AR11 | `destructor_returns_everything` | выход треда освобождает pool/channel/transient storage | ✅ |
+| AR12 | `promise_traits_uses_arena` | coroutine frame учитывается общей arena | ✅ |
+| AR13 | `foreign_transient_free_updates_owner_accounting` | foreign transient-free корректирует owner accounting | ✅ |
+| AR14 | `typed_allocation_uses_arena` | typed small/large arrays используют pool/transient пути | ✅ |
+| AR15 | `typed_allocation_overflow` | переполнение `count*sizeof(T)` даёт `bad_array_new_length` | ✅ |
+| AR16 | `arena_allocator_list_storage` | `std::list` nodes выделяются и освобождаются через arena | ✅ |
+| AR17 | `iovec_uses_shared_arena` | kernel iovec API меняет статистику того же singleton | ✅ |
+| AR18 | `cross_thread_iovec_release` | iovec storage безопасно возвращается owner arena с другого треда | ✅ |
 
 > 📝 Замечания по реализации:
 > - `pop_batch()` из nukes оказался нерабочим для вычитывания (итератор стартует с
@@ -898,7 +902,7 @@ runners_amount`; при достижении — fallback на malloc (+notify �
 | `control_block_fixture` | `::testing::Test` | ✅ | 18→15 (✅ 15) |
 | `runner_fixture` | `base_fixture` | ✅ | 21→10 (✅ 10, suspending_task_run починен) |
 | `dispatcher_fixture` | `base_fixture` | ✅ | 14→8 (✅ 8) |
-| `io_buffer_fixture` | `::testing::Test` | ✅ | 26→24 (✅ 24) |
+| `io_buffer_fixture` | `::testing::Test` | ✅ | 27→25 (✅ 25) |
 | `io_entity_fixture` | `::testing::Test` | ✅ | 9→9 (✅ 9) |
 | `io_hanged_fixture` | `::testing::Test` | ✅ | 5→5 (✅ 5) |
 | `io_any_fixture` | `::testing::Test` | ✅ | 6→6 (✅ 6) |
@@ -909,11 +913,11 @@ runners_amount`; при достижении — fallback на malloc (+notify �
 | `channel_extra_fixture` | `base_fixture` | ✅ | —→4 (✅ 4) |
 | `cutex_extra_fixture` | `base_fixture` | ✅ | —→5 (✅ 5) |
 | `get_runner_fixture` | `base_fixture` | ✅ | —→1 (✅ 1) |
-| `backup_fixture` | `base_fixture` | ✅ **добавлен** (backup/insure/emergency) | —→19 (✅ 19) |
-| `frame_alloc_fixture` | `::testing::Test` | ✅ **добавлен** (frame_alloc) | —→13 (✅ 13) |
+| `backup_fixture` | `base_fixture` | ✅ **добавлен** (backup/insure/emergency) | —→20 (✅ 20) |
+| `arena_fixture` | `::testing::Test` | ✅ (shared arena) | —→18 (✅ 18) |
 
-**Итого:** 34 fixture-класса, **296 тестов** (283 существующих + 13 новых frame_alloc;
-в meson-режиме 296 зарегистрированных прогонов, все активные).
+**Итого:** 34 fixture-класса, **276 тестов** (269 существующих + 7 новых);
+в meson-режиме 276 зарегистрированных прогонов, все активные.
 
 > Примечание: `timer_parallel_fixture` и `service_fixture`/`io_query_fixture`/
 > `kernelic_fixture`/`clock_fixture`/`entry_fixture` из ранней версии плана не
@@ -972,7 +976,7 @@ runners_amount`; при достижении — fallback на malloc (+notify �
 | 1062–1083 | `cutex_extra_fixture` | cutex |
 | 1085–1093 | `get_runner_fixture` | futures |
 | 1082–1140 | `backup_fixture` | futures (backup/insure/emergency) |
-| 1163–1199 | `frame_alloc_fixture` | tools (frame_alloc) |
+| 1175–1211 | `arena_fixture` | core (arena) |
 
 ### Расположение тестов в `tests/tests.cpp`
 
@@ -1000,7 +1004,7 @@ runners_amount`; при достижении — fallback на malloc (+notify �
 | 1564–1634 | `signal_fixture` | 4 |
 | 1635–1718 | `runner_fixture` | 8 (suspending_task_run починен) |
 | 1719–1821 | `dispatcher_fixture` | 7 |
-| 1822–2116 | `io_buffer_fixture` | 24 |
+| 1822–2128 | `io_buffer_fixture` | 25 |
 | 2118–2231 | `io_entity_fixture` | 9 |
 | 2232–2272 | `io_any_fixture` | 6 |
 | 2273–2316 | `io_hanged_fixture` | 5 |
@@ -1016,8 +1020,8 @@ runners_amount`; при достижении — fallback на malloc (+notify �
 | 3321–3400 | `fs_fixture` (fs ext) | 3 |
 | 3401–3470 | `base_fixture` (kernelic: nop, pipe r/w, close, iovec, register_files, overflow) | 6 |
 | 3471–3650 | `base_fixture` (channel bounded/pending/spsc/mpmc, get_current_pool, router, reattach×3, udp, tcp) | 14 |
-| 3749–4215 | `backup_fixture` | 19 |
-| 4219–4670 | `frame_alloc_fixture` | 13 |
+| 3749–4237 | `backup_fixture` | 20 |
+| 4240–4800 | `arena_fixture` | 18 |
 
 > ⚠️ Номера строк приблизительные и сдвигаются при правках. Источник истины —
 > `grep -n '^TEST' tests/tests.cpp`.

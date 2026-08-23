@@ -20,7 +20,7 @@
 16. [Router: маршрутизация futures](#router)
 17. [Promise traits и память](#promise-traits)
 18. [Service: фоновые сервисы](#service)
-19. [Tools: omniptr, queue, id_alloc, moving_average, iovec_alloc](#tools)
+19. [Arena и tools: arena, omniptr, queue, id_alloc, moving_average](#tools)
 20. [Важные ограничения и паттерны](#ограничения)
 21. [Файловая карта (полная)](#файловая-карта)
 22. [Тесты](#тесты)
@@ -67,7 +67,7 @@ ace::async<int> co_main(int argc, char** argv) {
 |------|-------|-------------|
 | `_runners_amount` | 137 | 1 |
 | `_emergency_default` | 140 | true — срабатывать ли backup-коллбекам на необработанных исключениях |
-| `_max_allocation_size` | 144 | 0 — предельный размер памяти для `frame_allocator` (0 = без лимита; лимит арены = значение / `_runners_amount`) |
+| `_max_allocation_size` | 144 | 0 — общий лимит памяти `ace::core::arena` для coroutine frames, I/O и framework containers (0 = без лимита; per-thread лимит = значение / `_runners_amount`) |
 | `_breach_memory_limit` | 149 | true — fallback на malloc при превышении лимита арены; false — `std::bad_alloc` |
 
 Глобальный экземпляр: `ace::cfg::g_config` (line 112).
@@ -551,7 +551,7 @@ co_await ace::emergency(false);                  // не срабатывать 
                                                  // конфигурируется через ace::cfg::g_config._emergency_default)
 ```
 
-**Fire:** все коллбеки (callable и task) складываются в одну fire task, планируемую в раннер отменённой корутины (`runner::attach`; нет runner → `ace::schedule`). Fire task идёт в обратном порядке: callable — вызов, `ace::task` — `co_await` до завершения. Точки fire: `async_router::cancel()` и `~async()` (гейт: `e_finished` — пропуск; `e_failed && !_emergency` — пропуск). При OOM при создании fire task — `throw std::runtime_error("failed to init backup context. out of memory.")`.
+**Хранилище и fire:** записи лежат в `std::stack` поверх `std::list<backup_record, arena_allocator<backup_record>>`; каждый list node выделяется общей `ace::core::arena`. При отмене stack переносится в одну fire task, планируемую в раннер отменённой корутины (`runner::attach`; нет runner → `ace::schedule`). Fire task делает `top()`/`pop()` в LIFO-порядке: callable — вызов, `ace::task` — `co_await` до завершения. Точки fire: `async_router::cancel()` и `~async()` (гейт: `e_finished` — пропуск; `e_failed && !_emergency` — пропуск). При OOM при создании fire task — `throw std::runtime_error("failed to init backup context. out of memory.")`.
 
 ---
 
@@ -870,7 +870,7 @@ Thread-local service. Каждый раннер имеет свой экземп
 | `ping()` | 109 | Дренирует SQEs, обрабатывает CQEs |
 | `submit()` | 127 | Универсальный шаблонный метод отправки IO |
 
-**iovec аллокатор:** `iovec_allocate(n)`, `iovec_deallocate(iov)`, `iovec_pool_allocate(n)`, `iovec_pool_deallocate(iov, n)` (lines 265-281).
+**iovec allocation:** `iovec_allocate(n)`, `iovec_deallocate(iov)`, `iovec_pool_allocate(n)`, `iovec_pool_deallocate(iov, n)` используют общий `ace::core::arena`; physical chunks больше 4096 байт обслуживаются transient-путём.
 
 **kernel_observer** (`kernelic.h:52`): полиморфный обработчик CQE. Поля: `_runner_identity` (runner_pool_t*), `_on_cancel` (bool), `_multishot` (bool). `on_result(int res)` вызывается при получении CQE.
 
@@ -1077,24 +1077,22 @@ Lock-free аллокатор уникальных ID. `id_alloc()` (33) выде
 
 RAII debug tracer: логирует конструирование/разрушение. `track()` / `untrack()` — глобальное вкл/выкл.
 
-### iovec_allocator (`core/tools/iovec_alloc.h:19`)
+### arena (`core/arena.h`)
 
-Thread-local аллокатор iovec буферов через `std::pmr`. `allocate(size_t)` (26), `deallocate(iovec*)` (42), `allocate_as<T>(n)` (50), `deallocate_as(void*, n)` (57). Внутренний `memory_controller` (63) с debug/release режимами.
-
-### frame_allocator (`core/tools/frame_alloc.h`)
-
-Thread-local арена для стек-фреймов корутин (используется `promise_traits::operator new/delete`).
+`ace::core::arena` — единая thread-local арена для coroutine frames, I/O/iovec и arena-backed framework containers. `ace::core::arena_allocator<T>` адаптирует её к стандартным контейнерам.
 
 | Метод | Линия | Описание |
 |-------|-------|----------|
-| `get_instance()` | 108 | `static thread_local` синглтон арены (одна на тред) |
-| `allocate(size)` | 120 | Чанк ≤ 4096 → `std::pmr::unsynchronized_pool_resource`; больше → transient `malloc` |
-| `deallocate(ptr, size)` | 133 | Transient → `free` сразу + atomic release владельцу; чужой pooled-чанк → `push` в канал владельца; свой → в пул |
-| `stats()` | 179 | Debug-only наблюдаемость: `in_use_bytes`, `pool_held_bytes`, `malloc_count`, `op_counter`, `drain_count`, `live_system_chunks` (глобальный атомарный) |
+| `get_instance()` | — | `static thread_local` синглтон арены (одна на тред) |
+| `allocate(size)` | — | Чанк ≤ 4096 → `std::pmr::unsynchronized_pool_resource`; больше → transient `malloc` |
+| `deallocate(ptr, size)` | — | Transient → `free` сразу + atomic release владельцу; чужой pooled-чанк → `push` в канал владельца; свой → в пул |
+| `allocate_as<T>(count)` | — | Typed allocation; проверяет переполнение, большие массивы идут transient-путём |
+| `deallocate_as<T>(ptr, count)` | — | Typed deallocation; фактический размер читается из chunk header |
+| `stats()` | — | Debug-only наблюдаемость: `in_use_bytes`, `pool_held_bytes`, `malloc_count`, `op_counter`, `drain_count`, `live_system_chunks` (глобальный атомарный) |
 
 **Устройство:**
 - Чанк: `[chunk_header(16B) | payload]` — заголовок = указатель на `extern_release` владельца + размер (бит 63 = transient-флаг).
-- Пул (`unsynchronized_pool_resource` + собственный `memory_resource` по аналогии с `iovec_alloc.h`): освобождённые чанки остаются в пуле, системе возвращаются **только при деструкции арены** (выход треда). `do_deallocate` всегда реально освобождает (в отличие от iovec_alloc) — контракт деструктора.
+- Пул (`unsynchronized_pool_resource` + собственный `memory_resource`): освобождённые чанки остаются в пуле, системе возвращаются **только при деструкции арены** (выход треда).
 - `extern_release` выбирается через `std::conditional_t`: обе версии содержат канал и атомарный `released_bytes`, debug-версия дополнительно содержит атомарный `malloc_count`, release-версия — без debug-счётчика.
 - Кросс-тредный возврат: чужой pooled-чанк кладётся в `nukes::dynamic::mpsc_queue` владельца; foreign transient-free освобождает память сразу и делает `released_bytes.fetch_add(size)`. Владелец при обработке `extern_release` забирает байты через `exchange(0)` и вычитает их из локального `_occupied`. Дренаж — по формуле утилизации: `N = max_allocation_size / occupied`, каждую N-ю операцию (alloc/dealloc); при `max==0` или `occupied==0` — на каждой аллокации. Канал вычитывается обычным `pop()` в цикле (`pop_batch()` из nukes нерабочий — итератор стартует с dummy-ноды).
 - Лимит арены = `g_config._max_allocation_size / g_config._runners_amount` (пересчёт на каждой операции); при достижении: fallback на transient-malloc с notify в `std::cerr` (один раз на арену) либо `throw std::bad_alloc` — по `g_config._breach_memory_limit`.
@@ -1149,7 +1147,7 @@ Thread-local арена для стек-фреймов корутин (испо�
          (в) вынести control_block в отдельную аллокацию. После фикса снять
          ограничение 10 и переписать тесты backup_fixture на лямбды. -->
 
-12. **Кросс-тредные чанки `frame_allocator`** — pooled-чанк, освобождённый на чужом треде, возвращается владельцу через `extern_release::_channel`. Transient-чанки (> 4096 и breach-fallback) канал **не используют**: освобождаются сразу, размер атомарно накапливается в `extern_release::_released_bytes`, а владелец при следующем drain корректирует `_occupied` через `exchange(0)`. Инвариант: все runner-треды джойнятся до завершения программы, поэтому чужие треды не обращаются к уже уничтоженному `extern_release`.
+12. **Кросс-тредные чанки `arena`** — pooled-чанк, освобождённый на чужом треде, возвращается владельцу через `extern_release::_channel`. Transient-чанки (> 4096 и breach-fallback) канал **не используют**: освобождаются сразу, размер атомарно накапливается в `extern_release::_released_bytes`, а владелец при следующем drain корректирует `_occupied` через `exchange(0)`. Инвариант: все runner-треды джойнятся до завершения программы, поэтому чужие треды не обращаются к уже уничтоженному `extern_release`.
 
 ---
 
@@ -1160,6 +1158,7 @@ Thread-local арена для стек-фреймов корутин (испо�
 | `ace.h` | Quick-start: entry, compose, spawn, post, reattach. Определяет guard `ACE_H` — короткие алиасы (`ace::timeout`, `ace::channel`, `ace::cutex`, `ace::println`, ...) определяются в самих `futures/*.h` и `console.h` под `#ifdef ACE_H` и доступны только при включении `ace.h` раньше. |
 | `core/entry.h` | `co_main()`, `ace::cfg::init()`, `ace::entry`, `ace::entry_result` |
 | `core/config.h` | `ace::cfg::config`, `ace::cfg::g_config`, `ace::cfg::ace_param<Tag>`, `detail::resolve<Tag>()` |
+| `core/arena.h` | `ace::core::arena`, `arena_allocator<T>` — общая thread-local арена, typed allocations и cross-thread возврат чанков |
 | `core/async.h` | `async<T>`, `promise<T>`, `automaton<T>`, `task`, `task_wrap`, `suspend`, promise_type, async_router, omni_node/omni_runner/runner_router aliases |
 | `core/async_handle.h` | `async_handle`, `join_handler`, `ping_handler`, `automaton_join_handler`, все router'ы для них |
 | `core/compose.h` | `or_await`, `and_await`, `or/and_await_composed`, `compose()` (6 overloads), `operator or/and/>>` |
@@ -1174,8 +1173,6 @@ Thread-local арена для стек-фреймов корутин (испо�
 | `core/tools/omniptr.h` | `omniptr<T, Ts...>` — тип-agnostic указатель |
 | `core/tools/queue.h` | `queue<T>`, `q_node<T>`, `slab_mempool<T>` |
 | `core/tools/id_alloc.h` | `id_allocator`, `async_id_allocator` |
-| `core/tools/iovec_alloc.h` | `iovec_allocator` — thread-local pmr-based iovec allocator |
-| `core/tools/frame_alloc.h` | `frame_allocator` — thread-local арена стек-фреймов корутин (pmr pool + кросс-тредный возврат чанков через mpsc_queue) |
 | `core/tools/macro.h` | `ACE_CACHE_LINE_SIZE`, `ACE_ROUTER_MEM_SIZE`, `ACE_AWAIT_NODISCARD`, `ACE_INLINE`, `ACE_WEAK` |
 | `core/tools/moving_average.h` | `moving_average` (sliding window 4) |
 | `core/tools/lifetime.h` | `lifetime` (RAII debug tracer) |
@@ -1206,7 +1203,7 @@ Thread-local арена для стек-фреймов корутин (испо�
 |------|-----------|
 | `tests/main.cpp` | GTest main |
 | `tests/environment.h` | Все fixture-классы с хелпер-тасками (1098 строк) |
-| `tests/tests.cpp` | `TEST_F` тесты (4670 строк, 296 тестов; отключённых нет — `cancel_spawned_with_channel` переоткрыт после фикса B7 в `BUGS_AND_BENCHMARKS.md`) |
+| `tests/tests.cpp` | `TEST_F` тесты (276 тестов; отключённых нет — `cancel_spawned_with_channel` переоткрыт после фикса B7 в `BUGS_AND_BENCHMARKS.md`) |
 
 ### Fixture-классы (34 fixture)
 
@@ -1232,7 +1229,7 @@ Thread-local арена для стек-фреймов корутин (испо�
 | `control_block_fixture` | `::testing::Test` | — | 15: control_block lifecycle + handle ops |
 | `runner_fixture` | `base_fixture` | — | 8: attach, run, velocity, move, suspending_task_run (с pump времени) |
 | `dispatcher_fixture` | `base_fixture` | reset runners + signal | 7: schedule, run, reload, signals |
-| `io_buffer_fixture` | `::testing::Test` | — | 24: buffer expand/append/prepend/assemble/clone |
+| `io_buffer_fixture` | `::testing::Test` | — | 25: buffer expand/overflow/append/prepend/assemble/clone |
 | `io_entity_fixture` | `::testing::Test` | — | 9: entity lifecycle, move, extract, close, guard |
 | `io_any_fixture` | `::testing::Test` | — | 6: type-erased any construction/move/destructor |
 | `io_hanged_fixture` | `::testing::Test` | — | 5: fire-and-forget command pool |
@@ -1243,7 +1240,7 @@ Thread-local арена для стек-фреймов корутин (испо�
 | `channel_extra_fixture` | `base_fixture` | — | 4: push/pull, shift operator, mpsc |
 | `cutex_extra_fixture` | `base_fixture` | reset runners + signal | 5: proxy double capture/sync/destructor, try_lock |
 | `get_runner_fixture` | `base_fixture` | — | 1: get_runner inside runner |
-| `frame_alloc_fixture` | `::testing::Test` | — | 13: пул (alloc/free/reuse/retention), transient-malloc, thread_local арены, кросс-тредный возврат pooled/transient чанков, каденс дренажа (N=2), лимит + breach, деструктор, интеграция promise_traits |
+| `arena_fixture` | `::testing::Test` | — | 18: пул, transient, typed API, `arena_allocator`, общий iovec accounting, cross-thread возврат, лимит, деструктор, интеграция promise_traits |
 
 ### Бенчмарки
 
@@ -1255,7 +1252,8 @@ roundtrip, schedule throughput. См. инвентарь в `BUGS_AND_BENCHMARKS
 
 ### Coverage
 
-Цель 95%. Текущее значение: **94.3%** (gcov, meson per-test режим; см. `TEST_PLAN.md`).
+Цель 95%. Текущее значение: **94.4%** (2226/2357 уникальных строк, gcov,
+meson per-test режим; см. `TEST_PLAN.md`).
 Измерение требует симлинков `tests`/`include` внутри build-каталога (см. TEST_PLAN.md).
 
 ### Добавление новых тестов

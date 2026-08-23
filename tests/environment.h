@@ -4,12 +4,15 @@
 
 #include <memory>
 #include <cstring>
+#include <limits>
+#include <list>
 #include <span>
 #include <thread>
 #include <future>
 #include <unistd.h>
 #include <gtest/gtest.h>
 #include <ace/ace.h>
+#include <ace/core/arena.h>
 #include <ace/core/compose.h>
 #include "ace/futures/get_runner.h"
 #include "ace/futures/roaming.h"
@@ -1105,6 +1108,23 @@ struct backup_fixture : base_fixture {
         co_return;
     }
 
+    // Регистрирует достаточно записей, чтобы проверить реальный list-backed
+    // стек, а не только короткий сценарий из трёх callbacks.
+    static ace::task many_backup_sleeper(std::vector<int>& order, int count) {
+        for (int i = 0; i < count; ++i)
+            co_await ace::backup([&order, i] { order.push_back(i); });
+        co_await ace::timeout(std::chrono::seconds(10));
+        co_return;
+    }
+
+    ace::task cancel_many_backups(std::vector<int>& order, int count) {
+        auto handle = co_await ace::spawn(many_backup_sleeper(order, count));
+        co_await ace::timeout(std::chrono::milliseconds(10));
+        handle.cancel();
+        _ch << ((co_await handle.join()) ? 0 : 1);
+        co_return;
+    }
+
     // Корутина, которая бросает исключение после регистрации backup-коллбека.
     // Возвращает ссылку на order для наблюдения за срабатыванием.
     static ace::task throwing_backup(std::vector<int>& order) {
@@ -1161,10 +1181,10 @@ struct get_runner_fixture : base_fixture {
 };
 
 // ==========================================================================
-// frame_alloc_fixture — coroutine frame allocator tests
+// arena_fixture — shared framework arena tests
 // ==========================================================================
 
-struct frame_alloc_fixture : ::testing::Test {
+struct arena_fixture : ::testing::Test {
 
     std::size_t _saved_max { 0 };
     bool _saved_breach { true };

@@ -1,12 +1,13 @@
 #pragma once
-/// @file frame_alloc.h
-/// @brief Thread-local coroutine frame allocator with cross-arena chunk recycling.
+/// @file arena.h
+/// @brief Thread-local framework allocator with cross-arena chunk recycling.
 ///
-/// @details Arena-per-thread allocator used by @c promise_traits::operator new/delete.
+/// @details Arena-per-thread allocator shared by coroutine frames, I/O buffers,
+/// and framework containers.
 ///
 /// Chunks up to @c kMaxSize bytes are served from a
-/// @c std::pmr::unsynchronized_pool_resource backed by a custom memory resource
-/// (same structure as @c iovec_alloc.h).  The pool retains freed chunks in its
+/// @c std::pmr::unsynchronized_pool_resource backed by a custom memory resource.
+/// The pool retains freed chunks in its
 /// free lists and returns its blocks to the system only when the arena — a
 /// thread-local singleton destroyed at thread exit — is destroyed.
 ///
@@ -29,7 +30,9 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
+#include <limits>
 #include <memory_resource>
 #include <new>
 #include <type_traits>
@@ -39,7 +42,7 @@
 #include "ace/core/config.h"
 #include "ace/core/tools/macro.h"
 
-namespace ace::core::tools {
+namespace ace::core {
 
     struct extern_release_debug;
     struct extern_release_release;
@@ -77,7 +80,7 @@ namespace ace::core::tools {
      * inverted naming of the flag in @c macro.h (is_debug == true means RELEASE).
      */
     template <bool Enabled>
-    struct frame_alloc_stats {
+    struct arena_stats {
         void note_pool_allocate(std::size_t) noexcept {}
         void note_pool_deallocate(std::size_t) noexcept {}
         void note_drain() noexcept {}
@@ -87,7 +90,7 @@ namespace ace::core::tools {
 
     /// @brief Stats specialization: real counters in debug builds.
     template <>
-    struct frame_alloc_stats<true> {
+    struct arena_stats<true> {
         std::size_t pool_held_bytes = 0;  ///< System bytes currently retained by the pmr pool.
         std::size_t drain_count     = 0;  ///< Channel drains performed.
 
@@ -99,13 +102,13 @@ namespace ace::core::tools {
     };
 
     /**
-     * @brief Thread-local arena for coroutine frame allocations.
+     * @brief Thread-local arena shared by framework allocations.
      *
      * @details All arena state is touched from the owning thread only, except
      * @c extern_release, whose queue and counters are accessed atomically by
      * foreign threads.
      */
-    struct frame_allocator : frame_alloc_stats<not is_debug> {
+    struct arena : arena_stats<not is_debug> {
 
         /// @brief Largest total chunk size served from the pmr pool.
         static constexpr std::size_t kMaxSize = 4096;
@@ -113,17 +116,20 @@ namespace ace::core::tools {
         /// @brief Size of the per-chunk header stored before the user payload.
         static constexpr std::size_t kHeaderSize = sizeof(chunk_header);
 
+        /// @brief Guaranteed alignment of returned storage.
+        static constexpr std::size_t kAlignment = 16;
+
         /// @brief Bit 63 of the header size field marks a transient (malloc-served) chunk.
         static constexpr std::size_t kTransientFlag = std::size_t{1} << 63;
 
         /// @brief Returns the thread-local arena singleton.
-        static frame_allocator& get_instance() {
-            static thread_local frame_allocator instance;
+        static arena& get_instance() {
+            static thread_local arena instance;
             return instance;
         }
 
         /**
-         * @brief Allocates @p size bytes for a coroutine frame.
+         * @brief Allocates @p size bytes from the current thread's arena.
          * @param size Requested payload size.
          * @return Pointer to the user payload area (chunk header + 16 bytes).
          * @throws std::bad_alloc on allocation failure or when the arena limit
@@ -131,10 +137,29 @@ namespace ace::core::tools {
          */
         [[nodiscard]] void* allocate(std::size_t size) {
             maybe_drain(true);
-            const auto total = align_up(size + kHeaderSize, 16);
+            if (size > std::numeric_limits<std::size_t>::max() - kHeaderSize)
+                throw std::bad_alloc();
+            const auto with_header = size + kHeaderSize;
+            if (with_header > std::numeric_limits<std::size_t>::max() - (kAlignment - 1))
+                throw std::bad_alloc();
+            const auto total = align_up(with_header, kAlignment);
             auto* chunk = obtain_chunk(total);
             _occupied += total;
             return chunk + 1;
+        }
+
+        /**
+         * @brief Allocates uninitialised storage for @p count objects of @p data_t.
+         * @throws std::bad_array_new_length when the element count overflows.
+         * @throws std::bad_alloc when the arena cannot allocate the storage.
+         */
+        template <typename data_t>
+        [[nodiscard]] data_t* allocate_as(std::size_t count = 1) {
+            static_assert(alignof(data_t) <= kAlignment,
+                "ace::core::arena does not support over-aligned types");
+            if (count > std::numeric_limits<std::size_t>::max() / sizeof(data_t))
+                throw std::bad_array_new_length();
+            return static_cast<data_t*>(allocate(sizeof(data_t) * count));
         }
 
         /**
@@ -163,13 +188,21 @@ namespace ace::core::tools {
                 }
             } else if (release != &_extern_release) {
                 // NOTE: Pooled chunk owned by another arena — hand it back through its channel.
-                release->_channel.push(std::move(chunk));
+                if (not release->_channel.push(std::move(chunk)))
+                    std::terminate();
             } else {
                 // NOTE: Local pooled chunk — back to the pool free list (never to the system).
                 _small_pool.deallocate(chunk, size);
                 _occupied -= size;
             }
             maybe_drain(false);
+        }
+
+        /** @brief Deallocates storage returned by @c allocate_as(). */
+        template <typename data_t>
+        void deallocate_as(data_t* mem_ptr, std::size_t count = 1) noexcept {
+            (void)count;
+            deallocate(mem_ptr, 0);
         }
 
         /**
@@ -252,13 +285,15 @@ namespace ace::core::tools {
          * @return @c true when the limit is reached and the fallback is enabled.
          * @throws std::bad_alloc when the limit is reached and the fallback is disabled.
          */
-        [[nodiscard]] bool breach_required() {
+        [[nodiscard]] bool breach_required(std::size_t requested) {
+            const auto max = cfg::g_config._max_allocation_size;
+            if (max == 0) return false;
             const auto limit = arena_limit();
-            if (limit == 0 or _occupied < limit) return false;
+            if (requested <= limit and _occupied <= limit - requested) return false;
             if (cfg::g_config._breach_memory_limit) {
                 if (not _breach_notified) {
                     _breach_notified = true;
-                    std::cerr << "ace: frame allocator arena limit reached (" << limit
+                    std::cerr << "ace: arena limit reached (" << limit
                               << " bytes); falling back to malloc" << std::endl;
                 }
                 return true;
@@ -271,7 +306,7 @@ namespace ace::core::tools {
          *        and fills its header.
          */
         [[nodiscard]] chunk_header* obtain_chunk(std::size_t total) {
-            const auto transient = (total > kMaxSize) or breach_required();
+            const auto transient = (total > kMaxSize) or breach_required(total);
             void* mem = nullptr;
             if (transient) {
                 mem = std::malloc(total);
@@ -330,13 +365,13 @@ namespace ace::core::tools {
         }
 
         /// @brief PMR resource backing the pool: allocates from the system, and
-        ///        actually deallocates (unlike iovec_alloc's controller) so that
-        ///        the arena destructor returns all pool blocks to the system.
+        ///        actually deallocates so that the arena destructor returns all
+        ///        pool blocks to the system.
         struct memory_controller : std::pmr::memory_resource {
 
-            frame_allocator* _arena { nullptr };
+            arena* _arena { nullptr };
 
-            explicit memory_controller(frame_allocator* arena)
+            explicit memory_controller(arena* arena)
                 : _arena(arena) {}
 
             void* do_allocate(std::size_t bytes, std::size_t alignment) override {
@@ -362,7 +397,7 @@ namespace ace::core::tools {
 
         /// @brief Destructor: returns foreign-freed chunks to the pool; the pool
         ///        itself releases all its blocks to the system on destruction.
-        ~frame_allocator() {
+        ~arena() {
             drain_channel();
         }
 
@@ -374,4 +409,39 @@ namespace ace::core::tools {
         std::pmr::unsynchronized_pool_resource _small_pool { &_controller }; ///< Small-buffer pool.
     };
 
-} // namespace ace::core::tools
+    /**
+     * @brief Stateless standard-container allocator backed by the current
+     * thread's @c ace::core::arena. Element alignment must not exceed
+     * @c arena::kAlignment.
+     *
+     * @details Allocation uses the calling thread's arena. Deallocation may
+     * happen on another thread because every chunk records its owner and is
+     * routed back through the arena's external-release channel.
+     */
+    template <typename data_t>
+    struct arena_allocator {
+        using value_type = data_t;
+        using is_always_equal = std::true_type;
+        using propagate_on_container_move_assignment = std::true_type;
+        using propagate_on_container_swap = std::true_type;
+
+        arena_allocator() noexcept = default;
+
+        template <typename other_t>
+        arena_allocator(const arena_allocator<other_t>&) noexcept {}
+
+        [[nodiscard]] data_t* allocate(std::size_t count) {
+            return arena::get_instance().template allocate_as<data_t>(count);
+        }
+
+        void deallocate(data_t* ptr, std::size_t count) noexcept {
+            arena::get_instance().template deallocate_as<data_t>(ptr, count);
+        }
+
+        template <typename other_t>
+        [[nodiscard]] bool operator==(const arena_allocator<other_t>&) const noexcept {
+            return true;
+        }
+    };
+
+} // namespace ace::core

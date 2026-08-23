@@ -31,8 +31,9 @@
 
 
 #include <climits>
-#include <utility>
 #include <format>
+#include <limits>
+#include <utility>
 
 #include "ace/services/kernelic.h"
 
@@ -622,15 +623,16 @@ public:                                                                         
         /**
          * @brief Allocates a new chunk of @p len payload bytes plus a control header.
          * @param len Payload size of the new chunk.
-         * @return New chunk, or @c nullptr on allocation failure.
+         * @return New chunk.
+         * @throws std::bad_alloc on allocation failure.
          */
         iovec* allocate_buf(const size_t len) {
+            if (len > std::numeric_limits<std::size_t>::max() - control_hdr_len)
+                throw std::bad_alloc();
             // NOTE: Allocating and subscribing new buff to chunk set
             const auto buf = services::kernel_controller::iovec_allocate(len + control_hdr_len);
             auto** new_control_hdr = static_cast<iovec**>(buf->iov_base);
             *new_control_hdr = nullptr;
-
-            if (not buf) return nullptr;
 
             buf->iov_len = len;
             _total_len += len;
@@ -638,12 +640,11 @@ public:                                                                         
         }
 
         /**
-         * @brief Returns a chunk to the iovec allocator and adjusts the total length.
+         * @brief Returns a chunk to the arena and adjusts the total length.
          * @param buf Chunk to deallocate.
          */
         void deallocate_buf(iovec* buf) {
             _total_len -= buf->iov_len;
-            buf->iov_len += control_hdr_len;
             services::kernel_controller::iovec_deallocate(buf);
         }
 

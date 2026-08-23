@@ -29,7 +29,7 @@
  *
  * All records are moved into a single fire task scheduled on the cancelled
  * coroutine's runner (or via @c ace::schedule() when no runner is assigned).
- * The task walks the records in reverse order: callables are invoked
+ * The task pops the records in LIFO order: callables are invoked
  * directly, tasks are co_awaited to completion before the next record.
  *
  * ### emergency flag
@@ -212,19 +212,21 @@ namespace ace::futures {
     };
 
     /**
-     * @brief Task that executes backup records in reverse registration order.
+     * @brief Task that executes backup records in LIFO order.
      * @details Callables are invoked directly; tasks are co_awaited to
      * completion before the next record is processed.
      * @param records  Backup records moved out of the cancelled promise.
      */
-    inline ace::task fire_backups_task(std::vector<core::backup_record> records) {
-        for (auto it = records.rbegin(); it != records.rend(); ++it) {
-            if (auto* task_ptr = std::get_if<ace::task>(&it->_payload)) {
+    inline ace::task fire_backups_task(core::backup_stack records) {
+        while (not records.empty()) {
+            auto record = std::move(records.top());
+            records.pop();
+            if (auto* task_ptr = std::get_if<ace::task>(&record._payload)) {
                 // NOTE: Skipping moved-from / already-finished tasks (a task
                 // payload can be registered only once)
                 if (task_ptr->is_exist()) co_await *task_ptr;
             } else {
-                std::get<std::function<void()>>(it->_payload)();
+                std::get<std::function<void()>>(record._payload)();
             }
         }
         co_return;
@@ -255,11 +257,11 @@ requires ace::core::is_rule<promise_rule_t>
 void ace::core::async<returnT, promise_rule_t>::promise_type::register_backup(ace::core::backup_record record) {
     // NOTE: A new registration discards the pending one-shot insure
     if (promise_locals::_insured) {
-        promise_locals::_backups.pop_back();
+        promise_locals::_backups.pop();
         promise_locals::_insured = false;
     }
     promise_locals::_insured_prev = false;
-    promise_locals::_backups.push_back(std::move(record));
+    promise_locals::_backups.push(std::move(record));
 }
 
 

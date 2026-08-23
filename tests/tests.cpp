@@ -1750,6 +1750,17 @@ TEST_F(io_buffer_fixture, buffer_expand_multiple) {
     EXPECT_EQ(32u + 64u + 128u, buf.len());
 }
 
+// Проверяет защиту io::buffer от переполнения payload + control header.
+TEST_F(io_buffer_fixture, buffer_expand_overflow) {
+    ace::io::buffer buf;
+
+    // Почему max size: до обращения к arena размер должен быть отклонён, иначе
+    // wrap создаст маленький chunk с ложным огромным iov_len.
+    EXPECT_THROW(static_cast<void>(buf.expand(std::numeric_limits<std::size_t>::max())),
+        std::bad_alloc);
+    EXPECT_EQ(0u, buf.len());
+}
+
 // Проверяет append(string_view) и as<string>().
 TEST_F(io_buffer_fixture, buffer_append_and_as_string) {
     // Почему проверяем append+as: это основной способ записи
@@ -3360,31 +3371,33 @@ TEST_F(base_fixture, kernelic_overflow_buffer_stress) {
     ::close(fds[1]);
 }
 
-// Проверяет iovec_allocator: аллокация/деаллокация малых и больших буферов.
-TEST_F(base_fixture, iovec_allocator_basic) {
-    // Почему iovec allocator: используется buffer::assemble и read/write
-    // путями. Разные ветки: <=4096 (пул) и >4096 (malloc).
-    auto& alloc = ace::services::kernel_controller::iovec_alloc();
-    ::iovec* small = alloc.allocate(64);
+// Проверяет публичный arena-backed iovec API для малых и больших буферов.
+TEST_F(base_fixture, kernel_iovec_arena_api) {
+    // Почему используем kernel_controller: это публичный API, которым реально
+    // пользуются buffer::assemble и read/write пути.
+    ::iovec* small = ace::services::kernel_controller::iovec_allocate(64);
     ASSERT_NE(nullptr, small);
     EXPECT_EQ(64u, small->iov_len);
     EXPECT_NE(nullptr, small->iov_base);
-    alloc.deallocate(small);
+    ace::services::kernel_controller::iovec_deallocate(small);
 
-    ::iovec* big = alloc.allocate(5000);
+    ::iovec* big = ace::services::kernel_controller::iovec_allocate(5000);
     ASSERT_NE(nullptr, big);
     EXPECT_EQ(5000u, big->iov_len);
-    alloc.deallocate(big);
+    ace::services::kernel_controller::iovec_deallocate(big);
 
-    alloc.deallocate(nullptr); // no-op ветка
+    ace::services::kernel_controller::iovec_deallocate(nullptr); // no-op ветка
 
-    ::iovec* arr = alloc.allocate_as<::iovec>(4);
+    ::iovec* arr = ace::services::kernel_controller::iovec_pool_allocate(4);
     ASSERT_NE(nullptr, arr);
-    alloc.deallocate_as(arr, sizeof(::iovec) * 4);
+    ace::services::kernel_controller::iovec_pool_deallocate(arr, 4);
 
-    // > kMaxSize для allocate_as → nullptr
-    EXPECT_EQ(nullptr, alloc.allocate_as<::iovec>(300));
-    alloc.deallocate_as(nullptr, 0);
+    // Почему 300: массив больше 4096 байт обязан использовать transient путь,
+    // а не возвращать nullptr, как удалённый iovec_allocator.
+    ::iovec* large_arr = ace::services::kernel_controller::iovec_pool_allocate(300);
+    ASSERT_NE(nullptr, large_arr);
+    ace::services::kernel_controller::iovec_pool_deallocate(large_arr, 300);
+    ace::services::kernel_controller::iovec_pool_deallocate(nullptr, 0);
 }
 
 // Проверяет kernel_controller::register_files / unregister_files.
@@ -3777,6 +3790,24 @@ TEST_F(backup_fixture, backup_cancel_fires_lifo) {
     EXPECT_EQ(3, order[0]);
     EXPECT_EQ(2, order[1]);
     EXPECT_EQ(1, order[2]);
+}
+
+// Проверяет LIFO-семантику arena-backed backup stack на количестве записей,
+// заметно превышающем короткий базовый сценарий.
+TEST_F(backup_fixture, backup_stack_many_records_fires_lifo) {
+    // Почему 64 записи: std::list выделяет отдельный arena-backed узел для
+    // каждой записи, поэтому тест одновременно нагружает порядок и storage.
+    constexpr int records = 64;
+    std::vector<int> order;
+    ace::schedule(cancel_many_backups(order, records));
+
+    ace::run();
+    auto res = fetch(_ch);
+    ASSERT_EQ(1u, res.size());
+    EXPECT_EQ(1, res[0]);
+    ASSERT_EQ(static_cast<std::size_t>(records), order.size());
+    for (int i = 0; i < records; ++i)
+        EXPECT_EQ(records - i - 1, order[static_cast<std::size_t>(i)]);
 }
 
 // Проверяет: корутина, дошедшая до co_return, НЕ выполняет backup-коллбеки.
@@ -4210,20 +4241,20 @@ TEST_F(backup_fixture, backup_cancel_via_spawn_handle) {
 }
 
 // ==========================================================================
-// frame_alloc_fixture — coroutine frame allocator tests
+// arena_fixture — shared framework arena tests
 // ==========================================================================
 
 // Проверяет, что небольшая аллокация обслуживается pmr-пулом арены:
 // не-null, выравнивание 16, пул вырос ровно на один системный блок,
 // transient-malloc не задействован, после free память остаётся в пуле.
-TEST_F(frame_alloc_fixture, small_alloc_served_from_pool) {
+TEST_F(arena_fixture, small_alloc_served_from_pool) {
     // Почему на выделенном треде: у свежего треда арена thread_local рождается
     // пустой, поэтому stats детерминированы (нет накопленного состояния).
     // Почему max=0 явно: поведение по умолчанию не должно зависеть от того,
     // что конфиг мог быть изменён предыдущим тестом в этом процессе.
     ace::cfg::g_config._max_allocation_size = 0;
     on_fresh_arena([] {
-        auto& arena = tool::frame_allocator::get_instance();
+        auto& arena = ace::core::arena::get_instance();
         const auto base = arena.stats();
 
         void* p = arena.allocate(100);
@@ -4253,10 +4284,10 @@ TEST_F(frame_alloc_fixture, small_alloc_served_from_pool) {
 
 // Проверяет, что аллокация больше kMaxSize (4096) уходит в transient-malloc:
 // пул не трогается, при деаллокации память сразу возвращается системе.
-TEST_F(frame_alloc_fixture, big_alloc_goes_to_malloc) {
+TEST_F(arena_fixture, big_alloc_goes_to_malloc) {
     ace::cfg::g_config._max_allocation_size = 0;
     on_fresh_arena([] {
-        auto& arena = tool::frame_allocator::get_instance();
+        auto& arena = ace::core::arena::get_instance();
         const auto base = arena.stats();
 
         void* p = arena.allocate(5000);
@@ -4283,10 +4314,10 @@ TEST_F(frame_alloc_fixture, big_alloc_goes_to_malloc) {
 
 // Проверяет переиспользование освобождённого чанка (LIFO free-лист пула):
 // alloc → free → alloc того же размера возвращает тот же адрес без роста пула.
-TEST_F(frame_alloc_fixture, chunk_reuse_after_free) {
+TEST_F(arena_fixture, chunk_reuse_after_free) {
     ace::cfg::g_config._max_allocation_size = 0;
     on_fresh_arena([] {
-        auto& arena = tool::frame_allocator::get_instance();
+        auto& arena = ace::core::arena::get_instance();
 
         void* a = arena.allocate(100);
         arena.deallocate(a, 100);
@@ -4307,10 +4338,10 @@ TEST_F(frame_alloc_fixture, chunk_reuse_after_free) {
 // Проверяет главный принцип: пул НЕ возвращает освобождённую память системе.
 // После alloc+free всех классов система держит ровно 8 блоков (по одному на
 // класс), повторные аллокации обслуживаются без роста.
-TEST_F(frame_alloc_fixture, pool_never_returns_to_system) {
+TEST_F(arena_fixture, pool_never_returns_to_system) {
     ace::cfg::g_config._max_allocation_size = 0;
     on_fresh_arena([] {
-        auto& arena = tool::frame_allocator::get_instance();
+        auto& arena = ace::core::arena::get_instance();
         const auto base = arena.stats();
         const std::size_t sizes[] = { 32, 64, 128, 256, 512, 1024, 2048, 4080 };
 
@@ -4339,26 +4370,26 @@ TEST_F(frame_alloc_fixture, pool_never_returns_to_system) {
 }
 
 // Проверяет, что арена thread_local: у каждого треда свой экземпляр.
-TEST_F(frame_alloc_fixture, arena_is_thread_local) {
-    auto& main_arena = tool::frame_allocator::get_instance();
+TEST_F(arena_fixture, arena_is_thread_local) {
+    auto& main_arena = ace::core::arena::get_instance();
     void* worker_arena_addr = nullptr;
 
     std::thread worker([&worker_arena_addr] {
         // Почему именно get_instance(): синглтон обязан вернуть инстанс,
         // привязанный к вызывающему треду.
-        worker_arena_addr = &tool::frame_allocator::get_instance();
+        worker_arena_addr = &ace::core::arena::get_instance();
     });
     worker.join();
 
     EXPECT_NE(&main_arena, worker_arena_addr);
     // Повторный вызов на главном треде возвращает тот же инстанс.
-    EXPECT_EQ(&main_arena, &tool::frame_allocator::get_instance());
+    EXPECT_EQ(&main_arena, &ace::core::arena::get_instance());
 }
 
 // Проверяет кросс-тредный возврат чанка владельцу: чужой тред освобождает
 // пуловый чанк арены A → чанк попадает в канал A → следующий alloc A
 // дренирует канал и получает тот же адрес обратно.
-TEST_F(frame_alloc_fixture, cross_thread_free_returns_to_owner) {
+TEST_F(arena_fixture, cross_thread_free_returns_to_owner) {
     ace::cfg::g_config._max_allocation_size = 0; // канал дренируется на каждом alloc
     std::promise<void*> chunk_ready;
     std::promise<void> freed;
@@ -4366,7 +4397,7 @@ TEST_F(frame_alloc_fixture, cross_thread_free_returns_to_owner) {
     auto freed_future = freed.get_future();
 
     std::thread owner([&] {
-        auto& arena = tool::frame_allocator::get_instance();
+        auto& arena = ace::core::arena::get_instance();
         void* p = arena.allocate(256);
         chunk_ready.set_value(p);
         freed_future.wait(); // ждём, пока чужой тред освободит p
@@ -4380,7 +4411,7 @@ TEST_F(frame_alloc_fixture, cross_thread_free_returns_to_owner) {
     std::thread foreign([&] {
         void* p = chunk_future.get();
         // Чужой тред освобождает чужой чанк → push в канал арены-владельца.
-        tool::frame_allocator::get_instance().deallocate(p, 256);
+        ace::core::arena::get_instance().deallocate(p, 256);
         freed.set_value();
     });
     owner.join();
@@ -4393,7 +4424,7 @@ TEST_F(frame_alloc_fixture, cross_thread_free_returns_to_owner) {
 // ВАЖНО: счётчик операций инкрементируется только в ветке формулы
 // (ветки «max==0» и «occupied==0» счётчик не двигают), поэтому после setup
 // счётчик равен 7 при девяти фактических операциях.
-TEST_F(frame_alloc_fixture, channel_drain_cadence) {
+TEST_F(arena_fixture, channel_drain_cadence) {
     // L = 65536, occupied = 28672..32768 → N = 2.
     ace::cfg::g_config._max_allocation_size = 65536;
     ace::cfg::g_config._runners_amount = 1;
@@ -4403,7 +4434,7 @@ TEST_F(frame_alloc_fixture, channel_drain_cadence) {
     auto freed_future = freed.get_future();
 
     std::thread owner([&] {
-        auto& arena = tool::frame_allocator::get_instance();
+        auto& arena = ace::core::arena::get_instance();
         const auto size = 4080u; // total = 4096
         std::vector<void*> chunks;
         for (int i = 0; i < 7; ++i) chunks.push_back(arena.allocate(size));
@@ -4432,7 +4463,7 @@ TEST_F(frame_alloc_fixture, channel_drain_cadence) {
     });
     std::thread foreign([&] {
         void* z = chunk_future.get();
-        tool::frame_allocator::get_instance().deallocate(z, 4080);
+        ace::core::arena::get_instance().deallocate(z, 4080);
         freed.set_value();
     });
     owner.join();
@@ -4440,7 +4471,7 @@ TEST_F(frame_alloc_fixture, channel_drain_cadence) {
 }
 
 // Проверяет режим max=0: канал дренируется на КАЖДОЙ аллокации.
-TEST_F(frame_alloc_fixture, limit_zero_drains_every_alloc) {
+TEST_F(arena_fixture, limit_zero_drains_every_alloc) {
     ace::cfg::g_config._max_allocation_size = 0;
     std::promise<void*> chunk_ready;
     std::promise<void> freed;
@@ -4448,7 +4479,7 @@ TEST_F(frame_alloc_fixture, limit_zero_drains_every_alloc) {
     auto freed_future = freed.get_future();
 
     std::thread owner([&] {
-        auto& arena = tool::frame_allocator::get_instance();
+        auto& arena = ace::core::arena::get_instance();
         const auto size = 256u;
 
         void* z = arena.allocate(size); // op1: drain (канал пуст)
@@ -4462,7 +4493,7 @@ TEST_F(frame_alloc_fixture, limit_zero_drains_every_alloc) {
     });
     std::thread foreign([&] {
         void* z = chunk_future.get();
-        tool::frame_allocator::get_instance().deallocate(z, 256);
+        ace::core::arena::get_instance().deallocate(z, 256);
         freed.set_value();
     });
     owner.join();
@@ -4472,7 +4503,7 @@ TEST_F(frame_alloc_fixture, limit_zero_drains_every_alloc) {
 // Проверяет режим occupied==0 при заданном лимите: на пустой арене канал
 // дренируется на каждой аллокации (деление на ноль исключено), после первой
 // аллокации в работу вступает формула утилизации.
-TEST_F(frame_alloc_fixture, occupied_zero_drains_every_alloc) {
+TEST_F(arena_fixture, occupied_zero_drains_every_alloc) {
     ace::cfg::g_config._max_allocation_size = 65536;
     std::promise<void*> chunk_ready;
     std::promise<void> freed;
@@ -4480,7 +4511,7 @@ TEST_F(frame_alloc_fixture, occupied_zero_drains_every_alloc) {
     auto freed_future = freed.get_future();
 
     std::thread owner([&] {
-        auto& arena = tool::frame_allocator::get_instance();
+        auto& arena = ace::core::arena::get_instance();
         const auto size = 256u;
 
         // op1: occupied==0 → drain на аллокации (канал пуст, но drain сработал).
@@ -4502,7 +4533,7 @@ TEST_F(frame_alloc_fixture, occupied_zero_drains_every_alloc) {
     });
     std::thread foreign([&] {
         void* z = chunk_future.get();
-        tool::frame_allocator::get_instance().deallocate(z, 256);
+        ace::core::arena::get_instance().deallocate(z, 256);
         freed.set_value();
     });
     owner.join();
@@ -4512,15 +4543,15 @@ TEST_F(frame_alloc_fixture, occupied_zero_drains_every_alloc) {
 // Проверяет поведение при достижении лимита арены (max/runners): по умолчанию
 // fallback на transient-malloc с освобождением сразу в систему; при
 // breach_memory_limit=false — std::bad_alloc.
-TEST_F(frame_alloc_fixture, limit_breach_fallback_malloc) {
-    const auto base_chunks = tool::frame_allocator::live_system_chunks.load();
+TEST_F(arena_fixture, limit_breach_fallback_malloc) {
+    const auto base_chunks = ace::core::arena::live_system_chunks.load();
 
     // --- Часть 1: breach_memory_limit=true → fallback на malloc ---
     ace::cfg::g_config._max_allocation_size = 4096; // лимит арены = 4096/1
     ace::cfg::g_config._runners_amount = 1;
     ace::cfg::g_config._breach_memory_limit = true;
     on_fresh_arena([] {
-        auto& arena = tool::frame_allocator::get_instance();
+        auto& arena = ace::core::arena::get_instance();
         const auto size = 4080u; // total = 4096
 
         void* c1 = arena.allocate(size); // occupied = 4096 = лимит
@@ -4543,31 +4574,43 @@ TEST_F(frame_alloc_fixture, limit_breach_fallback_malloc) {
     });
 
     // Почему проверяем после join: деструктор арены обязан вернуть системе всё.
-    EXPECT_EQ(base_chunks, tool::frame_allocator::live_system_chunks.load());
+    EXPECT_EQ(base_chunks, ace::core::arena::live_system_chunks.load());
 
     // --- Часть 2: breach_memory_limit=false → std::bad_alloc ---
     ace::cfg::g_config._breach_memory_limit = false;
     on_fresh_arena([] {
-        auto& arena = tool::frame_allocator::get_instance();
+        auto& arena = ace::core::arena::get_instance();
         const auto size = 4080u;
 
         void* c1 = arena.allocate(size);
         EXPECT_THROW(static_cast<void>(arena.allocate(size)), std::bad_alloc);
         arena.deallocate(c1, size);
     });
+
+    // --- Часть 3: лимит проверяет сумму occupied + requested ---
+    ace::cfg::g_config._max_allocation_size = 4096;
+    on_fresh_arena([] {
+        auto& arena = ace::core::arena::get_instance();
+        void* c1 = arena.allocate(3000);
+
+        // Почему второй блок 2000: occupied ещё меньше лимита, но сумма уже
+        // превышает его; старый check пропускал такую аллокацию.
+        EXPECT_THROW(static_cast<void>(arena.allocate(2000)), std::bad_alloc);
+        arena.deallocate(c1, 3000);
+    });
 }
 
 // Проверяет, что деструктор арены (выход треда) возвращает системе всё:
 // пуловые блоки, чанки из канала и transient-аллокации.
-TEST_F(frame_alloc_fixture, destructor_returns_everything) {
-    const auto base_chunks = tool::frame_allocator::live_system_chunks.load();
+TEST_F(arena_fixture, destructor_returns_everything) {
+    const auto base_chunks = ace::core::arena::live_system_chunks.load();
     std::promise<void*> chunk_ready;
     std::promise<void> freed;
     auto chunk_future = chunk_ready.get_future();
     auto freed_future = freed.get_future();
 
     std::thread owner([&] {
-        auto& arena = tool::frame_allocator::get_instance();
+        auto& arena = ace::core::arena::get_instance();
         const auto size = 4080u;
 
         std::vector<void*> chunks;
@@ -4586,23 +4629,23 @@ TEST_F(frame_alloc_fixture, destructor_returns_everything) {
     });
     std::thread foreign([&] {
         void* x = chunk_future.get();
-        tool::frame_allocator::get_instance().deallocate(x, 4080);
+        ace::core::arena::get_instance().deallocate(x, 4080);
         freed.set_value();
     });
     owner.join();
     foreign.join();
 
-    EXPECT_EQ(base_chunks, tool::frame_allocator::live_system_chunks.load());
+    EXPECT_EQ(base_chunks, ace::core::arena::live_system_chunks.load());
 }
 
 // Проверяет интеграцию promise_traits: кадр корутины аллоцируется через
-// frame_allocator (in_use растёт при создании и падает после destroy),
+// arena (in_use растёт при создании и падает после destroy),
 // выравнивание promise сохранено.
-TEST_F(frame_alloc_fixture, promise_traits_uses_allocator) {
+TEST_F(arena_fixture, promise_traits_uses_arena) {
     // Почему на главном треде: интеграция проверяется на том же треде, где
     // создаются и уничтожаются корутины теста; delta-статистика защищает от
     // накопленного состояния главной арены.
-    auto& arena = tool::frame_allocator::get_instance();
+    auto& arena = ace::core::arena::get_instance();
     const auto base = arena.stats();
 
     void* frame_addr = nullptr;
@@ -4620,17 +4663,16 @@ TEST_F(frame_alloc_fixture, promise_traits_uses_allocator) {
         EXPECT_EQ(0u, reinterpret_cast<std::uintptr_t>(frame_addr) % 16);
     }
     const auto after = arena.stats();
-    // ~async() разрушил фрейм → память вернулась в пул (in_use обнулён),
-    // но блок пула система не получила.
+    // ~async() разрушил только свой фрейм: общий accounting вернулся к
+    // baseline, который может содержать живые I/O/framework allocations.
     EXPECT_EQ(base.in_use_bytes, after.in_use_bytes);
-    EXPECT_EQ(0u, after.in_use_bytes);
 }
 
 // Проверяет точный учёт transient-чанка, освобождённого на чужом треде:
 // foreign-free атомарно сообщает владельцу размер и уменьшает debug malloc_count,
 // а следующий drain забирает released_bytes через exchange(0) и исправляет
 // локальный _occupied владельца.
-TEST_F(frame_alloc_fixture, foreign_transient_free_updates_owner_accounting) {
+TEST_F(arena_fixture, foreign_transient_free_updates_owner_accounting) {
     ace::cfg::g_config._max_allocation_size = 0; // следующий alloc гарантированно делает drain
     std::promise<void*> chunk_ready;
     std::promise<void> freed;
@@ -4638,7 +4680,7 @@ TEST_F(frame_alloc_fixture, foreign_transient_free_updates_owner_accounting) {
     auto freed_future = freed.get_future();
 
     std::thread owner([&] {
-        auto& arena = tool::frame_allocator::get_instance();
+        auto& arena = ace::core::arena::get_instance();
         void* transient = arena.allocate(5000); // total = 5024
         auto allocated = arena.stats();
         EXPECT_EQ(5024u, allocated.in_use_bytes);
@@ -4661,7 +4703,113 @@ TEST_F(frame_alloc_fixture, foreign_transient_free_updates_owner_accounting) {
     });
     std::thread foreign([&] {
         void* transient = chunk_future.get();
-        tool::frame_allocator::get_instance().deallocate(transient, 5000);
+        ace::core::arena::get_instance().deallocate(transient, 5000);
+        freed.set_value();
+    });
+    owner.join();
+    foreign.join();
+}
+
+// Проверяет typed API arena для пулового и transient массивов.
+TEST_F(arena_fixture, typed_allocation_uses_arena) {
+    ace::cfg::g_config._max_allocation_size = 0;
+    on_fresh_arena([] {
+        auto& arena = ace::core::arena::get_instance();
+        const auto base = arena.stats();
+
+        // Почему два размера: маленький массив обязан попасть в пул, большой
+        // должен пройти тот же API через transient allocation.
+        auto* small = arena.allocate_as<std::uint64_t>(8);
+        auto* large = arena.allocate_as<std::byte>(5000);
+        ASSERT_NE(nullptr, small);
+        ASSERT_NE(nullptr, large);
+        EXPECT_EQ(0u, reinterpret_cast<std::uintptr_t>(small) % alignof(std::uint64_t));
+        EXPECT_GT(arena.stats().in_use_bytes, base.in_use_bytes);
+        EXPECT_EQ(1u, arena.stats().malloc_count);
+
+        arena.deallocate_as(small, 8);
+        arena.deallocate_as(large, 5000);
+        EXPECT_EQ(base.in_use_bytes, arena.stats().in_use_bytes);
+        EXPECT_EQ(0u, arena.stats().malloc_count);
+    });
+}
+
+// Проверяет защиту typed API от переполнения count * sizeof(T).
+TEST_F(arena_fixture, typed_allocation_overflow) {
+    on_fresh_arena([] {
+        auto& arena = ace::core::arena::get_instance();
+        const auto count = std::numeric_limits<std::size_t>::max() / sizeof(std::uint64_t) + 1;
+
+        // Почему ожидаем bad_array_new_length: переполнение должно быть
+        // обнаружено до изменения arena accounting или обращения к PMR.
+        EXPECT_THROW(static_cast<void>(arena.allocate_as<std::uint64_t>(count)),
+            std::bad_array_new_length);
+        EXPECT_EQ(0u, arena.stats().in_use_bytes);
+    });
+}
+
+// Проверяет стандартный arena_allocator на реальном node-based контейнере.
+TEST_F(arena_fixture, arena_allocator_list_storage) {
+    ace::cfg::g_config._max_allocation_size = 0;
+    on_fresh_arena([] {
+        auto& arena = ace::core::arena::get_instance();
+        const auto base = arena.stats();
+        {
+            std::list<int, ace::core::arena_allocator<int>> values;
+            for (int i = 0; i < 32; ++i) values.push_back(i);
+
+            // Почему проверяем данные и accounting: allocator обязан не только
+            // выделять list nodes через arena, но и не нарушать их содержимое.
+            EXPECT_EQ(32u, values.size());
+            EXPECT_EQ(0, values.front());
+            EXPECT_EQ(31, values.back());
+            EXPECT_GT(arena.stats().in_use_bytes, base.in_use_bytes);
+        }
+        EXPECT_EQ(base.in_use_bytes, arena.stats().in_use_bytes);
+    });
+}
+
+// Проверяет, что kernel iovec API использует тот же singleton arena.
+TEST_F(arena_fixture, iovec_uses_shared_arena) {
+    ace::cfg::g_config._max_allocation_size = 0;
+    on_fresh_arena([] {
+        auto& arena = ace::core::arena::get_instance();
+        const auto base = arena.stats();
+
+        auto* data_iov = ace::services::kernel_controller::iovec_allocate(64);
+        auto* array_iov = ace::services::kernel_controller::iovec_pool_allocate(300);
+        // Почему смотрим ту же статистику: это отличает общую arena от
+        // прежнего отдельного thread_local iovec_allocator.
+        EXPECT_GT(arena.stats().in_use_bytes, base.in_use_bytes);
+        EXPECT_EQ(1u, arena.stats().malloc_count);
+
+        ace::services::kernel_controller::iovec_deallocate(data_iov);
+        ace::services::kernel_controller::iovec_pool_deallocate(array_iov, 300);
+        EXPECT_EQ(base.in_use_bytes, arena.stats().in_use_bytes);
+    });
+}
+
+// Проверяет cross-thread возврат iovec storage в arena владельца.
+TEST_F(arena_fixture, cross_thread_iovec_release) {
+    ace::cfg::g_config._max_allocation_size = 0;
+    std::promise<::iovec*> chunk_ready;
+    std::promise<void> freed;
+    auto chunk_future = chunk_ready.get_future();
+    auto freed_future = freed.get_future();
+
+    std::thread owner([&] {
+        auto* first = ace::services::kernel_controller::iovec_allocate(64);
+        chunk_ready.set_value(first);
+        freed_future.wait();
+        auto* reused = ace::services::kernel_controller::iovec_allocate(64);
+
+        // Почему сравниваем адрес: foreign deallocation должна пройти через
+        // owner channel и вернуться в его PMR free list до следующего alloc.
+        EXPECT_EQ(first, reused);
+        ace::services::kernel_controller::iovec_deallocate(reused);
+    });
+    std::thread foreign([&] {
+        ace::services::kernel_controller::iovec_deallocate(chunk_future.get());
         freed.set_value();
     });
     owner.join();

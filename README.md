@@ -917,7 +917,7 @@ Open `docs/doxygen/html/index.html` in a browser.
 | Namespace | Key types / functions |
 |---|---|
 | `ace` | `async<T>` `promise<T>` `task` `cutex` `guard`<br>`schedule()` `spawn()` `post()` `run()` `reload()` `interrupt()` `terminate()` `empty()` `reset_signal()` |
-| `ace::core` | `async<T,R>` `dispatcher` `runner` `control_block` `control_block_handle`<br>`omni_runner` `io_entity` `io_link` `io_query` `io_guard` `any` |
+| `ace::core` | `async<T,R>` `dispatcher` `runner` `control_block` `control_block_handle`<br>`arena` `arena_allocator<T>` `omni_runner` `io_entity` `io_link` `io_query` `io_guard` `any` |
 | `ace::core::traits` | `future_traits` `busy_future_traits` `promise_traits` `promise_return_traits`<br>`runner_router_handle` `control_router_handle` `router_slot` `service_traits` |
 | `ace::core::services` | `clock` (multi_dial time wheel) `kernel_controller` (io_uring service) |
 | `ace::core::tools` | `queue` `q_node` `slab_mempool` `moving_average` `id_allocator` `lifetime` |

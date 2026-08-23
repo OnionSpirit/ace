@@ -15,11 +15,12 @@
 /// Transient chunks are never pooled and never routed through the transfer
 /// channel.
 ///
-/// A pooled chunk deallocated on a foreign thread is handed back to its owning
-/// arena through the owner's @c nukes::dynamic::mpsc_queue; the pointer to that
-/// channel is stored in the chunk header, so the allocator can tell whether the
-/// chunk belongs to the current arena.  The owner drains its channel according
-/// to the utilization formula:
+/// The chunk header stores a pointer to the owner's @c extern_release context.
+/// A pooled chunk deallocated on a foreign thread is handed back through its
+/// @c nukes::dynamic::mpsc_queue.  A transient chunk is freed immediately and
+/// atomically reports its size through @c extern_release::_released_bytes; the
+/// owner subtracts all reported bytes while processing the release context.
+/// The owner drains its channel according to the utilization formula:
 ///     N = max_allocation_size / occupied_bytes
 /// every N-th allocation/deallocation operation drains the channel; with no
 /// application-wide limit configured (0) the channel is drained on every
@@ -31,6 +32,7 @@
 #include <iostream>
 #include <memory_resource>
 #include <new>
+#include <type_traits>
 
 #include <nukes/dynamic/mpsc_queue.h>
 
@@ -38,6 +40,34 @@
 #include "ace/core/tools/macro.h"
 
 namespace ace::core::tools {
+
+    struct extern_release_debug;
+    struct extern_release_release;
+
+    /// @brief Build-specific external release state used by chunk headers.
+    using extern_release = std::conditional_t<not is_debug, extern_release_debug, extern_release_release>;
+
+    /// @brief Per-chunk header: owner release context + size/flags.
+    struct chunk_header {
+        extern_release* _release { nullptr };
+        std::size_t _size { 0 };
+    };
+
+    static_assert(sizeof(chunk_header) == 16);
+
+    /// @brief State accessed by foreign threads when they release arena-owned chunks.
+    struct extern_release_base {
+        nukes::dynamic::mpsc_queue<chunk_header*> _channel;
+        std::atomic<std::size_t> _released_bytes { 0 };
+    };
+
+    /// @brief Debug build release state with exact transient allocation accounting.
+    struct extern_release_debug : extern_release_base {
+        std::atomic<std::size_t> _malloc_count { 0 };
+    };
+
+    /// @brief Release build state without debug-only transient allocation accounting.
+    struct extern_release_release : extern_release_base {};
 
     /**
      * @brief Debug-only observability counters (empty in release builds).
@@ -47,22 +77,33 @@ namespace ace::core::tools {
      * inverted naming of the flag in @c macro.h (is_debug == true means RELEASE).
      */
     template <bool Enabled>
-    struct frame_alloc_stats {};
+    struct frame_alloc_stats {
+        void note_pool_allocate(std::size_t) noexcept {}
+        void note_pool_deallocate(std::size_t) noexcept {}
+        void note_drain() noexcept {}
+        [[nodiscard]] std::size_t pool_held() const noexcept { return 0; }
+        [[nodiscard]] std::size_t drains() const noexcept { return 0; }
+    };
 
     /// @brief Stats specialization: real counters in debug builds.
     template <>
     struct frame_alloc_stats<true> {
         std::size_t pool_held_bytes = 0;  ///< System bytes currently retained by the pmr pool.
-        std::size_t malloc_count    = 0;  ///< Outstanding transient malloc chunks.
         std::size_t drain_count     = 0;  ///< Channel drains performed.
+
+        void note_pool_allocate(std::size_t bytes) noexcept { pool_held_bytes += bytes; }
+        void note_pool_deallocate(std::size_t bytes) noexcept { pool_held_bytes -= bytes; }
+        void note_drain() noexcept { ++drain_count; }
+        [[nodiscard]] std::size_t pool_held() const noexcept { return pool_held_bytes; }
+        [[nodiscard]] std::size_t drains() const noexcept { return drain_count; }
     };
 
     /**
      * @brief Thread-local arena for coroutine frame allocations.
      *
      * @details All arena state is touched from the owning thread only, except
-     * the incoming channel, which receives chunks pushed by foreign threads
-     * (lock-free @c nukes::dynamic::mpsc_queue).
+     * @c extern_release, whose queue and counters are accessed atomically by
+     * foreign threads.
      */
     struct frame_allocator : frame_alloc_stats<not is_debug> {
 
@@ -70,16 +111,10 @@ namespace ace::core::tools {
         static constexpr std::size_t kMaxSize = 4096;
 
         /// @brief Size of the per-chunk header stored before the user payload.
-        static constexpr std::size_t kHeaderSize = 16;
+        static constexpr std::size_t kHeaderSize = sizeof(chunk_header);
 
         /// @brief Bit 63 of the header size field marks a transient (malloc-served) chunk.
         static constexpr std::size_t kTransientFlag = std::size_t{1} << 63;
-
-        /// @brief Per-chunk header: transfer channel of the owning arena + size/flags.
-        struct chunk_header {
-            nukes::dynamic::mpsc_queue<chunk_header*>* _channel { nullptr };
-            std::size_t _size { 0 };
-        };
 
         /// @brief Returns the thread-local arena singleton.
         static frame_allocator& get_instance() {
@@ -111,21 +146,28 @@ namespace ace::core::tools {
             if (not mem_ptr) return;
             auto* chunk = static_cast<chunk_header*>(mem_ptr) - 1;
             const auto flags = chunk->_size;
+            const auto size = chunk_size_of(flags);
+            auto* release = chunk->_release;
             if (is_transient(flags)) {
                 // NOTE: Transient chunks never travel through the channel — free immediately.
-                _occupied -= chunk_size_of(flags);
+                // Foreign frees report their bytes atomically; the owner subtracts
+                // them from _occupied on its next channel drain.
+                if (release == &_extern_release)
+                    _occupied -= size;
+                else
+                    release->_released_bytes.fetch_add(size, std::memory_order_relaxed);
+                note_malloc_deallocate(*release);
                 std::free(chunk);
                 if constexpr (not is_debug) {
-                    --malloc_count;
                     live_system_chunks.fetch_sub(1, std::memory_order_relaxed);
                 }
-            } else if (chunk->_channel != &_channel) {
+            } else if (release != &_extern_release) {
                 // NOTE: Pooled chunk owned by another arena — hand it back through its channel.
-                chunk->_channel->push(std::move(chunk));
+                release->_channel.push(std::move(chunk));
             } else {
                 // NOTE: Local pooled chunk — back to the pool free list (never to the system).
-                _small_pool.deallocate(chunk, chunk_size_of(flags));
-                _occupied -= chunk_size_of(flags);
+                _small_pool.deallocate(chunk, size);
+                _occupied -= size;
             }
             maybe_drain(false);
         }
@@ -143,21 +185,15 @@ namespace ace::core::tools {
         };
 
         /**
-         * @brief Current arena statistics.  Always zeros on release builds.
+         * @brief Current arena statistics. Debug-only fields are zero on release builds.
          */
         [[nodiscard]] stats_view stats() const noexcept {
-            std::size_t pool_held = 0, mallocs = 0, drains = 0;
-            if constexpr (not is_debug) {
-                pool_held = pool_held_bytes;
-                mallocs = malloc_count;
-                drains = drain_count;
-            }
             return stats_view {
                 _occupied,
-                pool_held,
-                mallocs,
+                pool_held(),
+                malloc_count_of(_extern_release),
                 _op_counter,
-                drains,
+                drains(),
                 live_system_chunks.load(std::memory_order_relaxed),
             };
         }
@@ -166,6 +202,26 @@ namespace ace::core::tools {
         static inline std::atomic<std::size_t> live_system_chunks { 0 };
 
     private:
+
+        template <typename release_t>
+        static void note_malloc_allocate(release_t& release) noexcept {
+            if constexpr (std::is_same_v<std::remove_cvref_t<release_t>, extern_release_debug>)
+                release._malloc_count.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        template <typename release_t>
+        static void note_malloc_deallocate(release_t& release) noexcept {
+            if constexpr (std::is_same_v<std::remove_cvref_t<release_t>, extern_release_debug>)
+                release._malloc_count.fetch_sub(1, std::memory_order_relaxed);
+        }
+
+        template <typename release_t>
+        [[nodiscard]] static std::size_t malloc_count_of(const release_t& release) noexcept {
+            if constexpr (std::is_same_v<std::remove_cvref_t<release_t>, extern_release_debug>)
+                return release._malloc_count.load(std::memory_order_relaxed);
+            else
+                return 0;
+        }
 
         /// @brief Rounds @p value up to a multiple of @p alignment (power of two).
         static std::size_t align_up(std::size_t value, std::size_t alignment) noexcept {
@@ -220,8 +276,8 @@ namespace ace::core::tools {
             if (transient) {
                 mem = std::malloc(total);
                 if (not mem) throw std::bad_alloc();
+                note_malloc_allocate(_extern_release);
                 if constexpr (not is_debug) {
-                    ++malloc_count;
                     live_system_chunks.fetch_add(1, std::memory_order_relaxed);
                 }
             } else {
@@ -229,7 +285,7 @@ namespace ace::core::tools {
                 if (mem == nullptr) throw std::bad_alloc();
             }
             auto* chunk = static_cast<chunk_header*>(mem);
-            chunk->_channel = &_channel;
+            chunk->_release = &_extern_release;
             chunk->_size = transient ? (total | kTransientFlag) : total;
             return chunk;
         }
@@ -256,16 +312,17 @@ namespace ace::core::tools {
 
         /**
          * @brief Drains the incoming channel, returning every chunk to the pool.
-         * @details Chunks in the channel are owned by this arena (the header
-         * channel pointer equals @c &_channel by construction).  Uses the plain
-         * per-node @c pop() loop — @c pop_batch() iterates from the queue dummy
-         * node and yields garbage on the first dereference, so it is unusable
-         * for batch consumption.
+         * @details First accounts for transient chunks freed by foreign threads,
+         * then returns pooled chunks from the external release channel. Uses the
+         * plain per-node @c pop() loop — @c pop_batch() iterates from the queue
+         * dummy node and yields garbage on the first dereference, so it is
+         * unusable for batch consumption.
          */
         void drain_channel() {
-            if constexpr (not is_debug) ++drain_count;
+            note_drain();
+            _occupied -= _extern_release._released_bytes.exchange(0, std::memory_order_relaxed);
             chunk_header* chunk = nullptr;
-            while (_channel.pop(chunk)) {
+            while (_extern_release._channel.pop(chunk)) {
                 const auto size = chunk_size_of(chunk->_size);
                 _occupied -= size;
                 _small_pool.deallocate(chunk, size);
@@ -284,7 +341,7 @@ namespace ace::core::tools {
 
             void* do_allocate(std::size_t bytes, std::size_t alignment) override {
                 if constexpr (not is_debug) {
-                    _arena->pool_held_bytes += bytes;
+                    _arena->note_pool_allocate(bytes);
                     live_system_chunks.fetch_add(1, std::memory_order_relaxed);
                 }
                 return std::pmr::new_delete_resource()->allocate(bytes, alignment);
@@ -292,7 +349,7 @@ namespace ace::core::tools {
 
             void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override {
                 if constexpr (not is_debug) {
-                    _arena->pool_held_bytes -= bytes;
+                    _arena->note_pool_deallocate(bytes);
                     live_system_chunks.fetch_sub(1, std::memory_order_relaxed);
                 }
                 std::pmr::new_delete_resource()->deallocate(p, bytes, alignment);
@@ -309,7 +366,7 @@ namespace ace::core::tools {
             drain_channel();
         }
 
-        nukes::dynamic::mpsc_queue<chunk_header*> _channel;             ///< Incoming transfer channel.
+        extern_release _extern_release;                                 ///< Cross-thread release state.
         std::size_t _occupied { 0 };                                    ///< Bytes in use (pool + transient).
         std::size_t _op_counter { 0 };                                  ///< Operation counter.
         bool _breach_notified { false };                                ///< One-time breach notice.

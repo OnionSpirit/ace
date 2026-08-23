@@ -4287,7 +4287,6 @@ TEST_F(frame_alloc_fixture, chunk_reuse_after_free) {
     ace::cfg::g_config._max_allocation_size = 0;
     on_fresh_arena([] {
         auto& arena = tool::frame_allocator::get_instance();
-        const auto base = arena.stats();
 
         void* a = arena.allocate(100);
         arena.deallocate(a, 100);
@@ -4625,4 +4624,46 @@ TEST_F(frame_alloc_fixture, promise_traits_uses_allocator) {
     // но блок пула система не получила.
     EXPECT_EQ(base.in_use_bytes, after.in_use_bytes);
     EXPECT_EQ(0u, after.in_use_bytes);
+}
+
+// Проверяет точный учёт transient-чанка, освобождённого на чужом треде:
+// foreign-free атомарно сообщает владельцу размер и уменьшает debug malloc_count,
+// а следующий drain забирает released_bytes через exchange(0) и исправляет
+// локальный _occupied владельца.
+TEST_F(frame_alloc_fixture, foreign_transient_free_updates_owner_accounting) {
+    ace::cfg::g_config._max_allocation_size = 0; // следующий alloc гарантированно делает drain
+    std::promise<void*> chunk_ready;
+    std::promise<void> freed;
+    auto chunk_future = chunk_ready.get_future();
+    auto freed_future = freed.get_future();
+
+    std::thread owner([&] {
+        auto& arena = tool::frame_allocator::get_instance();
+        void* transient = arena.allocate(5000); // total = 5024
+        auto allocated = arena.stats();
+        EXPECT_EQ(5024u, allocated.in_use_bytes);
+        EXPECT_EQ(1u, allocated.malloc_count);
+
+        chunk_ready.set_value(transient);
+        freed_future.wait(); // чужой тред уже сделал free + fetch_add/fetch_sub
+
+        auto pending = arena.stats();
+        // malloc_count исправлен foreign-тредом сразу; _occupied исправляется
+        // только владельцем во время обработки extern_release.
+        EXPECT_EQ(0u, pending.malloc_count);
+        EXPECT_EQ(5024u, pending.in_use_bytes);
+
+        void* local = arena.allocate(100); // drain: 5024 - exchange(5024), затем +128
+        auto drained = arena.stats();
+        EXPECT_EQ(128u, drained.in_use_bytes);
+        EXPECT_EQ(0u, drained.malloc_count);
+        arena.deallocate(local, 100);
+    });
+    std::thread foreign([&] {
+        void* transient = chunk_future.get();
+        tool::frame_allocator::get_instance().deallocate(transient, 5000);
+        freed.set_value();
+    });
+    owner.join();
+    foreign.join();
 }

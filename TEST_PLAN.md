@@ -131,7 +131,7 @@ echo "Report: coverage_report/index.html"
 | `fs.h` | 93.9% | |
 | `console.h` | 100% | |
 | `iovec_alloc.h` | 93.5% | |
-| `frame_alloc.h` | новый (покрыт FA1-FA12) | |
+| `frame_alloc.h` | новый (покрыт FA1-FA13) | |
 
 **Не покрыто (остаточные пробелы):** multishot CQE-пути kernelic (accept-multishot не
 используется в тестах), error-пути compose (несовместимые типы — compile-time),
@@ -769,9 +769,12 @@ co_await/co_yield операцию (снимается при её успешн�
 Аллокатор стек-фреймов корутин (thread-local арена на `std::pmr::unsynchronized_pool_resource`,
 по аналогии с `iovec_alloc.h`): чанки ≤ 4096 обслуживаются пулом (освобождённые остаются в
 пуле, системе возвращаются только при деструкции арены), большие — transient-malloc'ом
-(возвращаются системе сразу, через канал не идут). Чанки, освобождённые на чужом треде,
-возвращаются владельцу через `nukes::dynamic::mpsc_queue` (указатель на канал в заголовке
-чанка). Дренаж канала — по формуле утилизации `N = max_allocation_size / occupied` каждую
+(возвращаются системе сразу, через канал не идут). Заголовок чанка хранит указатель на
+`extern_release`: pooled-чанки возвращаются владельцу через его
+`nukes::dynamic::mpsc_queue`, а foreign transient-free атомарно добавляет размер в
+`released_bytes`. Владелец при обработке `extern_release` забирает байты через
+`exchange(0)` и корректирует локальный `_occupied`. Дренаж канала — по формуле
+утилизации `N = max_allocation_size / occupied` каждую
 N-ю операцию; при лимите 0 — на каждой аллокации. Лимит арены = `max_allocation_size /
 runners_amount`; при достижении — fallback на malloc (+notify в stderr) либо `bad_alloc`
 (параметр `breach_memory_limit`).
@@ -790,6 +793,7 @@ runners_amount`; при достижении — fallback на malloc (+notify �
 | FA10 | `limit_breach_fallback_malloc` | лимит арены достигнут → transient fallback; при `breach_memory_limit=false` → `bad_alloc` | ✅ |
 | FA11 | `destructor_returns_everything` | деструктор арены (выход треда) вернул системе пул, канал и transient | ✅ |
 | FA12 | `promise_traits_uses_allocator` | кадр корутины аллоцируется через frame_allocator (in_use растёт/падает), выравнивание promise | ✅ |
+| FA13 | `foreign_transient_free_updates_owner_accounting` | foreign transient-free: атомарный malloc_count исправляется сразу, released_bytes через exchange(0) корректирует `_occupied` владельца на drain | ✅ |
 
 > 📝 Замечания по реализации:
 > - `pop_batch()` из nukes оказался нерабочим для вычитывания (итератор стартует с
@@ -801,6 +805,8 @@ runners_amount`; при достижении — fallback на malloc (+notify �
 > - `live_system_chunks`/`pool_held_bytes` считают и служебные upstream-аллокации пула
 >   libstdc++ (528B при конструировании, 192B на класс) — тесты не контрактят их точные
 >   значения, только относительные дельты.
+> - `extern_release` выбирается через `std::conditional_t`: debug-вариант содержит
+>   атомарный `malloc_count`, release-вариант — только канал и `released_bytes`.
 
 ---
 
@@ -904,10 +910,10 @@ runners_amount`; при достижении — fallback на malloc (+notify �
 | `cutex_extra_fixture` | `base_fixture` | ✅ | —→5 (✅ 5) |
 | `get_runner_fixture` | `base_fixture` | ✅ | —→1 (✅ 1) |
 | `backup_fixture` | `base_fixture` | ✅ **добавлен** (backup/insure/emergency) | —→19 (✅ 19) |
-| `frame_alloc_fixture` | `::testing::Test` | ✅ **добавлен** (frame_alloc) | —→12 (✅ 12) |
+| `frame_alloc_fixture` | `::testing::Test` | ✅ **добавлен** (frame_alloc) | —→13 (✅ 13) |
 
-**Итого:** 34 fixture-класса, **295 тестов** (283 существующих + 12 новых frame_alloc;
-в meson-режиме 295 зарегистрированных прогонов, все активные).
+**Итого:** 34 fixture-класса, **296 тестов** (283 существующих + 13 новых frame_alloc;
+в meson-режиме 296 зарегистрированных прогонов, все активные).
 
 > Примечание: `timer_parallel_fixture` и `service_fixture`/`io_query_fixture`/
 > `kernelic_fixture`/`clock_fixture`/`entry_fixture` из ранней версии плана не
@@ -1011,7 +1017,7 @@ runners_amount`; при достижении — fallback на malloc (+notify �
 | 3401–3470 | `base_fixture` (kernelic: nop, pipe r/w, close, iovec, register_files, overflow) | 6 |
 | 3471–3650 | `base_fixture` (channel bounded/pending/spsc/mpmc, get_current_pool, router, reattach×3, udp, tcp) | 14 |
 | 3749–4215 | `backup_fixture` | 19 |
-| 4219–4565 | `frame_alloc_fixture` | 12 |
+| 4219–4670 | `frame_alloc_fixture` | 13 |
 
 > ⚠️ Номера строк приблизительные и сдвигаются при правках. Источник истины —
 > `grep -n '^TEST' tests/tests.cpp`.

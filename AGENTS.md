@@ -1087,15 +1087,16 @@ Thread-local арена для стек-фреймов корутин (испо�
 
 | Метод | Линия | Описание |
 |-------|-------|----------|
-| `get_instance()` | 86 | `static thread_local` синглтон арены (одна на тред) |
-| `allocate(size)` | 97 | Чанк ≤ 4096 → `std::pmr::unsynchronized_pool_resource`; больше → transient `malloc` |
-| `deallocate(ptr, size)` | 110 | Transient → `free` сразу (не в канал!); чужой чанк → `push` в канал владельца; свой → в пул |
-| `stats()` | 148 | Debug-only наблюдаемость: `in_use_bytes`, `pool_held_bytes`, `malloc_count`, `op_counter`, `drain_count`, `live_system_chunks` (глобальный атомарный) |
+| `get_instance()` | 108 | `static thread_local` синглтон арены (одна на тред) |
+| `allocate(size)` | 120 | Чанк ≤ 4096 → `std::pmr::unsynchronized_pool_resource`; больше → transient `malloc` |
+| `deallocate(ptr, size)` | 133 | Transient → `free` сразу + atomic release владельцу; чужой pooled-чанк → `push` в канал владельца; свой → в пул |
+| `stats()` | 179 | Debug-only наблюдаемость: `in_use_bytes`, `pool_held_bytes`, `malloc_count`, `op_counter`, `drain_count`, `live_system_chunks` (глобальный атомарный) |
 
 **Устройство:**
-- Чанк: `[chunk_header(16B) | payload]` — заголовок = указатель на канал владельца + размер (бит 63 = transient-флаг).
+- Чанк: `[chunk_header(16B) | payload]` — заголовок = указатель на `extern_release` владельца + размер (бит 63 = transient-флаг).
 - Пул (`unsynchronized_pool_resource` + собственный `memory_resource` по аналогии с `iovec_alloc.h`): освобождённые чанки остаются в пуле, системе возвращаются **только при деструкции арены** (выход треда). `do_deallocate` всегда реально освобождает (в отличие от iovec_alloc) — контракт деструктора.
-- Кросс-тредный возврат: чужой тред кладёт чанк в `nukes::dynamic::mpsc_queue` владельца (указатель на канал в заголовке). Дренаж канала — по формуле утилизации: `N = max_allocation_size / occupied`, каждую N-ю операцию (alloc/dealloc); при `max==0` или `occupied==0` — на каждой аллокации. Канал дренируется обычным `pop()` в цикле (`pop_batch()` из nukes нерабочий — итератор стартует с dummy-ноды).
+- `extern_release` выбирается через `std::conditional_t`: обе версии содержат канал и атомарный `released_bytes`, debug-версия дополнительно содержит атомарный `malloc_count`, release-версия — без debug-счётчика.
+- Кросс-тредный возврат: чужой pooled-чанк кладётся в `nukes::dynamic::mpsc_queue` владельца; foreign transient-free освобождает память сразу и делает `released_bytes.fetch_add(size)`. Владелец при обработке `extern_release` забирает байты через `exchange(0)` и вычитает их из локального `_occupied`. Дренаж — по формуле утилизации: `N = max_allocation_size / occupied`, каждую N-ю операцию (alloc/dealloc); при `max==0` или `occupied==0` — на каждой аллокации. Канал вычитывается обычным `pop()` в цикле (`pop_batch()` из nukes нерабочий — итератор стартует с dummy-ноды).
 - Лимит арены = `g_config._max_allocation_size / g_config._runners_amount` (пересчёт на каждой операции); при достижении: fallback на transient-malloc с notify в `std::cerr` (один раз на арену) либо `throw std::bad_alloc` — по `g_config._breach_memory_limit`.
 - Счётчик операций инкрементируется только в ветке формулы (ветки «max==0»/«occupied==0» его не двигают).
 - `stats()`-код доступен только в debug-сборках (guard `if constexpr (not is_debug)` — флаг инвертирован, см. macro.h:82-85).
@@ -1148,7 +1149,7 @@ Thread-local арена для стек-фреймов корутин (испо�
          (в) вынести control_block в отдельную аллокацию. После фикса снять
          ограничение 10 и переписать тесты backup_fixture на лямбды. -->
 
-12. **Кросс-тредные чанки `frame_allocator`** — чанк, освобождённый на чужом треде, возвращается владельцу через его `mpsc_queue`-канал. Transient-чанки (> 4096 и breach-fallback) канал **не используют** — освобождаются сразу. Инвариант: все runner-треды джойнятся до завершения программы, поэтому чужие чанки не пишутся в канал уже уничтоженной арены. Примечание: transient-чанк, освобождённый на чужом треде, не уменьшает `_occupied` арены-владельца (счётчик дрейфует вверх — приближённая метрика, допустимо).
+12. **Кросс-тредные чанки `frame_allocator`** — pooled-чанк, освобождённый на чужом треде, возвращается владельцу через `extern_release::_channel`. Transient-чанки (> 4096 и breach-fallback) канал **не используют**: освобождаются сразу, размер атомарно накапливается в `extern_release::_released_bytes`, а владелец при следующем drain корректирует `_occupied` через `exchange(0)`. Инвариант: все runner-треды джойнятся до завершения программы, поэтому чужие треды не обращаются к уже уничтоженному `extern_release`.
 
 ---
 
@@ -1205,7 +1206,7 @@ Thread-local арена для стек-фреймов корутин (испо�
 |------|-----------|
 | `tests/main.cpp` | GTest main |
 | `tests/environment.h` | Все fixture-классы с хелпер-тасками (1098 строк) |
-| `tests/tests.cpp` | `TEST_F` тесты (4570 строк, 295 тестов; отключённых нет — `cancel_spawned_with_channel` переоткрыт после фикса B7 в `BUGS_AND_BENCHMARKS.md`) |
+| `tests/tests.cpp` | `TEST_F` тесты (4670 строк, 296 тестов; отключённых нет — `cancel_spawned_with_channel` переоткрыт после фикса B7 в `BUGS_AND_BENCHMARKS.md`) |
 
 ### Fixture-классы (34 fixture)
 
@@ -1242,7 +1243,7 @@ Thread-local арена для стек-фреймов корутин (испо�
 | `channel_extra_fixture` | `base_fixture` | — | 4: push/pull, shift operator, mpsc |
 | `cutex_extra_fixture` | `base_fixture` | reset runners + signal | 5: proxy double capture/sync/destructor, try_lock |
 | `get_runner_fixture` | `base_fixture` | — | 1: get_runner inside runner |
-| `frame_alloc_fixture` | `::testing::Test` | — | 12: пул (alloc/free/reuse/retention), transient-malloc, thread_local арены, кросс-тредный возврат чанков, каденс дренажа (N=2), лимит + breach, деструктор, интеграция promise_traits |
+| `frame_alloc_fixture` | `::testing::Test` | — | 13: пул (alloc/free/reuse/retention), transient-malloc, thread_local арены, кросс-тредный возврат pooled/transient чанков, каденс дренажа (N=2), лимит + breach, деструктор, интеграция promise_traits |
 
 ### Бенчмарки
 

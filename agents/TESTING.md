@@ -1,4 +1,4 @@
-# ACE Framework — Test Coverage Plan
+# ACE Framework — Testing Guide and Coverage Plan
 
 Цель: 95-100% покрытия кодовой базы + проверка всех механик и их взаимодействий.
 
@@ -16,7 +16,7 @@
    - Каждый `TEST_F` / `TEST` должен предваряться комментарием, описывающим **что конкретно проверяет тест**.
    - В теле теста должны быть комментарии в формате ответа на вопрос: **«Почему я это проверяю, и почему я это проверяю именно так?»**.
 
-4. **Актуализация плана**: после выполнения работ по плану агент обязан обновить TEST_PLAN.md — отметить реализованные тесты (✅), обновить карту фикстур и индексацию.
+4. **Актуализация плана**: после выполнения работ по плану агент обязан обновить `agents/TESTING.md` — отметить реализованные тесты (✅), обновить карту фикстур и индексацию.
 
 ---
 
@@ -186,7 +186,7 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 | O7 | `const_conversion` | operator const T*() const | ✅ |
 | O8 | `void_star_conversion` | operator void*() и operator const void*() | ✅ |
 | O9 | `arrow_operator` | operator->() даёт доступ к первому параметру | ✅ |
-| O10 | `address_of_operator` | operator&() возвращает T** | ⬜ (баг const-correctness в omniptr.h) |
+| O10 | `address_of_operator` | operator&() возвращает T** | ⬜ (B3 исправлен, отдельный регресс-тест не реализован) |
 | O11 | `reset` | reset() обнуляет указатель | ✅ |
 | O12 | `equality` | operator== с другим omniptr | ✅ |
 | O13 | `wrong_type_cast` | Конструирование из типа не из списка — SFINAE (compile-time check) | ⬜ |
@@ -448,7 +448,7 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 | AH1 | `join_handler_await_ready` | await_ready = false пока не done | ⬜ |
 | AH2 | `join_handler_await_ready_done` | await_ready = true когда done | ⬜ |
 | AH3 | `join_handler_await_suspend` | await_suspend регистрирует waiter | ⬜ |
-| AH4 | `join_handler_await_resume` | await_resume возвращает finished (false для void-корутин — баг?) | ⬜ |
+| AH4 | `join_handler_await_resume` | await_resume возвращает finished для успешной void-корутины (регрессия B4) | ⬜ |
 | AH5 | `spawn_and_join` | spawn → done-опрос → задача завершена | ✅ |
 | AH6 | `join_after_cancel` | join() на отменённой → false | ✅ |
 | AH7 | `handle_done` | done() возвращает true после завершения | ✅ |
@@ -758,7 +758,7 @@ co_await/co_yield операцию (снимается при её успешн�
 | BK19 | `backup_cancel_via_spawn_handle` | spawn + `async_handle::cancel` → backup сработал, join=false | ✅ |
 | BK20 | `backup_stack_many_records_fires_lifo` | 64 arena-backed list nodes → callbacks выполняются строго в обратном порядке | ✅ |
 
-> ⚠️ **Pre-existing баг фреймворка (не связан с этой фичей):** `observe()` на
+> ⚠️ **Открытый B13 из `agents/ISSUES.md`:** `observe()` на
 > лямбда-корутине перед `schedule()`/spawn портит захваченные ссылки — GCC
 > размещает closure лямбды в кадре так, что он накладывается на поле `_block`
 > promise, и `setup_control_block()` затирает захват. Поэтому тесты отмены
@@ -924,7 +924,7 @@ framework containers. Чанки ≤ 4096 обслуживаются `std::pmr::
 > реализованы как отдельные fixture-классы — их сценарии покрыты внутри
 > `timer_fixture` (parallel) и `base_fixture` (io_query/kernelic/clock/udp/tcp).
 
-**Бенчмарки:** 21 бенчмарк в `benchmarks/` (BM1-BM20, см. `BUGS_AND_BENCHMARKS.md`).
+**Бенчмарки:** 21 бенчмарк в `benchmarks/` (BM1-BM20, см. `agents/BENCHMARKS.md`).
 Запуск: `meson setup build-bench -Dbenchmarks=true && ninja -C build-bench ace_benchmarks`
 
 ---

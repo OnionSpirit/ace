@@ -39,7 +39,8 @@
 - **Статус:** Открыто.
 - **Приоритет:** Высокий.
 - **Файлы:** coroutine frame/control block в `include/ace/core/async.h` и
-  `include/ace/core/traits/promise.h`.
+  `include/ace/core/traits/promise.h`; текущие нарушения также находились в
+  `tests/`, `benchmarks/` и прежних README examples.
 - **Симптом:** `observe()` до `schedule()`/`spawn()` у coroutine lambda может
   повредить захваченные ссылки; ASan сообщает heap-use-after-free или
   stack-use-after-scope. Проблема также затрагивает task payload в
@@ -51,9 +52,10 @@
   некорутинные lambda допустимы.
 - **Возможные направления:** явно хранить closure в promise, изменить layout или
   смещение control block либо вынести control block в отдельную аллокацию.
+- **Текущая документационная работа:** все coroutine lambdas в tests/benchmarks
+  заменяются именованными helpers, но production-дефект остаётся открытым.
 - **После решения:** снять соответствующее ограничение в `agents/INDEX.md` и
-  `AGENTS.md`, переписать затронутые тесты `backup_fixture` на lambda и добавить
-  отдельный регресс-тест.
+  `AGENTS.md` и добавить отдельный regression test для control-block layout.
 
 ### B14. Повторный полный suite сохраняет глобальное состояние
 
@@ -65,6 +67,236 @@
   предыдущего повторения.
 - **Проверка решения:** несколько последовательных полных прогонов в одном
   процессе с фиксированными и случайными seed без зависимости от порядка.
+
+### B23. IPv6 aliases используют IPv4 storage и размеры
+
+- **Статус:** Открыто, исправление отложено.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/net.h`.
+- **Симптом:** aliases для `AF_INET6` существуют, но address storage, parsing и
+  длины во всех сетевых состояниях используют `sockaddr_in`, `in_addr` и
+  `sizeof(sockaddr_in)`; IPv6 API передают ядру несовместимые адреса.
+- **Корневая причина:** тип адреса и его размер не зависят от socket domain.
+- **Предлагаемое решение:** ввести domain-specific address traits и storage для
+  `sockaddr_in6`, корректную цель `inet_pton()`, длины и typed aliases, сохранив
+  move-consuming state machine.
+- **Проверка решения:** TCP- и UDP-тесты IPv6 loopback, тест invalid address;
+  benchmark нужен только если преобразование адресов попадёт в горячий путь.
+
+### B24. `io::link::read_buf()` может потерять накопленные данные при EOF
+
+- **Статус:** Открыто, исправление отложено.
+- **Приоритет:** Средний.
+- **Файл:** `include/ace/io.h:1886-1905`.
+- **Симптом:** после одного или нескольких полных чанков завершающее чтение с
+  результатом `0` возвращает `std::unexpected` вместо накопленного буфера.
+- **Корневая причина:** цикл проверяет terminal result `bytes_read < 1` и
+  завершает корутину до возврата уже собранных чанков.
+- **Предлагаемое решение:** хранить состояние накопления отдельно и трактовать
+  EOF с учётом уже прочитанных данных, явно зафиксировав контракт пустого EOF.
+- **Проверка решения:** regressions для пустого потока, одного чанка и нескольких
+  чанков с завершающим EOF.
+
+### B25. I/O lengths сужаются из `size_t` в `unsigned`
+
+- **Статус:** Открыто, исправление отложено.
+- **Приоритет:** Средний.
+- **Файлы:** `include/ace/io.h`, `include/ace/net.h`,
+  `include/ace/services/kernelic.h`.
+- **Симптом:** публичные buffer lengths типа `size_t` неявно сужаются до
+  `unsigned` в read/write query и kernelic API; большие размеры могут быть
+  усечены до отправки в ядро.
+- **Корневая причина:** длина не имеет единого типа и проверяемого преобразования
+  на границах API.
+- **Предлагаемое решение:** выбрать и документировать `size_t`-контракт до
+  системного вызова либо выполнять checked conversion/chunking без молчаливого
+  усечения.
+- **Проверка решения:** boundary tests около `UINT_MAX` без выделения гигантского
+  буфера, включая read и write paths.
+
+### B26. Ошибки `bind`/`listen` потребляют исходную entity
+
+- **Статус:** Открыто, исправление отложено; требуется решение по API.
+- **Приоритет:** Средний.
+- **Файл:** `include/ace/net.h`.
+- **Симптом:** неуспешные bind/listen queries уже потребили исходную entity и
+  возвращают invalid next-state entity, поэтому retry/recovery невозможны, а
+  состояние владения FD неочевидно.
+- **Корневая причина:** move-consuming переход выполняется до известного
+  результата системной операции, а failure result не возвращает владельца.
+- **Предлагаемое решение:** выбрать явный failure result, сохраняющий или
+  восстанавливающий entity, либо документировать terminal consumption как
+  контракт; изменение требует отдельного API-решения.
+- **Проверка решения:** тесты ownership после bind/listen failure, retry согласно
+  выбранному контракту и отсутствие double-close.
+
+### B27. Out-of-class definitions `cutex` нарушают ODR и блокируют Clang 22
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файлы:** `include/ace/futures/cutex.h`,
+  `tests/cross_mechanic_fixture.cpp`, `tests/cutex_extra_fixture.cpp`,
+  `tests/future_traits_fixture.cpp`.
+- **Симптом:** header-only заголовок содержит пять не-`inline` определений
+  `try_lock`, `notify`, `pending_notify`, `capture` и `release`; split tests
+  обходят duplicate symbols через GCC/Itanium `.weak` asm, который Clang 22
+  отвергает с `changed binding to STB_GLOBAL`.
+- **Корневая причина:** ODR-нарушение маскируется compiler- и ABI-specific asm.
+- **Предлагаемое решение:** пометить пять определений `inline` и удалить `.weak`
+  asm из трёх fixtures.
+- **Проверка решения:** собрать и запустить единый test executable GCC и Clang,
+  дополнительно слинковать двух-TU consumer, включающий `cutex.h` в обоих TU.
+
+### B28. Meson принимает argument syntax за compiler identity
+
+- **Статус:** Открыто.
+- **Приоритет:** Средний.
+- **Файл:** `meson.build:110-132,244-252`.
+- **Симптом:** test и benchmark sections сравнивают результат
+  `compiler.get_argument_syntax()` с `clang`; Clang возвращает gcc-compatible
+  syntax, поэтому clang branch недостижим и его flags не применяются.
+- **Корневая причина:** синтаксис аргументов используется как идентификатор
+  компилятора.
+- **Предлагаемое решение:** сохранить compiler object и выбирать ветку через
+  `compiler.get_id()`, используя argument syntax только там, где действительно
+  различается формат flags.
+- **Проверка решения:** сверить setup logs и фактические test/benchmark compile
+  flags в отдельных GCC- и Clang-конфигурациях.
+
+### B29. Некорректный regression блокирует проверку B16
+
+- **Статус:** Открыто, блокирует тестирование edge case B16.
+- **Приоритет:** Высокий.
+- **Файл:** `tests/yield_fixture.cpp:227-243`.
+- **Симптом:**
+  `yield_fixture.automaton_join_returns_nullopt_when_pending_yield_was_consumed`
+  детерминированно падает 10/10 и оставляет GCC full suite на 291/292.
+- **Корневая причина:** тест вызывает `await_resume()` после `await_ready() ==
+  false`, не вызывая `await_suspend()`; ожидание pending initial yield также
+  противоречит lazy `automaton::initial_suspend`.
+- **Предлагаемое решение:** построить корректный детерминированный протокол:
+  явно довести raw observed automaton до pending yield и затем чередовать
+  join/ping handlers либо использовать runner synchronization с полным await
+  protocol. Тест обязан падать без B16 и проходить с ним.
+- **Проверка решения:** отдельный повторный прогон edge regression и полный GCC
+  suite; текущий тест успешным не считается.
+
+### B30. Transition queries удерживают ссылки на перемещаемые source entities
+
+- **Статус:** Открыто.
+- **Приоритет:** Средний/высокий.
+- **Файлы и символы:** `include/ace/fs.h` (`fs::file::open_query`,
+  `fs::file::open()`); `include/ace/net.h` (bind/connect query types и
+  соответствующие transition methods).
+- **Симптом:** transition queries сохраняют ссылки или указатели на source entity
+  и её storage, тогда как `IMPORT_IO_ENTITY_ENV` теперь публично предоставляет
+  default derived moves. Например, `file::open_query` хранит `file&` и указатель
+  `_path.c_str()`, а net bind/connect queries хранят ссылки на entity и указатели
+  на address storage. Перемещение source после создания outstanding query может
+  инвалидировать storage или заставить query потребить moved-from entity; в
+  результате возможны возврат валидного FD, помеченного закрытым, либо утечка FD.
+- **Предлагаемое решение:** query должен владеть потребляемой entity и стабильным
+  address/path storage; альтернатива допустима только как enforceable API-запрет
+  перемещения entity, пока существует query.
+- **Проверка решения:** fs- и net-тесты создают query, затем перемещают source до
+  await и проверяют корректное ownership, результат перехода и строго однократное
+  закрытие FD.
+
+### B31. Self-move assignment `fs::file` может изменить path
+
+- **Статус:** Открыто.
+- **Приоритет:** Низкий.
+- **Файлы и символы:** `include/ace/fs.h` (`fs::file::operator=(file&&)`);
+  `include/ace/io.h` (`io::entity::operator=(entity&&)`).
+- **Симптом:** default derived move assignment продолжает self-move `_path` после
+  того, как base move assignment досрочно вернулся как no-op. Выражение
+  `file = std::move(file)` поэтому может оставить path в unspecified state, хотя
+  base-класс обещает self-move no-op.
+- **Предлагаемое решение:** добавить явную derived self-assignment check либо
+  реализовать move assignment, сохраняющий path и base ownership при self-move.
+- **Проверка решения:** выполнить self-move `fs::file`, затем открыть тот же path
+  и проверить сохранение path, корректный результат и ownership FD.
+
+### B32. Не покрыта отмена owning и direct `close_query`
+
+- **Статус:** Открыто.
+- **Приоритет:** Низкий.
+- **Файлы и символы:** `include/ace/io.h` (`io::entity::close()`,
+  `io::close_query`); `tests/io_entity_fixture.cpp` (close-query coverage).
+- **Симптом:** тесты различают entity-owned и напрямую созданный `close_query` при
+  await/discard, но не проверяют cancellation задач, приостановленных на этих
+  двух путях. Регрессия может нарушить намеренный контракт N4, привести к
+  unintended close, повторному закрытию или незавершённому lifetime query.
+- **Предлагаемое решение:** добавить отдельные cancellation tests для задачи,
+  suspended на entity-owned query, и задачи с напрямую созданным query, не меняя
+  различие ownership из N4.
+- **Проверка решения:** отменить обе suspended задачи и проверить завершение их
+  lifetime, строго однократное закрытие owning FD и отсутствие закрытия direct
+  non-owning FD.
+
+### B33. Move-assignment coverage не проверяет `io::link` и net entities
+
+- **Статус:** Открыто.
+- **Приоритет:** Низкий.
+- **Файлы и символы:** `include/ace/io.h` (`io::link` move assignment, payload и
+  guard); `include/ace/net.h` (net entity move assignments, address metadata и
+  base delegation); `tests/io_entity_fixture.cpp` (move-assignment coverage).
+- **Симптом:** move-assignment tests покрывают только `test_io_entity`, но не
+  прямые move/self-move paths `io::link` с payload/guard и net entities с
+  metadata/base delegation. Регрессии могут оставить guard привязанным к source,
+  потерять адресные данные или нарушить ownership FD.
+- **Предлагаемое решение:** добавить прямые move-assignment и self-move tests для
+  `io::link` и репрезентативных net entities без изменения production-кода до
+  выявления конкретного дефекта.
+- **Проверка решения:** проверить освобождение прежнего destination FD, строго
+  однократное закрытие принятого FD, сохранение payload/address metadata,
+  корректную привязку guard и no-op self-move.
+
+### B34. Нижняя граница timer-теста нестабильна относительно scheduler timing
+
+- **Статус:** Открыто.
+- **Приоритет:** Средний.
+- **Файлы и символы:** `tests/timer_fixture.cpp`
+  (`timer_fixture.do_or_await_test`); `include/ace/services/clock.h`
+  (`cached_now()`).
+- **Симптом:** в трёхкратном shuffled GCC/ASan-прогоне без блокирующего B29 тест
+  один раз измерил 98 ms при `EXPECT_GE(..., 100 ms)`; остальные итерации прошли.
+  Поведение `cached_now()` с обновлением на каждом 16-м вызове является намеренным
+  контрактом B6 и не должно изменяться или переоткрываться из-за этой записи.
+  Нестабильность отлична от B14, хотя может взаимодействовать с process state.
+- **Предлагаемое решение:** определить production timing contract либо изменить
+  тестовый контракт так, чтобы он использовал внешнее измерение через steady
+  clock и ограниченный допуск scheduler/timer, не скрывающий преждевременное
+  завершение.
+- **Проверка решения:** выполнить много shuffled/repeated прогонов с разными seed
+  в GCC/ASan, отдельно и в полном suite без B29, и подтвердить одновременно
+  стабильность теста и соблюдение выбранной временной границы.
+
+### B35. Fire-and-forget write fallback теряет command и moved buffer
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файлы и символы:** `include/ace/fs.h` (`file_link::output_action()`),
+  `include/ace/net.h` (`connection_link::output_action()`),
+  `include/ace/io.h` (`io::outcast::_command_pool`).
+- **Симптом:** оба output path сначала захватывают `outcast::command` и перемещают
+  в него исходный `io::buffer`. Если `kernel_controller::writev()` или
+  `sendmsg()` возвращает `false`, команда не возвращается через `raw_sync()`, а
+  blocking fallback вызывает `assemble()` у уже moved-from `buff`. Это теряет
+  слот freelist, удерживает payload в недоступной команде и может выполнить
+  пустую или некорректную fallback-запись.
+- **Причина:** неуспешный submit не принимает ownership observer-а, однако
+  fallback-пути, в отличие от `guard::dispatch_close()`, не восстанавливают
+  ownership команды и данных.
+- **Предлагаемое решение:** при неуспешном submit вернуть command в pool и
+  выполнять fallback над буфером, ownership которого явно восстановлен, либо
+  выполнять blocking fallback непосредственно из `cmd->_buffer` до возврата
+  команды. Зафиксировать единый ownership-контракт helper-ом только при
+  согласовании отдельного рефакторинга.
+- **Проверка решения:** принудительно заставить submission buffer reject request,
+  проверить точные bytes для file/socket fallback, возврат command slot и
+  отсутствие удержанного buffer; отдельно проверить успешный async path без
+  двойного `raw_sync()`.
 
 ## TODO в исходном коде
 
@@ -119,6 +351,44 @@
 - **Проверка решения:** документированный контракт stats и независимые от версии
   стандартной библиотеки тесты.
 
+### N5. Benchmark baseline и current измерены при несопоставимой нагрузке
+
+- **Статус:** Открыто, исследуется.
+- **Приоритет:** Средний.
+- **Область:** результаты производительности в `agents/BENCHMARKS.md` и файлы
+  `/tmp/opencode/ace-benchmark-current.json`,
+  `/tmp/opencode/ace-benchmark-current-targeted.json`.
+- **Нюанс:** baseline и current запускались при различающейся высокой фоновой
+  нагрузке. Особенно заметно отличие BM1 `cutex_race_capture`: медиана real time
+  изменилась с 296.678 ms до 1317.024 ms, или в 4.44x. Эти данные не позволяют
+  отделить изменение реализации от влияния окружения.
+- **Предлагаемое решение:** повторно измерить baseline и current в одном спокойном
+  окружении, зафиксировав CPU governor/frequency, compiler, build configuration и
+  CPU affinity; выполнить несколько повторений и исследовать распределение, а не
+  отдельное значение медианы.
+- **Ограничение:** не изменять код на основании текущих несопоставимых данных.
+- **Проверка решения:** сопоставимые повторные прогоны baseline/current при
+  зафиксированном окружении и анализ распределения результатов всех шести
+  сценариев, особенно BM1.
+
+## Зафиксированные технические нюансы
+
+### N4. Ownership напрямую созданного и entity-owned `close_query` различается
+
+- **Статус:** Зафиксировано как намеренный контракт API; открытого дефекта нет.
+- **Приоритет:** Информационный.
+- **Файл:** `include/ace/io.h`.
+- **Нюанс:** напрямую созданный `close_query(fd)` остаётся non-owning и при
+  уничтожении без await не закрывает FD; `entity::close()` передаёт sole
+  ownership возвращаемому query, поэтому discarded query обязан закрыть FD.
+- **Причина:** public query не должен неявно отнимать ownership у вызывающего, а
+  entity-owned path должен сохранять единственного владельца после потребления
+  entity.
+- **Поддержание контракта:** сохранять явные Doxygen и тесты обоих путей.
+- **Проверка:** `io_entity_fixture.direct_close_query_discard_remains_non_owning`,
+  `io_entity_fixture.entity_close_awaited_single_ownership` и
+  `io_entity_fixture.entity_close_discarded_single_ownership`.
+
 ## Решённые баги
 
 ### B1. `or_await_composed<3+>`: ошибка преобразования `void` в `bool`
@@ -169,11 +439,12 @@
 
 - **Статус:** Решено.
 - **Файл:** `include/ace/services/clock.h`.
-- **Причина:** timestamp обновлялся только каждый 16-й вызов, из-за чего новый
-  таймер мог сравниваться с сильно устаревшей границей времени и срабатывать
-  раньше срока.
-- **Решение:** кэш обновляется также при возрасте не менее 1 ms.
-- **Проверка:** timer/compose тесты и shuffle-прогоны.
+- **Уточнённый контракт:** обновление timestamp каждый 16-й вызов является
+  намеренным текущим поведением. Возраст кэша не создаёт отдельного refresh.
+- **Статус решения:** запись о дополнительном refresh при возрасте 1 ms была
+  устаревшей документацией; production-код изменять не требуется.
+- **Проверка:** timer/compose tests проверяют наблюдаемую точность, не полагаясь на
+  refresh каждого вызова.
 
 ### B7. `channel_router::cancel()` зацикливался
 
@@ -222,6 +493,117 @@
 - **Причина:** аргумент содержал пробел и кавычки после `=`, поэтому каждый из 234
   запусков успешно выполнял ноль тестов.
 - **Решение:** используется `--gtest_filter=@0@` без пробела и кавычек.
+
+### B15. `fs::file::open_rewrite()` не усекал существующий файл
+
+- **Статус:** Решено.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/fs.h`.
+- **Симптом:** повторная запись более короткого содержимого оставляла старый
+  хвост файла.
+- **Корневая причина:** `fs::file::open_rewrite()` открывал файл без `O_TRUNC`.
+- **Решение:** в flags открытия добавлен `O_TRUNC`.
+- **Проверка:** `fs_fixture.open_rewrite_truncates_existing_file`.
+
+### B16. Valued automaton join мог вернуть неинициализированное значение
+
+- **Статус:** Решено в production-коде; edge regression заблокирован B29.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/core/async_handle.h`.
+- **Симптом:** если pending yield был потреблён между проверкой готовности и
+  чтением, valued `automaton_join_handler` мог вернуть default или
+  неинициализированное значение.
+- **Корневая причина:** результат `yield_value()` типа `bool` игнорировался.
+- **Решение:** неуспешное чтение yield возвращает `std::nullopt`, после попытки
+  чтения active automaton отменяется.
+- **Проверка:** стандартные join tests проходят; специальный edge regression из
+  B29 некорректен и успешным не считается до замены.
+
+### B17. `io::read_query` писал NUL за пределами точного буфера
+
+- **Статус:** Решено.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/io.h`.
+- **Симптом:** exact-size read выполнял one-byte OOB write, а raw/binary input
+  получал неоговорённый терминатор.
+- **Корневая причина:** `await_resume()` записывал `NUL` в `buf[_res]`.
+- **Решение:** запись терминатора удалена; query возвращает raw bytes без
+  изменения данных за фактически прочитанным диапазоном.
+- **Проверка:**
+  `io_entity_fixture.read_query_exact_buffer_preserves_canary_and_binary_data`.
+
+### B18. `transport::recv(vector/string)` писал в spare capacity
+
+- **Статус:** Решено.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/net.h`.
+- **Симптом:** recv overloads разрешали ядру записывать за logical size объекта,
+  используя зарезервированную, но логически отсутствующую область.
+- **Корневая причина:** длина вычислялась через `capacity()`.
+- **Решение:** vector path передаёт `size() * sizeof(T)`, string path передаёт
+  `size()`.
+- **Проверка:** `io_entity_fixture.connection_recv_vector_uses_logical_size` и
+  `io_entity_fixture.connection_recv_string_uses_logical_size`.
+
+### B19. Move assignment сетевых и I/O entities терял ownership FD
+
+- **Статус:** Решено.
+- **Приоритет:** Высокий.
+- **Файлы:** `include/ace/io.h`, `include/ace/net.h`.
+- **Симптом:** move assignment мог утечь или потерять destination FD, а guard
+  после перемещения мог остаться связан с полями другого объекта.
+- **Корневая причина:** прежний destination owner не освобождался, а default/base
+  move paths не сохраняли корректную привязку guard.
+- **Решение:** старый destination FD освобождается до принятия нового ownership,
+  guard привязывается к полям destination, net move paths используют корректный
+  base ownership transfer.
+- **Проверка:**
+  `io_entity_fixture.entity_move_assignment_releases_old_and_keeps_incoming`.
+
+### B20. Self-move assignment инвалидировал единственного владельца FD
+
+- **Статус:** Решено.
+- **Приоритет:** Высокий.
+- **Файлы:** `include/ace/io.h`, `include/ace/net.h`.
+- **Симптом:** `entity = std::move(entity)` мог закрыть или сбросить собственный
+  descriptor.
+- **Корневая причина:** move assignment не проверял self-assignment перед
+  освобождением destination ownership.
+- **Решение:** self-move является no-op.
+- **Проверка:** `io_entity_fixture.entity_self_move_preserves_ownership`.
+
+### B21. `entity::close()` не передавал FD возвращаемому query
+
+- **Статус:** Решено.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/io.h`.
+- **Симптом:** entity сохранял FD после `close()`, поэтому discarded/canceled
+  queries могли приводить к double-close либо leak; повторный close не был явно
+  идемпотентен.
+- **Корневая причина:** ownership оставался одновременно связан с entity и
+  асинхронным close path.
+- **Решение:** `entity::close()` передаёт FD owning query и сразу инвалидирует
+  entity; повторный close является no-op, а напрямую созданный `close_query`
+  остаётся non-owning согласно N4.
+- **Проверка:** `io_entity_fixture.entity_close_awaited_single_ownership`,
+  `io_entity_fixture.entity_close_discarded_single_ownership`,
+  `io_entity_fixture.entity_close_repeated_is_idempotent` и
+  `io_entity_fixture.direct_close_query_discard_remains_non_owning`.
+
+### B22. UDP bind и net move paths нарушали единственное ownership
+
+- **Статус:** Решено.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/net.h`.
+- **Симптом:** UDP bind создавал result из raw FD, не потребляя source; listener
+  сохранял self-referential pointer на длину адреса, который устаревал после
+  move; отдельные net move paths обходили ownership базового класса.
+- **Корневая причина:** state transitions копировали descriptor/address metadata
+  вместо согласованного consuming move, а query ссылался на movable member.
+- **Решение:** bind и net transitions потребляют source через base moves;
+  listener использует address-length member напрямую без stale self-reference.
+- **Проверка:** `base_fixture.udp_bind_transfers_sole_ownership` и существующее
+  UDP echo coverage `base_fixture.udp_sendto_recv_loop`.
 
 ## История flaky-тестов
 

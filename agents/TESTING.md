@@ -2,9 +2,10 @@
 
 Цель: 95-100% покрытия кодовой базы + проверка всех механик и их взаимодействий.
 
-> **Статус (2026-08-23):** покрытие **94.4%** (2226/2357 уникальных строк по
-> `include/ace/**`, gcov + meson per-test). Отдельные модули — 85-100%.
-> План ниже актуализирован под фактическое состояние тестов.
+> **Статус (2026-08-23):** GCC 16 coverage union покрывает **2262/2398 =
+> 94.33%** уникальных исполняемых строк `include/ace/**`. В обычной GCC/ASan и
+> coverage-конфигурациях проходят 291 из 292 зарегистрированных Meson-тестов;
+> единственный сбой — открытый B29 из `agents/ISSUES.md`.
 
 ## Требования к генерации тестов (agent instructions)
 
@@ -76,79 +77,137 @@ endif
 
 Передаётся `link_args: coverage_link_args` в `executable(...)`.
 
-### Шаг 3: Скрипт генерации отчёта
-Добавить `scripts/coverage.sh` (опционально):
-```bash
-#!/bin/bash
-BUILD_DIR=${1:-build}
-ninja -C "$BUILD_DIR" ace_tests
-./"$BUILD_DIR"/ace_tests
-lcov --capture --directory "$BUILD_DIR" --output-file coverage.info --no-external
-lcov --remove coverage.info '/usr/*' '*/subprojects/*' '*/tests/*' --output-file coverage_filtered.info
-genhtml coverage_filtered.info --output-directory coverage_report
-echo "Report: coverage_report/index.html"
-```
+### Шаг 3: Сведение gcov JSON ✅
 
-### Шаг 4: discover_tests.py
-Добавить опциональный аргумент `--list` для явного разделения list/run режимов (защита от случайного запуска тестов при discovery).
+Coverage измеряется отдельно для каждого fixture TU, после чего gcov JSON
+сводится по каноническому пути исходного файла и номеру строки. Строка считается
+исполняемой, если она присутствует как executable хотя бы в одном TU, и покрытой,
+если её execution count положителен хотя бы в одном TU. Такое union-сведение
+обязательно для header-only шаблонов: одна template-строка может присутствовать
+в нескольких fixture TU, поэтому сложение знаменателей отдельных отчётов даёт
+двойной счёт.
+
+### Шаг 4: `discover_tests.py` ✅
+
+Реализованы две явные команды: `discover` лексически извлекает `TEST`/`TEST_F`
+из split source files, а `verify` сравнивает source discovery с фактическим
+`ace_tests --gtest_list_tests`. Лексер игнорирует комментарии, обычные, символьные
+и raw string literals, поддерживает многострочные объявления, исключает disabled
+tests, отклоняет parameterized macros и дубликаты. Семь unit tests находятся в
+`tests/discover_tests_test.py`.
 
 ---
 
 ## Текущее покрытие
 
-**Измерение (2026-08-23):** gcov по ACE-заголовкам, чистый режим meson per-test
-(276 прогонов), уникальные строки (множественные include и template-инстанцирования
-не учитываются повторно).
+**Измерение (2026-08-23):** GCC 16, gcov JSON, union уникальных исполняемых
+строк по всем 33 fixture TU. Множественные include и template-инстанцирования не
+учитываются повторно.
 
-**Итог: 2226/2357 = 94.4%**
+**Итог: 2262/2398 = 94.33%**
 
-| Модуль | Покрыто | Примечания |
-|--------|---------|-----------|
-| `core/tools/queue.h` | 95.0% | slab_mempool, queue, q_node — полный набор |
-| `core/tools/omniptr.h` | 100% | + lifetime 100% |
-| `core/tools/id_alloc.h` | 100% | |
-| `core/tools/moving_average.h` | 100% | |
-| `core/traits/future.h` | 100% | compile-time |
-| `core/traits/promise.h` | 97.4% | операторы new/delete покрыты |
-| `core/traits/routing.h` | 89.5% | router_slot — полный набор |
-| `core/traits/service.h` | 100% | |
-| `core/control.h` | 100% | |
-| `core/async.h` | 99.0% | |
-| `core/async_handle.h` | 85.5% | join/ping handler-ы |
-| `core/runner.h` | 92.0% | |
-| `core/dispatcher.h` | 89.0% | |
-| `core/signal.h` | 100% | |
-| `core/compose.h` | 86.9% | or/and/composed, operator>> |
-| `io.h` | 94.1% | query/buffer/entity/guard/hanged/any |
-| `net.h` | 94.9% | TCP echo, UDP, sendmsg/recvmsg |
-| `services/kernelic.h` | 91.5% | включая overflow-буфер (6000 запросов) |
-| `services/clock.h` | 97.6% | включая expire |
-| `futures/timeout.h` | 95.5% | |
-| `futures/channel.h` | 95.3% | включая cancel и pending_push |
-| `futures/cutex.h` | 92.2% | |
-| `futures/backup.h` | 97.7% | callable/task payload, insure, emergency, LIFO stack |
-| `futures/spawn.h` / `post.h` | 100% / 100% | |
-| `futures/reattach.h` | 100% | включая кросс-раннерную миграцию |
-| `futures/roaming.h` / `polling.h` / `get_runner.h` | 100% | |
-| `fs.h` | 96.9% | |
-| `console.h` | 100% | |
-| `core/arena.h` | 95.5% | AR1-AR18; coroutine frames + I/O + framework containers |
+| Модуль | Покрыто / исполняемо | Покрытие |
+|--------|-----------------------|----------|
+| `console` | 36/36 | 100% |
+| `arena` | 129/134 | 96.27% |
+| `async` | 190/192 | 98.96% |
+| `async_handle` | 72/84 | 85.71% |
+| `compose` | 126/145 | 86.90% |
+| `control` | 74/74 | 100% |
+| `dispatcher` | 105/118 | 88.98% |
+| `runner` | 161/175 | 92.00% |
+| `signal` | 10/10 | 100% |
+| `id_alloc` | 12/12 | 100% |
+| `lifetime` | 11/11 | 100% |
+| `moving_average` | 34/34 | 100% |
+| `omniptr` | 27/27 | 100% |
+| `queue` | 95/100 | 95.00% |
+| `future` | 9/9 | 100% |
+| `promise` | 74/76 | 97.37% |
+| `routing` | 34/38 | 89.47% |
+| `service` | 23/23 | 100% |
+| `fs` | 33/34 | 97.06% |
+| `backup` | 43/44 | 97.73% |
+| `channel` | 41/43 | 95.35% |
+| `cutex` | 59/64 | 92.19% |
+| `get_runner` | 5/5 | 100% |
+| `polling` | 5/5 | 100% |
+| `post` | 9/9 | 100% |
+| `reattach` | 18/18 | 100% |
+| `roaming` | 6/6 | 100% |
+| `spawn` | 9/9 | 100% |
+| `timeout` | 21/22 | 95.45% |
+| `io` | 369/401 | 92.02% |
+| `net` | 141/144 | 97.92% |
+| `clock` | 163/167 | 97.60% |
+| `kernelic` | 118/129 | 91.47% |
 
 **Не покрыто (остаточные пробелы):** multishot CQE-пути kernelic (accept-multishot не
 используется в тестах), error-пути compose (несовместимые типы — compile-time),
 `channel::channel_st` (e_regular режим), `kernelic` null-observer CQE.
 
-**Как измерить:**
+Review также выявил открытые пробелы B32/B33: не проверена cancellation для
+owning/direct `close_query`, а прямые move-assignment и self-move сценарии
+`io::link` и net entities не покрыты. Связанные transition-move риски B30/B31
+остаются открыты: outstanding fs/net query может ссылаться на перемещённую source
+entity, а self-move `fs::file` может изменить path. Специальных regressions для
+этих рисков пока нет.
+
+**Как воспроизвести сбор данных:**
 ```bash
 meson setup build-cov -Dtests=true -Dcoverage=true
 ninja -C build-cov ace_tests
 meson test -C build-cov
-cd build-cov && ln -sfn ../tests tests && ln -sfn ../include include
-gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
-# затем свести уникальные строки по include/ace/**/*.h (см. scripts/cov_summary.py)
+# Сгенерировать gcov JSON для каждого tests/*_fixture.cpp TU и объединить
+# executable/covered line numbers по каноническим путям include/ace/**.
 ```
-> ⚠️ `ln -sfn ../tests tests` обязателен: gcov резолвит пути gcno относительно
-> build-каталога, без симлинков показывает 0%.
+
+Зафиксированный coverage-прогон не является полностью успешным: 291/292,
+падает только B29 regression. Coverage union включает данные всех fixture TU,
+в том числе TU с этим запущенным, но упавшим тестом.
+
+### Фактическая проверка конфигураций
+
+| Конфигурация | Зарегистрировано | Результат |
+|--------------|------------------|-----------|
+| GCC + ASan, `ace_entry=false` | 292 (290 GTests + `discover_tests.unit` + `ace_tests.discovery_consistency`) | 291/292; падает только `yield_fixture.automaton_join_returns_nullopt_when_pending_yield_was_consumed` из B29 |
+| GCC 16 + ASan + coverage, `ace_entry=false` | 292 | 291/292; тот же единственный B29 failure |
+| GCC 16 + ASan, `ace_entry=true` | 293 (default set + `ace_entry.fallback`) | weak-entry конфигурация добавляет fallback test; полный успешный результат здесь не заявляется |
+| Clang 22, weak-entry fallback target | — | Target скомпилирован; проверка `tests/check_entry_fallback.py` завершилась успешно |
+| Clang 22, полный `ace_tests` | — | Сборка остаётся заблокирована открытыми B27/B28; полный suite не запускался |
+
+### Финальная проверка стабильности
+
+Выполнен прямой GCC/ASan-прогон 289 source GTests с исключением только открытого
+некорректного B29:
+
+```text
+--gtest_filter=-yield_fixture.automaton_join_returns_nullopt_when_pending_yield_was_consumed
+--gtest_shuffle --gtest_random_seed=230823 --gtest_repeat=3
+```
+
+GoogleTest автоматически увеличивал seed между итерациями. Прогон **не прошёл
+стабильно**: в одной из трёх итераций `timer_fixture.do_or_await_test` измерил
+98 ms и нарушил `EXPECT_GE(..., 100 ms)`; две другие итерации прошли. Эта
+нестабильность зарегистрирована как B34 и по прямому указанию пользователя в
+рамках данной работы не исправлялась. Исключение B29 не устраняет остаточные
+пробелы review B32/B33 и transition-move риски B30/B31.
+
+### Regression coverage B15-B22
+
+Статусы ниже согласованы с `agents/ISSUES.md`; наличие некорректного падающего
+теста не считается успешным regression coverage.
+
+| Issue | Regression tests | Статус |
+|-------|------------------|--------|
+| B15 | `fs_fixture.open_rewrite_truncates_existing_file` | ✅ Реализован и проходит в GCC-прогонах |
+| B16 | `yield_fixture.automaton_join_returns_nullopt_when_pending_yield_was_consumed` | ⚠️ Production fix есть, но edge regression некорректен и детерминированно падает; проверка заблокирована B29 |
+| B17 | `io_entity_fixture.read_query_exact_buffer_preserves_canary_and_binary_data` | ✅ Реализован и проходит в GCC-прогонах |
+| B18 | `io_entity_fixture.connection_recv_vector_uses_logical_size`, `io_entity_fixture.connection_recv_string_uses_logical_size` | ✅ Реализованы и проходят в GCC-прогонах |
+| B19 | `io_entity_fixture.entity_move_assignment_releases_old_and_keeps_incoming` | ✅ Реализован и проходит в GCC-прогонах |
+| B20 | `io_entity_fixture.entity_self_move_preserves_ownership` | ✅ Реализован и проходит в GCC-прогонах |
+| B21 | `io_entity_fixture.entity_close_awaited_single_ownership`, `entity_close_discarded_single_ownership`, `entity_close_repeated_is_idempotent`, `direct_close_query_discard_remains_non_owning` | ✅ Реализованы и проходят в GCC-прогонах |
+| B22 | `base_fixture.udp_bind_transfers_sole_ownership`; supporting coverage `base_fixture.udp_sendto_recv_loop` | ✅ Реализован и проходит в GCC-прогонах |
 
 ---
 
@@ -455,6 +514,7 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 | AH8 | `handle_cancel` | cancel() отменяет корутину | ⬜ |
 | AH9 | `check_valued_spawn_cancel` | join() на отменённой valued-таске → nullopt (cancel не даёт статусу стать e_finished) | ✅ |
 | AH10 | `check_valued_spawn_join_value` | join() на завершённой valued-таске → возвращает правильное значение из co_return | ✅ |
+| AH11 | `automaton_join_returns_nullopt_when_pending_yield_was_consumed` | Edge regression для B16 | ⚠️ Заблокирован B29: текущий тест нарушает await protocol и падает |
 
 ---
 
@@ -533,6 +593,15 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 | IE7 | `entity_guard_no_runner` | guard с невалидным FD не падает | ✅ |
 | IE8 | `guard_valid_fd_no_runner` | guard с валидным FD без раннера: schedule pending_close | ✅ |
 | IE9 | `guard_already_closed` | guard с _closed=true не закрывает FD повторно | ✅ |
+| IE10 | `read_query_exact_buffer_preserves_canary_and_binary_data` | Exact-size raw read не пишет NUL за буфер (B17) | ✅ |
+| IE11 | `entity_move_assignment_releases_old_and_keeps_incoming` | Move assignment освобождает старый FD и принимает incoming ownership (B19) | ✅ |
+| IE12 | `entity_self_move_preserves_ownership` | Self-move остаётся no-op и не теряет FD (B20) | ✅ |
+| IE13 | `entity_close_awaited_single_ownership` | Awaited close передаёт query единственное ownership FD (B21) | ✅ |
+| IE14 | `entity_close_discarded_single_ownership` | Discarded close query не создаёт double-close/leak (B21) | ✅ |
+| IE15 | `entity_close_repeated_is_idempotent` | Повторный close является no-op (B21) | ✅ |
+| IE16 | `direct_close_query_discard_remains_non_owning` | Напрямую созданный close query остаётся non-owning (B21) | ✅ |
+| IE17 | `connection_recv_vector_uses_logical_size` | Vector recv ограничен logical size, а не capacity (B18) | ✅ |
+| IE18 | `connection_recv_string_uses_logical_size` | String recv ограничен logical size, а не capacity (B18) | ✅ |
 
 #### `IoHangedFixture`, `IoAnyFixture`
 
@@ -544,11 +613,15 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 
 ### 3.11 net.h
 
-#### `socket_echo_fixture` + `udp_fixture` (не расширена)
+#### `socket_echo_fixture` + сетевые тесты `base_fixture`
 
 | # | Тест | Что проверяет | Статус |
 |---|------|--------------|--------|
-| N1-N35 | Все тесты net.h | ⬜ (существующие: do_io_socket_echo, do_io_socket_echo_zc) |
+| N1 | `do_io_socket_echo` | TCP echo | ✅ |
+| N2 | `do_io_socket_echo_zc` | TCP zero-copy echo | ✅ |
+| N3 | `udp_sendto_recv_loop` | UDP send/receive loop и supporting coverage B22 | ✅ |
+| N4 | `udp_bind_transfers_sole_ownership` | Bind потребляет source entity и сохраняет единственное ownership FD (B22) | ✅ |
+| N5 | `tcp_sendmsg_recvmsg_echo` | TCP sendmsg/recvmsg echo | ✅ |
 
 ---
 
@@ -696,6 +769,7 @@ gcov -b -o ace_tests.p/tests_tests.cpp.gcda ace_tests.p/tests_tests.cpp.gcno
 | FS9 | `file_output_action` | output_action использует kernel_controller::writev | ⬜ |
 | FS10 | `file_input_action` | input_action использует read_query | ⬜ |
 | FS11 | `file_write_and_read` | Полный цикл write → read → verify | ✅ (добавлен) |
+| FS12 | `open_rewrite_truncates_existing_file` | Повторная короткая запись усекает старый хвост (B15) | ✅ |
 
 ---
 
@@ -818,9 +892,9 @@ framework containers. Чанки ≤ 4096 обслуживаются `std::pmr::
 
 Тесты взаимодействия нескольких подсистем одновременно.
 
-> ⚠️ Ниже — исходный список плана. **Все пункты кроме X4, X5, X6, X7, X8, X10,
-> X14, X15, X16, X18, X22, X23 реализованы и проходят.** Дополнительно реализованы
-> тесты X26-X33 (см. конец раздела).
+> Ниже сохранён план взаимодействий. Источником истины для реализованных тестов
+> служат отметки в таблице и source discovery; неотмеченные сценарии остаются
+> планом, а не заявлением о покрытии.
 
 #### `cross_mechanic_fixture`
 
@@ -853,7 +927,6 @@ framework containers. Чанки ≤ 4096 обслуживаются `std::pmr::
 | X25 | `stress_spawn_cancel` | 100 spawn → cancel всех → нет утечек | ✅ |
 | X26 | `channel_clean_after_run` | Каналы пусты после run (no waiter leak) | ✅ (добавлен) |
 | X27 | `or_ping_automaton_loop_no_value_loss` | 2 automaton → or-гонка ping в цикле (8 итераций) → проверка что cancel_yield не разрушает автоматон и не теряет co_yield значения | ✅ (добавлен) |
-| X28 | `channel_clean_after_run` | Каналы пусты после run (no waiter leak) | ✅ |
 | X29 | `kernelic_overflow_buffer_stress` | 6000 висящих read (>4096 ring) → overflow-буфер kernel_entity → все завершаются | ✅ (добавлен, покрывает B8/B9) |
 | X30 | `reattach_nullptr_noop` | reattach(nullptr) → await_ready=true, задача не суспендится | ✅ (добавлен) |
 | X31 | `reattach_cross_runner_migration` | 2 раннера: задача мигрирует между ними через reattach_router::redirect | ✅ (добавлен) |
@@ -871,61 +944,65 @@ framework containers. Чанки ≤ 4096 обслуживаются `std::pmr::
 В блоке `if tests_enabled` добавлены coverage-флаги, передача `link_args` в `executable(...)`.
 
 ### discover_tests.py
-Исправить: добавить поддержку флага `--list-only` чтобы list-режим не запускал тесты полного прохода. Если передан `--list-only` — выполнить `--gtest_list_tests`. Иначе — обычный запуск с `--gtest_filter`.
-
-### scripts/coverage.sh
-Создать скрипт (опционально, см. выше).
+Реализован lexer-based source discovery с командами `discover` и `verify`.
+`discover` выдаёт полные GTest names из всех переданных split fixture sources,
+не принимая упоминания макросов в comments/literals за тесты. `verify` запускает
+`ace_tests --gtest_list_tests` и завершает проверку ошибкой при missing или
+unexpected names. Дубликаты, malformed declarations и parameterized macros
+отклоняются. Семь unit tests проверяют comments/literals, multiline `TEST` и
+`TEST_F`, дубликаты, disabled tests, parameterized macros, runtime mismatch и
+парсинг disabled runtime names.
 
 ---
 
 ## Карта fixture-классов (итоговая)
 
-| Fixture | Наследует | Статус | Тестов (план/факт) |
-|---------|----------|--------|---------------------|
-| `base_fixture` | `::testing::Test` | ✅ существующий + расширен | —/17 (io/kernelic/udp/tcp/reattach) |
-| `context_fixture` | `base_fixture` | ✅ | 5→13 (✅ 13) |
-| `channel_fixture` | `base_fixture` | ✅ | 1→1 |
-| `timer_fixture` | `base_fixture` | ✅ | 5→10 (✅ 10) |
-| `yield_fixture` | `base_fixture` | ✅ **добавлен** (automaton) | —→7 (✅ 7) |
-| `cutex_fixture` | `base_fixture` | ✅ | 4→4 |
-| `spawn_fixture` | `base_fixture` | ✅ | 6→10 (✅ 10) |
-| `socket_echo_fixture` | `base_fixture` | ✅ | 2→2 |
-| `fs_fixture` | `base_fixture` | ✅ | 1→4 (✅ 4) |
-| `queue_fixture` | `::testing::Test` | ✅ | 10→10 (✅ 10) |
-| `omniptr_fixture` | `::testing::Test` | ✅ (+lifetime 2) | 13→12 (✅ 12) |
-| `id_alloc_fixture` | `::testing::Test` | ✅ | 4→3 (✅ 3) |
-| `moving_average_fixture` | `::testing::Test` | ✅ | 4→7 (✅ 7) |
-| `future_traits_fixture` | `::testing::Test` | ✅ | 8→8 (✅ 8) |
-| `promise_traits_fixture` | `base_fixture` | ✅ | 12→8 (✅ 8) |
-| `router_slot_fixture` | `::testing::Test` | ✅ | 10→8 (✅ 8) |
-| `signal_fixture` | `base_fixture` | ✅ | 6→4 (✅ 4) |
-| `control_block_fixture` | `::testing::Test` | ✅ | 18→15 (✅ 15) |
-| `runner_fixture` | `base_fixture` | ✅ | 21→10 (✅ 10, suspending_task_run починен) |
-| `dispatcher_fixture` | `base_fixture` | ✅ | 14→8 (✅ 8) |
-| `io_buffer_fixture` | `::testing::Test` | ✅ | 27→25 (✅ 25) |
-| `io_entity_fixture` | `::testing::Test` | ✅ | 9→9 (✅ 9) |
-| `io_hanged_fixture` | `::testing::Test` | ✅ | 5→5 (✅ 5) |
-| `io_any_fixture` | `::testing::Test` | ✅ | 6→6 (✅ 6) |
-| `console_fixture` | `::testing::Test` | ✅ | 9→4 (✅ 4) |
-| `cross_mechanic_fixture` | `base_fixture` | ✅ | 25→17 (✅ 17, включая переоткрытый cancel_spawned_with_channel) |
-| `spawn_extra_fixture` | `base_fixture` | ✅ | —→12 (✅ 12) |
-| `compose_extra_fixture` | `base_fixture` | ✅ | —→3 (✅ 3) |
-| `channel_extra_fixture` | `base_fixture` | ✅ | —→4 (✅ 4) |
-| `cutex_extra_fixture` | `base_fixture` | ✅ | —→5 (✅ 5) |
-| `get_runner_fixture` | `base_fixture` | ✅ | —→1 (✅ 1) |
-| `backup_fixture` | `base_fixture` | ✅ **добавлен** (backup/insure/emergency) | —→20 (✅ 20) |
-| `arena_fixture` | `::testing::Test` | ✅ (shared arena) | —→18 (✅ 18) |
+Источник истины — `python3 discover_tests.py discover tests/*_fixture.cpp`.
+Каждая строка ниже соответствует одному split source file; counts включают только
+активные `TEST`/`TEST_F`, которые source discovery передаёт Meson.
 
-**Итого:** 34 fixture-класса, **276 тестов** (269 существующих + 7 новых);
-в meson-режиме 276 зарегистрированных прогонов, все активные.
+| Fixture source | Fixture | GTests |
+|----------------|---------|-------:|
+| `tests/arena_fixture.cpp` | `arena_fixture` | 18 |
+| `tests/backup_fixture.cpp` | `backup_fixture` | 20 |
+| `tests/base_fixture.cpp` | `base_fixture` | 18 |
+| `tests/channel_extra_fixture.cpp` | `channel_extra_fixture` | 4 |
+| `tests/channel_fixture.cpp` | `channel_fixture` | 1 |
+| `tests/compose_extra_fixture.cpp` | `compose_extra_fixture` | 3 |
+| `tests/console_fixture.cpp` | `console_fixture` | 4 |
+| `tests/context_fixture.cpp` | `context_fixture` | 13 |
+| `tests/control_block_fixture.cpp` | `control_block_fixture` | 14 |
+| `tests/cross_mechanic_fixture.cpp` | `cross_mechanic_fixture` | 14 |
+| `tests/cutex_extra_fixture.cpp` | `cutex_extra_fixture` | 5 |
+| `tests/cutex_fixture.cpp` | `cutex_fixture` | 4 |
+| `tests/dispatcher_fixture.cpp` | `dispatcher_fixture` | 7 |
+| `tests/fs_fixture.cpp` | `fs_fixture` | 4 |
+| `tests/future_traits_fixture.cpp` | `future_traits_fixture` | 8 |
+| `tests/get_runner_fixture.cpp` | `get_runner_fixture` | 1 |
+| `tests/id_alloc_fixture.cpp` | `id_alloc_fixture` | 3 |
+| `tests/io_any_fixture.cpp` | `io_any_fixture` | 6 |
+| `tests/io_buffer_fixture.cpp` | `io_buffer_fixture` | 25 |
+| `tests/io_entity_fixture.cpp` | `io_entity_fixture` | 18 |
+| `tests/io_hanged_fixture.cpp` | `io_hanged_fixture` | 5 |
+| `tests/moving_average_fixture.cpp` | `moving_average_fixture` | 7 |
+| `tests/omniptr_fixture.cpp` | `omniptr_fixture` | 12 |
+| `tests/promise_traits_fixture.cpp` | `promise_traits_fixture` | 8 |
+| `tests/queue_fixture.cpp` | `queue_fixture` | 10 |
+| `tests/router_slot_fixture.cpp` | `router_slot_fixture` | 9 |
+| `tests/runner_fixture.cpp` | `runner_fixture` | 8 |
+| `tests/signal_fixture.cpp` | `signal_fixture` | 4 |
+| `tests/socket_echo_fixture.cpp` | `socket_echo_fixture` | 2 |
+| `tests/spawn_extra_fixture.cpp` | `spawn_extra_fixture` | 8 |
+| `tests/spawn_fixture.cpp` | `spawn_fixture` | 10 |
+| `tests/timer_fixture.cpp` | `timer_fixture` | 9 |
+| `tests/yield_fixture.cpp` | `yield_fixture` | 8 |
+| **Итого: 33 файла** | | **290** |
 
-> Примечание: `timer_parallel_fixture` и `service_fixture`/`io_query_fixture`/
-> `kernelic_fixture`/`clock_fixture`/`entry_fixture` из ранней версии плана не
-> реализованы как отдельные fixture-классы — их сценарии покрыты внутри
-> `timer_fixture` (parallel) и `base_fixture` (io_query/kernelic/clock/udp/tcp).
-
-**Бенчмарки:** 21 бенчмарк в `benchmarks/` (BM1-BM20, см. `agents/BENCHMARKS.md`).
-Запуск: `meson setup build-bench -Dbenchmarks=true && ninja -C build-bench ace_benchmarks`
+Default Meson configuration (`ace_entry=false`) регистрирует **292** теста:
+290 GTests, `discover_tests.unit` и `ace_tests.discovery_consistency`. Конфигурация
+`ace_entry=true` дополнительно регистрирует `ace_entry.fallback`, всего 293.
+Наличие 290 discovered GTests не означает 290 successful GTests: B29 остаётся
+единственным известным failure текущих GCC-прогонов.
 
 ---
 
@@ -935,95 +1012,25 @@ framework containers. Чанки ≤ 4096 обслуживаются `std::pmr::
 
 | Файл | Назначение |
 |------|-----------|
-| `tests/main.cpp` | GTest entry point |
-| `tests/units.h` | Include-хаб: подключает все заголовки + `environment.h` + `fixtures.h` |
-| `tests/environment.h` | Все fixture-классы и вспомогательные корутины (helpers) |
-| `tests/tests.cpp` | Все тесты (`TEST_F` / `TEST`) |
+| `discover_tests.py` | Lexer-based `discover` и source/runtime `verify`; источник Meson registration names |
+| `tests/environment.h` | Общий `base_fixture` и shared test utilities; конкретные fixtures находятся рядом с тестами в split sources |
+| `tests/main.cpp` | GTest entry point для `ace_tests` |
+| `tests/discover_tests_test.py` | Семь unit tests discovery lexer/parser/verification |
+| `tests/entry_fallback.cpp` | Минимальный consumer без `co_main` для weak-entry fallback |
+| `tests/check_entry_fallback.py` | Проверяет ожидаемый exit code 126 fallback executable |
 
-### Расположение fixture-классов в `tests/environment.h`
+### Индексация split tests
 
-| Строки (примерно) | Fixture | Категория |
-|-------------------|---------|-----------|
-| 27–72 | `base_fixture` | Базовый |
-| 78–95 | `context_fixture` | async |
-| 97–123 | `channel_fixture` | channel |
-| 125–192 | `timer_fixture` | timeout |
-| 194–306 | `yield_fixture` | automaton |
-| 308–420 | `cutex_fixture` | cutex |
-| 422–642 | `spawn_fixture` | spawn/post/compose |
-| 644–723 | `socket_echo_fixture` | net |
-| 725–736 | `fs_fixture` | fs |
-| 738–750 | `queue_fixture` | tools |
-| 752–756 | `omniptr_fixture` | tools |
-| 758–762 | `id_alloc_fixture` | tools |
-| 764–768 | `moving_average_fixture` | tools |
-| 770–774 | `future_traits_fixture` | traits |
-| 776–788 | `promise_traits_fixture` | traits |
-| 790–816 | `router_slot_fixture` | traits |
-| 818–822 | `signal_fixture` | signal |
-| 824–871 | `control_block_fixture` | control |
-| 873–890 | `runner_fixture` | runner |
-| 892–907 | `dispatcher_fixture` | dispatcher |
-| 909–913 | `io_buffer_fixture` | io |
-| 915–924 | `io_entity_fixture` | io |
-| 926–930 | `io_any_fixture` | io |
-| 932–936 | `io_hanged_fixture` | io |
-| 938–942 | `console_fixture` | console |
-| 944–1004 | `cross_mechanic_fixture` | integration |
-| 1006–1023 | `spawn_extra_fixture` | futures |
-| 1025–1047 | `compose_extra_fixture` | compose |
-| 1049–1060 | `channel_extra_fixture` | channel |
-| 1062–1083 | `cutex_extra_fixture` | cutex |
-| 1085–1093 | `get_runner_fixture` | futures |
-| 1082–1140 | `backup_fixture` | futures (backup/insure/emergency) |
-| 1175–1211 | `arena_fixture` | core (arena) |
+Тесты и fixture-specific helpers расположены в 33 файлах
+`tests/*_fixture.cpp`; точные counts приведены в карте выше. Source discovery:
 
-### Расположение тестов в `tests/tests.cpp`
+```bash
+python3 discover_tests.py discover tests/*_fixture.cpp
+```
 
-| Строки | Fixture | Количество тестов |
-|--------|---------|-------------------|
-| 9–48 | `context_fixture` | 5 (базовые) |
-| 49–74 | `timer_fixture` | 3 (or/and/or_with_promise) |
-| 76–163 | `yield_fixture` | 7 (automaton) |
-| 164–182 | `fs_fixture` + `channel_fixture` | 2 |
-| 183–208 | `timer_fixture` | 1 (do_timer_on_runner_test) |
-| 209–234 | `timer_fixture` | 1 (do_expire_on_runner_test) |
-| 236–258 | `cutex_fixture` | 2 (race) |
-| 259–297 | `timer_fixture` | 1 (parallel) |
-| 298–315 | `socket_echo_fixture` | 2 |
-| 316–441 | `spawn_fixture` | 10 |
-| 441–502 | `cutex_fixture` | 2 (cancel) |
-| 503–672 | `queue_fixture` | 10 |
-| 673–969 | `omniptr_fixture` (+2 lifetime) | 12 |
-| 970–989 | `id_alloc_fixture` | 3 |
-| 990–1061 | `moving_average_fixture` | 7 |
-| 1062–1168 | `future_traits_fixture` | 8 |
-| 1169–1283 | `promise_traits_fixture` | 8 |
-| 1284–1380 | `router_slot_fixture` | 8 |
-| 1381–1563 | `control_block_fixture` | 15 |
-| 1564–1634 | `signal_fixture` | 4 |
-| 1635–1718 | `runner_fixture` | 8 (suspending_task_run починен) |
-| 1719–1821 | `dispatcher_fixture` | 7 |
-| 1822–2128 | `io_buffer_fixture` | 25 |
-| 2118–2231 | `io_entity_fixture` | 9 |
-| 2232–2272 | `io_any_fixture` | 6 |
-| 2273–2316 | `io_hanged_fixture` | 5 |
-| 2317–2348 | `console_fixture` | 4 |
-| 2349–2444 | `context_fixture` (async ext) | 8 |
-| 2445–2565 | `spawn_extra_fixture` | 8 |
-| 2566–2627 | `compose_extra_fixture` | 3 |
-| 2628–2715 | `channel_extra_fixture` | 4 |
-| 2716–2828 | `cutex_extra_fixture` | 5 |
-| 2829–2831 | `get_runner_fixture` | 1 |
-| 2832–3240 | `cross_mechanic_fixture` | 17 (включая переоткрытый cancel_spawned_with_channel) |
-| 3241–3320 | `timer_fixture` (timeout ext) | 3 |
-| 3321–3400 | `fs_fixture` (fs ext) | 3 |
-| 3401–3470 | `base_fixture` (kernelic: nop, pipe r/w, close, iovec, register_files, overflow) | 6 |
-| 3471–3650 | `base_fixture` (channel bounded/pending/spsc/mpmc, get_current_pool, router, reattach×3, udp, tcp) | 14 |
-| 3749–4237 | `backup_fixture` | 20 |
-| 4240–4800 | `arena_fixture` | 18 |
-
-> ⚠️ Номера строк приблизительные и сдвигаются при правках. Источник истины —
-> `grep -n '^TEST' tests/tests.cpp`.
+Команда возвращает 290 уникальных active GTest names. Meson выполняет эту же
+команду при setup, регистрирует каждый name отдельным `--gtest_filter`, а
+`ace_tests.discovery_consistency` через `verify` подтверждает совпадение списка
+source declarations с `ace_tests --gtest_list_tests`.
 
 ---

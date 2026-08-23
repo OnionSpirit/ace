@@ -145,7 +145,7 @@ namespace ace::core {
 
         /**
          * @brief Suspends the caller and starts both observers.
-         * @param external_coro Caller coroutine promise accessor.
+         * @details The coroutine promise accessor identifies the caller and its runner.
          * @return Always @c true — the caller is always suspended.
          */
         bool await_suspend(auto);
@@ -251,7 +251,7 @@ namespace ace::core {
 
         /**
          * @brief Suspends the caller and starts both observers.
-         * @param external_coro Caller coroutine promise accessor.
+         * @details The coroutine promise accessor identifies the caller and its runner.
          * @return Always @c true — the caller is always suspended.
          */
         bool await_suspend(auto);
@@ -353,7 +353,7 @@ namespace ace::core {
 
         /**
          * @brief Suspends the caller and starts all observers.
-         * @param external_coro Caller coroutine promise accessor.
+         * @details The coroutine promise accessor identifies the caller and its runner.
          * @return Always @c true — the caller is always suspended.
          */
         bool await_suspend(auto);
@@ -447,7 +447,7 @@ namespace ace::core {
 
         /**
          * @brief Suspends the caller and starts all observers.
-         * @param external_coro Caller coroutine promise accessor.
+         * @details The coroutine promise accessor identifies the caller and its runner.
          * @return Always @c true — the caller is always suspended.
          */
         bool await_suspend(auto);
@@ -480,7 +480,7 @@ namespace ace::core {
      * @tparam async_input           Input type of the responder (must match sender's resume type).
      * @tparam async_promise_rule_t  Suspension policy of the responder (default: @c differed).
      * @param sender     The upstream future.
-     * @param responder  The responder coroutine (takes sender's result as argument).
+     * The responder function type identifies the coroutine that receives the sender's result.
      * @return An @c ace::promise<async_return> that represents the composed operation.
      */
     template <
@@ -682,12 +682,12 @@ struct ACE_OR_AWAIT_FUTURE_SPACE or_await_router final : runner_router {
 };
 
 
-ACE_OR_AWAIT_FUTURE_MEMBER(bool)
-/**
+/*
  * @brief Creates and posts both observer tasks, then registers the race router.
  * @param external_coro Caller coroutine promise accessor.
  * @return Always @c true — the caller is always suspended.
  */
+ACE_OR_AWAIT_FUTURE_MEMBER(bool)
 await_suspend(auto external_coro) {
     auto* runner_ptr = external_coro.promise()._runner.template as<runner>();
     // NOTE: Creating observers for each futures
@@ -751,12 +751,12 @@ struct ACE_AND_AWAIT_FUTURE_SPACE and_await_router final : runner_router {
 };
 
 
-ACE_AND_AWAIT_FUTURE_MEMBER(bool)
-/**
+/*
  * @brief Creates and posts both observer tasks, then registers the AND router.
  * @param external_coro Caller coroutine promise accessor.
  * @return Always @c true — the caller is always suspended.
  */
+ACE_AND_AWAIT_FUTURE_MEMBER(bool)
 await_suspend(auto external_coro) {
     auto* runner_ptr = external_coro.promise()._runner.template as<runner>();
     // NOTE: Creating observers for each futures
@@ -818,12 +818,12 @@ struct ACE_AND_AWAIT_COMPOSED_FUTURE_SPACE and_await_composed_router final : run
 };
 
 
-ACE_AND_AWAIT_COMPOSED_FUTURE_MEMBER(bool)
-/**
+/*
  * @brief Creates and posts all observer tasks, then registers the variadic AND router.
  * @param external_coro Caller coroutine promise accessor.
  * @return Always @c true — the caller is always suspended.
  */
+ACE_AND_AWAIT_COMPOSED_FUTURE_MEMBER(bool)
 await_suspend(auto external_coro) {
     auto* runner_ptr = external_coro.promise()._runner.template as<runner>();
     // NOTE: Creating observers for each futures
@@ -885,12 +885,12 @@ struct ACE_OR_AWAIT_COMPOSED_FUTURE_SPACE or_await_composed_router final : runne
 };
 
 
-ACE_OR_AWAIT_COMPOSED_FUTURE_MEMBER(bool)
-/**
+/*
  * @brief Creates and posts all observer tasks, then registers the variadic OR router.
  * @param external_coro Caller coroutine promise accessor.
  * @return Always @c true — the caller is always suspended.
  */
+ACE_OR_AWAIT_COMPOSED_FUTURE_MEMBER(bool)
 await_suspend(auto external_coro) {
     auto* runner_ptr = external_coro.promise()._runner.template as<runner>();
     // NOTE: Creating observers for each futures
@@ -1111,6 +1111,8 @@ operator or(ace::core::or_await_composed<composed_future_ts...>& composed_future
         std::tuple_cat(composed_future._futures, std::tie(r_future))
     );
 }
+
+///@}
 
 // ========================================- OUTPUT COMPOSE CREATORS -==================================================
 

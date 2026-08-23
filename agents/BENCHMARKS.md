@@ -55,8 +55,8 @@ wrap-зависимость `google-benchmark` и цель `ace_benchmarks`.
 | Файл | Назначение |
 |------|-----------|
 | `benchmarks/main.cpp` | Google Benchmark entry point. |
-| `benchmarks/environment.h` | Helpers `configure_runners`, `reset_runners`, `fetch(ch)`. |
-| `benchmarks/benchmarks.cpp` | Сценарии BM1-BM20, всего 21 benchmark function. |
+| `benchmarks/environment.h` | 4 helpers: `configure_runners`, `reset_runners`, `fetch_into`, `fetch`. |
+| `benchmarks/benchmarks.cpp` | 21 benchmark scenarios (BM1-BM20) and 26 named coroutine helpers. |
 
 ## Инвентарь
 
@@ -86,17 +86,17 @@ wrap-зависимость `google-benchmark` и цель `ace_benchmarks`.
 ## Происхождение нагрузочных сценариев
 
 Сценарии BM1-BM6 были выделены из медленных correctness-тестов. Исходные тесты
-остаются в `tests/tests.cpp`, а объёмы benchmark-версий подобраны так, чтобы одна
-итерация обычно занимала около 0.1-0.5 s.
+находятся в отдельных fixture-файлах под `tests/`, а объёмы benchmark-версий
+подобраны так, чтобы одна итерация обычно занимала около 0.1-0.5 s.
 
 | Исходный тест | Нагрузка | Бенчмарк |
 |---------------|----------|----------|
-| `timer_fixture.do_timer_on_runner_parallel_test` | 100k таймеров на 4 runner-ах | `bm_timer_parallel` (BM3) |
-| `cutex_fixture.cutex_race` | 800k capture/release операций | `bm_cutex_race_capture` (BM1) |
-| `cutex_fixture.cutex_race_resheduling` | 800k capture/sync операций | `bm_cutex_race_sync` (BM2) |
-| `cross_mechanic_fixture.multi_runner_cutex_count` | 16k операций на 4 runner-ах | `bm_multi_runner_cutex` (BM6) |
-| `cross_mechanic_fixture.stress_spawn_cancel` | 100 spawn/cancel/join циклов | `bm_spawn_cancel` (BM4) |
-| timer/expire runner tests | 15 длительностей 0..501 ms | `bm_timer_ordering` (BM5) |
+| `tests/timer_fixture.cpp`: `timer_fixture.do_timer_on_runner_parallel_test` | 100k таймеров на 4 runner-ах | `bm_timer_parallel` (BM3) |
+| `tests/cutex_fixture.cpp`: `cutex_fixture.cutex_race` | 800k capture/release операций | `bm_cutex_race_capture` (BM1) |
+| `tests/cutex_fixture.cpp`: `cutex_fixture.cutex_race_resheduling` | 800k capture/sync операций | `bm_cutex_race_sync` (BM2) |
+| `tests/cross_mechanic_fixture.cpp`: `cross_mechanic_fixture.multi_runner_cutex_count` | 16k операций на 4 runner-ах | `bm_multi_runner_cutex` (BM6) |
+| `tests/cross_mechanic_fixture.cpp`: `cross_mechanic_fixture.stress_spawn_cancel` | 100 spawn/cancel/join циклов | `bm_spawn_cancel` (BM4) |
+| `tests/timer_fixture.cpp`: timer/expire runner tests | 15 длительностей 0..501 ms | `bm_timer_ordering` (BM5) |
 
 ## Интерпретация результатов
 
@@ -107,3 +107,31 @@ wrap-зависимость `google-benchmark` и цель `ace_benchmarks`.
 - Для I/O отдельно фиксировать kernel, версию liburing и характеристики устройства.
 - Обнаруженный функциональный дефект заносить в `agents/ISSUES.md`; benchmark не
   должен скрывать ошибку или менять ожидаемый контракт ради стабильного числа.
+
+## Проверка и результаты 2026-08-23
+
+- Все 21 сценария успешно собраны и прошли smoke-прогон командой
+  `./build/ace_benchmarks --benchmark_min_time=0.001s`; отказов benchmark-сценариев
+  не было.
+- Полный трёхкратный прогон сохранён в
+  `/tmp/opencode/ace-benchmark-current.json`. Он пересекался по времени с
+  ASan shuffle-прогоном и выполнялся при load average 5.50, поэтому его результаты
+  несопоставимы с baseline.
+- Отдельный целевой трёхкратный прогон шести baseline-сценариев сохранён в
+  `/tmp/opencode/ace-benchmark-current-targeted.json`; load average составлял
+  8.60.
+
+Медианы real time, baseline -> current:
+
+| Бенчмарк | Baseline, ms | Current, ms | Отношение |
+|----------|-------------:|------------:|----------:|
+| `automaton_ping` | 10.331 | 11.685 | 1.13x |
+| `channel_push_pull` | 6.023 | 6.814 | 1.13x |
+| `cutex_race_capture` | 296.678 | 1317.024 | 4.44x |
+| `pipe_io_roundtrip` | 64.224 | 76.279 | 1.19x |
+| `spawn_join` | 5.374 | 6.424 | 1.20x |
+| `timer_ordering` | 505.911 | 505.265 | 1.00x |
+
+Из-за различающейся и высокой фоновой нагрузки выводов об изменении
+производительности делать нельзя. Текущие числа фиксируют только результат
+прогонов; ни один benchmark-сценарий не завершился с ошибкой.

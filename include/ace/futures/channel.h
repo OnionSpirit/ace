@@ -426,22 +426,22 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_router : runner_router {
 };
 
 
-ACE_FUTURE_CHANNEL_MEMBER(void)
-/**
+/*
  * @brief Wakes up one waiter, if any.
  */
+ACE_FUTURE_CHANNEL_MEMBER(void)
 notify() {
     if (auto* node = _waiters.pop_node(); node) [[likely]]
         core::runner::reattach(node);
 }
 
 
-ACE_FUTURE_CHANNEL_MEMBER(bool)
-/**
+/*
  * @brief Pushes data to the channel (lvalue overload).
  * @param data Data to push.
  * @return @c false if the inner buffer overflowed.
  */
+ACE_FUTURE_CHANNEL_MEMBER(bool)
 push(data_t& data) {
     if (_container.push(std::forward<data_t>(data))) [[likely]] {
         notify();
@@ -451,12 +451,12 @@ push(data_t& data) {
 }
 
 
-ACE_FUTURE_CHANNEL_MEMBER(bool)
-/**
+/*
  * @brief Pushes data to the channel (rvalue overload).
  * @param data Data to push.
  * @return @c false if the inner buffer overflowed.
  */
+ACE_FUTURE_CHANNEL_MEMBER(bool)
 push(data_t&& data) {
     if (_container.push(std::forward<data_t>(data))) [[likely]] {
         notify();
@@ -465,11 +465,11 @@ push(data_t&& data) {
     return false;
 }
 
-ACE_FUTURE_CHANNEL_MEMBER(ace::promise<>)
-/**
+/*
  * @brief Pushes data, suspending until a vacant spot appears (lvalue overload).
  * @param data Data to push.
  */
+ACE_FUTURE_CHANNEL_MEMBER(ace::promise<>)
 pending_push(data_t data) {
     while (not _container.push(std::forward<data_t>(data))) [[unlikely]]
         co_await suspend();
@@ -478,11 +478,11 @@ pending_push(data_t data) {
 }
 
 
-ACE_FUTURE_CHANNEL_MEMBER(ace::promise<>)
-/**
+/*
  * @brief Pushes data, suspending until a vacant spot appears (rvalue overload).
  * @param data Data to push.
  */
+ACE_FUTURE_CHANNEL_MEMBER(ace::promise<>)
 pending_push(data_t&& data) {
     while (not _container.push(std::forward<data_t>(data))) [[unlikely]]
         co_await suspend();

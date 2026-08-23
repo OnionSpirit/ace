@@ -201,11 +201,15 @@ namespace ace::fs {
         -> open_query { return open_query { std::move(*this), _path.c_str(), flags, mode }; }
 
         /**
-         * @brief Opens the file for rewrite (truncate + read/write), creating it if missing.
-         * @return Awaitable resolving to a @c file_link.
+         * @brief Opens the file for rewrite, creating it if it does not exist.
+         * @details Uses @c O_CREAT | @c O_TRUNC | @c O_RDWR, so an existing
+         * file is truncated before read/write access. Newly created files use
+         * mode @c 0777, subject to the process umask.
+         * @return Awaitable that consumes this entity and resolves to the
+         * opened @c file_link.
          */
         ACE_AWAIT_NODISCARD auto open_rewrite()
-        -> open_query { return open_query { std::move(*this), _path.c_str(), O_CREAT | O_RDWR, 0777 }; }
+        -> open_query { return open_query { std::move(*this), _path.c_str(), O_CREAT | O_TRUNC | O_RDWR, 0777 }; }
 
         /**
          * @brief Opens the file read-only.

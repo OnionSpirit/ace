@@ -1,11 +1,211 @@
 #include "environment.h"
 
+namespace {
+
+ace::task cutex_capture_racer(ace::cutex& mtx, std::string& count, int max) {
+    ace::guard guard(mtx);
+    for (int i = 0; i < max; ++i) {
+        co_await guard.capture();
+        count = std::to_string(std::stoi(count) + 1);
+        co_await guard.release();
+    }
+    co_return;
+}
+
+ace::task cutex_sync_racer(ace::cutex& mtx, std::string& count, int max) {
+    ace::guard guard(mtx);
+    for (int i = 0; i < max; ++i) {
+        co_await guard.sync();
+        count = std::to_string(std::stoi(count) + 1);
+        co_await guard.release();
+    }
+    co_return;
+}
+
+ace::task timer_waiter(std::chrono::milliseconds duration, ace::bus<long>& ch) {
+    const auto start = ace::services::clock::current_time();
+    co_await ace::timeout(duration);
+    const auto end = ace::services::clock::current_time();
+    ch << (end - start).count();
+    co_return;
+}
+
+ace::task spawn_cancel_child(int value, ace::bus<int>& result) {
+    co_await ace::timeout(std::chrono::seconds(10));
+    result << value;
+    co_return;
+}
+
+ace::task spawn_cancel_tasks(int count, ace::bus<int>& result) {
+    for (int i = 0; i < count; ++i) {
+        auto handle = co_await ace::spawn(spawn_cancel_child(i, result));
+        handle.cancel();
+        co_await handle.join();
+    }
+    result << 1;
+    co_return;
+}
+
+ace::task timer_warmup() {
+    co_await ace::timeout(1ms);
+    co_return;
+}
+
+ace::task valued_timer(std::chrono::milliseconds duration, ace::bus<int>& ch) {
+    co_await ace::timeout(duration);
+    ch << static_cast<int>(duration.count());
+    co_return;
+}
+
+ace::task channel_producer(int count, ace::bus<int>& ch) {
+    for (int i = 0; i < count; ++i)
+        ch << i;
+    co_return;
+}
+
+ace::task channel_consumer(int count, ace::bus<int>& ch) {
+    int sum = 0;
+    for (int i = 0; i < count; ++i)
+        sum += co_await ch.pull();
+    if (sum != count * (count - 1) / 2)
+        std::cerr << "[bench] channel sum mismatch\n";
+    co_return;
+}
+
+ace::task spawn_join_child(int value, ace::bus<int>& result) {
+    result << value;
+    co_return;
+}
+
+ace::task spawn_join_tasks(int count, ace::bus<int>& result) {
+    for (int i = 0; i < count; ++i) {
+        auto handle = co_await ace::spawn(spawn_join_child(i, result));
+        if (not co_await handle.join())
+            std::cerr << "[bench] spawn join failed\n";
+    }
+    result << 1;
+    co_return;
+}
+
+ace::task timeout_waiter(std::chrono::milliseconds duration, ace::bus<int>& ch) {
+    co_await ace::timeout(duration);
+    ch << 1;
+    co_return;
+}
+
+ace::task compose_and_tasks(int count) {
+    for (int i = 0; i < count; ++i)
+        co_await (ace::timeout(0ms) and ace::timeout(0ms));
+    co_return;
+}
+
+ace::task compose_or_tasks(int count) {
+    for (int i = 0; i < count; ++i)
+        co_await (ace::timeout(0ms) or ace::timeout(0ms));
+    co_return;
+}
+
+ace::task trivial_task() {
+    co_return;
+}
+
+ace::task pipe_roundtrip_worker(int read_fd, int write_fd, int count) {
+    std::string payload(256, 'x');
+    for (int i = 0; i < count; ++i) {
+        const int written = co_await ace::io::write_query(
+            write_fd, payload.data(), static_cast<unsigned>(payload.size()));
+        if (written != static_cast<int>(payload.size()))
+            co_return;
+        const int read = co_await ace::io::read_query(
+            read_fd, payload.data(), static_cast<unsigned>(payload.size()));
+        if (read != static_cast<int>(payload.size()))
+            co_return;
+    }
+    co_return;
+}
+
+ace::task pending_push_producer(int count, ace::bus<int>& ch) {
+    for (int i = 0; i < count; ++i)
+        co_await ch.pending_push(i);
+    co_return;
+}
+
+ace::task pending_push_consumer(int count, ace::bus<int>& ch) {
+    int sum = 0;
+    for (int i = 0; i < count; ++i)
+        sum += co_await ch.pull();
+    if (sum != count * (count - 1) / 2)
+        std::cerr << "[bench] pending_push sum mismatch\n";
+    co_return;
+}
+
+ace::task gather_runner(ace::bus<ace::core::runner*>& runners) {
+    auto* runner = co_await ace::get_runner();
+    runners << runner;
+    co_return;
+}
+
+ace::task reattach_hopper(
+    int count, ace::core::runner* first, ace::core::runner* second) {
+    for (int i = 0; i < count; ++i) {
+        co_await ace::reattach{first};
+        co_await ace::reattach{second};
+    }
+    co_return;
+}
+
+ace::task spawn_fire_forget_child(int value, ace::bus<int>& result) {
+    result << value;
+    co_return;
+}
+
+ace::task spawn_fire_forget_tasks(int count, ace::bus<int>& result) {
+    for (int i = 0; i < count; ++i)
+        co_await ace::spawn(spawn_fire_forget_child(i, result));
+    co_return;
+}
+
+ace::automaton<int> automaton_values(int count) {
+    for (int i = 0; i < count; ++i)
+        co_yield i;
+    co_return count;
+}
+
+ace::task consume_automaton(int count, ace::bus<int>& ch) {
+    auto handle = co_await ace::spawn(automaton_values(count));
+    for (int i = 0; i <= count; ++i) {
+        if (auto value = co_await handle.ping())
+            ch << *value;
+    }
+    co_return;
+}
+
+ace::task expire_waiter(
+    ace::services::timepoint_t deadline, ace::bus<int>& ch) {
+    co_await ace::expire(deadline);
+    ch << 1;
+    co_return;
+}
+
+ace::task compose_variadic_tasks(int count) {
+    for (int i = 0; i < count; ++i) {
+        co_await (ace::timeout(0ms)
+            and ace::timeout(0ms)
+            and ace::timeout(0ms));
+        co_await (ace::timeout(0ms)
+            or ace::timeout(0ms)
+            or ace::timeout(0ms));
+    }
+    co_return;
+}
+
+} // namespace
+
 // ==========================================================================
-// BM1 — cutex_race: многопоточная гонка на cooperative mutex
+// BM1 - cutex_race: multithreaded cooperative mutex contention
 // ==========================================================================
-// Проверяет пропускную способность cutex при высокой конкуренции.
-// 8 раннеров, каждый делает N инкрементов под защитой cutex.
-// Счётчик должен быть равен runners * N (атомарность соблюдена).
+// Measures cutex throughput under high contention. Eight runners each perform
+// N increments protected by the cutex; the final count verifies atomicity.
 
 static void bm_cutex_race_capture(benchmark::State& state) {
     const int runners = 8;
@@ -16,21 +216,8 @@ static void bm_cutex_race_capture(benchmark::State& state) {
         ace::cutex mtx;
         std::string shared_cnt {"0"};
 
-        // racer: инкрементирует shared_cnt под защитой cutex
-        // NOTE: lvalue lambda — rvalue-lambda корутины хранят указатель на
-        // оригинальный lambda (GCC), время жизни которого короче корутины.
-        auto racer = [](ace::cutex& mtx, std::string& cnt, int max) -> ace::task {
-            ace::guard crx(mtx);
-            for (int i = 0; i < max; ++i) {
-                co_await crx.capture();
-                cnt = std::to_string(std::stoi(cnt) + 1);
-                co_await crx.release();
-            }
-            co_return;
-        };
-
         for (int i = 0; i < runners; ++i)
-            ace::schedule(racer(mtx, shared_cnt, ops_per_racer));
+            ace::schedule(cutex_capture_racer(mtx, shared_cnt, ops_per_racer));
 
         ace::run();
         if (std::stoi(shared_cnt) != runners * ops_per_racer) {
@@ -44,10 +231,10 @@ static void bm_cutex_race_capture(benchmark::State& state) {
 BENCHMARK(bm_cutex_race_capture)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM2 — cutex_race_rescheduling: гонка с миграцией waiter-ов
+// BM2 - cutex_race_rescheduling: contention with waiter migration
 // ==========================================================================
-// Аналогично BM1 но с включённым rescheduling — waiter'ы мигрируют
-// на раннер освободителя для улучшения cache locality.
+// Matches BM1 with rescheduling enabled so waiters migrate to the releasing
+// runner to improve cache locality.
 
 static void bm_cutex_race_sync(benchmark::State& state) {
     const int runners = 8;
@@ -58,18 +245,8 @@ static void bm_cutex_race_sync(benchmark::State& state) {
         ace::cutex mtx;
         std::string shared_cnt {"0"};
 
-        auto racer = [](ace::cutex& mtx, std::string& cnt, int max) -> ace::task {
-            ace::guard crx(mtx);
-            for (int i = 0; i < max; ++i) {
-                co_await crx.sync();
-                cnt = std::to_string(std::stoi(cnt) + 1);
-                co_await crx.release();
-            }
-            co_return;
-        };
-
         for (int i = 0; i < runners; ++i)
-            ace::schedule(racer(mtx, shared_cnt, ops_per_racer));
+            ace::schedule(cutex_sync_racer(mtx, shared_cnt, ops_per_racer));
 
         ace::run();
         if (std::stoi(shared_cnt) != runners * ops_per_racer) {
@@ -83,11 +260,10 @@ static void bm_cutex_race_sync(benchmark::State& state) {
 BENCHMARK(bm_cutex_race_sync)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM3 — timer_parallel: массовые таймеры на clock/hierarchical_time_wheel
+// BM3 - timer_parallel: bulk timers on clock/hierarchical_time_wheel
 // ==========================================================================
-// Проверяет масштабируемость иерархического колеса времени.
-// Создаёт N таймеров с разными duration на 4 раннерах,
-// проверяет что все таймеры сработали и данные доставлены.
+// Measures hierarchical time wheel scaling by creating timers with varying
+// durations on four runners and verifying that every timer delivers a result.
 
 static void bm_timer_parallel(benchmark::State& state) {
     constexpr int runners = 4;
@@ -100,15 +276,6 @@ static void bm_timer_parallel(benchmark::State& state) {
     for (auto _ : state) {
         configure_runners(runners);
         ace::bus<long> ch;
-
-        // timer_waiter: ждёт duration и пишет elapsed в канал
-        auto timer_waiter = [](auto dur, ace::bus<long>& ch) -> ace::task {
-            const auto start = ace::services::clock::current_time();
-            co_await ace::timeout(dur);
-            const auto end = ace::services::clock::current_time();
-            ch << (end - start).count();
-            co_return;
-        };
 
         for (int i = 0; i < sets_count; ++i) {
             for (int q = 0; q < max_in_set; q += set_step) {
@@ -134,10 +301,10 @@ static void bm_timer_parallel(benchmark::State& state) {
 BENCHMARK(bm_timer_parallel)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM4 — spawn_cancel: массовый spawn + cancel
+// BM4 - spawn_cancel: bulk spawn and cancel
 // ==========================================================================
-// Проверяет что при массовом spawn и немедленном cancel нет утечек
-// памяти (control_block, ноды, роутеры). Dispatcher должен быть пуст.
+// Verifies that bulk spawn followed by immediate cancellation leaves no
+// control blocks, nodes, or routers in the dispatcher.
 
 static void bm_spawn_cancel(benchmark::State& state) {
     const int spawn_count = 100;
@@ -145,23 +312,7 @@ static void bm_spawn_cancel(benchmark::State& state) {
     for (auto _ : state) {
         ace::bus<int> result;
 
-        auto spawner = [](int n, ace::bus<int>& result) -> ace::task {
-            for (int i = 0; i < n; ++i) {
-                auto handle = co_await ace::spawn([&result, i]() -> ace::task {
-                    co_await ace::timeout(std::chrono::seconds(10));
-                    int v = i;
-                    result << v;
-                    co_return;
-                }());
-                handle.cancel();
-                co_await handle.join();
-            }
-            int v = 1;
-            result << v;
-            co_return;
-        };
-
-        ace::schedule(spawner(spawn_count, result));
+        ace::schedule(spawn_cancel_tasks(spawn_count, result));
         ace::run();
 
         if (not ace::empty()) {
@@ -174,57 +325,37 @@ static void bm_spawn_cancel(benchmark::State& state) {
 BENCHMARK(bm_spawn_cancel)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM5 — timer_ordering: порядок срабатывания таймеров (проверка clock/hierarchical_time_wheel)
+// BM5 - timer_ordering: timer delivery through clock/hierarchical_time_wheel
 // ==========================================================================
-// Проверяет что таймеры срабатывают в правильном порядке при разных duration.
-// Аналог unit-теста timer_fixture.do_timer_on_runner_test.
+// Verifies delivery for the durations used by timer_fixture runner tests.
 
 static void bm_timer_ordering(benchmark::State& state) {
     using namespace std::chrono_literals;
 
-    // Прогрев clock service: первый вызов timeout() инициализирует
-    // clock::touch() → spawn service → hierarchical_time_wheel. Без прогрева
-    // первая итерация бенчмарка может иметь другой тайминг из-за
-    // холодного старта инфраструктуры (service корутина + io_uring ring).
-    // Почему schedule+run а не прямой вызов: service должен работать
-    // в контексте раннера для корректной инициализации.
-    {
-        ace::bus<int> warmup_ch;
-        auto warmup = [&warmup_ch]() -> ace::task {
-            co_await ace::timeout(1ms);
-            co_return;
-        };
-        ace::schedule(warmup());
-        ace::run();
-    }
+    // Warm up the clock service because the first timeout initializes the
+    // service coroutine, hierarchical time wheel, and io_uring ring. The
+    // service must run in runner context, hence schedule followed by run.
+    ace::schedule(timer_warmup());
+    ace::run();
 
     for (auto _ : state) {
         ace::bus<int> ch;
 
-        auto timer_valued = [](auto dur, ace::bus<int>& ch) -> ace::task {
-            co_await ace::timeout(dur);
-            int v = static_cast<int>(
-                std::chrono::duration_cast<std::chrono::milliseconds>(dur).count()
-            );
-            ch << v;
-            co_return;
-        };
-
-        ace::schedule(timer_valued(501ms, ch));
-        ace::schedule(timer_valued(495ms, ch));
-        ace::schedule(timer_valued(450ms, ch));
-        ace::schedule(timer_valued(401ms, ch));
-        ace::schedule(timer_valued(395ms, ch));
-        ace::schedule(timer_valued(350ms, ch));
-        ace::schedule(timer_valued(300ms, ch));
-        ace::schedule(timer_valued(256ms, ch));
-        ace::schedule(timer_valued(250ms, ch));
-        ace::schedule(timer_valued(200ms, ch));
-        ace::schedule(timer_valued(150ms, ch));
-        ace::schedule(timer_valued(100ms, ch));
-        ace::schedule(timer_valued(50ms, ch));
-        ace::schedule(timer_valued(10ms, ch));
-        ace::schedule(timer_valued(0ms, ch));
+        ace::schedule(valued_timer(501ms, ch));
+        ace::schedule(valued_timer(495ms, ch));
+        ace::schedule(valued_timer(450ms, ch));
+        ace::schedule(valued_timer(401ms, ch));
+        ace::schedule(valued_timer(395ms, ch));
+        ace::schedule(valued_timer(350ms, ch));
+        ace::schedule(valued_timer(300ms, ch));
+        ace::schedule(valued_timer(256ms, ch));
+        ace::schedule(valued_timer(250ms, ch));
+        ace::schedule(valued_timer(200ms, ch));
+        ace::schedule(valued_timer(150ms, ch));
+        ace::schedule(valued_timer(100ms, ch));
+        ace::schedule(valued_timer(50ms, ch));
+        ace::schedule(valued_timer(10ms, ch));
+        ace::schedule(valued_timer(0ms, ch));
 
         ace::run();
         if (not ace::empty()) {
@@ -232,31 +363,16 @@ static void bm_timer_ordering(benchmark::State& state) {
             break;
         }
 
-        // Дренируем канал: schedule + run как в оригинальном fetch()
-        // Почему schedule + run а не прямой pull: канал наполняется
-        // асинхронно таймерами; drainer должен выполняться в контексте
-        // раннера чтобы co_await ch.pull() корректно работал.
-        std::vector<int> res;
-        auto drain = [&ch, &res]() -> ace::task {
-            while (not ch.empty()) {
-                int v = co_await ch.pull();
-                res.push_back(v);
-            }
-            co_return;
-        };
-        ace::schedule(drain());
-        ace::run();
+        // Drain in runner context so channel pull can suspend correctly.
+        std::vector<int> res = fetch(ch);
         if (not ace::empty()) {
             state.SkipWithError("Dispatcher not empty after drain");
             break;
         }
 
-        // NOTE: Проверяем что каждый таймер сработал и доставлен ровно один раз.
-        // NOTE: Почему не порядок: таймеры одного слота колеса пробуждаются в
-        // NOTE: одном advance в порядке вставки (канал наполняется не по
-        // NOTE: дедлайнам, а по порядку реаттача), поэтому строгая монотонность
-        // NOTE: значений в канале не гарантирована — гарантировано лишь
-        // NOTE: присутствие всех длительностей.
+        // Check that every timer fired exactly once. Timers sharing a wheel slot
+        // wake during one advance in insertion order, so channel values are not
+        // guaranteed to be strictly ordered by deadline.
         if (res.size() == 15) {
             for (long d : { 501l, 495l, 450l, 401l, 395l, 350l, 300l, 256l, 250l, 200l, 150l, 100l, 50l, 10l, 0l }) {
                 if (std::ranges::find(res, d) == res.end()) {
@@ -269,15 +385,15 @@ static void bm_timer_ordering(benchmark::State& state) {
         }
     }
 
-    state.SetItemsProcessed(state.iterations() * 16);
+    state.SetItemsProcessed(state.iterations() * 15);
 }
 BENCHMARK(bm_timer_ordering)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM6 — multi_runner_cutex: целостность счётчика под cutex
+// BM6 - multi_runner_cutex: counter integrity under cutex
 // ==========================================================================
-// 4 раннера, каждый инкрементирует счётчик N раз под cutex.
-// Проверяет что финальное значение = runners * N.
+// Four runners increment a shared counter under cutex and verify that the final
+// value equals runners multiplied by increments per racer.
 
 static void bm_multi_runner_cutex(benchmark::State& state) {
     const int runners = 4;
@@ -288,18 +404,8 @@ static void bm_multi_runner_cutex(benchmark::State& state) {
         ace::cutex mtx;
         std::string counter_str = "0";
 
-        auto racer = [](ace::cutex& mtx, std::string& cnt, int max) -> ace::task {
-            auto g = ace::guard(mtx);
-            for (int i = 0; i < max; ++i) {
-                co_await g.capture();
-                cnt = std::to_string(std::stoi(cnt) + 1);
-                co_await g.release();
-            }
-            co_return;
-        };
-
         for (int r = 0; r < runners; ++r)
-            ace::schedule(racer(mtx, counter_str, incs_per_racer));
+            ace::schedule(cutex_capture_racer(mtx, counter_str, incs_per_racer));
 
         ace::run();
         if (std::stoi(counter_str) != runners * incs_per_racer) {
@@ -313,10 +419,10 @@ static void bm_multi_runner_cutex(benchmark::State& state) {
 BENCHMARK(bm_multi_runner_cutex)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM7 — channel_push_pull: пропускная способность dyn::bus канала
+// BM7 - channel_push_pull: dyn::bus channel throughput
 // ==========================================================================
-// Producer пушит N значений, consumer вытягивает их через co_await pull().
-// Измеряет полный цикл push→pull в контексте одного раннера.
+// A producer pushes N values and a consumer pulls them, measuring the complete
+// push-to-pull cycle on one runner.
 
 static void bm_channel_push_pull(benchmark::State& state) {
     constexpr int messages = 100000;
@@ -324,25 +430,9 @@ static void bm_channel_push_pull(benchmark::State& state) {
     for (auto _ : state) {
         ace::bus<int> ch;
 
-        auto producer = [](int n, ace::bus<int>& ch) -> ace::task {
-            for (int i = 0; i < n; ++i)
-                ch << i;
-            co_return;
-        };
-
-        auto consumer = [](int n, ace::bus<int>& ch) -> ace::task {
-            int sum = 0;
-            for (int i = 0; i < n; ++i)
-                sum += co_await ch.pull();
-            if (sum != n * (n - 1) / 2)
-                std::cerr << "[bench] channel sum mismatch\n";
-            co_return;
-        };
-
-        // NOTE: Потребитель должен быть зарегистрирован ДО продюсера —
-        // иначе часть push() уйдёт в буфер, и pull() не суспендится.
-        ace::schedule(consumer(messages, ch));
-        ace::schedule(producer(messages, ch));
+        // Register the consumer first so pull suspends before values are pushed.
+        ace::schedule(channel_consumer(messages, ch));
+        ace::schedule(channel_producer(messages, ch));
         ace::run();
 
         if (not ace::empty()) {
@@ -355,10 +445,10 @@ static void bm_channel_push_pull(benchmark::State& state) {
 BENCHMARK(bm_channel_push_pull)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM8 — spawn_join: задержка spawn + join цикла
+// BM8 - spawn_join: spawn and join cycle latency
 // ==========================================================================
-// Спавнит N тривиальных задач и дожидается каждую через handle.join().
-// Характеризует накладные расходы на создание/уничтожение задач.
+// Spawns N trivial tasks and joins each handle to measure task creation and
+// destruction overhead.
 
 static void bm_spawn_join(benchmark::State& state) {
     constexpr int tasks = 20000;
@@ -366,22 +456,7 @@ static void bm_spawn_join(benchmark::State& state) {
     for (auto _ : state) {
         ace::bus<int> result;
 
-        auto spawner = [](int n, ace::bus<int>& result) -> ace::task {
-            for (int i = 0; i < n; ++i) {
-                auto handle = co_await ace::spawn([&result, i]() -> ace::task {
-                    int v = i;
-                    result << v;
-                    co_return;
-                }());
-                if (not co_await handle.join())
-                    std::cerr << "[bench] spawn join failed\n";
-            }
-            int v = 1;
-            result << v;
-            co_return;
-        };
-
-        ace::schedule(spawner(tasks, result));
+        ace::schedule(spawn_join_tasks(tasks, result));
         ace::run();
 
         if (not ace::empty()) {
@@ -394,10 +469,10 @@ static void bm_spawn_join(benchmark::State& state) {
 BENCHMARK(bm_spawn_join)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM9 — timeout_short: пропускная способность clock при коротких таймерах
+// BM9 - timeout_short: clock throughput for short timers
 // ==========================================================================
-// Создаёт N таймеров по 1ms на 1 раннере — измеряет скорость
-// subscribe/release иерархического колеса времени.
+// Creates N one-millisecond timers on one runner to measure hierarchical time
+// wheel subscribe and release throughput.
 
 static void bm_timeout_short(benchmark::State& state) {
     using namespace std::chrono_literals;
@@ -406,15 +481,8 @@ static void bm_timeout_short(benchmark::State& state) {
     for (auto _ : state) {
         ace::bus<int> ch;
 
-        auto waiter = [](auto dur, ace::bus<int>& ch) -> ace::task {
-            co_await ace::timeout(dur);
-            int v = 1;
-            ch << v;
-            co_return;
-        };
-
         for (int i = 0; i < timers; ++i)
-            ace::schedule(waiter(1ms, ch));
+            ace::schedule(timeout_waiter(1ms, ch));
 
         ace::run();
 
@@ -422,16 +490,7 @@ static void bm_timeout_short(benchmark::State& state) {
             state.SkipWithError("Dispatcher not empty after timers");
         }
 
-        std::vector<int> res;
-        auto drain = [&ch, &res]() -> ace::task {
-            while (not ch.empty()) {
-                int v = co_await ch.pull();
-                res.push_back(v);
-            }
-            co_return;
-        };
-        ace::schedule(drain());
-        ace::run();
+        std::vector<int> res = fetch(ch);
         if (static_cast<int>(res.size()) != timers) {
             state.SkipWithError("Timer count mismatch");
         }
@@ -442,23 +501,17 @@ static void bm_timeout_short(benchmark::State& state) {
 BENCHMARK(bm_timeout_short)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM10 — compose_and_or: накладные расходы and/or композиций
+// BM10 - compose_and_or: AND/OR composition overhead
 // ==========================================================================
-// N раз co_await (a and b) / (a or b) с мгновенными (0ms) таймерами.
-// Характеризует стоимость observer-задач и router-ов.
+// Repeats AND/OR composition of immediate timers to measure observer task and
+// router overhead.
 
 static void bm_compose_and(benchmark::State& state) {
     using namespace std::chrono_literals;
     constexpr int compositions = 5000;
 
     for (auto _ : state) {
-        auto composer = [](int n) -> ace::task {
-            for (int i = 0; i < n; ++i)
-                co_await (ace::timeout(0ms) and ace::timeout(0ms));
-            co_return;
-        };
-
-        ace::schedule(composer(compositions));
+        ace::schedule(compose_and_tasks(compositions));
         ace::run();
 
         if (not ace::empty()) {
@@ -475,13 +528,7 @@ static void bm_compose_or(benchmark::State& state) {
     constexpr int compositions = 5000;
 
     for (auto _ : state) {
-        auto composer = [](int n) -> ace::task {
-            for (int i = 0; i < n; ++i)
-                co_await (ace::timeout(0ms) or ace::timeout(0ms));
-            co_return;
-        };
-
-        ace::schedule(composer(compositions));
+        ace::schedule(compose_or_tasks(compositions));
         ace::run();
 
         if (not ace::empty()) {
@@ -494,18 +541,17 @@ static void bm_compose_or(benchmark::State& state) {
 BENCHMARK(bm_compose_or)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM11 — schedule_throughput: пропускная способность диспетчера
+// BM11 - schedule_throughput: dispatcher throughput
 // ==========================================================================
-// N тривиальных задач: schedule() + run() до полного опустошения.
-// Характеризует стоимость attach/yank/release цикла раннера.
+// Schedules N trivial tasks and runs until empty to measure the runner's
+// attach/yank/release cycle.
 
 static void bm_schedule_throughput(benchmark::State& state) {
     constexpr int tasks = 200000;
 
     for (auto _ : state) {
-        auto trivial = []() -> ace::task { co_return; };
         for (int i = 0; i < tasks; ++i)
-            ace::schedule(trivial());
+            ace::schedule(trivial_task());
 
         ace::run();
 
@@ -519,11 +565,11 @@ static void bm_schedule_throughput(benchmark::State& state) {
 BENCHMARK(bm_schedule_throughput)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM12 — io_buffer_append: сборка scatter-gather буфера
+// BM12 - io_buffer_append: scatter-gather buffer assembly
 // ==========================================================================
-// N раз: append нескольких чанков + assemble() + disassemble() + clear().
-// Характеризует аллокацию чанков io::buffer и построение msghdr.
-// Большие массивы iovec обслуживаются transient-путём общей arena.
+// Appends chunks and assembles/disassembles a buffer to measure io::buffer
+// chunk allocation and msghdr construction. Large iovec arrays use the shared
+// arena's transient path.
 
 static void bm_io_buffer_append(benchmark::State& state) {
     constexpr int messages = 20000;
@@ -546,10 +592,10 @@ static void bm_io_buffer_append(benchmark::State& state) {
 BENCHMARK(bm_io_buffer_append)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM13 — io_buffer_clone: глубокое копирование scatter-gather буфера
+// BM13 - io_buffer_clone: deep copy of a scatter-gather buffer
 // ==========================================================================
-// N раз: собрать буфер из чанков и склонировать его.
-// Характеризует стоимость аллокации чанков при clone() (обход цепочки iovec).
+// Builds a buffer from chunks and clones it to measure allocation while walking
+// the iovec chain.
 
 static void bm_io_buffer_clone(benchmark::State& state) {
     constexpr int messages = 20000;
@@ -571,11 +617,10 @@ static void bm_io_buffer_clone(benchmark::State& state) {
 BENCHMARK(bm_io_buffer_clone)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM14 — pipe_io_roundtrip: цикл write+read через io_uring на pipe
+// BM14 - pipe_io_roundtrip: io_uring write/read cycle on a pipe
 // ==========================================================================
-// N раз: co_await io::write_query + io::read_query на паре pipe-дескрипторов.
-// Характеризует полный цикл submit→CQE→reattach kernel_controller'а
-// (services/kernelic.h + io::query router).
+// Repeats io::write_query and io::read_query on a pipe pair to measure the full
+// kernel_controller submit-to-CQE-to-reattach cycle.
 
 static void bm_pipe_io_roundtrip(benchmark::State& state) {
     constexpr int messages = 20000;
@@ -587,18 +632,7 @@ static void bm_pipe_io_roundtrip(benchmark::State& state) {
             break;
         }
 
-        auto worker = [](int rd, int wr, int n) -> ace::task {
-            std::string payload(256, 'x');
-            for (int i = 0; i < n; ++i) {
-                const int w = co_await ace::io::write_query(wr, payload.data(), static_cast<unsigned>(payload.size()));
-                if (w != static_cast<int>(payload.size())) co_return;
-                const int r = co_await ace::io::read_query(rd, payload.data(), static_cast<unsigned>(payload.size()));
-                if (r != static_cast<int>(payload.size())) co_return;
-            }
-            co_return;
-        };
-
-        ace::schedule(worker(fds[0], fds[1], messages));
+        ace::schedule(pipe_roundtrip_worker(fds[0], fds[1], messages));
         ace::run();
         if (not ace::empty())
             state.SkipWithError("Dispatcher not empty after io roundtrip");
@@ -612,11 +646,10 @@ static void bm_pipe_io_roundtrip(benchmark::State& state) {
 BENCHMARK(bm_pipe_io_roundtrip)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM15 — channel_pending_push: асинхронный push с backpressure
+// BM15 - channel_pending_push: asynchronous push with backpressure
 // ==========================================================================
-// Producer использует pending_push (асинхронный push, ждёт место в буфере),
-// consumer вытягивает через pull(). Характеризует путь ожидания
-// освобождения буфера канала (channel_router / pending_push промис).
+// The producer uses pending_push while the consumer pulls values, measuring the
+// channel buffer backpressure path through channel_router and pending_push.
 
 static void bm_channel_pending_push(benchmark::State& state) {
     constexpr int messages = 20000;
@@ -624,23 +657,8 @@ static void bm_channel_pending_push(benchmark::State& state) {
     for (auto _ : state) {
         ace::bus<int> ch;
 
-        auto producer = [](int n, ace::bus<int>& ch) -> ace::task {
-            for (int i = 0; i < n; ++i)
-                co_await ch.pending_push(i);
-            co_return;
-        };
-
-        auto consumer = [](int n, ace::bus<int>& ch) -> ace::task {
-            int sum = 0;
-            for (int i = 0; i < n; ++i)
-                sum += co_await ch.pull();
-            if (sum != n * (n - 1) / 2)
-                std::cerr << "[bench] pending_push sum mismatch\n";
-            co_return;
-        };
-
-        ace::schedule(producer(messages, ch));
-        ace::schedule(consumer(messages, ch));
+        ace::schedule(pending_push_producer(messages, ch));
+        ace::schedule(pending_push_consumer(messages, ch));
         ace::run();
 
         if (not ace::empty())
@@ -652,11 +670,10 @@ static void bm_channel_pending_push(benchmark::State& state) {
 BENCHMARK(bm_channel_pending_push)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM16 — reattach_migration: миграция корутины между раннерами
+// BM16 - reattach_migration: coroutine migration between runners
 // ==========================================================================
-// Задача N раз переключается между двумя раннерами через
-// co_await ace::reattach{runner*}. Характеризует стоимость
-// кросс-раннерной передачи узла (insert_pool + reattach_router).
+// Repeatedly switches a task between two runners with reattach to measure the
+// cross-runner node transfer through insert_pool and reattach_router.
 
 static void bm_reattach_migration(benchmark::State& state) {
     constexpr int hops = 20000;
@@ -665,14 +682,8 @@ static void bm_reattach_migration(benchmark::State& state) {
         configure_runners(2);
         ace::bus<ace::core::runner*> rch;
 
-        auto gather = [](ace::bus<ace::core::runner*>& rch) -> ace::task {
-            auto* r = co_await ace::get_runner();
-            rch << r;
-            co_return;
-        };
-
-        ace::schedule(gather(rch));
-        ace::schedule(gather(rch));
+        ace::schedule(gather_runner(rch));
+        ace::schedule(gather_runner(rch));
         ace::run();
         auto rs = fetch(rch);
         if (rs.size() != 2 or rs[0] == rs[1]) {
@@ -684,15 +695,7 @@ static void bm_reattach_migration(benchmark::State& state) {
         auto* r0 = rs[0];
         auto* r1 = rs[1];
 
-        auto hopper = [](int n, ace::core::runner* r0, ace::core::runner* r1) -> ace::task {
-            for (int i = 0; i < n; ++i) {
-                co_await ace::reattach{r0};
-                co_await ace::reattach{r1};
-            }
-            co_return;
-        };
-
-        ace::schedule(hopper(hops, r0, r1));
+        ace::schedule(reattach_hopper(hops, r0, r1));
         ace::run();
 
         if (not ace::empty())
@@ -706,10 +709,10 @@ static void bm_reattach_migration(benchmark::State& state) {
 BENCHMARK(bm_reattach_migration)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM17 — spawn_fire_forget: массовый spawn без join
+// BM17 - spawn_fire_forget: bulk spawn without join
 // ==========================================================================
-// Спавнит N тривиальных задач и не дожидается их (fire-and-forget).
-// Характеризует накладные расходы attach + carrier без join-механизма.
+// Spawns N trivial fire-and-forget tasks to measure attach and carrier overhead
+// without the join mechanism.
 
 static void bm_spawn_fire_forget(benchmark::State& state) {
     constexpr int tasks = 50000;
@@ -717,18 +720,7 @@ static void bm_spawn_fire_forget(benchmark::State& state) {
     for (auto _ : state) {
         ace::bus<int> result;
 
-        auto spawner = [](int n, ace::bus<int>& result) -> ace::task {
-            for (int i = 0; i < n; ++i) {
-                co_await ace::spawn([&result, i]() -> ace::task {
-                    int v = i;
-                    result << v;
-                    co_return;
-                }());
-            }
-            co_return;
-        };
-
-        ace::schedule(spawner(tasks, result));
+        ace::schedule(spawn_fire_forget_tasks(tasks, result));
         ace::run();
 
         if (not ace::empty())
@@ -740,11 +732,10 @@ static void bm_spawn_fire_forget(benchmark::State& state) {
 BENCHMARK(bm_spawn_fire_forget)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM18 — automaton_ping: потребление co_yield значений через ping()
+// BM18 - automaton_ping: consume co_yield values through ping()
 // ==========================================================================
-// N автоматонов, каждый co_yield-ит K значений; consumer потребляет их
-// через handle.ping(). Характеризует стоимость automaton_rule +
-// ping_handler + yield_waiter.
+// Each of N automata yields K values consumed through handle.ping(), measuring
+// automaton_rule, ping_handler, and yield_waiter overhead.
 
 static void bm_automaton_ping(benchmark::State& state) {
     constexpr int values_per_automaton = 10;
@@ -753,23 +744,8 @@ static void bm_automaton_ping(benchmark::State& state) {
     for (auto _ : state) {
         ace::bus<int> ch;
 
-        auto user = [](int n, ace::bus<int>& ch) -> ace::task {
-            auto handle = co_await ace::spawn([](int n) -> ace::automaton<int> {
-                for (int i = 0; i < n; ++i)
-                    co_yield i;
-                co_return n;
-            }(n));
-            for (int i = 0; i <= n; ++i) {
-                if (auto v = co_await handle.ping()) {
-                    int x = *v;
-                    ch << x;
-                }
-            }
-            co_return;
-        };
-
         for (int i = 0; i < automata; ++i)
-            ace::schedule(user(values_per_automaton, ch));
+            ace::schedule(consume_automaton(values_per_automaton, ch));
 
         ace::run();
 
@@ -782,12 +758,10 @@ static void bm_automaton_ping(benchmark::State& state) {
 BENCHMARK(bm_automaton_ping)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM19 — expire_absolute: таймеры с абсолютными дедлайнами
+// BM19 - expire_absolute: timers with absolute deadlines
 // ==========================================================================
-// N таймеров через ace::expire(deadline) с короткими дедлайнами.
-// Характеризует путь абсолютных дедлайнов clock (expire → timeout).
-// NOTE: Дедлайны в пределах 1..20ms — проверяет подписку в нижний диск
-// колеса и корректность подсчёта.
+// Creates N short timers through expire(deadline) to measure the clock's
+// absolute-deadline path. Deadlines of 1-20 ms exercise the lowest wheel.
 
 static void bm_expire_absolute(benchmark::State& state) {
     constexpr int timers = 5000;
@@ -795,16 +769,10 @@ static void bm_expire_absolute(benchmark::State& state) {
     for (auto _ : state) {
         ace::bus<int> ch;
 
-        auto waiter = [](ace::services::timepoint_t deadline, ace::bus<int>& ch) -> ace::task {
-            co_await ace::expire(deadline);
-            int v = 1;
-            ch << v;
-            co_return;
-        };
-
         const auto base = ace::services::clock::current_time();
         for (int i = 0; i < timers; ++i)
-            ace::schedule(waiter(base + std::chrono::milliseconds(i % 20 + 1), ch));
+            ace::schedule(expire_waiter(
+                base + std::chrono::milliseconds(i % 20 + 1), ch));
 
         ace::run();
 
@@ -821,30 +789,17 @@ static void bm_expire_absolute(benchmark::State& state) {
 BENCHMARK(bm_expire_absolute)->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
-// BM20 — compose_variadic: вариативные and/or композиции из 3+ futures
+// BM20 - compose_variadic: variadic AND/OR composition of 3+ futures
 // ==========================================================================
-// N раз: co_await (a and b and c) + (a or b or c) с мгновенными (0ms)
-// таймерами. Характеризует стоимость and_await_composed / or_await_composed
-// (observer-задачи, каскадные cancel).
+// Composes three immediate timers with AND and OR to measure composed observer
+// tasks and cascading cancellation.
 
 static void bm_compose_variadic(benchmark::State& state) {
     using namespace std::chrono_literals;
     constexpr int compositions = 3000;
 
     for (auto _ : state) {
-        auto composer = [](int n) -> ace::task {
-            for (int i = 0; i < n; ++i) {
-                co_await (ace::timeout(0ms)
-                    and ace::timeout(0ms)
-                    and ace::timeout(0ms));
-                co_await (ace::timeout(0ms)
-                    or ace::timeout(0ms)
-                    or ace::timeout(0ms));
-            }
-            co_return;
-        };
-
-        ace::schedule(composer(compositions));
+        ace::schedule(compose_variadic_tasks(compositions));
         ace::run();
 
         if (not ace::empty())

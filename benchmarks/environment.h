@@ -18,31 +18,34 @@
 using namespace std::chrono_literals;
 
 // ==========================================================================
-// helpers — общие утилиты для бенчмарков
+// Helpers shared by benchmark scenarios.
 // ==========================================================================
 
-// Сброс конфигурации раннеров в исходное состояние (1 раннер)
+// Restore the default single-runner configuration.
 inline void reset_runners() {
     ace::cfg::g_config._runners_amount = 1;
     ace::reload();
     ace::reset_signal();
 }
 
-// Настройка количества раннеров
+// Configure the runner count.
 inline void configure_runners(int n) {
     ace::cfg::g_config._runners_amount = n;
     ace::reload();
 }
 
-// Дренирует канал через публичный API (schedule + run)
+template <typename T>
+ace::task fetch_into(ace::bus<T>& ch, std::vector<T>& result) {
+    while (not ch.empty())
+        result.emplace_back(co_await ch.pull());
+    co_return;
+}
+
+// Drain a channel through its public API in runner context.
 template <typename T>
 inline std::vector<T> fetch(ace::bus<T>& ch) {
     std::vector<T> res;
-    ace::schedule([&ch, &res]() -> ace::task {
-        while (not ch.empty())
-            res.emplace_back(co_await ch.pull());
-        co_return;
-    }());
+    ace::schedule(fetch_into(ch, res));
     ace::run();
     return res;
 }

@@ -114,8 +114,8 @@ namespace ace::core::traits {
 
         /**
          * @brief Taking a yielded value from automaton coroutine
-         * @details Copies @c _return_value to @c mem_ptr and sets status to @c e_executed
-         * @param mem_ptr  Pointer to storage for the yielded value
+         * @details Copies @c _return_value to the storage addressed by the
+         * unnamed pointer argument and sets status to @c e_executed.
          * @return @c true if value was captured, @c false otherwise
          */
         virtual bool yield_value(void*) noexcept { return false; }
@@ -128,7 +128,8 @@ namespace ace::core::traits {
 
         /**
          * @brief Register a waiter to be resumed on the next yielded value.
-         * @param node_ptr  Pointer to the @c omni_node waiter to register.
+         * @details The unnamed pointer argument addresses the @c omni_node
+         * waiter to register.
          * @return @c true if the waiter was registered, @c false otherwise.
          */
         virtual bool set_yield_waiter(void* /* omni_node */) noexcept { return false; }

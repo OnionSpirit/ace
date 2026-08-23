@@ -66,15 +66,14 @@ namespace ace::net {
         /** @brief Default constructor. */
         net_entity() = default;
 
-        /** @brief Move constructor that steals the fd and addresses. */
-        net_entity(net_entity&& io) noexcept {
-            io::entity<derived_t>::_fd = io._fd;
-            io::entity<derived_t>::_is_closed = io._is_closed;
-            _self_sin = io._self_sin;
-            _peer_sin = io._peer_sin;
-            io._fd = -1;
-            io._is_closed = true;
-        }
+        /**
+         * @brief Move constructor that transfers sole FD ownership and addresses.
+         * @param io Source entity; its FD ownership is invalidated by the base move.
+         */
+        net_entity(net_entity&& io) noexcept
+            : io::entity<derived_t>(std::move(io))
+            , _self_sin(io._self_sin)
+            , _peer_sin(io._peer_sin) {}
 
         /** @brief Constructs an entity from a raw fd. */
         net_entity(int fd, bool is_closed) {
@@ -90,14 +89,18 @@ namespace ace::net {
             _peer_sin = peer_sin;
         }
 
-        /** @brief Move assignment that steals the fd and addresses. */
+        /**
+         * @brief Move assignment that releases the current FD, then transfers
+         *        sole FD ownership and addresses.
+         * @details Delegates FD ownership and self-move handling to @c io::entity.
+         * @param io Source entity; its FD ownership is invalidated unless this is
+         *           a self-move.
+         * @return This entity.
+         */
         net_entity& operator =(net_entity&& io) noexcept {
-            io::entity<derived_t>::_fd = io._fd;
-            io::entity<derived_t>::_is_closed = io._is_closed;
+            io::entity<derived_t>::operator=(std::move(io));
             _self_sin = io._self_sin;
             _peer_sin = io._peer_sin;
-            io._fd = -1;
-            io._is_closed = true;
             return *this;
         }
 
@@ -473,17 +476,6 @@ namespace ace::net {
         using connect_query_t = connect_query<transport_entity, domain_v>;
         friend connect_query_t;
 
-        /** @brief Move assignment that steals the fd and addresses. */
-        transport_entity& operator =(transport_entity&& io) noexcept {
-            io_net_entity_t::_fd = io._fd;
-            io_net_entity_t::_is_closed = io._is_closed;
-            _self_sin = io._self_sin;
-            _peer_sin = io._peer_sin;
-            io._fd = -1;
-            io._is_closed = true;
-            return *this;
-        }
-
         /**
          * @brief Awaitable query for sending a datagram to a specific address.
          */
@@ -752,15 +744,27 @@ namespace ace::net {
         [[nodiscard]] auto recv(void *buf, const size_t len, const int flags = 0) const
         -> recv_query { return recv_query{_fd, buf, len, flags}; }
 
-        /** @brief Receives data into a POD vector. */
+        /**
+         * @brief Receives data into the vector's existing elements.
+         * @details Resize @p buf to the desired writable element count before
+         * calling this function; unused capacity is never written. Awaiting the
+         * returned query yields the number of bytes received and does not resize
+         * the vector.
+         */
         template <typename data_t>
         requires std::is_pod_v<data_t>
         [[nodiscard]] auto recv(std::vector<data_t>& buf, const int flags = 0) const
-        -> recv_query { return recv_query{_fd, buf.data(), buf.capacity() * (sizeof(data_t) / sizeof(char)), flags}; }
+        -> recv_query { return recv_query{_fd, buf.data(), buf.size() * sizeof(data_t), flags}; }
 
-        /** @brief Receives data into a string. */
+        /**
+         * @brief Receives data into the string's existing characters.
+         * @details Resize @p buf to the desired writable byte count before
+         * calling this function; unused capacity is never written. Awaiting the
+         * returned query yields the number of bytes received and does not resize
+         * the string.
+         */
         [[nodiscard]] auto recv(std::string& buf, const int flags = 0) const
-        -> recv_query { return recv_query{_fd, buf.data(), buf.capacity(), flags}; }
+        -> recv_query { return recv_query{_fd, buf.data(), buf.size(), flags}; }
 
         /** @brief Receives data into a POD array. */
         template <typename data_t, size_t len_v>
@@ -899,11 +903,10 @@ namespace ace::net {
             _self_sin.sin_family = domain_v;
             _self_sin.sin_port = htons(port);
             inet_pton(domain_v, addr.data(), &(_self_sin.sin_addr));
-            return accept_query { this, reinterpret_cast<sockaddr*>(&_self_sin), _self_sin_len_ptr};
+            return accept_query { this, reinterpret_cast<sockaddr*>(&_self_sin), &_self_sin_size};
         }
 
         socklen_t _self_sin_size = sizeof(sockaddr_in);  ///< Size of @c sockaddr_in used as accept address length.
-        socklen_t* _self_sin_len_ptr = &_self_sin_size;  ///< Pointer to the accept address length.
 
     };
 
@@ -1065,6 +1068,8 @@ namespace ace::net {
             /**
              * @brief Returns the stream mode entity (SOCK_STREAM) or the
              *        datagram transport entity otherwise.
+             * @details A successful bind consumes the source entity exactly once,
+             * preserving its stored local and peer addresses in the result.
              */
             [[nodiscard]] auto await_resume() {
                 if constexpr (is_stream_type<type_v>)
@@ -1072,11 +1077,7 @@ namespace ace::net {
                 else {
                     if (_res > -1) {
                         _entity._peer_sin = *reinterpret_cast<sockaddr_in*>(_addr);
-                        // NOTE: для не-STREAM сокетов (UDP) bind() возвращает статус 0 в _res,
-                        // а реальный файловый дескриптор хранится в _entity._fd.
-                        // Передаём _entity._fd как дескриптор, чтобы итоговый io_net_interface
-                        // имел правильный fd для последующих sendto/recv операций.
-                        return io_transport_entity_t { static_cast<int>(_entity._fd), false, _entity._self_sin, _entity._peer_sin };
+                        return io_transport_entity_t::consume(_entity);
                     }
                     return io_transport_entity_t {_res, true};
                 }

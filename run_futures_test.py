@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
+import re
 import subprocess
 import sys
 
-TEST_NAME = "futures.cutex_race"
+TEST_NAME = "cutex_fixture.cutex_race"
 BINARY = "./build/ace_tests"
 TIMEOUT = 10
+
 
 def main():
     fails = 0
@@ -15,12 +17,20 @@ def main():
                 [BINARY, f"--gtest_filter={TEST_NAME}"],
                 capture_output=True,
                 text=True,
-                timeout=TIMEOUT
+                timeout=TIMEOUT,
             )
         except subprocess.TimeoutExpired:
             print(f"Timeout : [ RunTime > {TIMEOUT} sec]")
             fails += 1
             continue
+        match = re.search(
+            r"\[==========\] Running (\d+) tests? from ", result.stdout
+        )
+        if match is None or int(match.group(1)) == 0:
+            print("Failed: no tests executed")
+            print(result.stdout)
+            print(result.stderr)
+            sys.exit(1)
         if result.returncode == 0:
             print("Ok")
         else:
@@ -29,6 +39,7 @@ def main():
             print(result.stderr)
             sys.exit(1)
     print(f"Fails amount : {fails}...")
+
 
 if __name__ == "__main__":
     main()

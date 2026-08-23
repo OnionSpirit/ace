@@ -165,7 +165,8 @@ namespace ace::core {
         /**
          * @brief Returns an allocation to its owning arena.
          * @param mem_ptr Pointer returned by @c allocate().
-         * @param size Unused — the chunk size is read from the header.
+         * @details The unnamed size argument is unused because the chunk size is
+         * read from the allocation header.
          */
         void deallocate(void* mem_ptr, std::size_t) noexcept {
             if (not mem_ptr) return;

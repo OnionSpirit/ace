@@ -67,10 +67,44 @@ if tests_enabled
     mimalloc_dep = dependency('mimalloc', fallback : ['mimalloc', 'mimalloc_dep'], required : true)
     gtest_dep = dependency('gtest', main: true, fallback: ['gtest', 'gtest_dep'], required : true)
 
-    test_sources = files(
-      'tests/environment.h',
-      'tests/tests.cpp',
-      'tests/main.cpp',
+    test_fixture_sources = files(
+        'tests/arena_fixture.cpp',
+        'tests/backup_fixture.cpp',
+        'tests/base_fixture.cpp',
+        'tests/channel_extra_fixture.cpp',
+        'tests/channel_fixture.cpp',
+        'tests/compose_extra_fixture.cpp',
+        'tests/console_fixture.cpp',
+        'tests/context_fixture.cpp',
+        'tests/control_block_fixture.cpp',
+        'tests/cross_mechanic_fixture.cpp',
+        'tests/cutex_extra_fixture.cpp',
+        'tests/cutex_fixture.cpp',
+        'tests/dispatcher_fixture.cpp',
+        'tests/fs_fixture.cpp',
+        'tests/future_traits_fixture.cpp',
+        'tests/get_runner_fixture.cpp',
+        'tests/id_alloc_fixture.cpp',
+        'tests/io_any_fixture.cpp',
+        'tests/io_buffer_fixture.cpp',
+        'tests/io_entity_fixture.cpp',
+        'tests/io_hanged_fixture.cpp',
+        'tests/moving_average_fixture.cpp',
+        'tests/omniptr_fixture.cpp',
+        'tests/promise_traits_fixture.cpp',
+        'tests/queue_fixture.cpp',
+        'tests/router_slot_fixture.cpp',
+        'tests/runner_fixture.cpp',
+        'tests/signal_fixture.cpp',
+        'tests/socket_echo_fixture.cpp',
+        'tests/spawn_extra_fixture.cpp',
+        'tests/spawn_fixture.cpp',
+        'tests/timer_fixture.cpp',
+        'tests/yield_fixture.cpp',
+    )
+    test_sources = test_fixture_sources + files(
+        'tests/environment.h',
+        'tests/main.cpp',
     )
 
     # NOTE: Defining compiler-dependent args
@@ -124,14 +158,15 @@ if tests_enabled
     )
 
     python = import('python').find_installation('python3')
-    tests = run_command(
-      python, 'discover_tests.py', test_executable.full_path(),
-      check: false
+    discovery_script = files('discover_tests.py')[0]
+    discovered_tests = run_command(
+      python, discovery_script, 'discover', test_fixture_sources,
+      check: true
     ).stdout().strip().split()
 
-    message('Found tests: ', tests)
+    message('Found tests: ', discovered_tests)
 
-    foreach test_name : tests
+    foreach test_name : discovered_tests
     message('applying test - ', test_name)
     test(
       test_name,
@@ -148,6 +183,44 @@ if tests_enabled
       },
     )
     endforeach
+
+    discovery_unit_tests = files('tests/discover_tests_test.py')[0]
+    test(
+      'discover_tests.unit',
+      python,
+      args: [discovery_unit_tests],
+    )
+
+    test(
+      'ace_tests.discovery_consistency',
+      python,
+      args: [discovery_script, 'verify', test_executable] + test_fixture_sources,
+      depends: [test_executable],
+    )
+
+    if entry_mode
+        entry_fallback_executable = executable(
+            'ace_entry_fallback',
+            'tests/entry_fallback.cpp',
+            cpp_args: compile_args,
+            link_args: coverage_link_args,
+            dependencies: [ace_dep],
+            override_options: [
+                'debug=true',
+                'optimization=0',
+                'b_sanitize=address',
+            ],
+        )
+        test(
+            'ace_entry.fallback',
+            python,
+            args: [files('tests/check_entry_fallback.py')[0], entry_fallback_executable],
+            depends: [entry_fallback_executable],
+            env: {
+                'ASAN_OPTIONS': 'halt_on_error=0:detect_leaks=0',
+            },
+        )
+    endif
 
 endif
 

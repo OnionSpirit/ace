@@ -5,8 +5,9 @@
  * @details This header defines a type-safe, coroutine-friendly I/O framework
  * that wraps Linux @c io_uring operations.  The key building blocks are:
  *
- *  - <b>@c io::entity<T> </b> — CRTP base for file-descriptor owners.  Provides
- *    RAII FD lifecycle (via @c io_guard), move semantics, and async @c close().
+ *  - <b>@c io::entity<T> </b> — CRTP base for sole file-descriptor owners.
+ *    Provides RAII FD lifecycle (via @c io_guard), move-only semantics, and
+ *    ownership-transferring async @c close().
  *  - <b>@c io_query<T> </b> — CRTP base for individual I/O requests (read,
  *    write, close, etc.).  Each query is an awaitable that suspends the caller
  *    until @c kernel_controller delivers the @c io_uring completion.
@@ -21,7 +22,7 @@
  *
  * ### Entity state machine
  *
- * @mermaid{ graph LR; Idle[\"invalid (fd=-1)\"]-->Open[\"open\"]; Open-->Closed[\"closed\"]; Closed-->Idle; Open-->Idle; }
+ * @mermaid{ graph LR; Idle[\"invalid (fd=-1)\"]-->Open[\"entity owns FD\"]; Open--close()-->Closing[\"close query owns FD\"]; Closing-->Closed[\"closed\"]; Open--move/extract-->Idle; }
  *
  * @see ace::services::kernel_controller, ace::io::entity,
  *      ace::io::link
@@ -83,13 +84,23 @@ namespace ace::io {
     template <typename query_core_t>
     struct query;
 
-    /** @brief Awaitable for reading from a file descriptor. @see io_query */
+    /**
+     * @brief Awaitable for binary reads from a file descriptor.
+     * @details Never appends a NUL terminator; caller-owned storage must remain
+     * writable and alive until completion or cancellation.
+     * @see io_query
+     */
     struct read_query;
 
     /** @brief Awaitable for writing to a file descriptor. @see io_query */
     struct write_query;
 
-    /** @brief Awaitable for closing a file descriptor. @see io_query */
+    /**
+     * @brief Awaitable for closing a file descriptor.
+     * @details Public construction is non-owning; @c entity::close() returns an
+     * owning form that dispatches even when discarded before submission.
+     * @see io_query
+     */
     struct close_query;
 
     /**
@@ -103,7 +114,8 @@ namespace ace::io {
      * @details When the guard goes out of scope, it submits an async close
      * request to @c kernel_controller via the @c io::outcast mechanism.  If
      * the current thread is not running a runner, it falls back to scheduling
-     * a close task on the dispatcher.
+     * a close task on the dispatcher.  The same dispatch path accepts FD
+     * ownership from discarded entity-owned close queries.
      */
     struct guard;
 
@@ -136,9 +148,10 @@ namespace ace::io {
      *
      * @details Derived types represent entities that hold an open file
      * descriptor.  The base provides:
-     *  - Move semantics (transferring FD ownership).
+     *  - Move-only semantics (transferring sole FD ownership).
      *  - @c extract() — extract FD + closed flag and invalidate the entity.
-     *  - @c close() — async close via @c close_query.
+     *  - @c close() — immediately invalidate and transfer the FD to an owning
+     *    async @c close_query.
      *  - @c consume() — static factory that moves FD from a source entity.
      *  - @c io_guard member — ensures FD is closed on destruction via RAII.
      *
@@ -208,8 +221,9 @@ namespace ace::io {
 
 /**
  * @def IMPORT_IO_ENTITY_ENV(class)
- * @brief Injects @c io::entity<class> base aliases, protected FD members and
- * the @c IMPORT_ERROR_HANDLING block into a derived @c io::entity class.
+ * @brief Injects @c io::entity<class> base aliases, move-only special members,
+ * protected FD members and the @c IMPORT_ERROR_HANDLING block into a derived
+ * @c io::entity class.
  */
 #define IMPORT_IO_ENTITY_ENV(class)                                                         \
                                                                                             \
@@ -221,6 +235,11 @@ protected:                                                                      
     using io_entity_t::_is_closed;                                                          \
                                                                                             \
 public:                                                                                     \
+                                                                                            \
+    class(const class&) = delete;                                                           \
+    class& operator=(const class&) = delete;                                                \
+    class(class&&) noexcept = default;                                                      \
+    class& operator=(class&&) noexcept = default;                                           \
                                                                                             \
     IMPORT_ERROR_HANDLING                                                                   \
                                                                                             \
@@ -234,8 +253,9 @@ public:                                                                         
 
 /**
  * @def IMPORT_IO_LINK_ENV(class)
- * @brief Injects @c io::link base aliases, protected members and the
- * @c IMPORT_ERROR_HANDLING block into a derived @c io::link class.
+ * @brief Injects @c io::link base aliases, move-only special members,
+ * protected members and the @c IMPORT_ERROR_HANDLING block into a derived
+ * @c io::link class.
  */
 #define IMPORT_IO_LINK_ENV(class)                                                           \
                                                                                             \
@@ -249,6 +269,11 @@ protected:                                                                      
     using io_link_t::_data;                                                                 \
                                                                                             \
 public:                                                                                     \
+                                                                                            \
+    class(const class&) = delete;                                                           \
+    class& operator=(const class&) = delete;                                                \
+    class(class&&) noexcept = default;                                                      \
+    class& operator=(class&&) noexcept = default;                                           \
                                                                                             \
     IMPORT_ERROR_HANDLING                                                                   \
                                                                                             \
@@ -292,8 +317,8 @@ public:                                                                         
          *
          * @details Installed into the awaiting coroutine's promise by
          * @c await_suspend().  @c redirect() saves the node, which is later
-         * re-attached by @c on_result().  @c cancel() submits a cancellation
-         * request to @c kernel_controller.
+             * re-attached by @c on_result().  @c cancel() follows the concrete
+             * query's cancellation policy and otherwise requests kernel cancellation.
          */
         struct query_router : runner_router {
 
@@ -315,11 +340,16 @@ public:                                                                         
             }
 
             /**
-             * @brief Requests @c kernel_controller to cancel the submitted operation.
+             * @brief Requests cancellation unless the concrete query overrides it.
+             * @details Queries with a @c cancel_query() member control their own
+             * cancellation policy; all other queries use kernel cancellation.
              */
             void cancel() override {
                 // TODO: Improve cancel with pop from local submission queue
-                services::kernel_controller::cancel(_query, 0);
+                if constexpr (requires(query_core_t& query_) { query_.cancel_query(); })
+                    static_cast<query_core_t*>(_query)->cancel_query();
+                else
+                    services::kernel_controller::cancel(_query, 0);
             }
 
             ~query_router() override = default;
@@ -378,8 +408,12 @@ public:                                                                         
     /**
      * @brief Awaitable @c io_uring read query.
      *
-     * @details Submits @c io_uring_prep_read via @c kernel_controller.
-     * On completion, null-terminates the read buffer.
+     * @details Submits @c io_uring_prep_read via @c kernel_controller.  The
+     * destination is treated as raw binary storage: exactly the bytes reported
+     * by @c await_resume() are written and no NUL terminator is appended.
+     *
+     * @warning The storage referenced by @c buf must remain writable and alive
+     * until the query completes or is canceled.
      */
     struct ace::io::read_query : query<read_query> {
 
@@ -388,8 +422,9 @@ public:                                                                         
         /**
          * @brief Constructs a read query.
          * @param fd File descriptor to read from.
-         * @param buf Destination buffer.
-         * @param nbytes Number of bytes to read.
+         * @param buf Destination binary buffer whose lifetime extends through
+         *            query completion.
+         * @param nbytes Writable size of @p buf in bytes.
          * @param offset File offset (0 = current position).
          */
         [[nodiscard]] explicit read_query(const int fd, void *buf, const unsigned nbytes, const uint64_t offset = 0)
@@ -409,18 +444,14 @@ public:                                                                         
         }
 
         /**
-         * @brief Returns the read result, null-terminating the buffer on success.
+         * @brief Returns the raw read result without writing beyond the bytes read.
          * @return Number of bytes read, or a negative errno value.
          */
-        [[nodiscard]] int await_resume() const {
-            // NOTE: Nul-termination for input
-            if (_res > 0) static_cast<char*>(_buf)[_res] = '\0';
-            return _res;
-        }
+        [[nodiscard]] int await_resume() const { return _res; }
 
         const int _fd;                ///< File descriptor to read from
-        void *_buf;                   ///< Destination buffer
-        const unsigned _nbytes;       ///< Number of bytes to read
+        void *_buf;                   ///< Caller-owned binary destination, alive through completion
+        const unsigned _nbytes;       ///< Writable capacity of @c _buf in bytes
         const uint64_t _offset;       ///< File offset
     };
 
@@ -472,27 +503,70 @@ public:                                                                         
     /**
      * @brief Awaitable @c io_uring close query.
      *
-     * @details Submits @c io_uring_prep_close via @c kernel_controller.
+     * @details A directly constructed @c close_query(fd) is a non-owning
+     * awaitable: destroying it without awaiting does not close that FD.  The
+     * owning form returned by @c entity::close() holds sole ownership, cannot
+     * cancel an already submitted close, and dispatches the close through the
+     * guard cleanup path if it is destroyed before submission.
      */
     struct ace::io::close_query : query<close_query> {
 
-        IMPORT_IO_QUERY_ENV(close_query)
+        typedef ace::io::query<close_query> io_query_t;
+        using io_query_t::_fd;
+        using io_query_t::_res;
 
         close_query() = delete;
 
         /**
-         * @brief Constructs a close query.
-         * @param fd File descriptor to close.
+         * @brief Constructs a non-owning close query.
+         * @param fd File descriptor to close when the query is awaited.
+         * @warning The caller remains responsible for @p fd until this query is
+         * awaited and submitted.  Discarding this public form has no effect.
          */
         explicit close_query(const int fd) : io_query_t(fd) {}
+
+        /** @brief Copying is disabled because an owning query has sole FD ownership. */
+        close_query(const close_query&) = delete;
+        close_query& operator=(const close_query&) = delete;
+
+        /**
+         * @brief Transfers an unsubmitted query and any FD ownership.
+         * @warning A query must not be moved after it has been submitted.
+         */
+        close_query(close_query&& query) noexcept
+            : io_query_t(query._fd)
+            , _owns_fd(std::exchange(query._owns_fd, false))
+            , _is_submitted(std::exchange(query._is_submitted, false))
+            , _is_noop(std::exchange(query._is_noop, false)) {
+            _res = query._res;
+        }
+
+        close_query& operator=(close_query&&) = delete;
+
+        /**
+         * @brief Reports an idempotent close of an already-invalid entity as ready.
+         * @return @c true when no descriptor needs closing.
+         */
+        bool await_ready() override { return _is_noop; }
 
         /**
          * @brief Submits the close operation to @c kernel_controller.
          * @param kwp Kernel observer receiving the completion.
          * @return @c true on successful submission.
          */
-        bool setup_query(kernel_observer* kwp) const noexcept {
-            return services::kernel_controller::close(kwp, _fd);
+        bool setup_query(kernel_observer* kwp) noexcept {
+            return _is_submitted = services::kernel_controller::close(kwp, _fd);
+        }
+
+        /**
+         * @brief Handles cancellation routed from the awaiting coroutine.
+         * @details Entity-owned closes are non-cancelable after submission so
+         * the descriptor cannot remain open.  Public non-owning queries retain
+         * the normal query cancellation behavior.
+         */
+        void cancel_query() noexcept {
+            if (not _owns_fd)
+                services::kernel_controller::cancel(this, 0);
         }
 
         /**
@@ -500,6 +574,31 @@ public:                                                                         
          * @return @c 0 on success, or a negative errno value.
          */
         [[nodiscard]] int await_resume() const { return _res; }
+
+        /**
+         * @brief Dispatches an owned close that was discarded before submission.
+         * @details A submitted query never retries from its destructor, including
+         * when the kernel reports a close error.
+         */
+        ~close_query() override;
+
+    private:
+
+        /** @brief Constructs the owning form used exclusively by @c entity::close(). */
+        close_query(const int fd, const bool owns_fd) noexcept
+            : io_query_t(fd)
+            , _owns_fd(owns_fd and fd >= 0)
+            , _is_noop(fd < 0) {
+            if (fd < 0)
+                _res = 0;
+        }
+
+        bool _owns_fd = false;      ///< This query has sole ownership of @c _fd.
+        bool _is_submitted = false; ///< A close SQE or deferred kernel request owns the operation.
+        bool _is_noop = false;      ///< Entity was already invalid; no kernel operation is needed.
+
+        template <typename>
+        friend struct entity;
     };
 
 
@@ -1337,12 +1436,13 @@ public:                                                                         
         }
 
         /**
-         * @brief Asynchronously closes the referenced FD if it is still valid and open.
+         * @brief Dispatches one asynchronous close through the guard cleanup path.
+         * @param fd File descriptor whose ownership is being released.
          * @details Uses the @c io::outcast command pool when a runner identity is
          * available, otherwise falls back to scheduling @c pending_close().
          */
-        ~guard() noexcept {
-            if (_fd < 0 or _closed) return;
+        static void dispatch_close(const int fd) noexcept {
+            if (fd < 0) return;
             // NOTE: Trying to get current runner.
             // NOTE: Doing it manually for cases when classic 'runner::run()' is unused
             auto* runner_identity = core::runner::get().as<runner_pool_t>();
@@ -1351,21 +1451,38 @@ public:                                                                         
             {
                 cmd->_runner_identity = runner_identity;
                 cmd->_description = "io::guard file descriptor lazy-close";
-                if (services::kernel_controller::close(cmd, _fd))
+                if (services::kernel_controller::close(cmd, fd))
                     return;
+                // NOTE: Submission rejected; no completion will return the command to the pool.
+                outcast::_command_pool.raw_sync(cmd);
             }
             // NOTE: If can not get slot or identity not found -> using busy behavior
-            schedule(pending_close(_fd));
+            schedule(pending_close(fd));
+        }
+
+        /** @brief Releases the referenced FD if it is still valid and open. */
+        ~guard() noexcept {
+            if (_fd < 0 or _closed) return;
+            dispatch_close(_fd);
         }
     };
+
+
+    inline ace::io::close_query::~close_query() {
+        if (_owns_fd and not _is_submitted) {
+            _owns_fd = false;
+            guard::dispatch_close(_fd);
+        }
+    }
 
 
     /**
      * @brief CRTP base for I/O entities — owners of a file descriptor with RAII lifecycle.
      *
-     * @details Provides move semantics, @c extract(), async @c close(), and
-     * the @c consume() static factory.  An @c io_guard member ensures the FD
-     * is closed on destruction.
+     * @details Provides move-only sole ownership, @c extract(), async @c close(),
+     * and the @c consume() static factory.  An @c io_guard member ensures the
+     * FD is closed on destruction.  Moving invalidates the source; move
+     * assignment first releases the destination's old FD through that guard.
      *
      * @tparam entity_t  Derived entity type.
      */
@@ -1386,6 +1503,10 @@ public:                                                                         
             : _fd(fd)
             , _is_closed(is_closed) { };
 
+        /** @brief Copying is disabled because an entity solely owns its FD. */
+        entity(const entity&) = delete;
+        entity& operator=(const entity&) = delete;
+
         // NOTE: This method is made to never forget to move ownership
         /**
          * @brief Static factory: extracts the FD and closed flag from a source
@@ -1402,29 +1523,25 @@ public:                                                                         
         }
 
         /**
-         * @brief Move constructor — transfers FD ownership and rebinds the guard.
+         * @brief Move constructor that transfers sole FD ownership.
+         * @details The source is invalidated and the newly constructed guard is
+         * bound to the destination's own fields.
          */
-        entity(entity&& io) noexcept {
-            _fd = io._fd;
-            _is_closed = io._is_closed;
-            io._fd = -1;
-            io._is_closed = true;
-            // NOTE: The guard holds references to _fd/_is_closed — after the
-            // move it must be rebound to THIS entity's members, otherwise it
-            // references the (invalidated, soon destroyed) source members.
-            _guard.~guard();
-            new (&_guard) guard(_fd, _is_closed);
-        }
+        entity(entity&& io) noexcept
+            : _fd(std::exchange(io._fd, -1))
+            , _is_closed(std::exchange(io._is_closed, true)) {}
 
         /**
-         * @brief Move assignment — transfers FD ownership and rebinds the guard.
+         * @brief Move assignment that releases the old FD then transfers ownership.
+         * @details Self-move is a no-op.  The guard is reconstructed against the
+         * destination fields after its old binding performs normal cleanup.
          */
         entity& operator=(entity&& io) noexcept {
-            _fd = io._fd;
-            _is_closed = io._is_closed;
-            io._fd = -1;
-            io._is_closed = true;
+            if (this == &io)
+                return *this;
             _guard.~guard();
+            _fd = std::exchange(io._fd, -1);
+            _is_closed = std::exchange(io._is_closed, true);
             new (&_guard) guard(_fd, _is_closed);
             return *this;
         }
@@ -1449,11 +1566,19 @@ public:                                                                         
         }
 
         /**
-         * @brief Closes file descriptor asynchronously
-         * @return @c close_query future object that shall be processed via @c co_await operator
+         * @brief Immediately invalidates the entity and transfers its FD to an
+         * owning asynchronous close query.
+         * @details The returned query is non-cancelable after submission.  If
+         * discarded before submission, its destructor still dispatches exactly
+         * one close through the guard cleanup path.  Calling @c close() again
+         * returns a ready query whose result is @c 0.
+         * @return Owning @c close_query, or a ready no-op query when invalid.
          */
         [[nodiscard]] auto close()
-            -> io::close_query { _is_closed = true; return io::close_query{_fd}; }
+            -> io::close_query {
+            _is_closed = true;
+            return io::close_query{std::exchange(_fd, -1), true};
+        }
 
         /** @brief Virtual destructor (defaulted). */
         virtual ~entity() = default;
@@ -1465,14 +1590,16 @@ public:                                                                         
 
     private:
 
-        guard _guard {_fd, _is_closed}; ///< RAII guard rebinding FD/closed references on move
+        guard _guard {_fd, _is_closed}; ///< RAII guard permanently bound to this entity's fields
     };
 
 
     /**
      * @brief Common base for higher-level I/O abstractions.
      *
-     * @details Owns an FD and an optional @c any data payload.  Provides
+     * @details Solely owns an FD and an optional @c any data payload.  The type
+     * is move-only; moving invalidates the source, and move assignment releases
+     * the destination's old FD through its guard before transfer.  Provides
      * @c writeln(), @c write() and @c read() overloads (raw buffer,
      * @c std::string, POD vector/array/span) plus @c read_buf() as
      * convenience methods.  Derived types implement
@@ -1523,6 +1650,10 @@ public:                                                                         
             , _is_closed(is_closed)
             , _data(std::move(data)) { };
 
+        /** @brief Copying is disabled because a link solely owns its FD. */
+        link(const link&) = delete;
+        link& operator=(const link&) = delete;
+
         // NOTE: This method is made to never forget to move ownership
         /**
          * @brief Static factory: extracts the FD and closed flag from a source
@@ -1539,25 +1670,28 @@ public:                                                                         
         }
 
         /**
-         * @brief Move constructor — transfers FD ownership and payload.
+         * @brief Move constructor that transfers sole FD ownership and payload.
+         * @details The source is invalidated and the destination guard remains
+         * bound to the destination fields.
          */
-        link(link&& io) noexcept {
-            _fd = io._fd;
-            _is_closed = io._is_closed;
-            _data = std::move(io._data);
-            io._fd = -1;
-            io._is_closed = true;
-        }
+        link(link&& io) noexcept
+            : _fd(std::exchange(io._fd, -1))
+            , _is_closed(std::exchange(io._is_closed, true))
+            , _data(std::move(io._data)) {}
 
         /**
-         * @brief Move assignment — transfers FD ownership and payload.
+         * @brief Move assignment that releases the old FD then transfers ownership.
+         * @details Self-move is a no-op.  The guard is reconstructed against the
+         * destination fields after its old binding performs normal cleanup.
          */
         link& operator=(link&& io) noexcept {
-            _fd = io._fd;
-            _is_closed = io._is_closed;
+            if (this == &io)
+                return *this;
+            _guard.~guard();
+            _fd = std::exchange(io._fd, -1);
+            _is_closed = std::exchange(io._is_closed, true);
             _data = std::move(io._data);
-            io._fd = -1;
-            io._is_closed = true;
+            new (&_guard) guard(_fd, _is_closed);
             return *this;
         }
 
@@ -1682,9 +1816,11 @@ public:                                                                         
         }
 
         /**
-         * @brief Reads up to @p len bytes into a raw buffer.
-         * @param buf Destination buffer.
-         * @param len Buffer size.
+         * @brief Reads up to @p len binary bytes into a raw buffer.
+         * @details No NUL terminator is appended.  The destination storage must
+         * remain writable and alive until the returned coroutine completes.
+         * @param buf Destination binary buffer.
+         * @param len Writable buffer size in bytes.
          * @param flags Reserved for future use.
          * @return Number of bytes read, or a negative errno value.
          */
@@ -1777,7 +1913,7 @@ public:                                                                         
 
     private:
 
-        guard _guard {_fd, _is_closed}; ///< RAII guard rebinding FD/closed references on move
+        guard _guard {_fd, _is_closed}; ///< RAII guard permanently bound to this link's fields
     };
 
 

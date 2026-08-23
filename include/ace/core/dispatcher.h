@@ -288,8 +288,6 @@ namespace ace {
      * @details Distributes the task to a runner — round-robin when no
      * specific runner is given, with probability-based weighted selection
      * when runners have non-zero velocity.
-     * @param new_task  Task to schedule.
-     * @param rnr       Target runner (nullptr = auto-select).
      */
     inline void schedule(task &&new_task, core::runner *rnr) noexcept {
         // TODO: I will return it back when I will create spawn groups

@@ -23,7 +23,7 @@ FILE_PATTERNS          = *.h *.hpp
 RECURSIVE              = YES
 EXCLUDE_PATTERNS       = */oldbase/*
 USE_MDFILE_AS_MAINPAGE = README.md
-IMAGE_PATH             = docs/img
+IMAGE_PATH             =
 
 #---------------------------------------------------------------------------
 # Extraction — document EVERYTHING
@@ -68,6 +68,7 @@ SEARCH_INCLUDES        = YES
 INCLUDE_PATH           = include
 PREDEFINED             = __GNUC__
 SKIP_FUNCTION_MACROS   = NO
+BUILTIN_STL_SUPPORT    = YES
 
 #---------------------------------------------------------------------------
 # Markdown & aliases
@@ -130,29 +131,28 @@ GENERATE_LATEX         = NO
 LATEX_OUTPUT           = latex
 
 #---------------------------------------------------------------------------
-# Class / dependency diagrams (requires Graphviz dot)
+# Class / dependency diagrams (Graphviz is unavailable in this environment)
 #---------------------------------------------------------------------------
-HAVE_DOT               = YES
+HAVE_DOT               = NO
 DOT_NUM_THREADS        = 0
-CLASS_GRAPH            = YES
-COLLABORATION_GRAPH    = YES
-GROUP_GRAPHS           = YES
-UML_LOOK               = YES
+CLASS_GRAPH            = NO
+COLLABORATION_GRAPH    = NO
+GROUP_GRAPHS           = NO
+UML_LOOK               = NO
 UML_LIMIT_NUM_FIELDS   = 50
-TEMPLATE_RELATIONS     = YES
-INCLUDE_GRAPH          = YES
-INCLUDED_BY_GRAPH      = YES
-CALL_GRAPH             = YES
-CALLER_GRAPH           = YES
-GRAPHICAL_HIERARCHY    = YES
-DIRECTORY_GRAPH        = YES
+TEMPLATE_RELATIONS     = NO
+INCLUDE_GRAPH          = NO
+INCLUDED_BY_GRAPH      = NO
+CALL_GRAPH             = NO
+CALLER_GRAPH           = NO
+GRAPHICAL_HIERARCHY    = NO
+DIRECTORY_GRAPH        = NO
 DOT_IMAGE_FORMAT       = svg
 INTERACTIVE_SVG        = YES
 DOT_GRAPH_MAX_NODES    = 100
 MAX_DOT_GRAPH_DEPTH    = 0
-DOT_TRANSPARENT        = YES
 DOT_MULTI_TARGETS      = YES
-GENERATE_LEGEND        = YES
+GENERATE_LEGEND        = NO
 DOT_CLEANUP            = YES
 
 #---------------------------------------------------------------------------
@@ -170,7 +170,6 @@ VERBATIM_HEADERS       = YES
 # Index / groups
 #---------------------------------------------------------------------------
 ALPHABETICAL_INDEX     = YES
-COLS_IN_ALPHA_INDEX    = 3
 GENERATE_TAGFILE       = docs/doxygen/ace.tag
 
 #---------------------------------------------------------------------------

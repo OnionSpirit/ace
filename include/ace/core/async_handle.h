@@ -135,11 +135,14 @@ namespace ace::core {
     // ── automaton_join_handler (ping then cancel, via router) ──────────
 
     /**
-     * @brief Awaitable that joins an automaton: consumes the next yield value
-     *        (or final result) and then cancels the automaton.
+     * @brief Awaitable that joins an automaton by reading its next available
+     * value and canceling a non-terminal automaton.
      * @details Co-awaiting an @c automaton_join_handler resumes when a yield
-     * value is pending or the automaton has finished, then requests
-     * cancellation of the automaton.
+     * value is pending or the automaton reaches a terminal state. The valued
+     * overload requests cancellation after attempting to read a pending yield,
+     * regardless of whether the read succeeds; it reads a terminal result
+     * without an additional cancellation request. The @c void overload
+     * requests cancellation for every non-idle automaton.
      * @tparam resume_t  Yielded / returned value type (@c void by default).
      */
     template <typename resume_t = void>
@@ -176,7 +179,15 @@ namespace ace::core {
         template<typename promise_u>
         bool await_suspend(std::coroutine_handle<promise_u> outer);
 
-        /// @brief Valued variant — read the next yield value (or final result), then cancel.
+        /**
+         * @brief Reads the next available value and applies join cancellation.
+         * @return For an idle handle, @c std::nullopt without cancellation. For
+         * a terminal automaton, its final result when available, otherwise
+         * @c std::nullopt, without an additional cancellation request. For a
+         * non-terminal automaton, the yielded value when the read succeeds,
+         * otherwise @c std::nullopt; cancellation is requested after either
+         * yield-read outcome.
+         */
         [[nodiscard]] std::optional<resume_t> await_resume() requires (not std::is_void_v<resume_t>) {
             if (_handle.is_idle()) return std::nullopt;
             if (_handle.done() or _handle.finished()) {
@@ -185,12 +196,19 @@ namespace ace::core {
                 return std::nullopt;
             }
             resume_t res;
-            _handle.yield_value(&res);
+            const bool has_value = _handle.yield_value(&res);
             _handle.cancel();
+            if (not has_value) return std::nullopt;
             return res;
         }
 
-        /// @brief @c void variant — cancel the automaton and report whether it finished.
+        /**
+         * @brief Requests cancellation for a non-idle automaton.
+         * @return @c true when the automaton was already terminal; @c false
+         * when the handle was idle or the automaton was still active.
+         * Cancellation is requested for both terminal and active automatons,
+         * but not for an idle handle.
+         */
         bool await_resume() {
             if (_handle.is_idle()) return false;
             if (_handle.done() or _handle.finished()) { _handle.cancel(); return true; }

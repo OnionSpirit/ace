@@ -194,7 +194,6 @@ namespace ace::core {
         /**
          * @details Function to attach task to the runner
          * @param new_task Task to be pushed into the runner
-         * @return void
          */
         template <typename async_return_t, template <typename> typename promise_rule_t>
         requires is_spawnable_rule<promise_rule_t>
@@ -204,7 +203,6 @@ namespace ace::core {
         /**
          * @details Function to attach task to the runner
          * @param new_task Task to be pushed into the runner
-         * @return void
          */
         template <typename async_return_t, template <typename> typename promise_rule_t>
         requires is_spawnable_rule<promise_rule_t>

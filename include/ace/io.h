@@ -387,6 +387,14 @@ public:                                                                         
                     + std::string{typeid(query_core_t).name()} + "]");
             if (_res != INT_MIN)
                 return false;
+            const int initialization_error = services::kernel_controller::initialization_error();
+            if (initialization_error not_eq 0) {
+                // The controller stores the exact liburing init failure, so the
+                // query retains its normal negative-errno result contract
+                // without installing a router that could never be reattached.
+                _res = initialization_error;
+                return false;
+            }
             if (static_cast<query_core_t*>(this)->setup_query(this) and not _is_silent) {
                 coroutine.promise()._runner_router = query_router{this};
                 return true;
@@ -1375,9 +1383,9 @@ public:                                                                         
          * @brief A single fire-and-forget I/O command.
          *
          * @details Each @c command wraps an @c io_uring operation.  On
-         * completion, @c on_result() calls @c raw_sync() to return the
-         * command to the pool.  Errors are handled by the global
-         * @c fail_cb_handler.
+         * completion, @c on_result() releases the payload and calls
+         * @c raw_sync() to return the command to the pool. Errors are handled
+         * by the global @c fail_cb_handler.
          */
         struct command : services::kernel_observer {
 
@@ -1387,8 +1395,9 @@ public:                                                                         
             /**
              * @brief Handles the completion of a fire-and-forget command.
              * @param res Operation result (negative errno on failure).
-             * @details Invokes the global @c fail_cb_handler on failure, then
-             * returns the command to the pool via @c raw_sync().
+             * @details Handles both CQE results and local submission failures.
+             * Invokes the global @c fail_cb_handler on failure, releases the
+             * payload, then returns the command to the pool via @c raw_sync().
              */
             void on_result(const int res) override {
                 if (res < 0 and fail_cb_handler) {
@@ -1403,6 +1412,10 @@ public:                                                                         
                         std::cerr << "outcast-io-failure : { <unknown> }" << std::endl;
                     }
                 }
+                // raw_sync() deliberately preserves the command object's
+                // lifetime, so its owned payload must be released explicitly
+                // before the node can be reused or retained by the pool.
+                _buffer.clear();
                 _command_pool.raw_sync(this);
             }
 

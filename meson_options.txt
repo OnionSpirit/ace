@@ -3,3 +3,7 @@ option('ace_entry', type: 'boolean', value: false,
 option('tests', type: 'boolean', value: false, description: 'Build tests')
 option('coverage', type: 'boolean', value: false, description: 'Enable gcov/lcov code coverage')
 option('benchmarks', type: 'boolean', value: false, description: 'Build benchmarks (google-benchmark)')
+option('test_sanitizers', type: 'array', choices: ['address', 'undefined', 'thread'], value: ['address'],
+       description: 'Sanitizers for ACE test targets; use separate builds for thread')
+option('test_leak_detection', type: 'combo', choices: ['auto', 'enabled', 'disabled'], value: 'auto',
+       description: 'LSan policy for ASan tests: auto skips unsupported ptrace environments')

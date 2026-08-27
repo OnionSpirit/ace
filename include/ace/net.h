@@ -413,7 +413,8 @@ namespace ace::net {
 
         /**
          * @brief Asynchronously writes a buffer to the socket via @c sendmsg,
-         *        with a blocking @c ::sendmsg fallback.
+         *        with a blocking @c ::sendmsg fallback only when @c io_uring
+         *        initialized successfully.
          * @param buff  Scatter-gather buffer to send.
          */
         void output_action(io::buffer&& buff) override {
@@ -429,6 +430,13 @@ namespace ace::net {
                 const auto* assembled = cmd->_buffer.assemble();
                 if (services::kernel_controller::sendmsg(cmd, _fd, assembled, 0))
                     return;
+                const int error = services::kernel_controller::initialization_error();
+                if (error not_eq 0) {
+                    // A failed init has no CQE, so complete the command locally
+                    // through the same cleanup and error-reporting path.
+                    cmd->on_result(error);
+                    return;
+                }
             }
             // NOTE: If can not get slot or identity not found -> using busy behavior
             const auto* assembled = buff.assemble();

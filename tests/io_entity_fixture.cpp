@@ -1,4 +1,5 @@
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <climits>
@@ -13,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include <ace/ace.h>
+#include <ace/fs.h>
 #include <ace/futures/channel.h>
 #include <ace/futures/get_runner.h>
 #include <ace/futures/reattach.h>
@@ -30,6 +32,52 @@ struct test_kernel_observer final : ace::services::kernel_observer {
     void on_result(const int) override {}
 };
 
+namespace {
+
+int reject_kernel_queue_init(unsigned, io_uring*, io_uring_params*) {
+    return -EPERM;
+}
+
+std::atomic<int> outcast_init_failure {INT_MIN};
+
+void record_outcast_init_failure(const int error, const std::span<const char>&) {
+    outcast_init_failure.store(error, std::memory_order_relaxed);
+}
+
+struct kernel_init_override final {
+    explicit kernel_init_override(int (*initializer)(unsigned, io_uring*, io_uring_params*)) {
+        ace::services::kernel_controller::set_queue_init_for_testing(initializer);
+    }
+
+    kernel_init_override(const kernel_init_override&) = delete;
+    kernel_init_override& operator=(const kernel_init_override&) = delete;
+
+    ~kernel_init_override() {
+        ace::services::kernel_controller::set_queue_init_for_testing(nullptr);
+    }
+};
+
+struct outcast_handler_override final {
+    using handler_t = decltype(ace::io::outcast::fail_cb_handler);
+
+    explicit outcast_handler_override(const handler_t handler)
+        : _previous(ace::io::outcast::fail_cb_handler) {
+        ace::io::outcast::fail_cb_handler = handler;
+    }
+
+    outcast_handler_override(const outcast_handler_override&) = delete;
+    outcast_handler_override& operator=(const outcast_handler_override&) = delete;
+
+    ~outcast_handler_override() {
+        ace::io::outcast::fail_cb_handler = _previous;
+    }
+
+private:
+    handler_t _previous;
+};
+
+} // namespace
+
 struct io_entity_fixture : ::testing::Test {
     struct exact_read_storage {
         std::array<unsigned char, 4> bytes {0xCC, 0xCC, 0xCC, 0xCC};
@@ -38,6 +86,17 @@ struct io_entity_fixture : ::testing::Test {
 
     static ace::task read_exact(const int fd, exact_read_storage& storage, int& result) {
         result = co_await ace::io::read_query(fd, storage.bytes.data(), storage.bytes.size());
+    }
+
+    static ace::task read_after_kernel_init_failure(const int fd, int& result) {
+        char byte = 0;
+        result = co_await ace::io::read_query(fd, &byte, 1);
+    }
+
+    static ace::task write_file_link(ace::fs::file_link& link, const std::string_view payload, const int repeats = 1) {
+        for (int i = 0; i < repeats; ++i)
+            link.write(std::string_view {payload});
+        co_return;
     }
 
     static ace::task await_close(test_io_entity& entity, int& result) {
@@ -421,6 +480,95 @@ TEST_F(io_entity_fixture, kernelic_rejects_oversize_lengths_without_submission) 
         sizeof(address)));
     EXPECT_FALSE(ace::services::kernel_controller::recv(&observer, 0, &byte, oversize, 0));
     EXPECT_FALSE(ace::services::kernel_controller::writev(&observer, 0, &vec, oversize, 0, 0));
+}
+
+// Verifies that a failed io_uring initialization is observable and never touches a null ring.
+TEST_F(io_entity_fixture, kernelic_init_failure_reports_availability_and_rejects_ring_operations) {
+    const kernel_init_override init_override {reject_kernel_queue_init};
+    test_kernel_observer observer;
+    int fds[1] = {-1};
+
+    // The injected -EPERM must flow through every direct controller API so no
+    // caller can mistake an unusable thread-local ring for a usable one.
+    EXPECT_FALSE(ace::services::kernel_controller::available());
+    EXPECT_EQ(-EPERM, ace::services::kernel_controller::initialization_error());
+    EXPECT_FALSE(ace::services::kernel_controller::nop(&observer));
+    EXPECT_EQ(-EPERM, ace::services::kernel_controller::register_files(fds, 1));
+    EXPECT_EQ(-EPERM, ace::services::kernel_controller::register_files_update(0, -1));
+    EXPECT_EQ(-EPERM, ace::services::kernel_controller::unregister_files());
+    EXPECT_FALSE(ace::services::kernel_controller::ping());
+    // Status and rejected direct operations must not enqueue a polling service
+    // that cannot ever receive a CQE.
+    EXPECT_TRUE(ace::empty());
+}
+
+// Verifies that an I/O query returns the exact ring initialization error without suspending.
+TEST_F(io_entity_fixture, io_query_returns_kernel_init_error_without_submission) {
+    int pipe_fds[2] = {-1, -1};
+    ASSERT_EQ(0, ::pipe(pipe_fds));
+    int result = INT_MIN;
+    const kernel_init_override init_override {reject_kernel_queue_init};
+
+    ace::schedule(read_after_kernel_init_failure(pipe_fds[0], result));
+    run_dispatcher();
+
+    // The coroutine finishes immediately instead of installing a router that
+    // cannot receive a CQE from an unavailable ring.
+    EXPECT_EQ(-EPERM, result);
+    ::close(pipe_fds[0]);
+    ::close(pipe_fds[1]);
+}
+
+// Verifies file output reports init failure without writing through the blocking fallback.
+TEST_F(io_entity_fixture, file_output_reports_kernel_init_error_without_fallback_bytes) {
+    int pipe_fds[2] = {-1, -1};
+    ASSERT_EQ(0, ::pipe(pipe_fds));
+    ASSERT_NE(-1, ::fcntl(pipe_fds[0], F_SETFL, O_NONBLOCK));
+    ace::fs::file_link output {pipe_fds[1], true};
+    outcast_init_failure.store(INT_MIN, std::memory_order_relaxed);
+    const outcast_handler_override handler_override {record_outcast_init_failure};
+    const kernel_init_override init_override {reject_kernel_queue_init};
+
+    ace::schedule(write_file_link(output, "B38 injected init failure"));
+    run_dispatcher();
+
+    // Exact error plus an empty nonblocking pipe proves the failed async submit
+    // was observed without silently switching to the blocking writev path.
+    EXPECT_EQ(-EPERM, outcast_init_failure.load(std::memory_order_relaxed));
+    char byte = 0;
+    errno = 0;
+    EXPECT_EQ(-1, ::read(pipe_fds[0], &byte, 1));
+    EXPECT_EQ(EAGAIN, errno);
+    ::close(pipe_fds[0]);
+    ::close(pipe_fds[1]);
+}
+
+// Verifies repeated successful outcast completions preserve exact file output without sanitizer leaks.
+TEST_F(io_entity_fixture, file_output_reuses_completed_outcast_commands_without_payload_leaks) {
+    if (not ace::services::kernel_controller::available()) {
+        // Environments that deny io_uring exercise the deterministic failure
+        // branch above; successful recycle coverage requires actual CQEs.
+        EXPECT_LT(ace::services::kernel_controller::initialization_error(), 0);
+        return;
+    }
+
+    int pipe_fds[2] = {-1, -1};
+    ASSERT_EQ(0, ::pipe(pipe_fds));
+    ace::fs::file_link output {pipe_fds[1], true};
+    constexpr std::string_view payload {"completed payload"};
+    constexpr int repeats = 3;
+
+    ace::schedule(write_file_link(output, payload, repeats));
+    run_dispatcher();
+
+    std::array<char, payload.size() * repeats> bytes {};
+    // Exact bytes verify all recycled commands reached successful CQEs; the
+    // ASan+LSan run supplies the payload-lifetime regression assertion.
+    ASSERT_EQ(static_cast<ssize_t>(bytes.size()), ::read(pipe_fds[0], bytes.data(), bytes.size()));
+    EXPECT_EQ("completed payloadcompleted payloadcompleted payload",
+              std::string_view(bytes.data(), bytes.size()));
+    ::close(pipe_fds[0]);
+    ::close(pipe_fds[1]);
 }
 
 // Verifies that a stalled connection_link read no longer blocks a sibling timer and is cancelable.

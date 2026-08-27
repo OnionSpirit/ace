@@ -63,6 +63,18 @@ tests_enabled = get_option('tests')
 
 if tests_enabled
     message('Tests requested')
+    test_sanitizers = get_option('test_sanitizers')
+    test_leak_detection = get_option('test_leak_detection')
+    if test_sanitizers.contains('thread') and test_sanitizers.length() != 1
+        error('test_sanitizers=thread must use a separate build from address/undefined')
+    endif
+    if test_leak_detection == 'enabled' and not test_sanitizers.contains('address')
+        error('test_leak_detection=enabled requires address in test_sanitizers')
+    endif
+    test_sanitizer_options = []
+    if test_sanitizers.length() != 0
+        test_sanitizer_options = ['b_sanitize=' + ','.join(test_sanitizers)]
+    endif
     # Объявляем mimalloc
     mimalloc_dep = dependency('mimalloc', fallback : ['mimalloc', 'mimalloc_dep'], required : true)
     gtest_dep = dependency('gtest', main: true, fallback: ['gtest', 'gtest_dep'], required : true)
@@ -90,11 +102,13 @@ if tests_enabled
         'tests/io_entity_fixture.cpp',
         'tests/io_hanged_fixture.cpp',
         'tests/moving_average_fixture.cpp',
+        'tests/nukes_alignment_fixture.cpp',
         'tests/omniptr_fixture.cpp',
         'tests/promise_traits_fixture.cpp',
         'tests/queue_fixture.cpp',
         'tests/router_slot_fixture.cpp',
         'tests/runner_fixture.cpp',
+        'tests/service_fixture.cpp',
         'tests/signal_fixture.cpp',
         'tests/socket_echo_fixture.cpp',
         'tests/spawn_extra_fixture.cpp',
@@ -180,12 +194,21 @@ if tests_enabled
         override_options: [
             'debug=true',
             'optimization=0',
-            'b_sanitize=address',
-        ],
+        ] + test_sanitizer_options,
     )
 
     python = import('python').find_installation('python3')
     discovery_script = files('discover_tests.py')[0]
+    sanitized_test_runner = files('tests/sanitized_test_runner.py')[0]
+    sanitized_test_runner_common_args = [
+      sanitized_test_runner,
+      '--sanitizers', ','.join(test_sanitizers),
+      '--leak-mode', test_leak_detection,
+      '--probe-executable', test_executable,
+    ]
+    sanitized_test_runner_args = sanitized_test_runner_common_args + [
+      '--',
+    ]
     discovered_tests = run_command(
       python, discovery_script, 'discover', test_fixture_sources,
       check: true
@@ -197,17 +220,15 @@ if tests_enabled
     message('applying test - ', test_name)
     test(
       test_name,
-      test_executable,
-      args: [
+      python,
+      args: sanitized_test_runner_args + [test_executable] + [
         '--gtest_filter=@0@'.format(test_name),
         '--gtest_print_time=0',
         '--gtest_color=yes',
         '--gtest_catch_exceptions=0',
         '--gtest_break_on_failure=1'
       ],
-      env: {
-        'ASAN_OPTIONS': 'halt_on_error=0:detect_leaks=0',
-      },
+      suite: ['ace', 'sanitizer'],
     )
     endforeach
 
@@ -216,14 +237,33 @@ if tests_enabled
       'discover_tests.unit',
       python,
       args: [discovery_unit_tests],
+      suite: 'ace',
+    )
+
+    test(
+      'sanitized_test_runner.unit',
+      python,
+      args: [files('tests/sanitized_test_runner_test.py')[0]],
+      suite: 'ace',
     )
 
     test(
       'ace_tests.discovery_consistency',
       python,
-      args: [discovery_script, 'verify', test_executable] + test_fixture_sources,
+      args: sanitized_test_runner_args + [python, discovery_script, 'verify', test_executable] + test_fixture_sources,
       depends: [test_executable],
+      suite: ['ace', 'sanitizer'],
     )
+
+    if test_sanitizers.contains('address')
+        test(
+          'ace_tests.lsan_capability',
+          python,
+          args: sanitized_test_runner_common_args + ['--probe-only'],
+          depends: [test_executable],
+          suite: ['ace', 'sanitizer'],
+        )
+    endif
 
     if entry_mode
         entry_fallback_executable = executable(
@@ -235,17 +275,14 @@ if tests_enabled
             override_options: [
                 'debug=true',
                 'optimization=0',
-                'b_sanitize=address',
-            ],
+            ] + test_sanitizer_options,
         )
         test(
             'ace_entry.fallback',
             python,
-            args: [files('tests/check_entry_fallback.py')[0], entry_fallback_executable],
+            args: sanitized_test_runner_args + [python, files('tests/check_entry_fallback.py')[0], entry_fallback_executable],
             depends: [entry_fallback_executable],
-            env: {
-                'ASAN_OPTIONS': 'halt_on_error=0:detect_leaks=0',
-            },
+            suite: ['ace', 'sanitizer'],
         )
     endif
 
@@ -259,6 +296,7 @@ if benchmarks_enabled
 
     benchmark_dep = dependency('google-benchmark',
         fallback: ['google-benchmark', 'google_benchmark_dep'],
+        default_options: ['tests=disabled'],
         required: true
     )
 

@@ -47,7 +47,9 @@ namespace ace::fs {
      * @brief @c io_link for open files.
      *
      * @details Implements @c output_action() via async write through
-     * @c io::outcast::command (with blocking @c ::write() fallback).
+     * @c io::outcast::command, with a blocking @c ::write() fallback only
+     * when asynchronous dispatch is unavailable for reasons other than an
+     * @c io_uring initialization failure.
      * @c input_action() uses @c core::read_query for async reads.
      */
     struct ace::fs::file_link : io::link {
@@ -62,7 +64,9 @@ namespace ace::fs {
          * @details Tries to capture an @c io::outcast::command and submit a
          * @c writev operation through @c kernel_controller; falls back to a
          * blocking @c ::writev() when no runner context or command slot is
-         * available.  Failures are reported through @c io::outcast::fail_cb_handler.
+         * available. An unavailable @c io_uring instead returns the command to
+         * its pool and reports the exact initialization error through
+         * @c io::outcast::fail_cb_handler.
          * @param buff Buffer to write.
          */
         void output_action(io::buffer&& buff) override {
@@ -77,6 +81,13 @@ namespace ace::fs {
                 const auto* assembled = cmd->_buffer.assemble();
                 if (services::kernel_controller::writev(cmd, _fd, assembled->msg_iov, assembled->msg_iovlen, 0, 0))
                     return;
+                const int error = services::kernel_controller::initialization_error();
+                if (error not_eq 0) {
+                    // No CQE will arrive after a failed init, so complete the
+                    // command locally through its normal result path.
+                    cmd->on_result(error);
+                    return;
+                }
             }
             // NOTE: If can not get slot or identity not found -> using busy behavior
             const auto* assembled = buff.assemble();

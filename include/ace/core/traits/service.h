@@ -198,20 +198,29 @@ namespace ace::core::traits {
         }
 
         /**
+         * @brief Returns the single service instance selected by the spawn mode.
+         * @return Process-wide instance for shared services or the calling
+         * thread's instance for thread-local services.
+         */
+        static derived_t& inspect_impl() noexcept {
+            if constexpr (spawn_mode_v == service_spawn_mode::e_thread_shared) {
+                static derived_t instance {};
+                return instance;
+            } else if constexpr (spawn_mode_v == service_spawn_mode::e_thread_local) {
+                thread_local derived_t instance {};
+                return instance;
+            }
+        }
+
+        /**
          * @brief Returns the service instance, respawning it if it was detached.
          * @param rnr Runner to spawn the service on.
          * @return Reference to the (possibly respawned) service instance.
          */
         static derived_t& touch_impl(omni_runner rnr = nullptr) noexcept {
-            if constexpr (spawn_mode_v == service_spawn_mode::e_thread_shared) {
-                static derived_t instance {};
-                if (instance.detach_get()) instance.respawn(rnr.as<runner>());
-                return instance;
-            } else if constexpr (spawn_mode_v == service_spawn_mode::e_thread_local) {
-                thread_local derived_t instance {};
-                if (instance.detach_get()) instance.respawn(rnr.as<runner>());
-                return instance;
-            }
+            auto& instance = inspect_impl();
+            if (instance.detach_get()) instance.respawn(rnr.as<runner>());
+            return instance;
         }
 
     public:
@@ -224,10 +233,13 @@ namespace ace::core::traits {
         static derived_t& touch(const omni_runner rnr) noexcept
         requires (spawn_mode_v == service_spawn_mode::e_thread_local) { return touch_impl(rnr); }
 
-        // NOTE: Gets service instance to inspect without respawning
+        /**
+         * @brief Gets the same service instance as @c touch() without respawning it.
+         * @return Process-wide instance for shared mode or the calling thread's
+         * thread-local instance for unique mode.
+         */
         static derived_t& inspect() noexcept {
-            static derived_t instance;
-            return instance;
+            return inspect_impl();
         }
 
     };

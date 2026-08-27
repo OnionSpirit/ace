@@ -31,9 +31,8 @@ struct ace_nop_query : ace::io::query<ace_nop_query> {
     [[nodiscard]] int await_resume() const { return _res; }
 };
 
-ace::task run_nop_query() {
-    const int result = co_await ace_nop_query{};
-    EXPECT_GE(result, 0);
+ace::task run_nop_query(int& result) {
+    result = co_await ace_nop_query{};
 }
 
 ace::task pipe_write_read(int read_fd, int write_fd) {
@@ -281,11 +280,20 @@ ace::task tcp_buffer_client(int port, ace::bus<int>& result) {
         result << 1;
 }
 
-// Verifies the simplest kernel-controller submit and CQE completion path.
+// Verifies nop completion when io_uring is available, otherwise its init error contract.
 TEST_F(base_fixture, kernel_controller_nop) {
-    ace::schedule(run_nop_query());
+    if (not ace::services::kernel_controller::available()) {
+        // Sandboxed kernels can deny io_uring.  The regression is the exact
+        // negative init result, rather than a null-ring crash during submit.
+        EXPECT_LT(ace::services::kernel_controller::initialization_error(), 0);
+        return;
+    }
+
+    int result = 0;
+    ace::schedule(run_nop_query(result));
     ace::run();
     EXPECT_TRUE(ace::empty());
+    EXPECT_GE(result, 0);
 }
 
 // Verifies binary write_query and read_query operations on a local pipe.

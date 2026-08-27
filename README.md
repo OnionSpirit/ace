@@ -58,6 +58,26 @@ Programs still need the ACE and Nukes include paths and must link `liburing`.
 Meson's `ace_dep` supplies those requirements. Enabling `ace_entry` also builds a
 small static library that provides the optional weak `main()` entry point.
 
+### `io_uring` Availability
+
+Each runner owns a thread-local `io_uring` controller. Check it before relying
+on I/O in an environment that may deny `io_uring` (for example, a sandboxed
+container). When called from a runner, the status check keeps the controller's
+polling service on that same runner/thread:
+
+```cpp
+if (not ace::services::kernel_controller::available()) {
+    const int error = ace::services::kernel_controller::initialization_error();
+    // error is the negative errno returned by io_uring_queue_init_params().
+}
+```
+
+If initialization fails, ACE never accesses the uninitialized ring. Awaited I/O
+queries complete immediately with that same negative error; direct controller
+submit functions return `false`; file-registration functions return the error.
+Synchronous fire-and-forget file, socket, and console output reports it through
+`ace::io::outcast::fail_cb_handler` instead of falling back to a blocking write.
+
 ## Include Order
 
 Start with `ace/ace.h`, then include extension headers:
@@ -371,7 +391,22 @@ meson test -C build-test --print-errorlogs
 
 For an existing build directory, use
 `meson setup build-test --reconfigure -Dtests=true` before compiling. Meson
-registers each GoogleTest case as a separate test process.
+registers each GoogleTest case as a separate test process. Run ACE's own suite
+without dependency tests through `meson test -C build-test --suite ace`.
+
+Test targets default to ASan. The sanitizer matrix uses separate build
+directories because TSan cannot be combined with ASan:
+
+```bash
+meson setup build-asan -Dtests=true -Dtest_sanitizers=address
+meson setup build-ubsan -Dtests=true -Dtest_sanitizers=address,undefined -Dtest_leak_detection=disabled
+meson setup build-tsan -Dtests=true -Dtest_sanitizers=thread
+```
+
+`-Dtest_leak_detection=enabled` requires an LSan-capable environment. The
+default `auto` mode records a skipped `ace_tests.lsan_capability` check under
+ptrace and still runs correctness tests with leak detection disabled; it never
+suppresses non-LSan sanitizer failures.
 
 ## Benchmarks
 

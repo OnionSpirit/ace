@@ -4,10 +4,10 @@
 
 > **Статус:** GCC 16 coverage union от 2026-08-23 покрывает **2262/2398 =
 > 94.33%** уникальных исполняемых строк `include/ace/**`. После B13 текущая
-> default-конфигурация регистрирует 303 Meson-теста. Последний полный прогон
-> до добавления B25/B54 regressions в окружении без рабочего `io_uring` дал
-> 253/297: 43 падения относятся к B38, ещё одно — к B29; все B13 regressions
-> прошли.
+> default-конфигурация регистрирует 311 ACE Meson-тестов: 307 GTests, две
+> Python unit checks, discovery consistency и LSan capability. B29/B38/B66/B68
+> regressions проходят; successful-I/O tests всё ещё требуют доступного
+> `io_uring` и не становятся fallback tests.
 
 ## Требования к генерации тестов (agent instructions)
 
@@ -203,7 +203,7 @@ GoogleTest автоматически увеличивал seed между ит�
 | Issue | Regression tests | Статус |
 |-------|------------------|--------|
 | B15 | `fs_fixture.open_rewrite_truncates_existing_file` | ✅ Реализован и проходит в GCC-прогонах |
-| B16 | `yield_fixture.automaton_join_returns_nullopt_when_pending_yield_was_consumed` | ⚠️ Production fix есть, но edge regression некорректен и детерминированно падает; проверка заблокирована B29 |
+| B16 | `yield_fixture.automaton_join_returns_nullopt_when_pending_yield_was_consumed` | ✅ Корректный ready/resume race regression возвращает `nullopt` и отменяет automaton |
 | B17 | `io_entity_fixture.read_query_exact_buffer_preserves_canary_and_binary_data` | ✅ Реализован и проходит в GCC-прогонах |
 | B18 | `io_entity_fixture.connection_recv_vector_uses_logical_size`, `io_entity_fixture.connection_recv_string_uses_logical_size` | ✅ Реализованы и проходят в GCC-прогонах |
 | B19 | `io_entity_fixture.entity_move_assignment_releases_old_and_keeps_incoming` | ✅ Реализован и проходит в GCC-прогонах |
@@ -211,7 +211,12 @@ GoogleTest автоматически увеличивал seed между ит�
 | B21 | `io_entity_fixture.entity_close_awaited_single_ownership`, `entity_close_discarded_single_ownership`, `entity_close_repeated_is_idempotent`, `direct_close_query_discard_remains_non_owning` | ✅ Реализованы и проходят в GCC-прогонах |
 | B22 | `base_fixture.udp_bind_transfers_sole_ownership`; supporting coverage `base_fixture.udp_sendto_recv_loop` | ✅ Реализован и проходит в GCC-прогонах |
 | B25 | `io_entity_fixture.io_query_lengths_preserve_uint_max_boundary`, `oversize_io_queries_return_eoverflow_without_submission`, `kernelic_rejects_oversize_lengths_without_submission` | ✅ Реализованы и проходят |
-| B54 | `io_entity_fixture.connection_link_stalled_read_keeps_runner_responsive_and_cancels`, `connection_link_read_preserves_partial_eof_and_error_results`, `connection_link_read_preserves_runner_after_migration` | ⚠️ Реализованы; runtime-проверка блокируется B38 null-ring crash |
+| B38 | `io_entity_fixture.kernelic_init_failure_reports_availability_and_rejects_ring_operations`, `io_query_returns_kernel_init_error_without_submission`, `console_output_reports_kernel_init_error_and_releases_command` | ✅ Deterministic init-failure regressions проходят |
+| B66 | `tests/sanitized_test_runner_test.py`, `ace_tests.discovery_consistency`, `ace_tests.lsan_capability` | ✅ Matrix и LSan capability policy реализованы |
+| B68 | `nukes_alignment_fixture.*` | ✅ Three freelists preserve 1/8/16/32/64/128/256-byte node alignment |
+| B70 | `io_entity_fixture.outcast_command_completion_releases_payload_before_pool_return` | ✅ Successful completion очищает payload перед `raw_sync()`; full LSan clean |
+| B71 | `io_entity_fixture.connection_link_read_preserves_runner_after_migration` | ✅ Status preflight сохраняет thread-local service на current runner; 20/20 host repeats |
+| B54 | `io_entity_fixture.connection_link_stalled_read_keeps_runner_responsive_and_cancels`, `connection_link_read_preserves_partial_eof_and_error_results`, `connection_link_read_preserves_runner_after_migration` | ✅ 3/3 проходят на host с доступным io_uring |
 
 ---
 
@@ -605,9 +610,13 @@ GoogleTest автоматически увеличивал seed между ит�
 | IE19 | `io_query_lengths_preserve_uint_max_boundary` | Query и kernel boundary сохраняют `UINT_MAX` без narrowing (B25) | ✅ |
 | IE20 | `oversize_io_queries_return_eoverflow_without_submission` | read/write/send/sendto/recv oversize возвращают `-EOVERFLOW` без SQE (B25) | ✅ |
 | IE21 | `kernelic_rejects_oversize_lengths_without_submission` | Direct kernel wrappers отклоняют oversize до liburing/ring access (B25) | ✅ |
-| IE22 | `connection_link_stalled_read_keeps_runner_responsive_and_cancels` | Idle receive не блокирует timer и отменяется через query router (B54) | ⚠️ B38 |
-| IE23 | `connection_link_read_preserves_partial_eof_and_error_results` | Link receive сохраняет partial read, EOF и negative errno (B54) | ⚠️ B38 |
-| IE24 | `connection_link_read_preserves_runner_after_migration` | Completion receive возвращается к runner после двух migration steps (B54) | ⚠️ B38 |
+| IE22 | `kernelic_init_failure_reports_availability_and_rejects_ring_operations` | Init failure даёт status/error, безопасный submit/ping/registration/destructor (B38) | ✅ |
+| IE23 | `io_query_returns_kernel_init_error_without_submission` | Awaited I/O возвращает init errno без router/SQE (B38) | ✅ |
+| IE24 | `console_output_reports_kernel_init_error_and_releases_command` | Console outcast reports init error, cleans payload and returns command (B38) | ✅ |
+| IE25 | `outcast_command_completion_releases_payload_before_pool_return` | Successful outcast completion освобождает buffer до raw pool return (B70) | ✅ |
+| IE26 | `connection_link_stalled_read_keeps_runner_responsive_and_cancels` | Idle receive не блокирует timer и отменяется через query router (B54) | ✅ Host io_uring |
+| IE27 | `connection_link_read_preserves_partial_eof_and_error_results` | Link receive сохраняет partial read, EOF и negative errno (B54) | ✅ Host io_uring |
+| IE28 | `connection_link_read_preserves_runner_after_migration` | Completion receive возвращается к runner после двух migration steps (B54/B71) | ✅ Host io_uring; 20/20 repeats |
 
 #### `IoHangedFixture`, `IoAnyFixture`
 
@@ -628,7 +637,7 @@ GoogleTest автоматически увеличивал seed между ит�
 | N3 | `udp_sendto_recv_loop` | UDP send/receive loop и supporting coverage B22 | ✅ |
 | N4 | `udp_bind_transfers_sole_ownership` | Bind потребляет source entity и сохраняет единственное ownership FD (B22) | ✅ |
 | N5 | `tcp_sendmsg_recvmsg_echo` | TCP sendmsg/recvmsg echo | ✅ |
-| N6 | B54 regressions `connection_link_*` в `io_entity_fixture` | `connection_link::read()` использует cancelable io_uring receive, cancellation и runner routing | ⚠️ B38 |
+| N6 | B54 regressions `connection_link_*` в `io_entity_fixture` | `connection_link::read()` использует cancelable io_uring receive, cancellation и runner routing | ⚠️ Требуется доступный io_uring |
 
 ---
 
@@ -946,10 +955,15 @@ framework containers. Чанки ≤ 4096 обслуживаются `std::pmr::
 ## Обновление сборки
 
 ### meson_options.txt ✅
-Добавлена опция `coverage`.
+Добавлены `coverage`, `test_sanitizers` и `test_leak_detection`. Последние
+задают раздельные ASan, ASan+UBSan и TSan build profiles; TSan нельзя сочетать с
+другими sanitizers.
 
 ### meson.build ✅
-В блоке `if tests_enabled` добавлены coverage-флаги, передача `link_args` в `executable(...)`.
+В блоке `if tests_enabled` добавлены coverage-флаги, передача `link_args` в
+`executable(...)`, ACE test suite и единый sanitizer launcher. Fallback
+Google Benchmark dependency получает `tests=disabled`, поэтому его tests не
+попадают в `--suite ace` inventory.
 
 ### discover_tests.py
 Реализован lexer-based source discovery с командами `discover` и `verify`.
@@ -990,7 +1004,7 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/id_alloc_fixture.cpp` | `id_alloc_fixture` | 3 |
 | `tests/io_any_fixture.cpp` | `io_any_fixture` | 6 |
 | `tests/io_buffer_fixture.cpp` | `io_buffer_fixture` | 25 |
-| `tests/io_entity_fixture.cpp` | `io_entity_fixture` | 24 |
+| `tests/io_entity_fixture.cpp` | `io_entity_fixture` | 28 |
 | `tests/io_hanged_fixture.cpp` | `io_hanged_fixture` | 5 |
 | `tests/moving_average_fixture.cpp` | `moving_average_fixture` | 7 |
 | `tests/omniptr_fixture.cpp` | `omniptr_fixture` | 12 |
@@ -1004,14 +1018,26 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/spawn_fixture.cpp` | `spawn_fixture` | 10 |
 | `tests/timer_fixture.cpp` | `timer_fixture` | 9 |
 | `tests/yield_fixture.cpp` | `yield_fixture` | 8 |
-| **Итого: 33 файла** | | **301** |
+| `tests/nukes_alignment_fixture.cpp` | `nukes_alignment_fixture` | 3 |
+| **Итого: 34 файла** | | **308** |
 
-Default Meson configuration (`ace_entry=false`) регистрирует **303** теста:
-301 GTests, `discover_tests.unit` и `ace_tests.discovery_consistency`. Конфигурация
-`ace_entry=true` дополнительно регистрирует `ace_entry.fallback`, всего 304.
-Наличие 301 discovered GTests не означает green suite: в актуальном окружении
-полный GCC/ASan-прогон дополнительно блокирует B38, а B29 остаётся независимым
-некорректным regression.
+Default Meson configuration (`ace_entry=false`) регистрирует **312 ACE** tests:
+308 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
+`ace_tests.discovery_consistency` и `ace_tests.lsan_capability`. Последний
+становится Meson SKIP при недоступном под ptrace LSan; остальные checks выполняются
+с `detect_leaks=0` только в auto mode. `ace_entry=true` добавляет fallback test.
+
+Clang 22 + ASan targeted B29/B38/B68 tests прошли 40 shuffled executions.
+Host ASan+LSan: `io_entity_fixture` проходит 28/28 одним процессом без leaks;
+`connection_link_read_preserves_runner_after_migration` проходит 20/20 повторов.
+Single-process ASan+LSan прогон проходит 307/307 при исключении известного B34
+и не сообщает leaks. В предшествующем полном прогоне B34 воспроизвёлся как
+98 ms вместо 100 ms; остальные tests прошли.
+Официальный host `meson test -C build --suite ace` проходит 312/312: Meson
+process isolation не воспроизвёл B34, а LSan capability и discovery green.
+GCC 16 ASan+UBSan и TSan clean configurations прошли по 6 targeted launcher,
+discovery, B29 и B68 tests. Full `--suite ace` в этом sandbox закономерно имеет
+successful-I/O failures с `-EPERM`; B38 crash не воспроизводится.
 
 ---
 
@@ -1025,19 +1051,21 @@ Default Meson configuration (`ace_entry=false`) регистрирует **303**
 | `tests/environment.h` | Общий `base_fixture` и shared test utilities; конкретные fixtures находятся рядом с тестами в split sources |
 | `tests/main.cpp` | GTest entry point для `ace_tests` |
 | `tests/discover_tests_test.py` | Семь unit tests discovery lexer/parser/verification |
+| `tests/sanitized_test_runner.py` | Единая runtime sanitizer/LSan capability policy для executable и helper tests |
+| `tests/sanitized_test_runner_test.py` | Unit tests launcher environment, strict LSan и ptrace SKIP policy |
 | `tests/entry_fallback.cpp` | Минимальный consumer без `co_main` для weak-entry fallback |
 | `tests/check_entry_fallback.py` | Проверяет ожидаемый exit code 126 fallback executable |
 
 ### Индексация split tests
 
-Тесты и fixture-specific helpers расположены в 33 файлах
+Тесты и fixture-specific helpers расположены в 34 файлах
 `tests/*_fixture.cpp`; точные counts приведены в карте выше. Source discovery:
 
 ```bash
 python3 discover_tests.py discover tests/*_fixture.cpp
 ```
 
-Команда возвращает 301 уникальный active GTest name. Meson выполняет эту же
+Команда возвращает 307 уникальных active GTest name. Meson выполняет эту же
 команду при setup, регистрирует каждый name отдельным `--gtest_filter`, а
 `ace_tests.discovery_consistency` через `verify` подтверждает совпадение списка
 source declarations с `ace_tests --gtest_list_tests`.

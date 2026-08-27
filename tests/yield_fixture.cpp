@@ -115,20 +115,6 @@ struct yield_fixture : base_fixture {
         _int_channel << val;
     }
 
-    static ace::task join_after_pending_yield_consumed(ace::bus<int>& result) {
-        auto handle = co_await ace::spawn(yield_123_return_42());
-        auto pending_join = handle.join();
-        result << (pending_join.await_ready() ? 1 : 0);
-
-        const auto consumed = co_await handle.ping();
-        result << consumed.value_or(-1);
-
-        const auto joined = pending_join.await_resume();
-        result << joined.value_or(-1);
-        result << (handle.done() ? 1 : 0);
-        co_return;
-    }
-
     void TearDown() override {
         ace::cfg::g_config._runners_amount = 1;
         ace::reload();
@@ -226,20 +212,28 @@ TEST_F(yield_fixture, spawn_automaton_ping_with_timeout) {
 
 // Verifies join returns nullopt if another ping consumes the yield it observed as pending.
 TEST_F(yield_fixture, automaton_join_returns_nullopt_when_pending_yield_was_consumed) {
-    ace::bus<int> result;
-    ace::schedule(join_after_pending_yield_consumed(result));
-    ace::run();
-    ASSERT_TRUE(ace::empty());
+    auto automaton = yield_123_return_42();
+    const auto control = automaton.observe();
+    ace::core::async_handle<int, ace::core::automaton_rule> handle {control};
 
-    const auto res = fetch(result);
-    ASSERT_EQ(res.size(), 4u);
-    // join.await_ready() must first observe the automaton's pending initial yield.
-    EXPECT_EQ(res[0], 1);
-    EXPECT_EQ(res[1], 1);
-    // -1 encodes nullopt and guards against returning an uninitialized integer.
-    EXPECT_EQ(res[2], -1);
-    // Even when no value remains, join must still cancel the active automaton.
-    EXPECT_EQ(res[3], 1);
+    // Drive the lazy automaton through its public runner interface until its
+    // first yield is pending.  No awaiter protocol is skipped in this test.
+    automaton.awake();
+    auto pending_join = handle.join();
+    ASSERT_TRUE(pending_join.await_ready());
+
+    // A second valid ready/resume pair consumes the exact yield observed by
+    // join.  This reproduces the B16 gap without manually calling
+    // await_resume() on an awaiter that asked to suspend.
+    auto competing_ping = handle.ping();
+    ASSERT_TRUE(competing_ping.await_ready());
+    EXPECT_EQ(std::optional<int> {1}, competing_ping.await_resume());
+
+    // B16 requires the failed yield read to produce nullopt rather than the
+    // uninitialised local value in automaton_join_handler::await_resume().
+    EXPECT_EQ(std::nullopt, pending_join.await_resume());
+    // join cancels every non-terminal automaton after its read attempt.
+    EXPECT_TRUE(handle.done());
 }
 
 } // namespace

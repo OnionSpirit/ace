@@ -399,6 +399,17 @@ send/receive, read/write, open/close, cancel и nop operations через `io_ur
 Overflow SQEs буферизуются как `kernel_entity` и применяются после появления места
 в ring. `kernel_observer` принимает CQE и возвращает waiter его runner.
 
+`kernel_controller::available()` создаёт controller текущего потока при первом
+вызове, привязывает polling service к текущему runner и сообщает доступность
+ring; `initialization_error()` возвращает `0` либо точный отрицательный код
+`io_uring_queue_init_params()`. При init failure `submit`
+возвращает `false`, registration APIs и awaited I/O queries передают этот код,
+`ping()` не касается ring и destructor не вызывает `queue_exit()`. Синхронные
+fire-and-forget file/socket/console writes сообщают ошибку через
+`io::outcast::fail_cb_handler`, не выполняя blocking fallback. Внутренняя
+`set_queue_init_for_testing()` предоставляет deterministic init-failure injection
+и требует отсутствия I/O in flight на текущем потоке.
+
 Iovec storage использует общую arena. Большие physical chunks обслуживаются
 transient path. Публичные byte lengths остаются `size_t` до kernel boundary;
 один SQE допускает не более `kernel_controller::max_io_length` (`UINT_MAX`).
@@ -526,7 +537,7 @@ fallback, либо бросает `std::bad_alloc` согласно `_breach_mem
 
 ### Текущая карта
 
-Test executable собирается из `tests/main.cpp`, `tests/environment.h` и **33
+Test executable собирается из `tests/main.cpp`, `tests/environment.h` и **34
 fixture source files**:
 
 ```text
@@ -541,6 +552,7 @@ future_traits_fixture.cpp      get_runner_fixture.cpp
 id_alloc_fixture.cpp           io_any_fixture.cpp
 io_buffer_fixture.cpp          io_entity_fixture.cpp
 io_hanged_fixture.cpp          moving_average_fixture.cpp
+nukes_alignment_fixture.cpp
 omniptr_fixture.cpp            promise_traits_fixture.cpp
 queue_fixture.cpp              router_slot_fixture.cpp
 runner_fixture.cpp             signal_fixture.cpp
@@ -551,27 +563,30 @@ yield_fixture.cpp
 
 Fixture classes и helper coroutine functions объявляются в
 `tests/environment.h`; каждый fixture source содержит относящиеся к нему
-`TEST`/`TEST_F`. Текущая source inventory - **301 Google Test**. Meson discover
+`TEST`/`TEST_F`. Текущая source inventory - **307 Google Test**. Meson discover
 mode регистрирует каждый GTest отдельным процессом с точным `--gtest_filter`.
 
 Помимо source GTests, стандартная конфигурация регистрирует tooling tests:
 
 - `discover_tests.unit` проверяет parser/discovery logic;
+- `sanitized_test_runner.unit` проверяет единый ASan/UBSan/TSan/LSan launcher;
 - `ace_tests.discovery_consistency` сравнивает source discovery со списком
   собранного GTest binary;
+- `ace_tests.lsan_capability` сообщает successful LSan probe либо Meson SKIP
+  в ptrace-ограниченном environment;
 - `ace_entry.fallback` добавляется при включённом weak-entry mode.
 
 ### Текущий результат
 
-- GCC 16 + ASan: B13 targeted tests и двадцать shuffle-повторов полного
-  `promise_traits_fixture` проходят. Последний полный Meson suite до добавления
-  B25/B54 regressions в текущем окружении — **253/297**: 43 failures относятся
-  к недоступному `io_uring`/B38, один — к некорректному automaton edge regression
-  B29. Текущая конфигурация регистрирует 303 теста.
-- Clang 22 + ASan: B13 targeted tests и двадцать shuffle-повторов полного
-  `promise_traits_fixture` проходят; source/runtime discovery совпадает.
-  Полный suite не заявляется. B28 всё ещё выбирает compiler flags по argument
-  syntax, но прежний ODR-блокер B27 решён.
+- Clang 22 + ASan: targeted B29/B38/B68 checks прошли 40 shuffled executions;
+  все `io_entity_fixture` проходят 28/28 одним host-процессом с доступным
+  `io_uring`; migration regression проходит 20/20 повторов. Full host binary
+  не показывает LSan leaks, но остаётся известный timing failure B34.
+  Официальный host Meson suite проходит 312/312, включая LSan capability и
+  discovery; под ptrace LSan capability корректно отмечается SKIP.
+- GCC 16 + ASan+UBSan и GCC 16 + TSan: B29, B68, launcher и discovery прошли
+  6/6 в отдельных clean build directories. Full successful-I/O suite по-прежнему
+  требует host с доступным `io_uring`.
 
 Не заявлять общий green status до решения этих записей. Meson запускает каждый
 discovered GTest отдельным процессом; для проверки order dependencies дополнительно

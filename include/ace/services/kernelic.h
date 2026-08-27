@@ -29,6 +29,7 @@
 #define ACE_SERVICES_KERNELIC_H
 
 #include <algorithm>
+#include <cerrno>
 #include <cstring>
 #include <limits>
 #include <liburing.h>
@@ -89,14 +90,22 @@ namespace ace::services {
 
     private:
 
+        friend core::traits::service_traits<kernel_controller, core::service_spawn_mode::e_thread_local>;
+
+        using ring_init_fn = int (*)(unsigned, io_uring*, io_uring_params*);
+
         struct kernel_entity;
 
         static thread_local io_uring_params _ring_params; ///< io_uring ring parameters.
         static thread_local io_uring _ring;               ///< The io_uring ring itself.
+        static thread_local bool _init_attempted;         ///< Whether this thread attempted ring initialization.
+        static thread_local int _init_error;              ///< Zero on success, otherwise the negative liburing init error.
         static thread_local int _queries;                 ///< Number of in-flight operations.
         static thread_local bool _need_submission;        ///< Whether a submit is required on the next ping.
+        static thread_local ring_init_fn _ring_init_cb;   ///< Injectable queue initializer used by B38 regression tests.
 
-    public:
+        /// @brief Initializes this thread's ring once and records its result.
+        static void initialize() noexcept;
 
         /// @brief Initialises the ring (declaration; definition below).
         kernel_controller();
@@ -104,8 +113,41 @@ namespace ace::services {
         /// @brief Tears the ring down (declaration; definition below).
         ~kernel_controller();
 
+    public:
+
         /// @brief Maximum number of concurrent operations (ring capacity).
         static constexpr unsigned max_entries = 4096;
+
+        /**
+         * @brief Reports whether the current thread has a usable @c io_uring ring.
+         * @details Creates the thread-local controller on first use without
+         * scheduling its polling coroutine. The result is cached for that
+         * controller lifetime, so a failed
+         * initialization never permits liburing operations on an uninitialized
+         * ring.
+         * @return @c true when ring initialization succeeded.
+         */
+        [[nodiscard]] static bool available() noexcept;
+
+        /**
+         * @brief Returns the current thread's @c io_uring initialization result.
+         * @details Creates the thread-local controller on first use without
+         * scheduling its polling coroutine. A zero result means
+         * @c available() is @c true; otherwise the return
+         * value is the exact negative error from
+         * @c io_uring_queue_init_params().
+         * @return Zero on success, otherwise a negative @c errno value.
+         */
+        [[nodiscard]] static int initialization_error() noexcept;
+
+        /**
+         * @brief Replaces the queue initializer for deterministic tests.
+         * @warning This test-only hook destroys any successfully initialized
+         * current-thread ring and must be called only when no I/O is in flight.
+         * Passing @c nullptr restores @c io_uring_queue_init_params().
+         * @param initializer Replacement initializer, or @c nullptr to restore liburing.
+         */
+        static void set_queue_init_for_testing(ring_init_fn initializer) noexcept;
 
         /**
          * @brief Largest byte count representable by one io_uring SQE.
@@ -167,6 +209,8 @@ namespace ace::services {
          * @return 0 on success, negative errno on failure
          */
         static int register_files(const int* fds, unsigned nr_fds) noexcept {
+            const int error = initialization_error();
+            if (error not_eq 0) return error;
             return io_uring_register_files(&_ring, fds, nr_fds);
         }
 
@@ -177,6 +221,8 @@ namespace ace::services {
          * @return 0 on success, negative errno on failure
          */
         static int register_files_update(unsigned index, int fd) noexcept {
+            const int error = initialization_error();
+            if (error not_eq 0) return error;
             return io_uring_register_files_update(&_ring, index, &fd, 1);
         }
 
@@ -185,6 +231,8 @@ namespace ace::services {
          * @return 0 on success, negative errno on failure
          */
         static int unregister_files() noexcept {
+            const int error = initialization_error();
+            if (error not_eq 0) return error;
             return io_uring_unregister_files(&_ring);
         }
 
@@ -403,6 +451,9 @@ namespace ace::services {
 
     inline thread_local io_uring_params kernel_controller::_ring_params {};
     inline thread_local io_uring kernel_controller::_ring {};
+    inline thread_local bool kernel_controller::_init_attempted {false};
+    inline thread_local int kernel_controller::_init_error {-EAGAIN};
+    inline thread_local kernel_controller::ring_init_fn kernel_controller::_ring_init_cb {io_uring_queue_init_params};
 
     inline thread_local int kernel_controller::_queries {};
     inline thread_local bool kernel_controller::_need_submission {false};
@@ -424,18 +475,58 @@ inline returnT ACE_SERVICES_KERNEL_ENTITY_SPACE
 
 ACE_SERVICES_KERNEL_CONTROLLER_MEMBER()
 kernel_controller() {
+    initialize();
+}
+
+ACE_SERVICES_KERNEL_CONTROLLER_MEMBER(void)
+initialize() noexcept {
+    if (_init_attempted) return;
+    _init_attempted = true;
     memset(&_ring_params, 0, sizeof(_ring_params));
-    io_uring_queue_init_params(max_entries, &_ring, &_ring_params);
+    memset(&_ring, 0, sizeof(_ring));
+    const int result = _ring_init_cb(max_entries, &_ring, &_ring_params);
+    _init_error = result == 0 ? 0 : result;
 }
 
 ACE_SERVICES_KERNEL_CONTROLLER_MEMBER()
 ~kernel_controller() {
-    io_uring_queue_exit(&_ring);
+    if (_init_error == 0)
+        io_uring_queue_exit(&_ring);
+}
+
+ACE_SERVICES_KERNEL_CONTROLLER_MEMBER(bool)
+available() noexcept {
+    (void)inspect();
+    return _init_error == 0;
+}
+
+ACE_SERVICES_KERNEL_CONTROLLER_MEMBER(int)
+initialization_error() noexcept {
+    (void)inspect();
+    return _init_error;
+}
+
+ACE_SERVICES_KERNEL_CONTROLLER_MEMBER(void)
+set_queue_init_for_testing(ring_init_fn initializer) noexcept {
+    if (_init_error == 0)
+        io_uring_queue_exit(&_ring);
+    memset(&_ring_params, 0, sizeof(_ring_params));
+    memset(&_ring, 0, sizeof(_ring));
+    _queries = 0;
+    _need_submission = false;
+    _init_attempted = false;
+    _init_error = -EAGAIN;
+    _ring_init_cb = initializer ? initializer : io_uring_queue_init_params;
+    initialize();
+    // The service-only controller owns the ring lifetime even though changing
+    // the test initializer must not schedule its polling coroutine.
+    (void)inspect();
 }
 
 
 ACE_SERVICES_KERNEL_CONTROLLER_MEMBER(bool)
 ping() {
+    if (_init_error not_eq 0) return false;
     // NOTE: Setting requests to the io_uring
     _need_submission = _need_submission or not _submission_buffer.empty();
     // NOTE: The bound must stay signed — when _queries exceeds the ring
@@ -507,6 +598,8 @@ ping() {
 template <typename foo_t, typename ... Params> bool
 ACE_SERVICES_KERNEL_CONTROLLER_SPACE
 submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept {
+    if (not observer) return false;
+    if (initialization_error() not_eq 0) return false;
     if (not observer->_runner_identity)
         observer->_runner_identity = core::runner::get().as<runner_pool_t>();
     touch(observer->_runner_identity);
@@ -557,6 +650,7 @@ apply() {
     // NOTE: Fetching a fresh SQE slot — the buffered request must not
     // hold a pre-fetched slot across submissions (it may already be
     // consumed by io_uring_submit as an unprepared entry).
+    if (_init_error not_eq 0) return false;
     if (not _observer) [[unlikely]] return false;
     io_uring_sqe* sqe = io_uring_get_sqe(&_ring);
     if (not sqe) [[unlikely]] return false;

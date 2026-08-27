@@ -202,7 +202,7 @@
 
 ### B29. Некорректный regression блокирует проверку B16
 
-- **Статус:** Открыто, блокирует тестирование edge case B16.
+- **Статус:** Решено 2026-08-27.
 - **Приоритет:** Высокий.
 - **Файл:** `tests/yield_fixture.cpp:227-243`.
 - **Симптом:**
@@ -211,12 +211,12 @@
 - **Корневая причина:** тест вызывает `await_resume()` после `await_ready() ==
   false`, не вызывая `await_suspend()`; ожидание pending initial yield также
   противоречит lazy `automaton::initial_suspend`.
-- **Предлагаемое решение:** построить корректный детерминированный протокол:
-  явно довести raw observed automaton до pending yield и затем чередовать
-  join/ping handlers либо использовать runner synchronization с полным await
-  protocol. Тест обязан падать без B16 и проходить с ним.
-- **Проверка решения:** отдельный повторный прогон edge regression и полный GCC
-  suite; текущий тест успешным не считается.
+- **Решение:** regression теперь наблюдает lazy automaton, через публичный
+  `awake()` доводит его до pending yield и выполняет два валидных ready/resume
+  pairs: competing `ping()` забирает observed value до `join().await_resume()`.
+  Последний обязан вернуть `nullopt` и отменить automaton.
+- **Проверка:** Clang 22 + ASan — пять shuffled repeats целевого набора; GCC 16
+  ASan+UBSan и TSan clean configurations проходят без diagnostics.
 
 ### B30. Transition queries удерживают ссылки на перемещаемые source entities
 
@@ -334,35 +334,46 @@
   проверить точные bytes для file/socket fallback, возврат command slot и
   отсутствие удержанного buffer; отдельно проверить успешный async path без
   двойного `raw_sync()`.
+- **Связь с B38:** init-failure path теперь отдельно возвращает command в pool и
+  очищает payload до `raw_sync()`; это не исправляет основной сценарий B37 при
+  отказе submit после успешной инициализации ring.
 
 ### B38. Ошибка инициализации `io_uring` игнорируется и приводит к null-ring crash
 
-- **Статус:** Открыто; воспроизведено GCC/ASan 2026-08-27.
+- **Статус:** Решено 2026-08-27.
 - **Приоритет:** Критический.
 - **Файлы и символы:** `include/ace/services/kernelic.h`
-  (`kernel_controller::kernel_controller()`, `submit()`, `ping()`, destructor);
-  затронутые I/O/console tests.
+  (`kernel_controller::available()`, `initialization_error()`, constructor,
+  `submit()`, `ping()`, registration APIs, destructor); `include/ace/io.h`
+  (query await path); `include/ace/fs.h`, `include/ace/net.h` (outcast writes);
+  `tests/io_entity_fixture.cpp`.
 - **Симптом:** конструктор игнорирует отрицательный результат
   `io_uring_queue_init_params()`. После этого первый submit вызывает
   `io_uring_get_sqe()` над неинициализированным ring и падает в
   `io_uring_load_sq_head()` на null address. Свежий
   `context_fixture.do_runner_test` воспроизвёл ASan SEGV через
   `console::println()` -> `file_link::output_action()` -> `writev()`.
-- **Корневая причина:** у controller нет состояния `initialized/error`, а
-  destructor, submit, ping и registration APIs предполагают успешную
-  инициализацию без проверки.
-- **Требуемый контракт:** отсутствие доступного `io_uring` должно давать
-  определённую наблюдаемую ошибку или документированный fallback, но не crash,
-  hang и не ложный успех query. Выбор throw/error-state/fallback является
-  отдельным API-решением; singleton/service lifetime должен оставаться безопасным.
-- **Предлагаемое решение:** сохранить код инициализации, ввести явное состояние
-  controller, запретить все ring operations при failure, корректно завершать
-  только действительно инициализированный ring и провести ошибку до observer/query
-  либо выбранного fallback. Не подменять проблему skip-ом всех I/O tests.
-- **Проверка решения:** детерминированная injection ошибки init; проверки
-  submit/ping/destructor/register-files/console после failure; успешный path на
-  доступном ring; отсутствие зависших observers и утечек command/buffer. Запуски
-  GCC/Clang с ASan/UBSan и отдельный реальный environment probe.
+- **Причина:** у controller не было состояния `initialized/error`, а destructor,
+  submit, ping и registration APIs предполагали успешную инициализацию.
+- **Решение:** controller сохраняет thread-local точный init result. Публичные
+  `available()` и `initialization_error()` создают controller current thread и
+  предоставляют non-throwing status. При failure `submit()` возвращает `false`,
+  registration APIs и I/O query возвращают сохранённый negative errno, `ping()`
+  не обращается к ring, а destructor освобождает только успешно созданный ring.
+  Outcast console/file/socket path очищает command payload, возвращает node в pool
+  и сообщает error handler, не переходя к blocking fallback.
+- **Регресс-тесты:**
+  `io_entity_fixture.kernelic_init_failure_reports_availability_and_rejects_ring_operations`,
+  `io_query_returns_kernel_init_error_without_submission` и
+  `console_output_reports_kernel_init_error_and_releases_command` используют
+  deterministic injected `-EPERM` и проверяют status API, direct APIs, query,
+  destructor safety и outcast cleanup. `base_fixture.kernel_controller_nop`
+  проверяет successful CQE path при доступном ring, иначе exact negative init
+  error without submission.
+- **Проверка:** Clang 22 + ASan targeted B38 tests проходят; host-прогон с
+  доступным `io_uring` подтверждает 28/28 `io_entity_fixture`, включая 20/20
+  повторов migration path. Полный ASan+LSan binary не сообщает leaks; 307/307
+  tests проходят при исключении отдельно зарегистрированного flaky B34.
 
 ### B39. Coroutine allocation-failure protocol внутренне противоречив
 
@@ -876,7 +887,7 @@
 
 ### B66. Sanitizer/test-discovery configuration не даёт надёжной общей проверки
 
-- **Статус:** Открыто; частично воспроизведено 2026-08-27.
+- **Статус:** Решено 2026-08-27.
 - **Приоритет:** Высокий.
 - **Файлы:** `meson.build`, `discover_tests.py`, `agents/TESTING.md`.
 - **Симптом:** test target всегда принудительно включает только ASan и задаёт
@@ -884,18 +895,21 @@
   обнаруживаются. UBSan/TSan jobs отсутствуют. `ace_tests.discovery_consistency`
   не получает это env и в свежих GCC/Clang build-dir падает до сравнения списка:
   LeakSanitizer не может работать в текущем ptrace environment. При ручном
-  `ASAN_OPTIONS=detect_leaks=0` verify проходит; актуально он подтверждает 301
-  GTest, а Meson регистрирует 303 теста. При одновременно включённых tests+benchmarks могут
+  `ASAN_OPTIONS=detect_leaks=0` verify проходит; актуально он подтверждает 304
+  GTest, а Meson регистрирует 306 тестов. При одновременно включённых tests+benchmarks могут
   дополнительно регистрироваться tests fallback-проекта Google Benchmark, что
   искажает ACE count.
-- **Предлагаемое решение:** создать явную sanitizer matrix: ASan, UBSan, TSAN и
-  отдельный LSan-capable environment; одинаково передавать требуемое env helper
-  tests, не скрывая leaks глобальным disable там, где их можно проверить.
-  Fallback benchmark dependency должен отключать собственные tests либо counts
-  должны быть namespace-отделены и документированы.
-- **Проверка решения:** clean GCC/Clang configurations, discovery consistency,
-  стандартный suite, shuffled/repeated single-process run и sanitizer-specific
-  jobs; отчёт должен различать skipped sanitizer capability и успешный тест.
+- **Решение:** `test_sanitizers` создаёт отдельные ASan, ASan+UBSan и TSan
+  profiles, не позволяя смешать TSan с другими runtimes. Единый
+  `tests/sanitized_test_runner.py` оборачивает GTests, discovery и entry helper,
+  задаёт strict sanitizer options и probe-ит LSan. `enabled` requires leak-capable
+  environment; `auto` отдаёт Meson SKIP (77) для отдельного capability test
+  under ptrace, но продолжает correctness checks с `detect_leaks=0` только там.
+  ACE registrations имеют suite `ace`; fallback Google Benchmark получает
+  `tests=disabled`.
+- **Проверка:** Clang 22 ASan: discovery OK и LSan capability SKIP under ptrace.
+  GCC 16 ASan+UBSan и TSan clean directories: targeted B29/B68, launcher и
+  discovery 6/6. Full suite remains environment-limited only by successful I/O.
 
 ### B67. Пользовательская и агентская документация противоречит текущему коду
 
@@ -921,8 +935,7 @@
 
 ### B68. Nukes freelists размещают over-aligned nodes в обычном `malloc` storage
 
-- **Статус:** Открыто; подтверждено UBSan 2026-08-27, исправление относится к
-  dependency и должно быть согласовано с её владельцем.
+- **Статус:** Решено локальным vendored patch 2026-08-27.
 - **Приоритет:** Критический.
 - **Файлы и граница ACE:**
   `subprojects/nukes/include/nukes/dynamic/{mpmc,spmc,regular}_freelist.h`,
@@ -935,16 +948,65 @@
   misaligned адресу. Комбинированный GCC ASan+UBSan остановился до GTest на
   `mpmc_freelist::capture()` для глобального `ace::bus<int>` с сообщением
   `store to misaligned address ... requires 128 byte alignment`.
-- **Предлагаемое решение:** исправлять в Nukes либо обновлением dependency, либо
-  согласованным upstream patch: вычислять alignment из реального `alignof`
-  контракта node/data и использовать aligned allocation/deallocation, когда
-  требование превышает `alignof(std::max_align_t)`. Проверить все три freelist,
-  constructor growth и matching free; не маскировать UBSan suppression-ом.
-- **Проверка решения:** compile/runtime matrix для payload alignments
-  1/8/16/32/64/128/256 и nested queue nodes, проверка адреса `% alignof(node_t) ==
-  0`, push/pop/capture/sync/move/destruction под UBSan/ASan/TSan. Затем повторить
-  ACE static initialization и весь suite. Если выбирается новая версия Nukes,
-  зафиксировать version/commit и regression со стороны ACE.
+- **Решение:** `word_alignment<T>` derives from real `alignof(T)` rather than
+  `bit_ceil(sizeof(T))`. New internal `node_allocation.h` uses matched aligned
+  new/delete above `max_align_t`; all MPMC/SPMC/regular initial and growth
+  allocations and teardown paths use it. Teardown preserves the existing
+  freelist protocol in which `sync()` has already destroyed a returned payload.
+- **Регрессии и проверка:** `nukes_alignment_fixture` validates recovered node
+  and payload addresses for alignments 1/8/16/32/64/128/256 across all three
+  freelists and capture/sync/capture. Clang 22 ASan target repeats pass; clean
+  GCC 16 ASan+UBSan and TSan targeted suites pass without B68 diagnostics.
+
+### B69. `mpmc_freelist` move operations leave source ownership intact
+
+- **Статус:** Открыто; обнаружено при B68 move-path audit 2026-08-27.
+- **Приоритет:** Высокий.
+- **Файл:** `subprojects/nukes/include/nukes/dynamic/mpmc_freelist.h`.
+- **Симптом:** move constructor and move assignment copy `_head`, `_tail` and
+  `_dummy_ptr` but do not clear the source. Destruction of both objects can
+  release the same node chain twice.
+- **Требуемое решение:** transfer ownership transactionally, release an existing
+  destination chain in assignment, and null all source pointers. Add a focused
+  ASan regression for nonempty move construction/assignment.
+- **Проверка решения:** repeated move construction and assignment of nonempty
+  MPMC freelists under ASan/UBSan and TSan; no double free/leak and source empty.
+
+### B70. Завершённый outcast command удерживал payload после возврата в pool
+
+- **Статус:** Решено 2026-08-27.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/io.h` (`io::outcast::command::on_result()`).
+- **Симптом:** successful fire-and-forget writes возвращали command через
+  `raw_sync()` с живым `io::buffer`. Следующий move-assignment перетирал pointers
+  старого payload, а последний cached payload переживал teardown без destructor;
+  полный LSan-прогон показывал многочисленные leaks из console/timer output.
+- **Решение:** completion очищает buffer до `raw_sync()`, сохраняя intended
+  lifetime самого command и освобождая принадлежащие buffer arena chunks.
+- **Регресс-тест:**
+  `io_entity_fixture.outcast_command_completion_releases_payload_before_pool_return`;
+  полный host ASan+LSan-прогон не сообщает leaks, Meson suite проходит 312/312.
+- **Связь с B37:** исправлен successful completion lifecycle. Reject/fallback
+  ownership после успешной инициализации ring остаётся отдельной открытой B37.
+
+### B71. Kernel availability preflight запускал thread-local service на чужом runner
+
+- **Статус:** Решено 2026-08-27.
+- **Приоритет:** Критический.
+- **Файлы:** `include/ace/services/kernelic.h`
+  (`kernel_controller::available()`, `initialization_error()`),
+  `tests/io_entity_fixture.cpp`.
+- **Симптом:** B38 preflight вызывал `touch(nullptr)`. После migration запрос
+  создавался на worker thread, но round-robin мог поставить polling service на
+  другой runner/thread с другим thread-local ring. CQE не обрабатывался,
+  coroutine и последующий close оставались suspended; LSan показывал два task
+  node leaks.
+- **Решение:** status methods передают в `touch()` текущий runner pool. Service
+  опрашивает тот же thread-local ring, на котором выполняется preflight/submit.
+- **Регресс-тест:**
+  `io_entity_fixture.connection_link_read_preserves_runner_after_migration`
+  проходит 20/20 host repeats; весь `io_entity_fixture` проходит 28/28 одним
+  ASan+LSan-процессом без leaks; Meson suite проходит 312/312.
 
 ### B36. `is_debug` имел инвертированную семантику
 

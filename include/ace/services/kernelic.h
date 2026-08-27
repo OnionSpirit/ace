@@ -107,6 +107,25 @@ namespace ace::services {
         /// @brief Maximum number of concurrent operations (ring capacity).
         static constexpr unsigned max_entries = 4096;
 
+        /**
+         * @brief Largest byte count representable by one io_uring SQE.
+         *
+         * @details liburing stores read/write/send/receive lengths in a
+         * 32-bit SQE field.  ACE accepts @c size_t at its public boundaries,
+         * but lengths above this value must be rejected before calling
+         * liburing so they cannot be silently truncated.
+         */
+        static constexpr std::size_t max_io_length = std::numeric_limits<unsigned>::max();
+
+        /**
+         * @brief Checks whether a length fits in one io_uring SQE.
+         * @param length Byte count or iovec count supplied to a kernel wrapper.
+         * @return @c true when @p length can be represented without narrowing.
+         */
+        [[nodiscard]] static constexpr bool is_io_length_supported(const std::size_t length) noexcept {
+            return length <= max_io_length;
+        }
+
         /// @brief Overflow buffer for requests submitted while the ring is full.
         static thread_local core::tools::queue<kernel_entity> _submission_buffer;
         /**
@@ -220,27 +239,27 @@ namespace ace::services {
             return submit(io_uring_prep_accept, observer, fd, addr, addrlen, flags);
         }
 
-        /// @brief Submits an @c io_uring_prep_send operation.
+        /// @brief Submits an @c io_uring_prep_send operation; returns @c false for oversize input.
         static bool send(kernel_observer* observer, const int fd, const void *buf, const size_t len, const int flags) {
-            return submit(io_uring_prep_send, observer, fd, buf, len, flags);
+            return is_io_length_supported(len) and submit(io_uring_prep_send, observer, fd, buf, len, flags);
         }
 
-        /// @brief Submits an @c io_uring_prep_send_zc (zero-copy) operation.
+        /// @brief Submits an @c io_uring_prep_send_zc operation; returns @c false for oversize input.
         static bool send_zc(kernel_observer* observer, const int fd, const void *buf, const size_t len,
                             const int flags, const unsigned int zc_flags) {
-            return submit(io_uring_prep_send_zc, observer, fd, buf, len, flags, zc_flags);
+            return is_io_length_supported(len) and submit(io_uring_prep_send_zc, observer, fd, buf, len, flags, zc_flags);
         }
 
-        /// @brief Submits an @c io_uring_prep_send_zc_fixed operation with a registered buffer.
+        /// @brief Submits an @c io_uring_prep_send_zc_fixed operation; returns @c false for oversize input.
         static bool send_zc_fixed(kernel_observer* observer, const int fd, const void *buf, const size_t len,
                             const int flags, const unsigned int zc_flags, const unsigned buf_index) {
-            return submit(io_uring_prep_send_zc_fixed, observer, fd, buf, len, flags, zc_flags, buf_index);
+            return is_io_length_supported(len) and submit(io_uring_prep_send_zc_fixed, observer, fd, buf, len, flags, zc_flags, buf_index);
         }
 
-        /// @brief Submits an @c io_uring_prep_sendto operation.
+        /// @brief Submits an @c io_uring_prep_sendto operation; returns @c false for oversize input.
         static bool sendto(kernel_observer* observer, const int fd, const void *buf, const size_t len, const int flags,
             const sockaddr *addr, const socklen_t addrlen) {
-            return submit(io_uring_prep_sendto, observer, fd, buf, len, flags, addr, addrlen);
+            return is_io_length_supported(len) and submit(io_uring_prep_sendto, observer, fd, buf, len, flags, addr, addrlen);
         }
 
         /**
@@ -270,24 +289,24 @@ namespace ace::services {
             return submit(io_uring_prep_recvmsg, observer, fd, msg, flags);
         }
 
-        /// @brief Submits an @c io_uring_prep_recv operation.
+        /// @brief Submits an @c io_uring_prep_recv operation; returns @c false for oversize input.
         static bool recv(kernel_observer* observer, const int fd, void *buf, const size_t len, const int flags) {
-            return submit(io_uring_prep_recv, observer, fd, buf, len, flags);
+            return is_io_length_supported(len) and submit(io_uring_prep_recv, observer, fd, buf, len, flags);
         }
 
-        /// @brief Submits an @c io_uring_prep_read operation.
-        static bool read(kernel_observer* observer, const int fd, void *buf, const unsigned nbytes, const uint64_t offset) {
-            return submit(io_uring_prep_read, observer, fd, buf, nbytes, offset);
+        /// @brief Submits an @c io_uring_prep_read operation; returns @c false for oversize input.
+        static bool read(kernel_observer* observer, const int fd, void *buf, const size_t nbytes, const uint64_t offset) {
+            return is_io_length_supported(nbytes) and submit(io_uring_prep_read, observer, fd, buf, nbytes, offset);
         }
 
-        /// @brief Submits an @c io_uring_prep_write operation.
-        static bool write(kernel_observer* observer, const int fd, const void *buf, const unsigned nbytes, const uint64_t offset) {
-            return submit(io_uring_prep_write, observer, fd, buf, nbytes, offset);
+        /// @brief Submits an @c io_uring_prep_write operation; returns @c false for oversize input.
+        static bool write(kernel_observer* observer, const int fd, const void *buf, const size_t nbytes, const uint64_t offset) {
+            return is_io_length_supported(nbytes) and submit(io_uring_prep_write, observer, fd, buf, nbytes, offset);
         }
 
-        /// @brief Submits an @c io_uring_prep_writev2 (scatter-gather) operation.
-        static bool writev(kernel_observer* observer, const int fd, const iovec *vec, const unsigned len, const uint64_t offset, const int flags) {
-            return submit(io_uring_prep_writev2, observer, fd, vec, len, offset, flags);
+        /// @brief Submits an @c io_uring_prep_writev2 operation; returns @c false for an oversize iovec count.
+        static bool writev(kernel_observer* observer, const int fd, const iovec *vec, const size_t len, const uint64_t offset, const int flags) {
+            return is_io_length_supported(len) and submit(io_uring_prep_writev2, observer, fd, vec, len, offset, flags);
         }
 
         // ── Arena-backed iovec allocation ─────────────────────────────

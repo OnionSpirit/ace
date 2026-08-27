@@ -32,6 +32,7 @@
 
 
 #include <climits>
+#include <cerrno>
 #include <format>
 #include <limits>
 #include <utility>
@@ -363,8 +364,9 @@ public:                                                                         
         bool      _is_silent = false;    ///< Mark to detach and not suspend
 
         /**
-         * @brief Queries never complete synchronously.
-         * @return Always @c false.
+         * @brief Queries defer completion to @c await_suspend().
+         * @return Always @c false so a stored pre-submission error is returned
+         * from the normal await-resume path.
          */
         bool await_ready() override { return false; };
 
@@ -383,6 +385,8 @@ public:                                                                         
             if (INT_MIN == _fd)
                 throw std::logic_error("Trying to make query on idle 'io_entry' [Query object type: "
                     + std::string{typeid(query_core_t).name()} + "]");
+            if (_res != INT_MIN)
+                return false;
             if (static_cast<query_core_t*>(this)->setup_query(this) and not _is_silent) {
                 coroutine.promise()._runner_router = query_router{this};
                 return true;
@@ -400,6 +404,22 @@ public:                                                                         
                 core::runner::reattach(_waiter);
         }
 
+    protected:
+
+        /**
+         * @brief Completes this query without submission using a negative errno.
+         * @param error Positive errno value to expose from @c await_resume().
+         *
+         * @details Derived constructors use this for input that cannot be
+         * represented by one SQE.  The awaiting coroutine keeps the normal
+         * asynchronous result contract but never installs a router or submits
+         * an operation.
+         */
+        void fail_before_submission(const int error) noexcept {
+            _res = -error;
+        }
+
+    public:
         /** @brief Virtual destructor (defaulted). */
         ~query() override = default;
     };
@@ -410,7 +430,9 @@ public:                                                                         
      *
      * @details Submits @c io_uring_prep_read via @c kernel_controller.  The
      * destination is treated as raw binary storage: exactly the bytes reported
-     * by @c await_resume() are written and no NUL terminator is appended.
+     * by @c await_resume() are written and no NUL terminator is appended.  A
+     * request above @c kernel_controller::max_io_length completes without
+     * submission and returns @c -EOVERFLOW.
      *
      * @warning The storage referenced by @c buf must remain writable and alive
      * until the query completes or is canceled.
@@ -427,12 +449,15 @@ public:                                                                         
          * @param nbytes Writable size of @p buf in bytes.
          * @param offset File offset (0 = current position).
          */
-        [[nodiscard]] explicit read_query(const int fd, void *buf, const unsigned nbytes, const uint64_t offset = 0)
+        [[nodiscard]] explicit read_query(const int fd, void *buf, const size_t nbytes, const uint64_t offset = 0)
             : query(fd)
             , _fd(fd)
             , _buf(buf)
             , _nbytes(nbytes)
-            , _offset(offset) {}
+            , _offset(offset) {
+            if (not services::kernel_controller::is_io_length_supported(nbytes))
+                fail_before_submission(EOVERFLOW);
+        }
 
         /**
          * @brief Submits the read operation to @c kernel_controller.
@@ -451,7 +476,7 @@ public:                                                                         
 
         const int _fd;                ///< File descriptor to read from
         void *_buf;                   ///< Caller-owned binary destination, alive through completion
-        const unsigned _nbytes;       ///< Writable capacity of @c _buf in bytes
+        const size_t _nbytes;         ///< Writable capacity of @c _buf in bytes
         const uint64_t _offset;       ///< File offset
     };
 
@@ -460,6 +485,8 @@ public:                                                                         
      * @brief Awaitable @c io_uring write query.
      *
      * @details Submits @c io_uring_prep_write via @c kernel_controller.
+     * A request above @c kernel_controller::max_io_length completes without
+     * submission and returns @c -EOVERFLOW.
      */
     struct ace::io::write_query : query<write_query> {
 
@@ -472,12 +499,15 @@ public:                                                                         
          * @param nbytes Number of bytes to write.
          * @param offset File offset (0 = current position).
          */
-        explicit write_query(const int fd, const void *buf, const unsigned nbytes, const uint64_t offset = 0)
+        explicit write_query(const int fd, const void *buf, const size_t nbytes, const uint64_t offset = 0)
             : query(fd)
             , _fd(fd)
             , _buf(buf)
             , _nbytes(nbytes)
-            , _offset(offset) {}
+            , _offset(offset) {
+            if (not services::kernel_controller::is_io_length_supported(nbytes))
+                fail_before_submission(EOVERFLOW);
+        }
 
         /**
          * @brief Submits the write operation to @c kernel_controller.
@@ -496,7 +526,7 @@ public:                                                                         
 
         const int _fd;                ///< File descriptor to write to
         const void *_buf;             ///< Source buffer
-        const unsigned _nbytes;       ///< Number of bytes to write
+        const size_t _nbytes;         ///< Number of bytes to write
         const uint64_t _offset;       ///< File offset
     };
 

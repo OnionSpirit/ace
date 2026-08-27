@@ -1,9 +1,11 @@
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <climits>
 #include <fcntl.h>
 #include <string>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -11,12 +13,21 @@
 #include <gtest/gtest.h>
 
 #include <ace/ace.h>
+#include <ace/futures/channel.h>
+#include <ace/futures/get_runner.h>
+#include <ace/futures/reattach.h>
+#include <ace/futures/spawn.h>
+#include <ace/futures/timeout.h>
 #include <ace/io.h>
 #include <ace/net.h>
 
 struct test_io_entity : ace::io::entity<test_io_entity> {
     IMPORT_IO_ENTITY_ENV(test_io_entity)
     IMPORT_IO_ENTITY_FABRICATION
+};
+
+struct test_kernel_observer final : ace::services::kernel_observer {
+    void on_result(const int) override {}
 };
 
 struct io_entity_fixture : ::testing::Test {
@@ -58,6 +69,104 @@ struct io_entity_fixture : ::testing::Test {
         result = co_await connection.recv(buffer);
     }
 
+    static ace::task await_oversize_queries(
+        const int read_fd,
+        const int write_fd,
+        const int socket_fd,
+        char& byte,
+        int& read_result,
+        int& write_result,
+        int& send_result,
+        int& sendto_result,
+        int& recv_result)
+    {
+        const auto oversize = static_cast<std::size_t>(UINT_MAX) + 1U;
+        sockaddr_in address {};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+        read_result = co_await ace::io::read_query(read_fd, &byte, oversize);
+        write_result = co_await ace::io::write_query(write_fd, &byte, oversize);
+        send_result = co_await ace::net::send_query(socket_fd, &byte, oversize);
+        sendto_result = co_await ace::net::net_interface::sendto_query(
+            socket_fd,
+            &byte,
+            oversize,
+            0,
+            reinterpret_cast<const sockaddr*>(&address),
+            sizeof(address));
+        recv_result = co_await ace::net::recv_query(socket_fd, &byte, oversize);
+    }
+
+    static ace::task stalled_link_read(
+        ace::net::connection_link& link,
+        bool& entered,
+        bool& completed)
+    {
+        char byte = 0;
+        entered = true;
+        (void)co_await link.read(&byte, 1);
+        completed = true;
+    }
+
+    static ace::task cancel_stalled_link_read(
+        ace::net::connection_link& link,
+        bool& entered,
+        bool& timer_fired,
+        bool& read_completed,
+        bool& join_failed)
+    {
+        auto handle = co_await ace::spawn(stalled_link_read(link, entered, read_completed));
+        co_await ace::timeout(std::chrono::milliseconds(10));
+        timer_fired = true;
+        handle.cancel();
+        join_failed = not co_await handle.join();
+    }
+
+    static ace::task read_link(
+        ace::net::connection_link& link,
+        char *const data,
+        const std::size_t len,
+        int& result)
+    {
+        result = co_await link.read(data, len);
+    }
+
+    static ace::task gather_runner(ace::bus<ace::core::runner*>& result) {
+        result << co_await ace::get_runner{};
+    }
+
+    static ace::task read_link_after_migration(
+        ace::net::connection_link& link,
+        ace::core::runner *const first,
+        ace::core::runner *const second,
+        ace::bus<int>& result)
+    {
+        co_await ace::reattach(first);
+        result << ((co_await ace::get_runner{}) == first ? 1 : 0);
+        co_await ace::reattach(second);
+        result << ((co_await ace::get_runner{}) == second ? 1 : 0);
+
+        char byte = 0;
+        const int read_result = co_await link.read(&byte, 1);
+        result << (read_result == 1 ? 1 : 0);
+        result << ((co_await ace::get_runner{}) == second ? 1 : 0);
+    }
+
+    template <typename value_t>
+    static ace::task drain_channel(ace::bus<value_t>& channel, std::vector<value_t>& values) {
+        while (not channel.empty())
+            values.emplace_back(co_await channel.pull());
+    }
+
+    template <typename value_t>
+    static std::vector<value_t> fetch(ace::bus<value_t>& channel) {
+        std::vector<value_t> values;
+        ace::schedule(drain_channel(channel, values));
+        run_dispatcher();
+        return values;
+    }
+
     static void run_dispatcher() {
         ace::run();
         EXPECT_TRUE(ace::empty());
@@ -71,6 +180,12 @@ struct io_entity_fixture : ::testing::Test {
         errno = 0;
         EXPECT_EQ(-1, ::fcntl(fd, F_GETFD));
         EXPECT_EQ(EBADF, errno);
+    }
+
+    void TearDown() override {
+        ace::cfg::g_config._runners_amount = 1;
+        ace::reload();
+        ace::reset_signal();
     }
 };
 
@@ -205,6 +320,215 @@ TEST_F(io_entity_fixture, read_query_exact_buffer_preserves_canary_and_binary_da
     EXPECT_EQ(0xA5, storage.canary);
     ::close(pipe_fds[0]);
     ::close(pipe_fds[1]);
+}
+
+// Verifies that query construction preserves the full io_uring length boundary.
+TEST_F(io_entity_fixture, io_query_lengths_preserve_uint_max_boundary) {
+    char byte = 0;
+    constexpr auto max_length = static_cast<std::size_t>(UINT_MAX);
+    constexpr auto almost_max_length = max_length - 1U;
+    sockaddr_in address {};
+    address.sin_family = AF_INET;
+
+    ace::io::read_query read(0, &byte, max_length);
+    ace::io::read_query almost_max_read(0, &byte, almost_max_length);
+    ace::io::write_query write(1, &byte, max_length);
+    ace::net::send_query send(2, &byte, max_length);
+    ace::net::recv_query recv(3, &byte, max_length);
+    ace::net::net_interface::sendto_query sendto(
+        4,
+        &byte,
+        max_length,
+        0,
+        reinterpret_cast<const sockaddr*>(&address),
+        sizeof(address));
+
+    // These constructors do not submit I/O, so a one-byte object safely proves
+    // the public query representation reaches UINT_MAX without truncation.
+    EXPECT_EQ(max_length, read._nbytes);
+    EXPECT_EQ(almost_max_length, almost_max_read._nbytes);
+    EXPECT_EQ(max_length, write._nbytes);
+    EXPECT_EQ(max_length, send._len);
+    EXPECT_EQ(max_length, recv._len);
+    EXPECT_EQ(max_length, sendto._len);
+    EXPECT_TRUE(ace::services::kernel_controller::is_io_length_supported(max_length));
+    EXPECT_TRUE(ace::services::kernel_controller::is_io_length_supported(almost_max_length));
+    EXPECT_FALSE(ace::services::kernel_controller::is_io_length_supported(max_length + 1U));
+}
+
+// Verifies that every raw read/write/send/receive query reports oversize input asynchronously.
+TEST_F(io_entity_fixture, oversize_io_queries_return_eoverflow_without_submission) {
+    int pipe_fds[2] = {-1, -1};
+    int socket_fds[2] = {-1, -1};
+    ASSERT_EQ(0, ::pipe(pipe_fds));
+    ASSERT_EQ(0, ::socketpair(AF_UNIX, SOCK_STREAM, 0, socket_fds));
+    char byte = 0;
+    int read_result = INT_MIN;
+    int write_result = INT_MIN;
+    int send_result = INT_MIN;
+    int sendto_result = INT_MIN;
+    int recv_result = INT_MIN;
+
+    ace::schedule(await_oversize_queries(
+        pipe_fds[0],
+        pipe_fds[1],
+        socket_fds[0],
+        byte,
+        read_result,
+        write_result,
+        send_result,
+        sendto_result,
+        recv_result));
+    run_dispatcher();
+
+    // A common negative errno result is observable without allocating or
+    // submitting a gigantic buffer; any submission would instead require the
+    // caller's one-byte storage to remain valid for kernel access.
+    EXPECT_EQ(-EOVERFLOW, read_result);
+    EXPECT_EQ(-EOVERFLOW, write_result);
+    EXPECT_EQ(-EOVERFLOW, send_result);
+    EXPECT_EQ(-EOVERFLOW, sendto_result);
+    EXPECT_EQ(-EOVERFLOW, recv_result);
+    ::close(pipe_fds[0]);
+    ::close(pipe_fds[1]);
+    ::close(socket_fds[0]);
+    ::close(socket_fds[1]);
+}
+
+// Verifies that direct kernel wrappers reject oversize arguments before touching the ring.
+TEST_F(io_entity_fixture, kernelic_rejects_oversize_lengths_without_submission) {
+    test_kernel_observer observer;
+    char byte = 0;
+    iovec vec {&byte, 1};
+    sockaddr_in address {};
+    address.sin_family = AF_INET;
+    const auto oversize = static_cast<std::size_t>(UINT_MAX) + 1U;
+
+    // These calls deliberately use no initialized controller: returning false
+    // before submit proves the guard precedes every liburing conversion/access.
+    EXPECT_FALSE(ace::services::kernel_controller::read(&observer, 0, &byte, oversize, 0));
+    EXPECT_FALSE(ace::services::kernel_controller::write(&observer, 0, &byte, oversize, 0));
+    EXPECT_FALSE(ace::services::kernel_controller::send(&observer, 0, &byte, oversize, 0));
+    EXPECT_FALSE(ace::services::kernel_controller::send_zc(&observer, 0, &byte, oversize, 0, 0));
+    EXPECT_FALSE(ace::services::kernel_controller::send_zc_fixed(&observer, 0, &byte, oversize, 0, 0, 0));
+    EXPECT_FALSE(ace::services::kernel_controller::sendto(
+        &observer,
+        0,
+        &byte,
+        oversize,
+        0,
+        reinterpret_cast<const sockaddr*>(&address),
+        sizeof(address)));
+    EXPECT_FALSE(ace::services::kernel_controller::recv(&observer, 0, &byte, oversize, 0));
+    EXPECT_FALSE(ace::services::kernel_controller::writev(&observer, 0, &vec, oversize, 0, 0));
+}
+
+// Verifies that a stalled connection_link read no longer blocks a sibling timer and is cancelable.
+TEST_F(io_entity_fixture, connection_link_stalled_read_keeps_runner_responsive_and_cancels) {
+    int socket_fds[2] = {-1, -1};
+    ASSERT_EQ(0, ::socketpair(AF_UNIX, SOCK_STREAM, 0, socket_fds));
+    bool entered = false;
+    bool timer_fired = false;
+    bool read_completed = false;
+    bool join_failed = false;
+
+    {
+        ace::net::connection_link link(socket_fds[0], false);
+        ace::schedule(cancel_stalled_link_read(
+            link,
+            entered,
+            timer_fired,
+            read_completed,
+            join_failed));
+        run_dispatcher();
+
+        // The timeout is serviced while the receive is pending; the old
+        // blocking ::recv path could not reach this line until the peer wrote.
+        EXPECT_TRUE(entered);
+        EXPECT_TRUE(timer_fired);
+        EXPECT_FALSE(read_completed);
+        EXPECT_TRUE(join_failed);
+    }
+    run_dispatcher();
+    ::close(socket_fds[1]);
+}
+
+// Verifies that connection_link preserves partial data, EOF, and kernel errno results.
+TEST_F(io_entity_fixture, connection_link_read_preserves_partial_eof_and_error_results) {
+    const std::array<char, 2> payload = {'A', 'B'};
+    char data[4] = {};
+    int result = INT_MIN;
+
+    int partial_fds[2] = {-1, -1};
+    ASSERT_EQ(0, ::socketpair(AF_UNIX, SOCK_STREAM, 0, partial_fds));
+    {
+        ace::net::connection_link link(partial_fds[0], false);
+        ASSERT_EQ(static_cast<ssize_t>(payload.size()), ::write(partial_fds[1], payload.data(), payload.size()));
+        ace::schedule(read_link(link, data, sizeof(data), result));
+        run_dispatcher();
+        // A short successful result distinguishes partial data from EOF and
+        // proves the link uses the receive query's raw byte contract.
+        EXPECT_EQ(static_cast<int>(payload.size()), result);
+        EXPECT_EQ(payload[0], data[0]);
+        EXPECT_EQ(payload[1], data[1]);
+
+        ::close(partial_fds[1]);
+        result = INT_MIN;
+        ace::schedule(read_link(link, data, sizeof(data), result));
+        run_dispatcher();
+        EXPECT_EQ(0, result);
+    }
+    run_dispatcher();
+
+    int error_fds[2] = {-1, -1};
+    ASSERT_EQ(0, ::socketpair(AF_UNIX, SOCK_STREAM, 0, error_fds));
+    {
+        ace::net::connection_link link(error_fds[0], false);
+        // Keeping the object's positive FD while closing the OS descriptor
+        // makes io_uring report EBADF instead of triggering query's invalid-FD guard.
+        ASSERT_EQ(0, ::close(error_fds[0]));
+        result = INT_MIN;
+        ace::schedule(read_link(link, data, sizeof(data), result));
+        run_dispatcher();
+        EXPECT_EQ(-EBADF, result);
+    }
+    run_dispatcher();
+    ::close(error_fds[1]);
+}
+
+// Verifies that a connection_link receive resumes on the runner selected before submission.
+TEST_F(io_entity_fixture, connection_link_read_preserves_runner_after_migration) {
+    ace::cfg::g_config._runners_amount = 2;
+    ace::reload();
+    ace::bus<ace::core::runner*> runners_channel;
+    ace::schedule(gather_runner(runners_channel));
+    ace::schedule(gather_runner(runners_channel));
+    ace::run();
+    const auto runners = fetch(runners_channel);
+    ASSERT_EQ(2u, runners.size());
+    ASSERT_NE(runners[0], runners[1]);
+
+    int socket_fds[2] = {-1, -1};
+    ASSERT_EQ(0, ::socketpair(AF_UNIX, SOCK_STREAM, 0, socket_fds));
+    ASSERT_EQ(1, ::write(socket_fds[1], "x", 1));
+    ace::bus<int> result;
+    {
+        ace::net::connection_link link(socket_fds[0], false);
+        ace::schedule(read_link_after_migration(link, runners[0], runners[1], result));
+        ace::run();
+        EXPECT_TRUE(ace::empty());
+    }
+    ace::run();
+    ::close(socket_fds[1]);
+
+    const auto values = fetch(result);
+    ASSERT_EQ(4u, values.size());
+    // The final marker proves completion was routed back to the runner that
+    // submitted the receive after both explicit migration steps.
+    EXPECT_EQ(1, values[0]);
+    EXPECT_EQ(1, values[1]);
+    EXPECT_EQ(1, values[2]);
+    EXPECT_EQ(1, values[3]);
 }
 
 // Verifies that move assignment closes the old descriptor and keeps the incoming one.

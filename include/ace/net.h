@@ -174,6 +174,11 @@ namespace ace::net {
      */
     struct send_query;
 
+    /**
+     * @brief Awaitable query for receiving data into a caller-owned buffer.
+     */
+    struct recv_query;
+
 
 // ================================- DECLARATIONS -================================
 
@@ -182,8 +187,8 @@ namespace ace::net {
      * @brief @c io::link implementation for connected sockets.
      *
      * @details Implements @c output_action() via async @c sendmsg() (with
-     * fallback to blocking @c ::sendmsg()) and @c input_action() via
-     * blocking @c ::recv().
+     * fallback to blocking @c ::sendmsg()) and @c input_action() via the
+     * cancelable @c io_uring receive query.
      */
     struct connection_link;
 
@@ -307,7 +312,9 @@ namespace ace::net {
     /**
      * @brief Awaitable that sends data on a connected transport entity.
      *
-     * @details @c co_await resolves to the number of bytes sent.
+     * @details @c co_await resolves to the number of bytes sent.  A length
+     * above @c kernel_controller::max_io_length completes without submission
+     * and returns @c -EOVERFLOW.
      */
     struct ace::net::send_query : io::query<send_query> {
 
@@ -327,7 +334,10 @@ namespace ace::net {
             : io_query_t(fd)
             , _buf(buf)
             , _len(len)
-            , _flags(flags) {}
+            , _flags(flags) {
+            if (not services::kernel_controller::is_io_length_supported(len))
+                fail_before_submission(EOVERFLOW);
+        }
 
         /** @brief Submits the send operation to the kernel controller. */
         bool setup_query(services::kernel_observer* kwp) const {
@@ -344,10 +354,55 @@ namespace ace::net {
 
 
     /**
+     * @brief Awaitable query for receiving data.
+     *
+     * @details A length above @c kernel_controller::max_io_length completes
+     * without submission and returns @c -EOVERFLOW from @c await_resume().
+     * The destination must remain writable and alive until completion or
+     * cancellation.
+     */
+    struct ace::net::recv_query : io::query<recv_query> {
+
+        IMPORT_IO_QUERY_ENV(recv_query)
+
+        /** @brief Deleted: a recv query requires a fd and a buffer. */
+        recv_query() = delete;
+
+        /**
+         * @brief Constructs a receive query.
+         * @param fd Socket descriptor.
+         * @param buf Destination buffer.
+         * @param len Writable buffer size in bytes.
+         * @param flags Receive flags (default 0).
+         */
+        explicit recv_query(const int fd, void *buf, const size_t len, const int flags = 0)
+            : io_query_t(fd)
+            , _buf(buf)
+            , _len(len)
+            , _flags(flags) {
+            if (not services::kernel_controller::is_io_length_supported(len))
+                fail_before_submission(EOVERFLOW);
+        }
+
+        /** @brief Submits the receive operation to the kernel controller. */
+        bool setup_query(services::kernel_observer* kwp) const {
+            return services::kernel_controller::recv(kwp, _fd, _buf, _len, _flags);
+        }
+
+        /** @brief Returns the number of bytes received or a negative errno. */
+        [[nodiscard]] int await_resume() const { return _res; }
+
+        void *_buf;          ///< Destination buffer.
+        const size_t _len;   ///< Writable buffer size in bytes.
+        const int _flags;    ///< Receive flags.
+    };
+
+
+    /**
      * @brief High-level connection wrapper over @c io::link.
      *
      * @details Fire-and-forget @c write()/@c writeln() via scatter-gather
-     * @c sendmsg; blocking @c ::recv()-based reads for @c read()/@c read_buf().
+     * @c sendmsg; cancelable io_uring receives for @c read()/@c read_buf().
      */
     struct ace::net::connection_link : io::link {
 
@@ -381,20 +436,15 @@ namespace ace::net {
                 io::outcast::fail_cb_handler(errno, "net::connection_link busy-send");
         };
 
-        // NOTE: Здесь используется send_query для input_action из-за ограничения
-        // видимости: recv_query определён позже в io_transport_entity и не имеет
-        // forward-объявления, поэтому недоступен на этом уровне. Для чтения данных
-        // через io_connection_link используется обходной путь — блокирующий ::recv
-        // в качестве fallback-режима. Контроллеры не используют io_connection_link,
-        // работая напрямую с io_connection::recv() / io_net_interface::recv().
         /**
-         * @brief Synchronously reads data from the socket.
+         * @brief Asynchronously reads data from the socket.
          * @param buff  Destination buffer.
          * @param len   Buffer length.
-         * @return Number of bytes read (or a negative error code).
+         * @return Number of bytes read or a negative errno value.
+         * @warning @p buff must remain alive until completion or cancellation.
          */
-        promise<int> input_action(void *buff, const std::size_t len) override {
-            co_return ::recv(_fd, buff, len, 0);
+        promise<int> input_action(void *buff, std::size_t len) override {
+            co_return co_await recv_query {_fd, buff, len, 0};
         }
 
     public:
@@ -478,6 +528,8 @@ namespace ace::net {
 
         /**
          * @brief Awaitable query for sending a datagram to a specific address.
+         * @details A length above @c kernel_controller::max_io_length
+         * completes without submission and returns @c -EOVERFLOW.
          */
         struct sendto_query : io::query<sendto_query> {
 
@@ -502,7 +554,10 @@ namespace ace::net {
                 , _len(len)
                 , _flags(flags)
                 , _addr(addr)
-                , _addrlen(addrlen) {}
+                , _addrlen(addrlen) {
+                if (not services::kernel_controller::is_io_length_supported(len))
+                    this->fail_before_submission(EOVERFLOW);
+            }
 
             /** @brief Submits the sendto operation to the kernel controller. */
             bool setup_query(services::kernel_observer* kwp) const {
@@ -519,41 +574,6 @@ namespace ace::net {
             const socklen_t _addrlen; ///< Length of @c _addr.
         };
 
-        /**
-         * @brief Awaitable query for receiving data.
-         */
-        struct recv_query : io::query<recv_query> {
-
-            IMPORT_IO_QUERY_ENV(recv_query)
-
-            /** @brief Deleted: a recv query requires a fd and a buffer. */
-            recv_query() = delete;
-
-            /**
-             * @brief Constructs a recv query.
-             * @param fd     Socket descriptor.
-             * @param buf    Destination buffer.
-             * @param len    Buffer length.
-             * @param flags  Receive flags (default 0).
-             */
-            explicit recv_query(const int fd, void *buf, const size_t len, const int flags = 0)
-                : io_query_t(fd)
-                , _buf(buf)
-                , _len(len)
-                , _flags(flags) {}
-
-            /** @brief Submits the recv operation to the kernel controller. */
-            bool setup_query(services::kernel_observer* kwp) const {
-                return services::kernel_controller::recv(kwp, _fd, _buf, _len, _flags);
-            }
-
-            /** @brief Returns the number of bytes received (or a negative error code). */
-            [[nodiscard]] int await_resume() const { return _res; }
-
-            void *_buf;          ///< Destination buffer.
-            const size_t _len;   ///< Buffer length.
-            const int _flags;    ///< Receive flags.
-        };
 
         /**
          * @brief Awaitable query for scatter-gather send.

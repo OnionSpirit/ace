@@ -125,24 +125,6 @@
   полных chunks + EOF и terminal error после накопленных данных. Зафиксировать,
   когда partial data возвращается как value, а когда ошибка имеет приоритет.
 
-### B25. I/O lengths сужаются из `size_t` в `unsigned`
-
-- **Статус:** Открыто, исправление отложено.
-- **Приоритет:** Средний.
-- **Файлы:** `include/ace/io.h`, `include/ace/net.h`,
-  `include/ace/services/kernelic.h`.
-- **Симптом:** публичные buffer lengths типа `size_t` неявно сужаются до
-  `unsigned` в read/write query и kernelic API; большие размеры могут быть
-  усечены до отправки в ядро. Дополнительно blocking `::recv()` возвращает
-  `ssize_t`, который сужается до `int` в `connection_link::input_action()`.
-- **Корневая причина:** длина не имеет единого типа и проверяемого преобразования
-  на границах API.
-- **Предлагаемое решение:** выбрать и документировать `size_t`-контракт до
-  системного вызова либо выполнять checked conversion/chunking без молчаливого
-  усечения.
-- **Проверка решения:** boundary tests около `UINT_MAX` без выделения гигантского
-  буфера, включая read/write/recv paths и отрицательные errno-results.
-
 ### B26. Ошибки `bind`/`listen` потребляют исходную entity
 
 - **Статус:** Открыто, исправление отложено; требуется решение по API.
@@ -682,25 +664,6 @@
   failed controller init, отсутствие suspension/hang, корректная invalid socket
   entity/error; успешный socket creation без регрессии.
 
-### B54. `connection_link` блокирует runner системным `recv()`
-
-- **Статус:** Открыто.
-- **Приоритет:** Высокий.
-- **Файл:** `include/ace/net.h` (`connection_link::input_action()`, high-level
-  `read()/read_buf()` path).
-- **Симптом:** coroutine выполняет blocking `::recv` прямо на runner thread.
-  Один медленный peer блокирует timers, services и все остальные tasks этого
-  runner; cancellation не может снять системный вызов. Результат `ssize_t`
-  дополнительно сужается до `int` (см. B25).
-- **Предлагаемое решение:** использовать общий asynchronous recv query/io_uring
-  path с корректным router/cancellation/lifetime. Visibility limitation из
-  текущего комментария решить минимальным перемещением/forward declaration, а не
-  blocking fallback в event loop.
-- **Проверка решения:** stalled peer + независимые short timer/task на том же
-  runner, cancel suspended read, EOF/error/partial data, multi-runner migration.
-  Benchmark: latency/throughput при 1/10/100 idle connections против baseline;
-  runner не должен блокироваться длительностью peer stall.
-
 ### B55. Address overloads неверно используют `string_view` и игнорируют `inet_pton`
 
 - **Статус:** Открыто.
@@ -921,8 +884,8 @@
   обнаруживаются. UBSan/TSan jobs отсутствуют. `ace_tests.discovery_consistency`
   не получает это env и в свежих GCC/Clang build-dir падает до сравнения списка:
   LeakSanitizer не может работать в текущем ptrace environment. При ручном
-  `ASAN_OPTIONS=detect_leaks=0` verify проходит и подтверждает 295 GTests; Meson
-  регистрирует 297 тестов. При одновременно включённых tests+benchmarks могут
+  `ASAN_OPTIONS=detect_leaks=0` verify проходит; актуально он подтверждает 301
+  GTest, а Meson регистрирует 303 теста. При одновременно включённых tests+benchmarks могут
   дополнительно регистрироваться tests fallback-проекта Google Benchmark, что
   искажает ACE count.
 - **Предлагаемое решение:** создать явную sanitizer matrix: ASan, UBSan, TSAN и
@@ -1157,6 +1120,37 @@
   `io_entity_fixture.entity_close_discarded_single_ownership`.
 
 ## Решённые баги
+
+### B25. I/O lengths сужались из `size_t` в `unsigned`
+
+- **Статус:** Решено.
+- **Файлы:** `include/ace/io.h`, `include/ace/net.h`,
+  `include/ace/services/kernelic.h`.
+- **Причина:** read/write queries и kernelic wrappers принимали `unsigned`, а
+  liburing также неявно приводил публичные `size_t` send/recv lengths к полю
+  SQE типа `__u32`.
+- **Решение:** API query и kernelic wrappers используют `size_t`; единый предел
+  `kernel_controller::max_io_length == UINT_MAX` проверяется до liburing.
+  Oversize query завершает normal await-path с `-EOVERFLOW`, не создавая SQE;
+  direct kernelic wrapper возвращает `false`.
+- **Тесты:** `io_entity_fixture.io_query_lengths_preserve_uint_max_boundary`,
+  `oversize_io_queries_return_eoverflow_without_submission` и
+  `kernelic_rejects_oversize_lengths_without_submission`.
+
+### B54. `connection_link` блокировал runner системным `recv()`
+
+- **Статус:** Решено.
+- **Файл:** `include/ace/net.h` (`connection_link::input_action()`).
+- **Причина:** high-level link не мог видеть nested `transport_entity::recv_query`
+  и выполнял `::recv()` на runner thread.
+- **Решение:** общий namespace-level `net::recv_query` используется и transport,
+  и `connection_link`; nested spelling сохраняется через type alias. Read теперь
+  проходит через io_uring query-router и поддерживает cancellation.
+- **Тесты:** `io_entity_fixture.connection_link_stalled_read_keeps_runner_responsive_and_cancels`,
+  `connection_link_read_preserves_partial_eof_and_error_results` и
+  `connection_link_read_preserves_runner_after_migration`.
+- **Benchmark:** `bm_connection_link_idle_cancel` измеряет cancellation idle
+  connections при нагрузках 1, 10 и 100.
 
 ### B1. `or_await_composed<3+>`: ошибка преобразования `void` в `bool`
 

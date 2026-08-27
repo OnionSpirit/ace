@@ -342,6 +342,9 @@ IPv4-specific. IPv6 исправление явно отложено в
 `connection::recv_buf()` возвращает eager `promise<io::input_t>` и требует
 `co_await`. Известный EOF edge case накопленного `io::link::read_buf()` описан в
 [B24](ISSUES.md#b24-iolinkread_buf-может-потерять-накопленные-данные-при-eof).
+Высокоуровневый `connection_link::read()` и `read_buf()` используют тот же
+cancelable `net::recv_query` через io_uring; они не выполняют blocking `::recv`
+на runner thread.
 
 ## Файлы и консоль
 
@@ -397,8 +400,10 @@ Overflow SQEs буферизуются как `kernel_entity` и применя�
 в ring. `kernel_observer` принимает CQE и возвращает waiter его runner.
 
 Iovec storage использует общую arena. Большие physical chunks обслуживаются
-transient path. Публичные `size_t` lengths пока могут сужаться во внутренних API;
-это отслеживается в [B25](ISSUES.md#b25-io-lengths-сужаются-из-size_t-в-unsigned).
+transient path. Публичные byte lengths остаются `size_t` до kernel boundary;
+один SQE допускает не более `kernel_controller::max_io_length` (`UINT_MAX`).
+Oversize query завершает await-path с `-EOVERFLOW`, а direct kernel wrapper
+возвращает `false`, не создавая SQE.
 
 ### Clock
 
@@ -546,7 +551,7 @@ yield_fixture.cpp
 
 Fixture classes и helper coroutine functions объявляются в
 `tests/environment.h`; каждый fixture source содержит относящиеся к нему
-`TEST`/`TEST_F`. Текущая source inventory - **295 Google Tests**. Meson discover
+`TEST`/`TEST_F`. Текущая source inventory - **301 Google Test**. Meson discover
 mode регистрирует каждый GTest отдельным процессом с точным `--gtest_filter`.
 
 Помимо source GTests, стандартная конфигурация регистрирует tooling tests:
@@ -559,9 +564,10 @@ mode регистрирует каждый GTest отдельным процес
 ### Текущий результат
 
 - GCC 16 + ASan: B13 targeted tests и двадцать shuffle-повторов полного
-  `promise_traits_fixture` проходят. Полный Meson suite в текущем окружении —
-  **253/297**: 43 failures относятся к недоступному `io_uring`/B38, один — к
-  некорректному automaton edge regression B29.
+  `promise_traits_fixture` проходят. Последний полный Meson suite до добавления
+  B25/B54 regressions в текущем окружении — **253/297**: 43 failures относятся
+  к недоступному `io_uring`/B38, один — к некорректному automaton edge regression
+  B29. Текущая конфигурация регистрирует 303 теста.
 - Clang 22 + ASan: B13 targeted tests и двадцать shuffle-повторов полного
   `promise_traits_fixture` проходят; source/runtime discovery совпадает.
   Полный suite не заявляется. B28 всё ещё выбирает compiler flags по argument

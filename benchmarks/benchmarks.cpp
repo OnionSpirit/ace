@@ -1,5 +1,11 @@
 #include "environment.h"
 
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <ace/futures/spawn.h>
+#include <ace/net.h>
+
 namespace {
 
 ace::task cutex_capture_racer(ace::cutex& mtx, std::string& count, int max) {
@@ -197,6 +203,30 @@ ace::task compose_variadic_tasks(int count) {
             or ace::timeout(0ms));
     }
     co_return;
+}
+
+ace::task idle_connection_link_read(ace::net::connection_link& link) {
+    char byte = 0;
+    (void)co_await link.read(&byte, 1);
+}
+
+ace::task cancel_idle_connection_link_reads(
+    std::vector<ace::net::connection_link>& links,
+    bool& timer_fired,
+    int& canceled_reads)
+{
+    std::vector<ace::core::async_handle<>> handles;
+    handles.reserve(links.size());
+    for (auto& link : links)
+        handles.emplace_back(co_await ace::spawn(idle_connection_link_read(link)));
+
+    co_await ace::timeout(1ms);
+    timer_fired = true;
+    for (auto& handle : handles) {
+        handle.cancel();
+        if (not co_await handle.join())
+            ++canceled_reads;
+    }
 }
 
 } // namespace
@@ -809,3 +839,60 @@ static void bm_compose_variadic(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * compositions * 6);
 }
 BENCHMARK(bm_compose_variadic)->Unit(benchmark::kMillisecond);
+
+// ===========================================================================
+// BM21 - connection_link_idle_cancel: cancellation responsiveness of idle peers
+// ===========================================================================
+// Starts one, ten, or one hundred reads whose peers remain idle, then verifies
+// that the runner still services a 1 ms timer and cancels every receive.
+
+static void bm_connection_link_idle_cancel(benchmark::State& state) {
+    const int connections = static_cast<int>(state.range(0));
+
+    for (auto _ : state) {
+        std::vector<int> peers;
+        std::vector<ace::net::connection_link> links;
+        peers.reserve(connections);
+        links.reserve(connections);
+        bool timer_fired = false;
+        int canceled_reads = 0;
+        bool setup_failed = false;
+
+        for (int index = 0; index < connections; ++index) {
+            int fds[2] = {-1, -1};
+            if (::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) {
+                setup_failed = true;
+                break;
+            }
+            links.emplace_back(fds[0], false);
+            peers.emplace_back(fds[1]);
+        }
+        if (setup_failed) {
+            state.SkipWithError("socketpair setup failed");
+            for (const int peer : peers)
+                ::close(peer);
+            break;
+        }
+
+        ace::schedule(cancel_idle_connection_link_reads(links, timer_fired, canceled_reads));
+        ace::run();
+        if (not timer_fired or canceled_reads != connections)
+            state.SkipWithError("idle receive blocked the timer or was not canceled");
+        if (not ace::empty())
+            state.SkipWithError("dispatcher not empty after idle receive cancellation");
+
+        // Destruction owns the local ends; draining afterward gives their
+        // asynchronous guards one normal cleanup pass before the peer closes.
+        links.clear();
+        ace::run();
+        for (const int peer : peers)
+            ::close(peer);
+    }
+
+    state.SetItemsProcessed(state.iterations() * connections);
+}
+BENCHMARK(bm_connection_link_idle_cancel)
+    ->Arg(1)
+    ->Arg(10)
+    ->Arg(100)
+    ->Unit(benchmark::kMillisecond);

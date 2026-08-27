@@ -4,9 +4,10 @@
 
 > **Статус:** GCC 16 coverage union от 2026-08-23 покрывает **2262/2398 =
 > 94.33%** уникальных исполняемых строк `include/ace/**`. После B13 текущая
-> default-конфигурация регистрирует 297 Meson-тестов. Прогон 2026-08-27 в
-> окружении без рабочего `io_uring` дал 253/297: 43 падения относятся к B38,
-> ещё одно — к B29; все B13 regressions прошли.
+> default-конфигурация регистрирует 303 Meson-теста. Последний полный прогон
+> до добавления B25/B54 regressions в окружении без рабочего `io_uring` дал
+> 253/297: 43 падения относятся к B38, ещё одно — к B29; все B13 regressions
+> прошли.
 
 ## Требования к генерации тестов (agent instructions)
 
@@ -209,6 +210,8 @@ GoogleTest автоматически увеличивал seed между ит�
 | B20 | `io_entity_fixture.entity_self_move_preserves_ownership` | ✅ Реализован и проходит в GCC-прогонах |
 | B21 | `io_entity_fixture.entity_close_awaited_single_ownership`, `entity_close_discarded_single_ownership`, `entity_close_repeated_is_idempotent`, `direct_close_query_discard_remains_non_owning` | ✅ Реализованы и проходят в GCC-прогонах |
 | B22 | `base_fixture.udp_bind_transfers_sole_ownership`; supporting coverage `base_fixture.udp_sendto_recv_loop` | ✅ Реализован и проходит в GCC-прогонах |
+| B25 | `io_entity_fixture.io_query_lengths_preserve_uint_max_boundary`, `oversize_io_queries_return_eoverflow_without_submission`, `kernelic_rejects_oversize_lengths_without_submission` | ✅ Реализованы и проходят |
+| B54 | `io_entity_fixture.connection_link_stalled_read_keeps_runner_responsive_and_cancels`, `connection_link_read_preserves_partial_eof_and_error_results`, `connection_link_read_preserves_runner_after_migration` | ⚠️ Реализованы; runtime-проверка блокируется B38 null-ring crash |
 
 ---
 
@@ -599,6 +602,12 @@ GoogleTest автоматически увеличивал seed между ит�
 | IE16 | `direct_close_query_discard_remains_non_owning` | Напрямую созданный close query остаётся non-owning (B21) | ✅ |
 | IE17 | `connection_recv_vector_uses_logical_size` | Vector recv ограничен logical size, а не capacity (B18) | ✅ |
 | IE18 | `connection_recv_string_uses_logical_size` | String recv ограничен logical size, а не capacity (B18) | ✅ |
+| IE19 | `io_query_lengths_preserve_uint_max_boundary` | Query и kernel boundary сохраняют `UINT_MAX` без narrowing (B25) | ✅ |
+| IE20 | `oversize_io_queries_return_eoverflow_without_submission` | read/write/send/sendto/recv oversize возвращают `-EOVERFLOW` без SQE (B25) | ✅ |
+| IE21 | `kernelic_rejects_oversize_lengths_without_submission` | Direct kernel wrappers отклоняют oversize до liburing/ring access (B25) | ✅ |
+| IE22 | `connection_link_stalled_read_keeps_runner_responsive_and_cancels` | Idle receive не блокирует timer и отменяется через query router (B54) | ⚠️ B38 |
+| IE23 | `connection_link_read_preserves_partial_eof_and_error_results` | Link receive сохраняет partial read, EOF и negative errno (B54) | ⚠️ B38 |
+| IE24 | `connection_link_read_preserves_runner_after_migration` | Completion receive возвращается к runner после двух migration steps (B54) | ⚠️ B38 |
 
 #### `IoHangedFixture`, `IoAnyFixture`
 
@@ -619,6 +628,7 @@ GoogleTest автоматически увеличивал seed между ит�
 | N3 | `udp_sendto_recv_loop` | UDP send/receive loop и supporting coverage B22 | ✅ |
 | N4 | `udp_bind_transfers_sole_ownership` | Bind потребляет source entity и сохраняет единственное ownership FD (B22) | ✅ |
 | N5 | `tcp_sendmsg_recvmsg_echo` | TCP sendmsg/recvmsg echo | ✅ |
+| N6 | B54 regressions `connection_link_*` в `io_entity_fixture` | `connection_link::read()` использует cancelable io_uring receive, cancellation и runner routing | ⚠️ B38 |
 
 ---
 
@@ -980,7 +990,7 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/id_alloc_fixture.cpp` | `id_alloc_fixture` | 3 |
 | `tests/io_any_fixture.cpp` | `io_any_fixture` | 6 |
 | `tests/io_buffer_fixture.cpp` | `io_buffer_fixture` | 25 |
-| `tests/io_entity_fixture.cpp` | `io_entity_fixture` | 18 |
+| `tests/io_entity_fixture.cpp` | `io_entity_fixture` | 24 |
 | `tests/io_hanged_fixture.cpp` | `io_hanged_fixture` | 5 |
 | `tests/moving_average_fixture.cpp` | `moving_average_fixture` | 7 |
 | `tests/omniptr_fixture.cpp` | `omniptr_fixture` | 12 |
@@ -994,12 +1004,12 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/spawn_fixture.cpp` | `spawn_fixture` | 10 |
 | `tests/timer_fixture.cpp` | `timer_fixture` | 9 |
 | `tests/yield_fixture.cpp` | `yield_fixture` | 8 |
-| **Итого: 33 файла** | | **295** |
+| **Итого: 33 файла** | | **301** |
 
-Default Meson configuration (`ace_entry=false`) регистрирует **297** тестов:
-295 GTests, `discover_tests.unit` и `ace_tests.discovery_consistency`. Конфигурация
-`ace_entry=true` дополнительно регистрирует `ace_entry.fallback`, всего 298.
-Наличие 295 discovered GTests не означает green suite: в актуальном окружении
+Default Meson configuration (`ace_entry=false`) регистрирует **303** теста:
+301 GTests, `discover_tests.unit` и `ace_tests.discovery_consistency`. Конфигурация
+`ace_entry=true` дополнительно регистрирует `ace_entry.fallback`, всего 304.
+Наличие 301 discovered GTests не означает green suite: в актуальном окружении
 полный GCC/ASan-прогон дополнительно блокирует B38, а B29 остаётся независимым
 некорректным regression.
 
@@ -1027,7 +1037,7 @@ Default Meson configuration (`ace_entry=false`) регистрирует **297**
 python3 discover_tests.py discover tests/*_fixture.cpp
 ```
 
-Команда возвращает 295 уникальных active GTest names. Meson выполняет эту же
+Команда возвращает 301 уникальный active GTest name. Meson выполняет эту же
 команду при setup, регистрирует каждый name отдельным `--gtest_filter`, а
 `ace_tests.discovery_consistency` через `verify` подтверждает совпадение списка
 source declarations с `ace_tests --gtest_list_tests`.

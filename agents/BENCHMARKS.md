@@ -59,7 +59,7 @@ release-путь: `debug=false`, `optimization=3` и `b_ndebug=true`; поэто
 |------|-----------|
 | `benchmarks/main.cpp` | Google Benchmark entry point. |
 | `benchmarks/environment.h` | 4 helpers: `configure_runners`, `reset_runners`, `fetch_into`, `fetch`. |
-| `benchmarks/benchmarks.cpp` | 21 benchmark scenarios (BM1-BM20) and 26 named coroutine helpers. |
+| `benchmarks/benchmarks.cpp` | 22 benchmark scenarios (BM1-BM21) and 28 named coroutine helpers. |
 
 ## Инвентарь
 
@@ -85,6 +85,7 @@ release-путь: `debug=false`, `optimization=3` и `b_ndebug=true`; поэто
 | BM18 | `bm_automaton_ping` | Потребление 50k `co_yield` через `ping()`. |
 | BM19 | `bm_expire_absolute` | 5k таймеров с абсолютными deadline. |
 | BM20 | `bm_compose_variadic` | Variadic AND/OR из трёх и более futures. |
+| BM21 | `bm_connection_link_idle_cancel` | Responsiveness и cancellation для 1/10/100 idle `connection_link` reads. |
 
 ## Происхождение нагрузочных сценариев
 
@@ -138,6 +139,16 @@ release-путь: `debug=false`, `optimization=3` и `b_ndebug=true`; поэто
 Из-за различающейся и высокой фоновой нагрузки выводов об изменении
 производительности делать нельзя. Текущие числа фиксируют только результат
 прогонов; ни один benchmark-сценарий не завершился с ошибкой.
+
+## B54 baseline protocol (2026-08-27)
+
+`BM21` создаёт 1, 10 или 100 `socketpair` peers без данных, запускает reads,
+проверяет доставку 1 ms timer и отменяет все reads. Для baseline используется
+отдельный worktree от pre-fix commit и ограниченный по времени запуск: blocking
+`::recv` не должен завершать idle phase. Изменённый путь должен завершить все
+cancellation handles; latency/throughput допустимо сравнивать только в одном
+доступном `io_uring` environment. В текущем container runtime-прогон блокирует
+B38 до выполнения benchmark-кода.
 
 ## B13 smoke-проверка 2026-08-27
 

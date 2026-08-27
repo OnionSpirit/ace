@@ -1,6 +1,6 @@
 # ACE Framework - Issues and Technical Debt
 
-Дата актуализации: 2026-08-23.
+Дата актуализации: 2026-08-27.
 
 Этот файл является единым реестром известных багов, TODO, нестабильностей и
 технических нюансов, требующих решения. Закрытые записи не удаляются: их статус
@@ -45,17 +45,35 @@
   повредить захваченные ссылки; ASan сообщает heap-use-after-free или
   stack-use-after-scope. Проблема также затрагивает task payload в
   `backup`/`insure`.
-- **Причина:** GCC размещает closure в coroutine frame так, что запись поля
-  `_block` promise перекрывает захват.
+- **Подтверждённая корневая причина:**
+  `promise_traits::operator new()` выделяет `[control_block][coroutine frame]`,
+  конструирует `control_block` по адресу `ptr`, но записывает `_frame_size` через
+  `static_cast<control_block*>(mem_ptr)`, где `mem_ptr = ptr +
+  control_block_size`. Таким образом запись попадает в начало coroutine frame, а
+  не в prefix block. Последующая инициализация promise может замаскировать
+  повреждение; layout coroutine lambda делает его наблюдаемым на захватах.
+- **Ложноположительный текущий тест:**
+  `promise_traits_fixture.operator_new_layout` проверяет, что `_frame_size` в
+  настоящем prefix block равен нулю после eager completion. Именно ноль там и
+  остаётся из-за ошибочной записи в frame, поэтому тест проходит при наличии
+  дефекта и не защищает заявленный layout.
 - **Текущий обход:** не использовать coroutine lambdas. Оформлять корутины как
   именованные функции или helper-методы с явными параметрами. Обычные
   некорутинные lambda допустимы.
-- **Возможные направления:** явно хранить closure в promise, изменить layout или
-  смещение control block либо вынести control block в отдельную аллокацию.
+- **Предлагаемое решение:** сначала исправить адрес назначения `_frame_size` на
+  фактический prefix block и проверить согласованность `operator delete()`,
+  `get_block_from_address()`, `prefetch()` и lifecycle disown. Не менять layout и
+  не выносить block в отдельную аллокацию без отдельного доказательства, что
+  минимальное исправление недостаточно.
 - **Текущая документационная работа:** все coroutine lambdas в tests/benchmarks
   заменяются именованными helpers, но production-дефект остаётся открытым.
+- **Проверка решения:** regression должен наблюдать ненулевой точный размер
+  живого frame до completion/cancel, ноль только после предусмотренного disown и
+  неизменность canary/аргументов coroutine frame. Отдельно проверить именованную
+  coroutine и lambda-coroutine с захватами по значению/ссылке под GCC и Clang,
+  ASan/UBSan. Тест обязан падать на текущей реализации.
 - **После решения:** снять соответствующее ограничение в `agents/INDEX.md` и
-  `AGENTS.md` и добавить отдельный regression test для control-block layout.
+  `AGENTS.md`, актуализировать Doxygen intrusive layout.
 
 ### B14. Повторный полный suite сохраняет глобальное состояние
 
@@ -83,19 +101,22 @@
 - **Проверка решения:** TCP- и UDP-тесты IPv6 loopback, тест invalid address;
   benchmark нужен только если преобразование адресов попадёт в горячий путь.
 
-### B24. `io::link::read_buf()` может потерять накопленные данные при EOF
+### B24. `read_buf()` может потерять накопленные данные при EOF
 
 - **Статус:** Открыто, исправление отложено.
 - **Приоритет:** Средний.
-- **Файл:** `include/ace/io.h:1886-1905`.
+- **Файлы и символы:** `include/ace/io.h` (`io::link::read_buf()`),
+  `include/ace/net.h` (`transport_entity::recv_buf()`).
 - **Симптом:** после одного или нескольких полных чанков завершающее чтение с
   результатом `0` возвращает `std::unexpected` вместо накопленного буфера.
-- **Корневая причина:** цикл проверяет terminal result `bytes_read < 1` и
-  завершает корутину до возврата уже собранных чанков.
+- **Корневая причина:** обе почти одинаковые реализации проверяют terminal
+  result `bytes_read < 1` и завершают корутину до возврата уже собранных чанков.
 - **Предлагаемое решение:** хранить состояние накопления отдельно и трактовать
   EOF с учётом уже прочитанных данных, явно зафиксировав контракт пустого EOF.
-- **Проверка решения:** regressions для пустого потока, одного чанка и нескольких
-  чанков с завершающим EOF.
+- **Проверка решения:** одинаковые regressions для file/link и TCP transport:
+  пустой EOF, один неполный chunk, ровно один полный chunk + EOF, несколько
+  полных chunks + EOF и terminal error после накопленных данных. Зафиксировать,
+  когда partial data возвращается как value, а когда ошибка имеет приоритет.
 
 ### B25. I/O lengths сужаются из `size_t` в `unsigned`
 
@@ -105,14 +126,15 @@
   `include/ace/services/kernelic.h`.
 - **Симптом:** публичные buffer lengths типа `size_t` неявно сужаются до
   `unsigned` в read/write query и kernelic API; большие размеры могут быть
-  усечены до отправки в ядро.
+  усечены до отправки в ядро. Дополнительно blocking `::recv()` возвращает
+  `ssize_t`, который сужается до `int` в `connection_link::input_action()`.
 - **Корневая причина:** длина не имеет единого типа и проверяемого преобразования
   на границах API.
 - **Предлагаемое решение:** выбрать и документировать `size_t`-контракт до
   системного вызова либо выполнять checked conversion/chunking без молчаливого
   усечения.
 - **Проверка решения:** boundary tests около `UINT_MAX` без выделения гигантского
-  буфера, включая read и write paths.
+  буфера, включая read/write/recv paths и отрицательные errno-results.
 
 ### B26. Ошибки `bind`/`listen` потребляют исходную entity
 
@@ -179,6 +201,10 @@
   syntax, поэтому clang branch недостижим и его flags не применяются.
 - **Корневая причина:** синтаксис аргументов используется как идентификатор
   компилятора.
+- **Дополнительное подтверждение 2026-08-27:** свежий setup с Clang 22.1.8
+  вывел `Arguments for gcc compiler` и применил GCC-набор, включая
+  `-fno-sanitize-address-use-after-scope`; Clang-ветка с `-flto` осталась
+  недостижимой.
 - **Предлагаемое решение:** сохранить compiler object и выбирать ветку через
   `compiler.get_id()`, используя argument syntax только там, где действительно
   различается формат flags.
@@ -294,7 +320,7 @@
   в GCC/ASan, отдельно и в полном suite без B29, и подтвердить одновременно
   стабильность теста и соблюдение выбранной временной границы.
 
-### B35. Fire-and-forget write fallback теряет command и moved buffer
+### B37. Fire-and-forget write fallback теряет command и moved buffer
 
 - **Статус:** Открыто.
 - **Приоритет:** Высокий.
@@ -319,6 +345,637 @@
   проверить точные bytes для file/socket fallback, возврат command slot и
   отсутствие удержанного buffer; отдельно проверить успешный async path без
   двойного `raw_sync()`.
+
+### B38. Ошибка инициализации `io_uring` игнорируется и приводит к null-ring crash
+
+- **Статус:** Открыто; воспроизведено GCC/ASan 2026-08-27.
+- **Приоритет:** Критический.
+- **Файлы и символы:** `include/ace/services/kernelic.h`
+  (`kernel_controller::kernel_controller()`, `submit()`, `ping()`, destructor);
+  затронутые I/O/console tests.
+- **Симптом:** конструктор игнорирует отрицательный результат
+  `io_uring_queue_init_params()`. После этого первый submit вызывает
+  `io_uring_get_sqe()` над неинициализированным ring и падает в
+  `io_uring_load_sq_head()` на null address. Свежий
+  `context_fixture.do_runner_test` воспроизвёл ASan SEGV через
+  `console::println()` -> `file_link::output_action()` -> `writev()`.
+- **Корневая причина:** у controller нет состояния `initialized/error`, а
+  destructor, submit, ping и registration APIs предполагают успешную
+  инициализацию без проверки.
+- **Требуемый контракт:** отсутствие доступного `io_uring` должно давать
+  определённую наблюдаемую ошибку или документированный fallback, но не crash,
+  hang и не ложный успех query. Выбор throw/error-state/fallback является
+  отдельным API-решением; singleton/service lifetime должен оставаться безопасным.
+- **Предлагаемое решение:** сохранить код инициализации, ввести явное состояние
+  controller, запретить все ring operations при failure, корректно завершать
+  только действительно инициализированный ring и провести ошибку до observer/query
+  либо выбранного fallback. Не подменять проблему skip-ом всех I/O tests.
+- **Проверка решения:** детерминированная injection ошибки init; проверки
+  submit/ping/destructor/register-files/console после failure; успешный path на
+  доступном ring; отсутствие зависших observers и утечек command/buffer. Запуски
+  GCC/Clang с ASan/UBSan и отдельный реальный environment probe.
+
+### B39. Coroutine allocation-failure protocol внутренне противоречив
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файлы и символы:** `include/ace/core/traits/promise.h`
+  (`promise_traits::operator new()`), `include/ace/core/async.h`
+  (`get_return_object_on_allocation_failure()`, raw-handle constructor).
+- **Симптом:** coroutine `operator new(size_t) noexcept` вызывает throwing
+  `arena::allocate()`, поэтому allocation failure завершает процесс через
+  `std::terminate`. Одновременно объявлен стандартный allocation-failure hook,
+  возвращающий `async(nullptr)`, но raw-handle constructor без проверки вызывает
+  `_coroutine.promise()` у null handle.
+- **Требуемый контракт:** выбрать один согласованный путь: либо allocation
+  exception распространяется согласно C++ coroutine protocol, либо non-throwing
+  allocation возвращает null и создаёт безопасный пустой `async`. Нельзя
+  сохранять одновременно недостижимый fallback и null dereference.
+- **Предлагаемое решение:** согласовать exception/noexcept API с arena, затем
+  удалить несовместимый hook либо сделать всю null-return цепочку безопасной.
+  Учесть переполнение `mem_size + control_block_size` до allocation.
+- **Проверка решения:** controlled arena limit/failing allocator без гигантских
+  выделений; lazy/eager/automaton paths; наблюдение, move и destruction результата;
+  отсутствие terminate, double free и обращения к null promise. Обновить Doxygen
+  `@throws` или empty-result contract.
+
+### B40. Move-assignment `async` теряет уже принадлежащую destination корутину
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/core/async.h` (`async::operator=(async&&)`).
+- **Симптом:** assignment без освобождения перезаписывает destination handle и
+  обнуляет source. Незавершённый старый frame, router, waiters, backups и
+  control-block refs destination становятся недоступными. Self-move также
+  обнуляет единственный handle.
+- **Пробел теста:** `context_fixture.async_move_leaves_source_null` проверяет
+  только move construction; assignment в непустую destination и self-move
+  отсутствуют.
+- **Предлагаемое решение:** до transfer выполнить тот же согласованный lifecycle,
+  что destructor, либо реализовать move-and-swap с корректным release; self-move
+  должен быть явным no-op. Не вызывать coroutine callbacks дважды.
+- **Проверка решения:** empty/non-empty destination, completed/suspended/observed
+  source и destination, backups/insure, waiters, self-move; точные destructor
+  counters и arena/control-block accounting под ASan/LSan.
+
+### B41. Move-assignment `io::buffer` теряет destination chunks и ломает self-move
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/io.h` (`io::buffer::operator=(buffer&&)`).
+- **Симптом:** assignment перезаписывает `_hdr` и три указателя destination без
+  `clear()`, теряя chunks и assembled iovec. При `buffer = std::move(buffer)`
+  поля сначала копируются сами в себя, затем обнуляются, поэтому payload
+  становится недоступным и не освобождается.
+- **Пробел теста:** `io_buffer_fixture.buffer_move_assign` использует пустую
+  destination и не проверяет release старого payload, assembled state либо
+  self-move; тест проходит на текущем дефекте.
+- **Предлагаемое решение:** self-check, затем гарантированно освободить прежнее
+  состояние destination и атомарно принять всё состояние source. Уточнить
+  exception guarantee; текущая операция заявлена `noexcept`.
+- **Проверка решения:** непустая и assembled destination, много chunks, empty
+  source, self-move; точные данные/len/msg_iovlen и arena live-chunk deltas;
+  ASan/LSan на отсутствие leak/UAF/double-free.
+
+### B42. `io::buffer::shape()` допускает OOB-read и invalidates assembled metadata
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/io.h` (`io::buffer::shape()`).
+- **Симптом:** метод документирован как shrink, но не проверяет `len <=` длины
+  tail chunk и копирует `len + control_hdr_len` bytes. Больший `len` читает за
+  старым chunk. Вызов после `assemble()` заменяет и освобождает tail, оставляя
+  `_hdr.msg_iov` со ссылкой на освобождённый payload.
+- **Предлагаемое решение:** определить ошибочный input contract (checked return,
+  exception либо assert для internal precondition), запретить modification в
+  assembled state так же, как `expand/append`, либо безопасно disassemble и
+  rebuild metadata. Сохранить `_total_len`, links и arena ownership при failure.
+- **Проверка решения:** oversize, equal size, zero, single/multiple chunks,
+  before/after assemble и allocation failure; canary/ASan test обязан падать на
+  текущей реализации. Обновить Doxygen с preconditions/error semantics.
+
+### B43. Primary template `io::buffer::as<T>()` принимает неподдерживаемые типы
+
+- **Статус:** Открыто.
+- **Приоритет:** Средний.
+- **Файл:** `include/ace/io.h` (`buffer::as<T>()`).
+- **Симптом:** `static_assert("No ...")` всегда истинна, поскольку string literal
+  преобразуется в `true`. Любой неподдерживаемый default-constructible `T`
+  компилируется и молча возвращает пустое значение вместо диагностики.
+- **Предлагаемое решение:** использовать dependent-false assertion либо
+  constraint/удалённый primary overload, сохранив только явно поддержанные
+  conversions. Текст Doxygen не должен обещать default value как fallback, если
+  это не осознанный публичный контракт.
+- **Проверка решения:** compile-fail/`requires` checks для unsupported type и
+  положительные checks для `std::string` и `std::vector<std::byte>`.
+
+### B44. Byte-size multiplication в buffer/net overloads не проверяет overflow
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файлы и символы:** `include/ace/io.h` (`buffer::emplace` для vector/span),
+  `include/ace/net.h` (typed send/recv/sendto overloads).
+- **Симптом:** `element_count * sizeof(T)` вычисляется как `size_t` без checked
+  multiplication. При wraparound выделяется/передаётся малая длина, после чего
+  `memcpy` либо kernel operation использует контракт, не соответствующий
+  исходному диапазону. Это отдельная проблема от B25: здесь ошибка возникает до
+  сужения на системной границе.
+- **Предлагаемое решение:** единый checked byte-count helper либо локальные
+  guards до allocation/submission; failure не должен менять buffer/entity.
+- **Проверка решения:** synthetic spans/counts у границы `SIZE_MAX / sizeof(T)`
+  без реального огромного allocation, типы разных размеров, zero length и все
+  overload families. Зафиксировать exception/error contract в Doxygen.
+
+### B45. Move-конструктор intrusive `queue` оставляет nodes привязанными к source
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/core/tools/queue.h` (`queue(queue&&)`,
+  `q_node::owning_queue`, `q_node::remove()`).
+- **Симптом:** head/tail переходят в destination, но `owning_queue` каждого узла
+  продолжает указывать на moved-from queue. Последующий `node->remove()` изменяет
+  пустой source через links destination и может повредить обе очереди.
+- **Пробел теста:** `queue_fixture.queue_move_constructor` извлекает элементы
+  только через destination и не вызывает self-ejection сохранённого node.
+- **Предлагаемое решение:** либо обновить back-pointers всех перенесённых nodes
+  (O(N)), либо перепроектировать owner token/indirection так, чтобы move очереди
+  сохранял O(1) и `remove()` находил актуального владельца. Выбор важен для
+  O(1)-контракта timer cancellation.
+- **Проверка решения:** сохранить pointers на head/middle/tail, переместить queue,
+  удалить каждый через `q_node::remove()`, проверить links/destructors/reuse;
+  repeated moves и empty queue. Документировать complexity move/remove.
+
+### B46. Уничтожение непустой `queue<T>` не разрушает живые `T`
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/core/tools/queue.h` (`queue`, `slab_mempool`).
+- **Симптом:** у `queue` нет destructor, дренирующего nodes. `T` создаётся
+  placement-new, но `delete[]` slabs вызывает только destructor `q_node`, который
+  не разрушает объект в raw storage. Оставшиеся timer/service payloads пропускают
+  destructors и могут удерживать ресурсы.
+- **Пробел теста:** `slab_mempool_destructor` возвращает узлы или использует
+  payload без наблюдаемого destructor counter.
+- **Предлагаемое решение:** определить ownership между queue и pool и обеспечить
+  разрушение каждого constructed payload ровно один раз до освобождения slab.
+  Учесть, что несколько queue могут разделять один pool.
+- **Проверка решения:** tracked non-trivial type, непустые несколько очередей,
+  unlink/pop/dequeue/move/destruction permutations; точные construct/destruct
+  counts под ASan/LSan.
+
+### B47. `slab_mempool` маскирует allocation failure и затем разыменовывает null
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/core/tools/queue.h` (`grow()`, `alloc()`, enqueue APIs).
+- **Симптом:** `grow()` ловит exception, пишет в `std::cerr` и возвращается;
+  `alloc() noexcept` затем без проверки разыменовывает `free_head == nullptr`.
+  Если `new[]` успешен, а `slabs.push_back()` бросает, новый slab также теряется.
+  Placement-construction `T` вызывается из `noexcept enqueue`, хотя copy/move
+  constructor `T` может бросить.
+- **Предлагаемое решение:** выбрать явный failure contract и обеспечить strong
+  cleanup при каждом участке allocation/construction. Не продолжать после
+  failure и не печатать из generic container как замену передаче ошибки.
+- **Проверка решения:** failing allocator/injected vector growth и throwing
+  payload constructors; первый slab и последующие growth; отсутствие null
+  dereference, terminate и leak; очередь остаётся согласованной.
+
+### B48. `dispatcher::worker_state::_pending` образует data race
+
+- **Статус:** Открыто.
+- **Приоритет:** Критический.
+- **Файл:** `include/ace/core/dispatcher.h` (`worker_state`, `worker_round()`,
+  `worker_tf()`, `run()`).
+- **Симптом:** worker threads пишут обычный `bool _pending`, а main thread
+  одновременно читает его в polling loop без mutex/atomic/happens-before. Это UB;
+  `run()` может преждевременно завершиться, бесконечно ждать или читать устаревшее
+  состояние.
+- **Предлагаемое решение:** определить протокол публикации idle/activity с
+  подходящими atomic memory orders либо другим synchronization primitive.
+  Простая замена типа недостаточна без доказательства terminal condition при
+  concurrent reattach/schedule.
+- **Проверка решения:** TSAN, многопоточная подача задач во время `run()`, задачи,
+  которые мигрируют/порождают новые задачи на границе idle, тысячи shuffled
+  повторов; run возвращается только после доказанной quiescence.
+
+### B49. `reload()` меняет конфигурацию нетранзакционно и принимает ноль runner-ов
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/core/dispatcher.h` (`fetch_config()`, `reload()`,
+  `round_robin()`, `schedule()`, `run()`).
+- **Симптом:** `_runners_amount` обновляется до проверки `empty()`. Если reload
+  занятого dispatcher возвращает `false`, размер vectors остаётся старым, а
+  amount уже новый. Значение 0 очищает vectors; затем single/round-robin paths
+  получают OOB или modulo zero, а `run()` резервирует `workers_amount - 1`.
+- **Требуемый контракт:** конфигурация либо полностью принята, либо состояние
+  dispatcher не меняется. Минимум один runner должен быть валидирован до commit.
+- **Предлагаемое решение:** прочитать candidate отдельно, валидировать range и
+  idle condition, подготовить новое состояние с exception safety, затем commit.
+  Решить, возвращается ли structured error либо `false`.
+- **Проверка решения:** zero, one, increase/decrease, same value, reload при
+  pending/running work, allocation failure; после отклонения старый dispatcher
+  продолжает корректно schedule/run. Обновить config/API Doxygen.
+
+### B50. Полностью переработать weighted scheduler как O(1) load-aware balancer
+
+- **Статус:** Открыто; требуется отдельное архитектурное решение до реализации.
+- **Приоритет:** Критический для multi-runner производительности и correctness.
+- **Файлы и символы:** `include/ace/core/dispatcher.h` (`schedule()`,
+  `_aggregate_velocity`, `_runner_selector`), `include/ace/core/runner.h`
+  (`_tasks_amount`, `_quants`, `velocity()`, `upgrade_velocity()`),
+  `include/ace/core/tools/moving_average.h`; новые tests/benchmarks.
+- **Текущие дефекты:** selection проходит все runners, то есть O(N). Вес
+  `1 - velocity/aggregate` не нормализован: сумма привлекательностей равна
+  `N - 1`, а random value берётся из `[0,1]`, поэтому ранние элементы получают
+  несоразмерную долю, поздние могут почти не выбираться. Статические `mt19937` и
+  distribution совместно используются без synchronization. `_tasks_amount` и
+  `_quants` читаются scheduler-ом одновременно с записью worker-а без безопасной
+  публикации, поэтому сам load signal имеет data races.
+- **Цель задачи:** заменить текущий алгоритм целиком. Scheduler обязан выбирать
+  runner на основании актуальной наблюдаемой нагрузки runner-ов. Текущий
+  `velocity` можно переопределить или заменить: допустимы queue depth, runnable
+  work, service/polling weight, throughput/latency EWMA и их O(1)-комбинация.
+  Метрика должна быть размерностно осмысленной, устойчива к idle/zero values и
+  публиковаться thread-safe без глобального contention.
+- **Требование сложности:** hot-path `publish/update load`, `select runner` и
+  `schedule/attach metadata` должны стремиться к worst-case либо доказанной
+  expected/amortized O(1), независимо от числа runners. Нельзя заменять текущий
+  scan на sorting, heap/Fenwick O(log N) или периодический O(N) rebuild в hot
+  path. O(N) initialization/reload допустим только как явно вынесенная cold-path
+  стоимость O(1) на runner; исполнитель обязан приложить таблицу complexity всех
+  операций и обосновать каждое отклонение от O(1).
+- **Допустимое направление:** bounded-choice/bucketed либо иная approximate
+  weighted схема с константным числом samples и O(1) обновлением. Exact global
+  weighted distribution не является самоцелью, если она конфликтует с O(1):
+  важнее доказуемо направлять работу от перегруженных runner-ов к менее
+  загруженным и не допускать starvation. Конкретный дизайн должен быть утверждён
+  отдельно, без добавления новой abstraction заранее.
+- **Correctness-тесты:** deterministic injectable randomness/selector;
+  одинаковая нагрузка без систематического index bias; один и несколько явно
+  перегруженных runner-ов; быстро меняющаяся нагрузка; idle/zero metric; 1/2/4/64+
+  runners; concurrent external `schedule()`; отсутствие starvation и bounded
+  convergence после смены нагрузки. Тест должен наблюдать фактические runner IDs
+  и load, а не только общее число завершённых задач.
+- **Benchmarks и критерии:** добавить отдельные сценарии selection-only и
+  end-to-end schedule/run для 1, 2, 4, 8, 16, 64+ runners; balanced/skewed/bursty
+  load; несколько producer threads. Фиксировать selections/sec, ns/schedule,
+  p50/p95/p99 queue wait, throughput, max/mean load imbalance, starvation count
+  и scaling относительно N. Сравнение выполнять по N5 в одном окружении и
+  доказать отсутствие линейного роста selection cost. Обновить
+  `agents/BENCHMARKS.md`, `agents/TESTING.md`, `agents/INDEX.md` и Doxygen.
+
+### B51. `reset_signal()` извлекает не более одного сигнала
+
+- **Статус:** Открыто.
+- **Приоритет:** Средний/высокий.
+- **Файл:** `include/ace/core/dispatcher.h` (`ace::reset_signal()`).
+- **Симптом:** условие `while (not pop(sgl) and not empty())` прекращает цикл при
+  успешном первом `pop`; накопившиеся signals остаются в глобальном pipe и могут
+  влиять на следующий test/run. Это возможный конкретный источник B14.
+- **Пробел тестов:** `interrupt_signal` и `terminate_signal` кладут ровно один
+  signal, вызывают reset и завершаются `SUCCEED()` без проверки pipe state.
+- **Предлагаемое решение:** дренировать до документированного empty result,
+  не инвертируя семантику `pop`; учесть concurrent producers и определить,
+  гарантирует ли reset snapshot-drain или quiescent drain.
+- **Проверка решения:** смесь нескольких break/shutdown signals, повторный reset,
+  empty pipe, следующий `run()` без stale action; repeated/shuffled suite.
+
+### B52. `noexcept` публичных scheduler/container APIs не соответствует операциям
+
+- **Статус:** Открыто; требуется аудит контрактов.
+- **Приоритет:** Высокий.
+- **Файлы и символы:** `include/ace/core/dispatcher.h` (`reload`, `schedule`,
+  `run`), `include/ace/core/traits/service.h` (`respawn`, `touch`),
+  `include/ace/core/tools/queue.h` и связанные runner paths.
+- **Симптом:** функции помечены `noexcept`, но выполняют `vector::resize/reserve`,
+  создают `std::jthread`, конструируют payloads, выделяют queue nodes и вызывают
+  scheduling paths с потенциальными исключениями. Failure превращается в
+  `std::terminate` вместо заявляемого/обрабатываемого результата.
+- **Предлагаемое решение:** составить call graph потенциально throwing операций;
+  для каждого публичного API либо снять `noexcept` и документировать `@throws`,
+  либо полностью обработать failure с rollback/error result. Не ловить всё с
+  продолжением в частично изменённом состоянии.
+- **Проверка решения:** injected allocation/thread-construction/payload failures,
+  transactional state checks, отсутствие terminate и leak. Добавить compile-time
+  `noexcept(...)` assertions для принятого контракта.
+
+### B53. `socket::setup_query()` скрывает отказ submission
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/net.h` (`ace::net::socket::setup_query()`).
+- **Симптом:** метод вызывает `kernel_controller::socket(...)`, игнорирует его
+  bool-result и всегда возвращает `true`. При отказе controller query сообщает,
+  что suspension установлена, хотя CQE не будет; coroutine может зависнуть.
+- **Предлагаемое решение:** вернуть фактический submit result и согласовать с
+  общим `io::query::await_suspend/await_resume` contract: немедленный отказ
+  должен давать определённую ошибку, а не sentinel `INT_MIN` или ложный success.
+- **Проверка решения:** принудительно заполненный/rejecting submission buffer и
+  failed controller init, отсутствие suspension/hang, корректная invalid socket
+  entity/error; успешный socket creation без регрессии.
+
+### B54. `connection_link` блокирует runner системным `recv()`
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/net.h` (`connection_link::input_action()`, high-level
+  `read()/read_buf()` path).
+- **Симптом:** coroutine выполняет blocking `::recv` прямо на runner thread.
+  Один медленный peer блокирует timers, services и все остальные tasks этого
+  runner; cancellation не может снять системный вызов. Результат `ssize_t`
+  дополнительно сужается до `int` (см. B25).
+- **Предлагаемое решение:** использовать общий asynchronous recv query/io_uring
+  path с корректным router/cancellation/lifetime. Visibility limitation из
+  текущего комментария решить минимальным перемещением/forward declaration, а не
+  blocking fallback в event loop.
+- **Проверка решения:** stalled peer + независимые short timer/task на том же
+  runner, cancel suspended read, EOF/error/partial data, multi-runner migration.
+  Benchmark: latency/throughput при 1/10/100 idle connections против baseline;
+  runner не должен блокироваться длительностью peer stall.
+
+### B55. Address overloads неверно используют `string_view` и игнорируют `inet_pton`
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/net.h` (string-address overloads `bind`, `connect`,
+  `accept` у net entities).
+- **Симптом:** `inet_pton(domain_v, addr.data(), ...)` требует NUL-terminated
+  string, чего `std::string_view` не гарантирует. Return 0 (invalid text) и -1
+  (unsupported family/error) игнорируются; transition продолжает работу с
+  нулевым или прежним address storage и потребляет entity.
+- **Предлагаемое решение:** обеспечить bounded NUL-terminated representation или
+  использовать parser с length; валидировать return и передавать parse failure до
+  consuming transition. Согласовать с B23 domain-specific storage.
+- **Проверка решения:** substring view с мусором сразу после view, non-terminated
+  array, invalid IPv4/IPv6, embedded NUL, valid endpoints; parse failure не
+  выполняет kernel operation и соблюдает выбранный B26 ownership contract.
+
+### B56. Public `listener_entity::accept` overload не компилируется при instantiation
+
+- **Статус:** Открыто.
+- **Приоритет:** Средний.
+- **Файл:** `include/ace/net.h` (`listener_entity::accept(sockaddr*, const
+  socklen_t*, int)`, `accept_query` constructor).
+- **Симптом:** public overload принимает `const socklen_t*`, но передаёт его
+  constructor-у, ожидающему writable `socklen_t*`; kernel accept изменяет длину.
+  Template body не диагностируется, пока overload не инстанцирован, поэтому
+  текущая сборка проходит.
+- **Предлагаемое решение:** публично принимать корректный in/out pointer либо
+  изменить API на безопасную owned result structure; не использовать const-cast.
+- **Проверка решения:** отдельный consumer compile-test инстанцирует overload;
+  runtime loopback проверяет обновлённые address и addrlen, short buffer и error.
+  Обновить Doxygen direction `[in,out]`.
+
+### B57. `channel::pending_push()` повторно перемещает один payload в retry-loop
+
+- **Статус:** Открыто; статически подтверждено, runtime зависит от контракта
+  внешней queue.
+- **Приоритет:** Высокий для move-only payloads.
+- **Файл:** `include/ace/futures/channel.h` (оба `pending_push` overload).
+- **Симптом:** каждая неуспешная итерация вызывает
+  `_container.push(std::forward<data_t>(data))`. Если failed bounded push имеет
+  право переместить аргумент до сообщения overflow, следующая попытка отправляет
+  moved-from value. Rvalue-reference overload также удерживает reference через
+  suspension, что требует явного lifetime contract.
+- **Предлагаемое решение:** проверить контракт nukes queue; хранить payload во
+  владеющем coroutine frame и перемещать ровно на успешной commit-операции либо
+  использовать API, гарантирующий отсутствие consume при failure. Удалить
+  дублирующий overload, если он создаёт dangling-reference риск.
+- **Проверка решения:** bounded-full channel с move-only tracked payload,
+  несколькими suspend/retry, producer cancellation и destruction source после
+  вызова; доставляется исходное значение ровно один раз, counters согласованы.
+
+### B58. `service_traits::touch()` и `inspect()` возвращают разные instances
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/core/traits/service.h` (`touch_impl()`, `inspect()`,
+  shared detached accessors).
+- **Симптом:** обе функции объявляют собственный function-local static
+  `derived_t instance`. В thread-local mode `touch` использует thread-local
+  instance, а `inspect` — отдельный process-static; в shared mode также создаются
+  два разных объекта. Instance fields и `_shared_detached` читаются/пишутся не у
+  того объекта, который выполняет `ping()`.
+- **Причина маскировки:** clock/kernel services в основном используют static или
+  thread-local данные, поэтому текущие тесты не наблюдают identity/state split;
+  отдельного service_traits fixture нет.
+- **Предлагаемое решение:** единый storage accessor для каждого spawn mode,
+  используемый touch/inspect/detach accessors; сохранить ровно одну instance на
+  thread либо process согласно контракту.
+- **Проверка решения:** test derived service с нестатическими identity/counters,
+  адреса touch/inspect, несколько threads, detach/respawn и destruction order.
+
+### B59. Shared service может быть запущен повторно конкурентными `touch()`
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файл:** `include/ace/core/traits/service.h` (`touch_impl`, `respawn`,
+  `_shared_detached`).
+- **Симптом:** shared mode выполняет check-then-act: несколько threads читают
+  `detached == true`, каждый вызывает `schedule(service(...))`, затем записывает
+  false. Один shared instance получает несколько eternal service coroutines.
+- **Предлагаемое решение:** атомарно claim-ить право respawn через CAS или
+  эквивалентный state machine (`detached/spawning/running/stopping`), публикуя
+  state до schedule и откатывая его при failure. Согласовать memory orders и B52.
+- **Проверка решения:** barrier-start десятков concurrent touch calls, ровно один
+  service loop/runner attachment, повторный spawn только после detach, injected
+  scheduling failure, TSAN.
+
+### B60. Type-erased storage `kernel_entity::_params` не проверяет size/alignment
+
+- **Статус:** Открыто; защитный инвариант отсутствует.
+- **Приоритет:** Средний.
+- **Файл:** `include/ace/services/kernelic.h` (`kernel_entity`, constructor,
+  `action_templ`).
+- **Симптом:** tuple параметров placement-new размещается в фиксированном
+  `uintptr_t _params[8]`, но нет `static_assert(sizeof(tuple) <= sizeof(_params))`
+  и проверки alignment. Новый/изменённый io_uring wrapper может тихо записать за
+  storage; тип также копируется без явного destruction contract.
+- **Предлагаемое решение:** зафиксировать compile-time size/alignment/triviality
+  constraints либо заменить storage на корректный type-erasure с destroy/move.
+  Не расширять buffer наугад без инвентаризации всех signatures.
+- **Проверка решения:** compile-time checks всех текущих submit instantiations,
+  deliberately oversized/non-trivial tuple diagnostic, deferred enqueue/move/
+  apply/destruction под sanitizers.
+
+### B61. Compose/channel/cutex tests не проверяют заявленные операции
+
+- **Статус:** Открыто; тестовый аудит 2026-08-27.
+- **Приоритет:** Высокий.
+- **Файлы:** `tests/compose_extra_fixture.cpp`,
+  `tests/channel_extra_fixture.cpp`, `tests/cutex_extra_fixture.cpp`.
+- **Ложноположительные сценарии:** `operator_pipe` вообще не использует
+  `operator>>`; `or_await_left_wins` принимает победу любой ветки при 10 ms против
+  2000 ms; `and_await_both_succeed` использует одинаковые timers и marker после
+  await не доказывает ожидание обеих веток; `mpsc_channel` имеет одного producer
+  и проверяет только сумму; `proxy_double_sync` дважды вызывает `release()`, а не
+  `sync()`. Все эти тесты проходят в свежей GCC/ASan-сборке.
+- **Предлагаемое решение:** заменить каждый сценарием через фактический публичный
+  API и наблюдаемое различающее поведение. Не переименовывать тест под текущую
+  слабую проверку, если заявленная возможность должна поддерживаться.
+- **Проверка решения:** regressions должны быть mutation-sensitive: удаление
+  tested operator/второй branch/одного producer/второго sync обязано приводить к
+  failure. Для async ordering использовать barrier/channels, а не только wall
+  clock; обновить fixture map и статусы в `agents/TESTING.md`.
+
+### B62. Tests roaming/polling/multi-runner/interrupt не наблюдают семантику
+
+- **Статус:** Открыто; тестовый аудит 2026-08-27.
+- **Приоритет:** Высокий.
+- **Файлы:** `tests/spawn_extra_fixture.cpp`,
+  `tests/cross_mechanic_fixture.cpp`, `tests/dispatcher_fixture.cpp`.
+- **Ложноположительные сценарии:** `roaming_true/false` и `polling_true` проверяют
+  только marker completion, не flag, routing или service pool;
+  `multi_runner_spawn` считает результаты, но не доказывает использование разных
+  runner-ов; `interrupt_during_timeout` вызывает interrupt уже после завершения
+  `ace::run()`; signal tests завершаются `SUCCEED()` после push/reset.
+- **Предлагаемое решение:** публиковать runner identity и наблюдаемые lifecycle
+  transitions через public futures/handles; вводить barrier, чтобы interrupt
+  происходил во время suspended timeout; проверять содержимое/эффект signals и
+  отсутствие stale state. Не читать private fields ради удобства теста, если
+  observable public path существует.
+- **Проверка решения:** каждый true/false mode даёт различимый результат;
+  multi-runner test видит минимум два runner ID; interrupt отменяет/прерывает
+  именно активное ожидание; repeated/shuffled прогон не зависит от B14.
+
+### B63. Filesystem и socket echo tests могут пройти без единой успешной операции
+
+- **Статус:** Открыто; тестовый аудит 2026-08-27.
+- **Приоритет:** Критический для интеграционного покрытия.
+- **Файлы:** `tests/fs_fixture.cpp`, `tests/socket_echo_fixture.cpp`.
+- **Ложноположительные сценарии:** fs helpers молча выходят при open/read failure,
+  а tests проверяют только `ace::empty()`; записанные bytes и прочитанный content
+  не сравниваются. Socket helpers делают `co_return` при любом
+  socket/bind/listen/connect/accept failure; send/recv payload только печатается,
+  tests снова проверяют empty. ZC client сравнивает положительный byte count с
+  `EXIT_SUCCESS == 0`. Фиксированные ports 8000/8001/9000/9001 создают collisions.
+  `flexing.txt` и `test_write_read.txt` не очищаются fixture-ом.
+- **Предлагаемое решение:** helpers должны всегда публиковать structured outcome
+  со stage/error/byte-count/payload; любое неожиданное системное отклонение —
+  явный failure, а unsupported environment — явный skip только по заранее
+  определённой причине. Использовать unique temporary paths и ephemeral/derived
+  ports, cleanup в RAII/TearDown.
+- **Проверка решения:** exact file contents/size и exact пять framed messages в
+  обе стороны; partial send/recv и errors; тесты демонстративно падают при
+  invalid path/port/disabled listener. Нужна граница сообщений: TCP не сохраняет
+  send boundaries, поэтому нельзя считать один `recv_buf` одним message без
+  framing/EOF protocol.
+
+### B64. Timer tests публикуют requested values вместо фактического времени
+
+- **Статус:** Открыто; тестовый аудит 2026-08-27.
+- **Приоритет:** Высокий.
+- **Файл:** `tests/timer_fixture.cpp`.
+- **Ложноположительные сценарии:** `do_timer_on_runner_test` отправляет в channel
+  исходную duration, поэтому tolerance проверяет вход теста; `do_expire_on_runner_test`
+  отправляет заданный deadline, а не wake timestamp; `timeout_short` допускает
+  elapsed >= 0 для timeout 10 ms. Parallel test создаёт 100000 timers в
+  correctness suite, имеет слабую sum-проверку и одновременно служит benchmark.
+- **Предлагаемое решение:** измерять `steady_clock` непосредственно вокруг await,
+  сопоставлять уникальный timer ID с requested/observed timestamps, отдельно
+  проверять нижнюю и разумную верхнюю границы. Для absolute expire проверять, что
+  wake не раньше deadline. Масштаб correctness сделать детерминированным и
+  умеренным; тяжёлую нагрузку оставить benchmark-у.
+- **Проверка решения:** zero/negative/sub-ms/boundary wheel slots, concurrent
+  timers, cancel, multi-runner; статистически устойчивые допуски без принятия
+  мгновенного completion. Много повторов/shuffle по B34.
+
+### B65. Ownership/console/outcast tests используют `SUCCEED` вместо наблюдаемых инвариантов
+
+- **Статус:** Открыто; тестовый аудит 2026-08-27.
+- **Приоритет:** Высокий.
+- **Файлы:** `tests/io_any_fixture.cpp`, `tests/console_fixture.cpp`,
+  `tests/io_hanged_fixture.cpp`, `tests/context_fixture.cpp`,
+  `tests/promise_traits_fixture.cpp`, `tests/queue_fixture.cpp`.
+- **Ложноположительные сценарии:** все `io_any` lifecycle tests не считают
+  move/destruction/deleter; console tests проверяют только отсутствие exception,
+  не bytes/newline/format; outcast capture tests проходят даже при `capture ==
+  false`, а `hanged_command_defaults` вопреки `agents/TESTING.md` намеренно не
+  проверяет defaults; `async_prefetch` не защищает ненулевой frame size;
+  `kernel_register_files` выполняет assertions только внутри успешной ветки
+  `pipe()` и молча проходит при failure; layout/buffer/queue gaps описаны в
+  B13/B41/B45/B46.
+- **Предлагаемое решение:** tracked payloads/canaries/counters, deterministic
+  stdout sink/capture без реального kernel console, обязательный ASSERT на
+  resource acquisition, точные command reset/retain semantics. Разделить
+  standalone runner tests от console/io_uring, чтобы B38 не скрывал их смысл.
+- **Проверка решения:** tests должны падать при пропуске deleter, double move,
+  stale command field, неверном newline и нулевом frame-size metadata; включить
+  LSan-capable job либо эквивалентное arena/pool accounting.
+
+### B66. Sanitizer/test-discovery configuration не даёт надёжной общей проверки
+
+- **Статус:** Открыто; частично воспроизведено 2026-08-27.
+- **Приоритет:** Высокий.
+- **Файлы:** `meson.build`, `discover_tests.py`, `agents/TESTING.md`.
+- **Симптом:** test target всегда принудительно включает только ASan и задаёт
+  `detect_leaks=0` для discovered GTests, поэтому queue/buffer ownership leaks не
+  обнаруживаются. UBSan/TSan jobs отсутствуют. `ace_tests.discovery_consistency`
+  не получает это env и в свежих GCC/Clang build-dir падает до сравнения списка:
+  LeakSanitizer не может работать в текущем ptrace environment. При ручном
+  `ASAN_OPTIONS=detect_leaks=0` verify проходит и подтверждает 291 GTest; Meson
+  регистрирует 293 теста. При одновременно включённых tests+benchmarks могут
+  дополнительно регистрироваться tests fallback-проекта Google Benchmark, что
+  искажает ACE count.
+- **Предлагаемое решение:** создать явную sanitizer matrix: ASan, UBSan, TSAN и
+  отдельный LSan-capable environment; одинаково передавать требуемое env helper
+  tests, не скрывая leaks глобальным disable там, где их можно проверить.
+  Fallback benchmark dependency должен отключать собственные tests либо counts
+  должны быть namespace-отделены и документированы.
+- **Проверка решения:** clean GCC/Clang configurations, discovery consistency,
+  стандартный suite, shuffled/repeated single-process run и sanitizer-specific
+  jobs; отчёт должен различать skipped sanitizer capability и успешный тест.
+
+### B67. Пользовательская и агентская документация противоречит текущему коду
+
+- **Статус:** Открыто.
+- **Приоритет:** Средний.
+- **Файлы:** `README.md`, `agents/INDEX.md`, `agents/TESTING.md`,
+  `include/ace/services/clock.h`.
+- **Расхождения:** README называет `automaton<T>` eager и diagram запускает его
+  вызовом, тогда как implementation/INDEX/test фиксируют lazy
+  `suspend_always`; INDEX всё ещё сообщает 291/292 и блокировку Clang по уже
+  решённому B27, тогда как текущий inventory — 291 GTests/293 Meson tests и
+  Clang target собирается; clock Doxygen обещает refresh `cached_now()` при
+  возрасте >1 ms, но код и решённый B6 задают только каждый 16-й вызов;
+  `agents/TESTING.md` приписывает `hanged_command_defaults` проверки, которых в
+  test body нет.
+- **Предлагаемое решение:** после исправления соответствующих production/test
+  issues выбрать authoritative contracts и синхронно обновить все четыре
+  документа. Не менять implementation для совпадения с устаревшим текстом без
+  отдельного API-решения.
+- **Проверка решения:** ручная cross-reference проверка coroutine table/diagram,
+  test counts и compiler status; Doxygen соответствует B6; fixture map точно
+  описывает assertions. Добавить lightweight doc/count consistency checks там,
+  где это не требует дублировать данные.
+
+### B68. Nukes freelists размещают over-aligned nodes в обычном `malloc` storage
+
+- **Статус:** Открыто; подтверждено UBSan 2026-08-27, исправление относится к
+  dependency и должно быть согласовано с её владельцем.
+- **Приоритет:** Критический.
+- **Файлы и граница ACE:**
+  `subprojects/nukes/include/nukes/dynamic/{mpmc,spmc,regular}_freelist.h`,
+  `nukes/details/node_types.h`, `nukes/details/constants.h`; ACE инстанцирует эти
+  контейнеры в `include/ace/futures/channel.h`, runner/signal/arena/id allocator.
+- **Симптом:** `dyn_node<T>::_data` получает alignment
+  `bit_ceil(sizeof(T))`, из-за чего вложенный node ACE достигает alignment 128.
+  Freelist выделяет его через `malloc(sizeof(node_t))`, который гарантирует лишь
+  fundamental/max alignment, и выполняет placement-new по потенциально
+  misaligned адресу. Комбинированный GCC ASan+UBSan остановился до GTest на
+  `mpmc_freelist::capture()` для глобального `ace::bus<int>` с сообщением
+  `store to misaligned address ... requires 128 byte alignment`.
+- **Предлагаемое решение:** исправлять в Nukes либо обновлением dependency, либо
+  согласованным upstream patch: вычислять alignment из реального `alignof`
+  контракта node/data и использовать aligned allocation/deallocation, когда
+  требование превышает `alignof(std::max_align_t)`. Проверить все три freelist,
+  constructor growth и matching free; не маскировать UBSan suppression-ом.
+- **Проверка решения:** compile/runtime matrix для payload alignments
+  1/8/16/32/64/128/256 и nested queue nodes, проверка адреса `% alignof(node_t) ==
+  0`, push/pop/capture/sync/move/destruction под UBSan/ASan/TSan. Затем повторить
+  ACE static initialization и весь suite. Если выбирается новая версия Nukes,
+  зафиксировать version/commit и regression со стороны ACE.
 
 ### B36. `is_debug` имел инвертированную семантику
 
@@ -409,6 +1066,71 @@
 - **Проверка решения:** сопоставимые повторные прогоны baseline/current при
   зафиксированном окружении и анализ распределения результатов всех шести
   сценариев, особенно BM1.
+
+### N6. Конвертация и clone `io::buffer` выполняют лишние allocation/move
+
+- **Статус:** Открыто; оптимизация допустима только после B41-B44.
+- **Приоритет:** Средний.
+- **Файл:** `include/ace/io.h` (`buffer::as<std::string>()`,
+  `as<std::vector<std::byte>>()`, `clone()`).
+- **Наблюдение:** обе conversions знают `_total_len`, но не делают `reserve`.
+  Byte-vector строится по одному `push_back` на byte вместо range copy каждого
+  chunk. `clone()` возвращает `std::forward<buffer>(cl)`, что принудительно
+  превращает local в xvalue и мешает гарантированному NRVO-style return path.
+- **Предлагаемое решение:** после correctness fixes зарезервировать точный итоговый
+  размер, копировать contiguous chunk ranges и возвращать named local обычным
+  `return cl`. Проверить, можно ли безопасно дать caller-allocated/range API,
+  только если текущих overloads недостаточно; новую abstraction заранее не
+  добавлять.
+- **Correctness-проверка:** empty/single/many chunks, binary NUL bytes,
+  prepend/shape/assembled source, exact equality и независимость clone.
+- **Benchmark:** добавить отдельные `as_string`, `as_bytes`, `clone` сценарии для
+  64 B, 4 KiB, 1 MiB и разного числа chunks при одинаковом total size. Фиксировать
+  bytes/sec, allocations, copied bytes и peak memory; несколько прогонов по N5.
+  Приёмка — отсутствие новых allocations сверх необходимой destination storage
+  и отсутствие regression на single chunk.
+
+### N7. Channel backpressure и cancellation создают polling/thundering herd
+
+- **Статус:** Открыто; сначала исправить B57 и подтвердить семантику.
+- **Приоритет:** Средний.
+- **Файл:** `include/ace/futures/channel.h`; benchmark BM15.
+- **Наблюдение:** full `pending_push` кооперативно повторяет push после `suspend`,
+  не регистрируя отдельного producer waiter, поэтому latency/CPU зависят от
+  общего polling scheduler. `channel_router::cancel()` дренирует и reattach-ит
+  всех consumers, поскольку waiter nodes не имеют адресного cancel/ejection;
+  одиночная отмена создаёт O(N) wakeups и cross-runner traffic.
+- **Предлагаемое направление:** после фиксации ownership payload оценить отдельные
+  producer/consumer waiter queues с адресной O(1) регистрацией/ejection и
+  wake-one по освобождению slot. Lifetime node и cancel race должны быть доказаны
+  до оптимизации; не переносить проблему в busy spin.
+- **Correctness-проверка:** bounded MPSC/MPMC, FIFO согласно выбранному контракту,
+  cancel одного waiter не будит/не теряет остальных, close/destruction, runner
+  migration и exact-once delivery.
+- **Benchmark:** расширить BM15 размерами capacity 1/16/1024, 1..N producers и
+  consumers, cancel storms. Фиксировать throughput, suspend/resume и reattach
+  counts, CPU time, p95/p99 wait и масштабирование N; сравнивать по N5.
+
+### N8. `dispatcher::run()` пересоздаёт threads и использует фиксированный polling cadence
+
+- **Статус:** Открыто; исследовать после B48-B50 и B52.
+- **Приоритет:** Средний.
+- **Файл:** `include/ace/core/dispatcher.h` (`run()`, `worker_tf()`,
+  `worker_round()`).
+- **Наблюдение:** каждый `run()` и каждая внешняя do/while-итерация создаёт новый
+  vector `std::jthread`, запускает N-1 threads и уничтожает их после polling
+  convergence. Worker busy-poll-ит до 1 ms, затем использует фиксированные 1 us
+  или 1 ms sleeps. Для коротких повторных workloads thread lifecycle может
+  доминировать, а sleeps задают latency floor.
+- **Предлагаемое направление:** сначала измерить доли thread startup, useful work,
+  spin и sleep. Рассмотреть persistent workers/condition or atomic wait/adaptive
+  backoff только с явным dispatcher lifetime/shutdown/reload contract. Нельзя
+  сохранять workers дольше owner arena/storage (критическое ограничение проекта).
+- **Benchmark:** repeated 0/1/10/100 short tasks при 1/2/4/8/16 runners, burst-idle
+  циклы и polling services. Фиксировать wall/CPU time, thread creations,
+  wake-to-run p50/p99, idle CPU и throughput. Baseline/current — в одинаковом
+  окружении по N5; оптимизация не должна ухудшать timer/cancellation latency или
+  завершение runner threads перед owner storage.
 
 ## Зафиксированные технические нюансы
 

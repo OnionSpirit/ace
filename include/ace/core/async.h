@@ -299,7 +299,7 @@ namespace ace::core {
         /**
          * @brief Prefetch the coroutine frame's cache lines for temporal locality.
          * @details Reads the frame size from the control block prefix and issues
-         * @c nukes::details::prefetch hints for each cache line of the frame,
+         * @c nukes::detail::prefetch hints for each cache line of the frame,
          * preparing it for an imminent resume.
          */
         void prefetch() const {
@@ -308,7 +308,7 @@ namespace ace::core {
             const auto* frame_bytes = reinterpret_cast<const uint8_t*>(frame);
             for (std::size_t offset = 0; offset < frame_size; offset += ACE_CACHE_LINE_SIZE) {
                 const void* cacheline_ptr = frame_bytes + offset;
-                nukes::details::prefetch<nukes::details::e_temporal>(cacheline_ptr);
+                nukes::detail::prefetch<nukes::detail::e_temporal>(cacheline_ptr);
             }
         }
 

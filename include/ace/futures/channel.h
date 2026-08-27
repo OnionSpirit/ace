@@ -396,7 +396,7 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_router : runner_router {
      * @param node Task node of the suspended puller.
      */
     void redirect(omni_node node) override {
-        using namespace nukes::details::nodes;
+        using namespace nukes::detail::nodes;
         // if constexpr (access_mode_v == access_mode::e_regular)
         //     _waiters->push_node(node);
         // else {

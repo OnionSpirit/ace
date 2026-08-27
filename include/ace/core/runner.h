@@ -385,7 +385,7 @@ namespace ace::core {
 
 
     inline void runner::reattach_impl(omni_node& node, const omni_runner local_runner_ptr) {
-        using namespace nukes::details::nodes;
+        using namespace nukes::detail::nodes;
         if (not node or not node->_data.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach' idle context" };
         const omni_runner target_runner_ptr = node->_data._coroutine.promise()._runner;
@@ -403,7 +403,7 @@ namespace ace::core {
 
 
     inline void runner::reattach_front_impl(omni_node& node, const omni_runner local_runner_ptr) {
-        using namespace nukes::details::nodes;
+        using namespace nukes::detail::nodes;
         if (not node or not node->_data.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach_front' idle context" };
         const omni_runner target_runner_ptr = node->_data._coroutine.promise()._runner;
@@ -478,7 +478,7 @@ namespace ace::core {
 
 
     inline bool runner::yank() noexcept {
-        using namespace nukes::details::nodes;
+        using namespace nukes::detail::nodes;
 
         promise_lifecycle touch_result = e_executed;
         omni_node task_unit = fetch_task_node();
@@ -583,7 +583,7 @@ namespace ace::core {
     }
 
     inline omni_node runner::fetch_task_node() {
-        using namespace nukes::details::nodes;
+        using namespace nukes::detail::nodes;
         omni_node task_unit {};
         // NOTE: Trying to fetch from local pool
         if (_pull_source == pull_source::e_local_pool) {

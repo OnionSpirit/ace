@@ -205,6 +205,9 @@ namespace ace::core {
          * @return Reference to the unique dispatcher instance.
          */
         static dispatcher &get_instance() noexcept {
+            // Configure Nukes before constructing runner queues: their dummy
+            // nodes are the first dynamic queue allocations in a fresh ACE process.
+            (void)configure_nukes_node_allocator();
             static dispatcher instance;
             return instance;
         }

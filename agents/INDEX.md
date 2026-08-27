@@ -443,6 +443,12 @@ frames, I/O/iovec и framework containers. Малые chunks идут в
 `std::pmr::unsynchronized_pool_resource`, большие - в transient malloc path.
 `arena_allocator<T>` адаптирует arena к стандартным containers.
 
+Nukes dynamic queues используют отдельно настроенный
+`nukes_node_allocator<T>` поверх thread-safe process-lifetime
+`nukes_node_arena`. Он намеренно не является thread-local `arena`: static queue
+может быть уничтожена после teardown owner thread, поэтому её nodes должны
+оставаться валидны до завершения процесса.
+
 Cross-thread release protocol:
 
 - pooled chunk возвращается owner thread через MPSC channel;
@@ -509,7 +515,7 @@ fallback, либо бросает `std::bad_alloc` согласно `_breach_mem
 | `include/ace/core/dispatcher.h` | Dispatcher и global scheduling API. |
 | `include/ace/core/runner.h` | Runner queues, carrier, reattach и execution. |
 | `include/ace/core/signal.h` | Signal handlers и signal pipe. |
-| `include/ace/core/arena.h` | Shared arena и `arena_allocator`. |
+| `include/ace/core/arena.h` | Shared arena, `arena_allocator` и durable Nukes node arena. |
 | `include/ace/core/traits/future.h` | Future concepts и resume type traits. |
 | `include/ace/core/traits/promise.h` | Coroutine rules и promise traits. |
 | `include/ace/core/traits/routing.h` | Router interfaces и inline storage. |
@@ -537,7 +543,7 @@ fallback, либо бросает `std::bad_alloc` согласно `_breach_mem
 
 ### Текущая карта
 
-Test executable собирается из `tests/main.cpp`, `tests/environment.h` и **34
+Test executable собирается из `tests/main.cpp`, `tests/environment.h` и **35
 fixture source files**:
 
 ```text
@@ -555,7 +561,8 @@ io_hanged_fixture.cpp          moving_average_fixture.cpp
 nukes_alignment_fixture.cpp
 omniptr_fixture.cpp            promise_traits_fixture.cpp
 queue_fixture.cpp              router_slot_fixture.cpp
-runner_fixture.cpp             signal_fixture.cpp
+runner_fixture.cpp             service_fixture.cpp
+signal_fixture.cpp
 socket_echo_fixture.cpp        spawn_extra_fixture.cpp
 spawn_fixture.cpp              timer_fixture.cpp
 yield_fixture.cpp
@@ -563,7 +570,7 @@ yield_fixture.cpp
 
 Fixture classes и helper coroutine functions объявляются в
 `tests/environment.h`; каждый fixture source содержит относящиеся к нему
-`TEST`/`TEST_F`. Текущая source inventory - **307 Google Test**. Meson discover
+`TEST`/`TEST_F`. Текущая source inventory - **314 Google Test**. Meson discover
 mode регистрирует каждый GTest отдельным процессом с точным `--gtest_filter`.
 
 Помимо source GTests, стандартная конфигурация регистрирует tooling tests:

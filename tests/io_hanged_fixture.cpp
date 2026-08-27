@@ -41,7 +41,7 @@ TEST_F(io_hanged_fixture, hanged_command_pool_capture) {
     const bool captured = ace::io::outcast::_command_pool.capture(command);
     if (captured) {
         ASSERT_NE(nullptr, command);
-        ace::io::outcast::_command_pool.raw_sync(command);
+        ace::io::outcast::_command_pool.raw_release(command);
     }
     SUCCEED();
 }
@@ -50,10 +50,10 @@ TEST_F(io_hanged_fixture, hanged_command_pool_capture) {
 TEST_F(io_hanged_fixture, hanged_command_defaults) {
     ace::io::outcast::command* command = nullptr;
     if (ace::io::outcast::_command_pool.capture(command)) {
-        // raw_sync() does not promise to clear payload fields, so this test
+        // raw_release() does not promise to clear payload fields, so this test
         // intentionally checks pool lifecycle rather than stale field values.
         ASSERT_NE(nullptr, command);
-        ace::io::outcast::_command_pool.raw_sync(command);
+        ace::io::outcast::_command_pool.raw_release(command);
     }
     SUCCEED();
 }

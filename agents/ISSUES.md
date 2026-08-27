@@ -318,7 +318,7 @@
   `include/ace/io.h` (`io::outcast::_command_pool`).
 - **Симптом:** оба output path сначала захватывают `outcast::command` и перемещают
   в него исходный `io::buffer`. Если `kernel_controller::writev()` или
-  `sendmsg()` возвращает `false`, команда не возвращается через `raw_sync()`, а
+  `sendmsg()` возвращает `false`, команда не возвращается через `raw_release()`, а
   blocking fallback вызывает `assemble()` у уже moved-from `buff`. Это теряет
   слот freelist, удерживает payload в недоступной команде и может выполнить
   пустую или некорректную fallback-запись.
@@ -333,9 +333,9 @@
 - **Проверка решения:** принудительно заставить submission buffer reject request,
   проверить точные bytes для file/socket fallback, возврат command slot и
   отсутствие удержанного buffer; отдельно проверить успешный async path без
-  двойного `raw_sync()`.
+  двойного `raw_release()`.
 - **Связь с B38:** init-failure path теперь отдельно возвращает command в pool и
-  очищает payload до `raw_sync()`; это не исправляет основной сценарий B37 при
+  очищает payload до `raw_release()`; это не исправляет основной сценарий B37 при
   отказе submit после успешной инициализации ring.
 
 ### B38. Ошибка инициализации `io_uring` игнорируется и приводит к null-ring crash
@@ -952,10 +952,10 @@
   `bit_ceil(sizeof(T))`. New internal `node_allocation.h` uses matched aligned
   new/delete above `max_align_t`; all MPMC/SPMC/regular initial and growth
   allocations and teardown paths use it. Teardown preserves the existing
-  freelist protocol in which `sync()` has already destroyed a returned payload.
+  freelist protocol in which `release()` has already destroyed a returned payload.
 - **Регрессии и проверка:** `nukes_alignment_fixture` validates recovered node
   and payload addresses for alignments 1/8/16/32/64/128/256 across all three
-  freelists and capture/sync/capture. Clang 22 ASan target repeats pass; clean
+  freelists and capture/release/capture. Clang 22 ASan target repeats pass; clean
   GCC 16 ASan+UBSan and TSan targeted suites pass without B68 diagnostics.
 
 ### B69. `mpmc_freelist` move operations leave source ownership intact
@@ -978,10 +978,10 @@
 - **Приоритет:** Высокий.
 - **Файл:** `include/ace/io.h` (`io::outcast::command::on_result()`).
 - **Симптом:** successful fire-and-forget writes возвращали command через
-  `raw_sync()` с живым `io::buffer`. Следующий move-assignment перетирал pointers
+  `raw_release()` с живым `io::buffer`. Следующий move-assignment перетирал pointers
   старого payload, а последний cached payload переживал teardown без destructor;
   полный LSan-прогон показывал многочисленные leaks из console/timer output.
-- **Решение:** completion очищает buffer до `raw_sync()`, сохраняя intended
+- **Решение:** completion очищает buffer до `raw_release()`, сохраняя intended
   lifetime самого command и освобождая принадлежащие buffer arena chunks.
 - **Регресс-тест:**
   `io_entity_fixture.outcast_command_completion_releases_payload_before_pool_return`;
@@ -1007,6 +1007,27 @@
   `io_entity_fixture.connection_link_read_preserves_runner_after_migration`
   проходит 20/20 host repeats; весь `io_entity_fixture` проходит 28/28 одним
   ASan+LSan-процессом без leaks; Meson suite проходит 312/312.
+
+### B72. Thread-local arena не переживает teardown статической Nukes queue
+
+- **Статус:** Решено 2026-08-27.
+- **Приоритет:** Критический.
+- **Файлы:** `include/ace/core/arena.h`, `include/ace/core/dispatcher.h`,
+  `subprojects/nukes/include/nukes/details/node_allocation.h`,
+  `tests/arena_fixture.cpp`, `tests/nukes_alignment_fixture.cpp`.
+- **Симптом:** настройка `node_allocation` через `arena_allocator<T>` помещала
+  storage статических ACE queue в thread-local `arena`. При shutdown TLS arena
+  разрушалась до статической queue, и её destructor обращался к уже освобождённой
+  node storage; Clang ASan сообщал use-after-free.
+- **Решение:** ACE однократно настраивает singleton `node_allocation` шаблоном
+  `nukes_node_allocator<T>`. Он использует синхронизированный
+  process-lifetime `nukes_node_arena`; прежний `arena_allocator<T>` остаётся
+  thread-local allocator для coroutine, I/O и backup storage.
+- **Регрессии и проверка:** `nukes_alignment_fixture` проверяет отсутствие legacy
+  `sync`, destruction payload для `release`/`raw_release`.
+  `arena_fixture.nukes_node_allocator_uses_durable_arena_and_preserves_overalignment`
+  проверяет lifetime и alignment 256. Clang 22 ASan shuffled repeats проходят
+  без прежнего teardown UAF.
 
 ### B36. `is_debug` имел инвертированную семантику
 

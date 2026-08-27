@@ -15,6 +15,8 @@
 #include <ace/core/arena.h>
 #include <ace/services/kernelic.h>
 
+#include <nukes/dynamic/regular_freelist.h>
+
 namespace {
 
 struct arena_fixture : ::testing::Test {
@@ -52,6 +54,10 @@ TEST_F(arena_fixture, is_debug_matches_build_configuration) {
 ace::promise<int> arena_valued_coroutine() {
     co_return 42;
 }
+
+struct alignas(256) arena_node_payload {
+    std::byte value {};
+};
 
 // Verifies pooled accounting, alignment, and retention for one small allocation.
 TEST_F(arena_fixture, small_alloc_served_from_pool) {
@@ -450,6 +456,22 @@ TEST_F(arena_fixture, typed_allocation_overflow) {
         // Detection occurs before arena accounting changes.
         EXPECT_EQ(0u, arena.stats().in_use_bytes);
     });
+}
+
+// Verifies ACE configures Nukes to use its durable node arena with over-aligned storage.
+TEST_F(arena_fixture, nukes_node_allocator_uses_durable_arena_and_preserves_overalignment) {
+    ASSERT_TRUE(ace::core::configure_nukes_node_allocator());
+    const auto baseline = ace::core::nukes_node_arena::outstanding_bytes();
+    {
+        nukes::dynamic::reg_freelist<arena_node_payload> freelist;
+        arena_node_payload* payload = nullptr;
+        ASSERT_TRUE(freelist.capture(payload));
+        ASSERT_NE(nullptr, payload);
+        EXPECT_EQ(0u, reinterpret_cast<std::uintptr_t>(payload) % alignof(arena_node_payload));
+        ASSERT_TRUE(freelist.release(payload));
+        EXPECT_GT(ace::core::nukes_node_arena::outstanding_bytes(), baseline);
+    }
+    EXPECT_EQ(baseline, ace::core::nukes_node_arena::outstanding_bytes());
 }
 
 // Verifies arena_allocator storage and contents in a node-based standard container.

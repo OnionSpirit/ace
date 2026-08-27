@@ -1384,7 +1384,7 @@ public:                                                                         
          *
          * @details Each @c command wraps an @c io_uring operation.  On
          * completion, @c on_result() releases the payload and calls
-         * @c raw_sync() to return the command to the pool. Errors are handled
+         * @c raw_release() to return the command to the pool. Errors are handled
          * by the global @c fail_cb_handler.
          */
         struct command : services::kernel_observer {
@@ -1397,7 +1397,7 @@ public:                                                                         
              * @param res Operation result (negative errno on failure).
              * @details Handles both CQE results and local submission failures.
              * Invokes the global @c fail_cb_handler on failure, releases the
-             * payload, then returns the command to the pool via @c raw_sync().
+             * payload, then returns the command to the pool via @c raw_release().
              */
             void on_result(const int res) override {
                 if (res < 0 and fail_cb_handler) {
@@ -1412,11 +1412,11 @@ public:                                                                         
                         std::cerr << "outcast-io-failure : { <unknown> }" << std::endl;
                     }
                 }
-                // raw_sync() deliberately preserves the command object's
+                // raw_release() deliberately preserves the command object's
                 // lifetime, so its owned payload must be released explicitly
                 // before the node can be reused or retained by the pool.
                 _buffer.clear();
-                _command_pool.raw_sync(this);
+                _command_pool.raw_release(this);
             }
 
             /** @brief Virtual destructor (defaulted). */
@@ -1497,7 +1497,7 @@ public:                                                                         
                 if (services::kernel_controller::close(cmd, fd))
                     return;
                 // NOTE: Submission rejected; no completion will return the command to the pool.
-                outcast::_command_pool.raw_sync(cmd);
+                outcast::_command_pool.raw_release(cmd);
             }
             // NOTE: If can not get slot or identity not found -> using busy behavior
             schedule(pending_close(fd));

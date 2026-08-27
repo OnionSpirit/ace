@@ -58,6 +58,10 @@ Programs still need the ACE and Nukes include paths and must link `liburing`.
 Meson's `ace_dep` supplies those requirements. Enabling `ace_entry` also builds a
 small static library that provides the optional weak `main()` entry point.
 
+Dynamic Nukes queue nodes used by ACE are allocated from a dedicated,
+thread-safe process-lifetime pool. This keeps static queues safe during process
+teardown; it is separate from ACE's thread-local coroutine and I/O arenas.
+
 ### `io_uring` Availability
 
 Each runner owns a thread-local `io_uring` controller. Check it before relying

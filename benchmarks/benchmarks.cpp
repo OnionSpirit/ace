@@ -6,6 +6,8 @@
 #include <ace/futures/spawn.h>
 #include <ace/net.h>
 
+#include <nukes/dynamic/regular_freelist.h>
+
 namespace {
 
 ace::task cutex_capture_racer(ace::cutex& mtx, std::string& count, int max) {
@@ -896,3 +898,30 @@ BENCHMARK(bm_connection_link_idle_cancel)
     ->Arg(10)
     ->Arg(100)
     ->Unit(benchmark::kMillisecond);
+
+// ===========================================================================
+// BM22 - nukes_node_release: local node-pool capture/release throughput
+// ===========================================================================
+// Measures the hot reuse path through the configured Nukes node allocator.
+// The freelist remains alive for the benchmark so only the first capture grows
+// the durable arena; all timed iterations reuse the same node storage.
+
+static void bm_nukes_node_release(benchmark::State& state) {
+    nukes::dynamic::reg_freelist<std::uint64_t> freelist;
+
+    for (auto _ : state) {
+        std::uint64_t* value = nullptr;
+        if (not freelist.capture(value)) {
+            state.SkipWithError("Nukes node allocation failed");
+            break;
+        }
+        benchmark::DoNotOptimize(value);
+        if (not freelist.release(value)) {
+            state.SkipWithError("Nukes node release failed");
+            break;
+        }
+    }
+
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(bm_nukes_node_release)->Unit(benchmark::kNanosecond);

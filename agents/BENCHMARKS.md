@@ -59,7 +59,7 @@ release-путь: `debug=false`, `optimization=3` и `b_ndebug=true`; поэто
 |------|-----------|
 | `benchmarks/main.cpp` | Google Benchmark entry point. |
 | `benchmarks/environment.h` | 4 helpers: `configure_runners`, `reset_runners`, `fetch_into`, `fetch`. |
-| `benchmarks/benchmarks.cpp` | 22 benchmark scenarios (BM1-BM21) and 28 named coroutine helpers. |
+| `benchmarks/benchmarks.cpp` | 22 numbered benchmark scenarios (BM1-BM22) and 28 named coroutine helpers. |
 
 ## Инвентарь
 
@@ -86,6 +86,7 @@ release-путь: `debug=false`, `optimization=3` и `b_ndebug=true`; поэто
 | BM19 | `bm_expire_absolute` | 5k таймеров с абсолютными deadline. |
 | BM20 | `bm_compose_variadic` | Variadic AND/OR из трёх и более futures. |
 | BM21 | `bm_connection_link_idle_cancel` | Responsiveness и cancellation для 1/10/100 idle `connection_link` reads. |
+| BM22 | `bm_nukes_node_release` | Reuse-path capture/release в local Nukes node pool. |
 
 ## Происхождение нагрузочных сценариев
 

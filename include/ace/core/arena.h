@@ -444,4 +444,104 @@ namespace ace::core {
         }
     };
 
+    /**
+     * @brief Thread-safe process-lifetime storage for Nukes queue nodes.
+     *
+     * @details Dynamic Nukes queues can be static and therefore outlive a
+     * thread-local @c arena.  This dedicated synchronized pool deliberately
+     * lives until process termination, preventing global queue teardown from
+     * observing storage released by a departed owner thread.
+     */
+    class nukes_node_arena {
+    public:
+        [[nodiscard]] static void* allocate(
+            const std::size_t bytes, const std::size_t alignment)
+        {
+            auto* const storage = resource().allocate(bytes, alignment);
+            _outstanding_bytes.fetch_add(bytes, std::memory_order_relaxed);
+            return storage;
+        }
+
+        static void deallocate(
+            void* storage, const std::size_t bytes, const std::size_t alignment) noexcept
+        {
+            if (not storage)
+                return;
+            resource().deallocate(storage, bytes, alignment);
+            _outstanding_bytes.fetch_sub(bytes, std::memory_order_relaxed);
+        }
+
+        /// @brief Bytes currently checked out to live Nukes nodes.
+        [[nodiscard]] static std::size_t outstanding_bytes() noexcept {
+            return _outstanding_bytes.load(std::memory_order_relaxed);
+        }
+
+    private:
+        static inline std::atomic<std::size_t> _outstanding_bytes { 0 };
+
+        [[nodiscard]] static std::pmr::synchronized_pool_resource& resource() {
+            // Intentionally never destroyed: static queues may run their
+            // destructors after thread-local arenas have already been torn down.
+            static auto* instance = new std::pmr::synchronized_pool_resource {};
+            return *instance;
+        }
+    };
+
+    /**
+     * @brief Standard allocator adapter for process-lifetime Nukes node storage.
+     * @tparam data_t Element type requested by a standard allocator consumer.
+     */
+    template <typename data_t>
+    struct nukes_node_allocator {
+        using value_type = data_t;
+        using is_always_equal = std::true_type;
+        using propagate_on_container_move_assignment = std::true_type;
+        using propagate_on_container_swap = std::true_type;
+
+        nukes_node_allocator() noexcept = default;
+
+        template <typename other_t>
+        nukes_node_allocator(const nukes_node_allocator<other_t>&) noexcept {}
+
+        [[nodiscard]] data_t* allocate(const std::size_t count) {
+            if (count > std::numeric_limits<std::size_t>::max() / sizeof(data_t))
+                throw std::bad_array_new_length();
+            return static_cast<data_t*>(nukes_node_arena::allocate(
+                sizeof(data_t) * count, alignof(data_t)));
+        }
+
+        void deallocate(data_t* ptr, const std::size_t count) noexcept {
+            nukes_node_arena::deallocate(ptr, sizeof(data_t) * count, alignof(data_t));
+        }
+
+        [[nodiscard]] static void* allocate_bytes(
+            const std::size_t bytes, const std::size_t alignment)
+        {
+            return nukes_node_arena::allocate(bytes, alignment);
+        }
+
+        static void deallocate_bytes(
+            void* storage, const std::size_t bytes, const std::size_t alignment) noexcept
+        {
+            nukes_node_arena::deallocate(storage, bytes, alignment);
+        }
+
+        template <typename other_t>
+        [[nodiscard]] bool operator==(const nukes_node_allocator<other_t>&) const noexcept {
+            return true;
+        }
+    };
+
+    [[nodiscard]] inline bool configure_nukes_node_allocator() noexcept {
+        static const bool configured = nukes::detail::nodes::node_allocation::get_instance()
+            .template set_allocator<nukes_node_allocator>();
+        return configured;
+    }
+
+    // Configure before main() and before any framework queue can allocate its
+    // dummy node.  Direct Nukes clients must still configure their own backend
+    // before their first allocation.
+    [[maybe_unused]] inline const bool nukes_node_allocator_configured =
+        configure_nukes_node_allocator();
+
 } // namespace ace::core

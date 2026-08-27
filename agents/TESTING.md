@@ -4,7 +4,7 @@
 
 > **Статус:** GCC 16 coverage union от 2026-08-23 покрывает **2262/2398 =
 > 94.33%** уникальных исполняемых строк `include/ace/**`. После B13 текущая
-> default-конфигурация регистрирует 311 ACE Meson-тестов: 307 GTests, две
+> default-конфигурация регистрирует 318 ACE Meson-тестов: 314 GTests, две
 > Python unit checks, discovery consistency и LSan capability. B29/B38/B66/B68
 > regressions проходят; successful-I/O tests всё ещё требуют доступного
 > `io_uring` и не становятся fallback tests.
@@ -213,8 +213,8 @@ GoogleTest автоматически увеличивал seed между ит�
 | B25 | `io_entity_fixture.io_query_lengths_preserve_uint_max_boundary`, `oversize_io_queries_return_eoverflow_without_submission`, `kernelic_rejects_oversize_lengths_without_submission` | ✅ Реализованы и проходят |
 | B38 | `io_entity_fixture.kernelic_init_failure_reports_availability_and_rejects_ring_operations`, `io_query_returns_kernel_init_error_without_submission`, `console_output_reports_kernel_init_error_and_releases_command` | ✅ Deterministic init-failure regressions проходят |
 | B66 | `tests/sanitized_test_runner_test.py`, `ace_tests.discovery_consistency`, `ace_tests.lsan_capability` | ✅ Matrix и LSan capability policy реализованы |
-| B68 | `nukes_alignment_fixture.*` | ✅ Three freelists preserve 1/8/16/32/64/128/256-byte node alignment |
-| B70 | `io_entity_fixture.outcast_command_completion_releases_payload_before_pool_return` | ✅ Successful completion очищает payload перед `raw_sync()`; full LSan clean |
+| B68 | `nukes_alignment_fixture.*`, `arena_fixture.nukes_node_allocator_uses_durable_arena_and_preserves_overalignment` | ✅ Three freelists preserve 1/8/16/32/64/128/256-byte node alignment and ACE config uses durable storage |
+| B70 | `io_entity_fixture.outcast_command_completion_releases_payload_before_pool_return` | ✅ Successful completion очищает payload перед `raw_release()`; full LSan clean |
 | B71 | `io_entity_fixture.connection_link_read_preserves_runner_after_migration` | ✅ Status preflight сохраняет thread-local service на current runner; 20/20 host repeats |
 | B54 | `io_entity_fixture.connection_link_stalled_read_keeps_runner_responsive_and_cancels`, `connection_link_read_preserves_partial_eof_and_error_results`, `connection_link_read_preserves_runner_after_migration` | ✅ 3/3 проходят на host с доступным io_uring |
 
@@ -868,6 +868,10 @@ framework containers. Чанки ≤ 4096 обслуживаются `std::pmr::
 канал, а transient foreign-free освобождается сразу с отложенной коррекцией accounting.
 Лимит `_max_allocation_size` общий для всех клиентов arena.
 
+Nukes nodes, configured by ACE through `nukes_node_allocator<T>`, instead use
+the thread-safe process-lifetime `nukes_node_arena`. It remains available through
+static queue teardown, while `arena_allocator<T>` keeps its thread-local protocol.
+
 | # | Тест | Что проверяет | Статус |
 |---|------|--------------|--------|
 | AR1 | `small_alloc_served_from_pool` | малая аллокация, выравнивание, accounting и retention пула | ✅ |
@@ -889,6 +893,7 @@ framework containers. Чанки ≤ 4096 обслуживаются `std::pmr::
 | AR17 | `iovec_uses_shared_arena` | kernel iovec API меняет статистику того же singleton | ✅ |
 | AR18 | `cross_thread_iovec_release` | iovec storage безопасно возвращается owner arena с другого треда | ✅ |
 | AR19 | `is_debug_matches_build_configuration` | `is_debug` соответствует наличию `NDEBUG` | ✅ |
+| AR20 | `nukes_node_allocator_uses_durable_arena_and_preserves_overalignment` | Nukes node storage remains valid through teardown and preserves 256-byte alignment | ✅ |
 
 > 📝 Замечания по реализации:
 > - `pop_batch()` из nukes оказался нерабочим для вычитывания (итератор стартует с
@@ -985,7 +990,7 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 
 | Fixture source | Fixture | GTests |
 |----------------|---------|-------:|
-| `tests/arena_fixture.cpp` | `arena_fixture` | 19 |
+| `tests/arena_fixture.cpp` | `arena_fixture` | 20 |
 | `tests/backup_fixture.cpp` | `backup_fixture` | 20 |
 | `tests/base_fixture.cpp` | `base_fixture` | 18 |
 | `tests/channel_extra_fixture.cpp` | `channel_extra_fixture` | 4 |
@@ -1012,17 +1017,18 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/queue_fixture.cpp` | `queue_fixture` | 10 |
 | `tests/router_slot_fixture.cpp` | `router_slot_fixture` | 9 |
 | `tests/runner_fixture.cpp` | `runner_fixture` | 8 |
+| `tests/service_fixture.cpp` | `service_fixture` | 3 |
 | `tests/signal_fixture.cpp` | `signal_fixture` | 4 |
 | `tests/socket_echo_fixture.cpp` | `socket_echo_fixture` | 2 |
 | `tests/spawn_extra_fixture.cpp` | `spawn_extra_fixture` | 8 |
 | `tests/spawn_fixture.cpp` | `spawn_fixture` | 10 |
 | `tests/timer_fixture.cpp` | `timer_fixture` | 9 |
 | `tests/yield_fixture.cpp` | `yield_fixture` | 8 |
-| `tests/nukes_alignment_fixture.cpp` | `nukes_alignment_fixture` | 3 |
-| **Итого: 34 файла** | | **308** |
+| `tests/nukes_alignment_fixture.cpp` | `nukes_alignment_fixture` | 5 |
+| **Итого: 35 файлов** | | **314** |
 
-Default Meson configuration (`ace_entry=false`) регистрирует **312 ACE** tests:
-308 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
+Default Meson configuration (`ace_entry=false`) регистрирует **318 ACE** tests:
+314 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
 `ace_tests.discovery_consistency` и `ace_tests.lsan_capability`. Последний
 становится Meson SKIP при недоступном под ptrace LSan; остальные checks выполняются
 с `detect_leaks=0` только в auto mode. `ace_entry=true` добавляет fallback test.

@@ -163,7 +163,6 @@ namespace ace::core {
          * @details Returns @c true iff all of the following hold:
          *  - The handle is non-null.
          *  - The coroutine has not finished (@c !done()).
-         *  - The control block has not been disowned (not cancelled).
          * @return @c true if resumable.
          */
         [[nodiscard]] bool is_exist() const noexcept {
@@ -306,8 +305,9 @@ namespace ace::core {
         void prefetch() const {
             const control_block* frame = control_block::get_block_from_address(_coroutine.address());
             const std::size_t frame_size = frame->_frame_size;
-            for (std::size_t i = 0; i <= frame_size / ACE_CACHE_LINE_SIZE; ++i) {
-                const void* cacheline_ptr = frame + (2 * i);
+            const auto* frame_bytes = reinterpret_cast<const uint8_t*>(frame);
+            for (std::size_t offset = 0; offset < frame_size; offset += ACE_CACHE_LINE_SIZE) {
+                const void* cacheline_ptr = frame_bytes + offset;
                 nukes::details::prefetch<nukes::details::e_temporal>(cacheline_ptr);
             }
         }

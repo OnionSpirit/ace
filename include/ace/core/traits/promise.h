@@ -290,8 +290,8 @@ namespace ace::core::traits {
      *    the appropriate future concept (@c is_future_accurate vs
      *    @c is_busy_future_accurate).
      *  - <b>Intrusive memory layout</b>: @c operator new allocates a
-     *    @c control_block immediately before the promise, enabling external
-     *    handles without a separate allocation.
+     *    @c control_block immediately before the compiler-owned coroutine
+     *    frame, enabling external handles without a separate allocation.
      *  - Optional tracing support via @c setup_trace().
      *
      * @tparam derived_t  Derived type of inherited trait user
@@ -304,9 +304,9 @@ namespace ace::core::traits {
      *
      * @par Memory layout
      * @code
-     * [ control_block | promise_traits<T> | coroutine frame ]
-     *  ▲                ▲
-     *  base_ptr         mem_ptr  (returned by operator new)
+     * [ control_block | compiler-owned coroutine frame ]
+     *  ▲               ▲
+     *  block_ptr       frame_ptr  (returned by operator new)
      * @endcode
      */
     template <typename derived_t, template <typename> typename promise_rule_t, typename return_t>
@@ -421,33 +421,35 @@ namespace ace::core::traits {
         }
 
         /**
-         * @brief Custom allocator that prepends a @c control_block before the promise.
+         * @brief Custom allocator that prepends a @c control_block before the coroutine frame.
          * @details Allocates @c mem_size + sizeof(control_block) bytes through the
          * thread-local arena, constructs a @c control_block at the
          * beginning, then returns a pointer offset by @c sizeof(control_block).
-         * This enables external handles without a separate heap allocation.
-         * @param mem_size  Requested size for the promise itself.
-         * @return Pointer to the promise area (after the control block).
+         * The block stores the exact total allocation size as immutable metadata
+         * until deallocation. This enables external handles and frame prefetching
+         * without a separate heap allocation.
+         * @param mem_size  Compiler-requested coroutine frame size.
+         * @return Pointer to the coroutine frame area after the control block.
          */
         void* operator new(size_t mem_size) noexcept {
             const auto frame_size = mem_size + control_block_size;
             const auto ptr = static_cast<uint8_t*>(arena::get_instance().allocate(frame_size));
             void* mem_ptr = ptr + control_block_size;
-            new (ptr) control_block();
-            static_cast<control_block*>(mem_ptr)->_frame_size = frame_size;
+            auto* block = new (ptr) control_block();
+            block->_frame_size = frame_size;
             return mem_ptr;
         }
 
         /**
          * @brief Custom deallocator.  Frees the whole allocation once the
-         * control block is untracked (strong reference count already zero).
-         * @param mem_ptr  Pointer to the promise area.
-         * @param mem_size Memory size of the promise frame
+         * control block is untracked.
+         * @param mem_ptr  Pointer to the coroutine frame area.
+         * @param mem_size Compiler-provided coroutine frame size.
          */
         void operator delete(void* mem_ptr, size_t mem_size) noexcept {
-            // NOTE: Trying to disown, and if it's untracked do delete
+            // NOTE: Delete only after the owning async and all observers release the block.
             if (control_block* block = control_block::get_block_from_address(mem_ptr); control_block::is_untracked(block)) {
-                // NOTE: Using true frame size with control block
+                // NOTE: Restore the arena allocation size by including the prefix block.
                 mem_size += sizeof(control_block);
                 block->~control_block();
                 arena::get_instance().deallocate(block, mem_size);

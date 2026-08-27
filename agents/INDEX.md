@@ -468,10 +468,11 @@ fallback, либо бросает `std::bad_alloc` согласно `_breach_mem
 8. Automaton создаётся suspended; значения продвигаются и потребляются через
    `ping()`, `join()` выполняет ping + cancel, specialized handle отменяет active
    automaton в destructor.
-9. Coroutine lambdas запрещены из-за открытого
-   [B13](ISSUES.md#b13-lambda-coroutine-повреждает-захваты-при-observe). Использовать
-   named coroutine functions или helper methods с явными параметрами. Обычные
-   некорутинные lambdas разрешены.
+9. Coroutine lambdas разрешены после решения
+   [B13](ISSUES.md#b13-lambda-coroutine-повреждает-захваты-при-observe). Для
+   capturing coroutine lambda closure должен жить до завершения или отмены
+   возвращённой корутины; immediate invocation временного capturing closure
+   небезопасен, если корутина переживает его.
 10. Короткие aliases futures и console под `#ifdef ACE_H` доступны только если
     `ace/ace.h` подключён раньше соответствующего header. Иначе использовать
     полные имена `ace::futures::*` и `ace::console::*`.
@@ -545,7 +546,7 @@ yield_fixture.cpp
 
 Fixture classes и helper coroutine functions объявляются в
 `tests/environment.h`; каждый fixture source содержит относящиеся к нему
-`TEST`/`TEST_F`. Текущая source inventory - **290 Google Tests**. Meson discover
+`TEST`/`TEST_F`. Текущая source inventory - **295 Google Tests**. Meson discover
 mode регистрирует каждый GTest отдельным процессом с точным `--gtest_filter`.
 
 Помимо source GTests, стандартная конфигурация регистрирует tooling tests:
@@ -557,14 +558,14 @@ mode регистрирует каждый GTest отдельным процес
 
 ### Текущий результат
 
-- GCC: **291/292** registered tests проходят; единственный failure связан с
-  некорректным automaton edge regression
-  [B29](ISSUES.md#b29-некорректный-regression-блокирует-проверку-b16). Это не
-  green suite.
-- Clang: полноценная проверка заблокирована ODR/compiler-specific workaround
-  [B27](ISSUES.md#b27-out-of-class-definitions-cutex-нарушают-odr-и-блокируют-clang-22)
-  и неверным compiler detection
-  [B28](ISSUES.md#b28-meson-принимает-argument-syntax-за-compiler-identity).
+- GCC 16 + ASan: B13 targeted tests и двадцать shuffle-повторов полного
+  `promise_traits_fixture` проходят. Полный Meson suite в текущем окружении —
+  **253/297**: 43 failures относятся к недоступному `io_uring`/B38, один — к
+  некорректному automaton edge regression B29.
+- Clang 22 + ASan: B13 targeted tests и двадцать shuffle-повторов полного
+  `promise_traits_fixture` проходят; source/runtime discovery совпадает.
+  Полный suite не заявляется. B28 всё ещё выбирает compiler flags по argument
+  syntax, но прежний ODR-блокер B27 решён.
 
 Не заявлять общий green status до решения этих записей. Meson запускает каждый
 discovered GTest отдельным процессом; для проверки order dependencies дополнительно

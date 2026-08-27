@@ -138,3 +138,15 @@ release-путь: `debug=false`, `optimization=3` и `b_ndebug=true`; поэто
 Из-за различающейся и высокой фоновой нагрузки выводов об изменении
 производительности делать нельзя. Текущие числа фиксируют только результат
 прогонов; ни один benchmark-сценарий не завершился с ошибкой.
+
+## B13 smoke-проверка 2026-08-27
+
+Исправление B13 восстанавливает ненулевой frame-size metadata, используемый
+существующим runner prefetch path. Новый benchmark-сценарий не добавлялся:
+BM11 уже измеряет attach/yank/release и вызывает `async::prefetch()`.
+
+Clang 22 release-target успешно собрался, затем
+`bm_schedule_throughput` прошёл один smoke iteration с
+`--benchmark_min_time=0.01s`: 43.3 ms real, 40.9 ms CPU,
+4.88422M items/s при load average 2.73. Это только smoke result без baseline;
+вывод о регрессии или улучшении не делается.

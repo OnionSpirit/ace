@@ -314,12 +314,14 @@ ace::task tcp_client(std::string_view host, std::uint16_t port) {
 
 ## Important Safety Rules
 
-### Do Not Use Coroutine Lambdas
+### Coroutine Lambda Lifetime
 
-Do not write a lambda whose body is a coroutine. Known issue B13 can corrupt
-captured state when ACE observes its coroutine frame. Use named coroutine
-functions or named helper methods with explicit parameters, as all examples in
-this guide do. Ordinary non-coroutine lambdas are allowed.
+Coroutine lambdas are supported. For a capturing coroutine lambda, keep the
+lambda closure alive until the returned coroutine has completed or been
+cancelled. The coroutine may retain a pointer to its closure, so immediately
+invoking a temporary capturing lambda and storing its returned `async` can leave
+the coroutine with dangling captures. Named coroutine functions remain the
+simplest choice when closure lifetime would otherwise be difficult to see.
 
 ### Ownership and Lifetime
 
@@ -331,6 +333,8 @@ this guide do. Ordinary non-coroutine lambdas are allowed.
   await.
 - Cancellation is part of coroutine and router lifetime management; do not let
   references used by an operation expire while it is suspended.
+- Keep a capturing coroutine lambda's closure alive for the entire lifetime of
+  the coroutine returned by that closure.
 
 ## Build and Use
 

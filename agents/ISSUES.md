@@ -36,7 +36,7 @@
 
 ### B13. Lambda-coroutine повреждает захваты при `observe()`
 
-- **Статус:** Открыто.
+- **Статус:** Решено.
 - **Приоритет:** Высокий.
 - **Файлы:** coroutine frame/control block в `include/ace/core/async.h` и
   `include/ace/core/traits/promise.h`; текущие нарушения также находились в
@@ -52,28 +52,35 @@
   control_block_size`. Таким образом запись попадает в начало coroutine frame, а
   не в prefix block. Последующая инициализация promise может замаскировать
   повреждение; layout coroutine lambda делает его наблюдаемым на захватах.
-- **Ложноположительный текущий тест:**
-  `promise_traits_fixture.operator_new_layout` проверяет, что `_frame_size` в
+- **Ложноположительный прежний тест:**
+  `promise_traits_fixture.operator_new_layout` проверял, что `_frame_size` в
   настоящем prefix block равен нулю после eager completion. Именно ноль там и
-  остаётся из-за ошибочной записи в frame, поэтому тест проходит при наличии
-  дефекта и не защищает заявленный layout.
-- **Текущий обход:** не использовать coroutine lambdas. Оформлять корутины как
-  именованные функции или helper-методы с явными параметрами. Обычные
-  некорутинные lambda допустимы.
-- **Предлагаемое решение:** сначала исправить адрес назначения `_frame_size` на
-  фактический prefix block и проверить согласованность `operator delete()`,
-  `get_block_from_address()`, `prefetch()` и lifecycle disown. Не менять layout и
-  не выносить block в отдельную аллокацию без отдельного доказательства, что
-  минимальное исправление недостаточно.
-- **Текущая документационная работа:** все coroutine lambdas в tests/benchmarks
-  заменяются именованными helpers, но production-дефект остаётся открытым.
-- **Проверка решения:** regression должен наблюдать ненулевой точный размер
-  живого frame до completion/cancel, ноль только после предусмотренного disown и
-  неизменность canary/аргументов coroutine frame. Отдельно проверить именованную
-  coroutine и lambda-coroutine с захватами по значению/ссылке под GCC и Clang,
-  ASan/UBSan. Тест обязан падать на текущей реализации.
-- **После решения:** снять соответствующее ограничение в `agents/INDEX.md` и
-  `AGENTS.md`, актуализировать Doxygen intrusive layout.
+  оставался из-за ошибочной записи в frame, поэтому тест проходил при наличии
+  дефекта и не защищал заявленный layout.
+- **Решение:** `promise_traits::operator new()` теперь записывает `_frame_size`
+  через указатель на сконструированный prefix block. Значение содержит точный
+  полный размер `[control_block][coroutine frame]`, остаётся immutable до
+  деаллокации и не используется как старый disown marker. `prefetch()` обходит
+  allocation byte offsets с шагом cache line вместо арифметики
+  `control_block*`. Intrusive layout и refcount lifecycle уточнены в Doxygen.
+- **Регресс-тесты:** `promise_traits_fixture.operator_new_layout` проверяет
+  точный ненулевой размер; `operator_new_preserves_frame_canary` падает при
+  записи metadata в frame; `observe_preserves_named_coroutine_arguments`,
+  `observe_preserves_lambda_coroutine_captures` и
+  `observed_lambda_coroutine_cancels_safely` проверяют named baseline и
+  lambda-coroutines с value/reference captures при completion и cancellation.
+- **API/documentation:** blanket-запрет coroutine lambdas снят из `README.md`,
+  `agents/INDEX.md` и `AGENTS.md`. Остаётся стандартное lifetime-требование C++:
+  capturing closure обязан жить до completion/cancellation возвращённой
+  корутины; немедленный вызов временного capturing closure не получает
+  дополнительного lifetime от ACE.
+- **Проверка:** pre-fix exact-size и canary regressions падали на Clang 22 +
+  ASan. После исправления пять B13 regressions и `async_prefetch` прошли 6/6 на
+  GCC 16 и Clang 22 с ASan; весь `promise_traits_fixture` прошёл 20 shuffle
+  iterations на каждом compiler. ASan+UBSan recover-прогоны также дали 6/6,
+  но clean UBSan остаётся заблокирован dependency issue B68. Полный GCC/ASan
+  suite дал 253/297: 43 известных B38 null-ring failures и один B29 failure,
+  без B13 regressions.
 
 ### B14. Повторный полный suite сохраняет глобальное состояние
 
@@ -892,10 +899,10 @@
   move/destruction/deleter; console tests проверяют только отсутствие exception,
   не bytes/newline/format; outcast capture tests проходят даже при `capture ==
   false`, а `hanged_command_defaults` вопреки `agents/TESTING.md` намеренно не
-  проверяет defaults; `async_prefetch` не защищает ненулевой frame size;
-  `kernel_register_files` выполняет assertions только внутри успешной ветки
+  проверяет defaults; `kernel_register_files` выполняет assertions только
+  внутри успешной ветки
   `pipe()` и молча проходит при failure; layout/buffer/queue gaps описаны в
-  B13/B41/B45/B46.
+  B41/B45/B46. Layout gap B13 закрыт exact-size и canary regressions.
 - **Предлагаемое решение:** tracked payloads/canaries/counters, deterministic
   stdout sink/capture без реального kernel console, обязательный ASSERT на
   resource acquisition, точные command reset/retain semantics. Разделить
@@ -914,8 +921,8 @@
   обнаруживаются. UBSan/TSan jobs отсутствуют. `ace_tests.discovery_consistency`
   не получает это env и в свежих GCC/Clang build-dir падает до сравнения списка:
   LeakSanitizer не может работать в текущем ptrace environment. При ручном
-  `ASAN_OPTIONS=detect_leaks=0` verify проходит и подтверждает 291 GTest; Meson
-  регистрирует 293 теста. При одновременно включённых tests+benchmarks могут
+  `ASAN_OPTIONS=detect_leaks=0` verify проходит и подтверждает 295 GTests; Meson
+  регистрирует 297 тестов. При одновременно включённых tests+benchmarks могут
   дополнительно регистрироваться tests fallback-проекта Google Benchmark, что
   искажает ACE count.
 - **Предлагаемое решение:** создать явную sanitizer matrix: ASan, UBSan, TSAN и
@@ -935,9 +942,8 @@
   `include/ace/services/clock.h`.
 - **Расхождения:** README называет `automaton<T>` eager и diagram запускает его
   вызовом, тогда как implementation/INDEX/test фиксируют lazy
-  `suspend_always`; INDEX всё ещё сообщает 291/292 и блокировку Clang по уже
-  решённому B27, тогда как текущий inventory — 291 GTests/293 Meson tests и
-  Clang target собирается; clock Doxygen обещает refresh `cached_now()` при
+  `suspend_always`; test inventory и compiler status в INDEX синхронизированы
+  при решении B13, но clock Doxygen всё ещё обещает refresh `cached_now()` при
   возрасте >1 ms, но код и решённый B6 задают только каждый 16-й вызов;
   `agents/TESTING.md` приписывает `hanged_command_defaults` проверки, которых в
   test body нет.

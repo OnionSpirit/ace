@@ -1,4 +1,8 @@
+#include <algorithm>
 #include <coroutine>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <type_traits>
 #include <variant>
 
@@ -14,6 +18,15 @@ namespace tool = ace::core::tools;
 struct promise_traits_fixture : ::testing::Test {
     ace::promise<int> simple_valued_coroutine() {
         co_return 42;
+    }
+
+    static ace::task named_argument_coroutine(
+        const std::uint64_t value,
+        const std::uint64_t& referenced,
+        std::uint64_t& observed)
+    {
+        observed = value + referenced;
+        co_return;
     }
 };
 
@@ -78,16 +91,122 @@ TEST_F(promise_traits_fixture, await_transform_future) {
     SUCCEED();
 }
 
-// Verifies that coroutine allocation places a discoverable control block prefix.
+// Verifies that coroutine allocation stores the exact immutable frame size in the prefix block.
 TEST_F(promise_traits_fixture, operator_new_layout) {
-    auto coroutine = simple_valued_coroutine();
-    if (coroutine._coroutine) {
-        auto* promise_address = coroutine._coroutine.address();
-        auto* block = ace::core::control_block::get_block_from_address(promise_address);
-        ASSERT_NE(nullptr, block);
-        // The eager coroutine has completed, so its frame is marked disowned.
-        EXPECT_EQ(0u, block->_frame_size);
+    using promise_type = ace::task::promise_type;
+    constexpr std::size_t requested_frame_size = 257;
+    constexpr std::size_t expected_allocation_size =
+        requested_frame_size + ace::core::control_block_size;
+
+    void* frame = promise_type::operator new(requested_frame_size);
+    auto* block = ace::core::control_block::get_block_from_address(frame);
+
+    ASSERT_NE(nullptr, block);
+    EXPECT_EQ(expected_allocation_size, block->_frame_size);
+
+    // Direct allocation does not construct a promise, so release the initial block reference
+    // before invoking the matching sized deallocator.
+    EXPECT_TRUE(ace::core::control_block::untrack(block));
+    promise_type::operator delete(frame, requested_frame_size);
+}
+
+// Verifies that prefix metadata initialization does not overwrite the coroutine frame payload.
+TEST_F(promise_traits_fixture, operator_new_preserves_frame_canary) {
+    using promise_type = ace::task::promise_type;
+    constexpr std::size_t requested_frame_size = 257;
+    constexpr std::size_t allocation_size =
+        requested_frame_size + ace::core::control_block_size;
+    constexpr unsigned char canary = 0xa5;
+
+    auto& arena = ace::core::arena::get_instance();
+    void* seeded_allocation = arena.allocate(allocation_size);
+    std::memset(seeded_allocation, canary, allocation_size);
+    arena.deallocate(seeded_allocation, allocation_size);
+
+    void* frame = promise_type::operator new(requested_frame_size);
+    auto* block = ace::core::control_block::get_block_from_address(frame);
+    const bool reused_seeded_allocation = block == seeded_allocation;
+    EXPECT_TRUE(reused_seeded_allocation);
+    if (reused_seeded_allocation) {
+        const auto* frame_bytes = static_cast<const unsigned char*>(frame);
+        EXPECT_TRUE(std::all_of(
+            frame_bytes,
+            frame_bytes + requested_frame_size,
+            [](const unsigned char byte) { return byte == canary; }
+        ));
     }
+
+    EXPECT_TRUE(ace::core::control_block::untrack(block));
+    promise_type::operator delete(frame, requested_frame_size);
+}
+
+// Verifies that observe() preserves explicit arguments in a named lazy coroutine.
+TEST_F(promise_traits_fixture, observe_preserves_named_coroutine_arguments) {
+    std::uint64_t value = 0x1122334455667788;
+    const std::uint64_t referenced = 0x0102030405060708;
+    std::uint64_t observed = 0;
+    auto coroutine = named_argument_coroutine(value, referenced, observed);
+    auto* block = ace::core::control_block::get_block_from_address(coroutine._coroutine.address());
+    const auto frame_size = block->_frame_size;
+    auto observer = coroutine.observe();
+
+    EXPECT_GT(frame_size, ace::core::control_block_size);
+    EXPECT_FALSE(observer.is_idle());
+    coroutine.awake();
+    EXPECT_EQ(value + referenced, observed);
+    EXPECT_TRUE(observer.finished());
+    EXPECT_EQ(frame_size, block->_frame_size);
+}
+
+// Verifies that observe() preserves value and reference captures of a live coroutine lambda.
+TEST_F(promise_traits_fixture, observe_preserves_lambda_coroutine_captures) {
+    std::uint64_t value = 0x1122334455667788;
+    std::uint64_t referenced = 0x0102030405060708;
+    std::uint64_t observed = 0;
+    // The named closure intentionally outlives both the returned task and its observer.
+    auto coroutine_factory = [value, &referenced, &observed]() -> ace::task {
+        observed = value + referenced;
+        co_return;
+    };
+    auto coroutine = coroutine_factory();
+    auto* block = ace::core::control_block::get_block_from_address(coroutine._coroutine.address());
+    const auto frame_size = block->_frame_size;
+    auto observer = coroutine.observe();
+
+    EXPECT_GT(frame_size, ace::core::control_block_size);
+    EXPECT_FALSE(observer.is_idle());
+    coroutine.awake();
+    EXPECT_EQ(value + referenced, observed);
+    EXPECT_TRUE(observer.finished());
+    EXPECT_EQ(frame_size, block->_frame_size);
+}
+
+// Verifies lambda captures remain valid through suspension, observation, and cancellation.
+TEST_F(promise_traits_fixture, observed_lambda_coroutine_cancels_safely) {
+    std::uint64_t value = 0x1122334455667788;
+    std::uint64_t referenced = 0x0102030405060708;
+    std::uint64_t observed = 0;
+    // Keeping the closure alive isolates ACE frame handling from the standard closure-lifetime rule.
+    auto coroutine_factory = [value, &referenced, &observed]() -> ace::task {
+        observed = value + referenced;
+        co_await std::suspend_always {};
+        observed = 0;
+        co_return;
+    };
+    auto coroutine = coroutine_factory();
+    auto* block = ace::core::control_block::get_block_from_address(coroutine._coroutine.address());
+    const auto frame_size = block->_frame_size;
+    auto observer = coroutine.observe();
+
+    EXPECT_GT(frame_size, ace::core::control_block_size);
+    coroutine.awake();
+    EXPECT_EQ(value + referenced, observed);
+    EXPECT_FALSE(observer.done());
+
+    observer.cancel();
+    EXPECT_TRUE(observer.is_idle());
+    EXPECT_EQ(value + referenced, observed);
+    EXPECT_EQ(frame_size, block->_frame_size);
 }
 
 // Verifies that the shared trace allocator returns increasing fresh IDs.

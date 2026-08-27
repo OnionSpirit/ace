@@ -2,28 +2,26 @@
  * @file control.h
  * @brief Intrusive control block and its external handle for ACE coroutines.
  *
- * @details Every ACE coroutine promise is allocated with a @c control_block
- * immediately *before* the promise in memory (see @c promise_traits::operator new).
+ * @details Every ACE coroutine frame is allocated with a @c control_block
+ * immediately *before* the compiler-owned frame memory (see
+ * @c promise_traits::operator new).
  * This provides a zero-cost way to attach external observers without an
  * additional heap allocation.
  *
  * ### Reference counting
  *
- * The control block uses a dual reference-count scheme:
- *  - @c _strong_refcount — counts coroutine *owners* (always 1: the frame itself).
- *    Decremented by @c disown() when the coroutine finishes.
- *  - @c _weak_refcount — counts *watchers* (@c control_block_handle instances).
- *    Incremented by @c watch(), decremented by @c unwatch().
- *
- * The block is freed only when both counts reach zero.
+ * The control block uses one intrusive reference count. Its initial reference
+ * belongs to the owning @c async; every @c control_block_handle adds another
+ * reference. The allocation is freed only when the final reference is released.
  *
  * ### Lifecycle
  *
  * @code
- * create coroutine           → control_block { _strong=1, _weak=1, _exists=true }
- * async.observe()          → control_block_handle (watch → _weak=2)
- * coroutine finishes         → disown() (_strong=0, _weak=1, _exists=false)
- * handle destructs / cancel  → unwatch() (_weak=0) → delete block
+ * create coroutine           → control_block { _refcount=1, _frame_size=N }
+ * async.observe()            → control_block_handle (track → _refcount=2)
+ * coroutine reaches terminal state → frame remains owned and observable
+ * handle destructs / cancel  → untrack()
+ * owning async destructs     → untrack(); final release destroys the frame
  * @endcode
  */
 #ifndef ACE_CONTROL_H
@@ -55,23 +53,24 @@ namespace ace::core {
     };
 
     /**
-     * @brief Intrusive reference-counted control block for a coroutine promise.
+     * @brief Intrusive reference-counted prefix for a coroutine frame.
      *
-     * @details Allocated immediately before the promise in memory by
-     * @c promise_traits::operator new.  Stores the reference counts and an
+     * @details Allocated immediately before the coroutine frame by
+     * @c promise_traits::operator new. Stores the reference count, immutable
+     * allocation size and an
      * optional pointer to a @c control_router_handle that enables external
      * join / cancel operations.
      *
-     * All static methods accept a raw @c void* pointing to @b either the
-     * block itself @b or a promise address; @c get_block_from_address converts
-     * the latter to the former.
+     * Reference-counting methods accept the block address. The
+     * @c get_block_from_address helper accepts the coroutine frame address
+     * returned by the allocation function and recovers its prefix block.
      */
     struct control_block {
 
         struct {
-            uint32_t          _refcount   : 24 { 1 };                ///< Number of watchers (handles). Initial value: 1 (the coroutine itself).
+            uint32_t          _refcount   : 24 { 1 };                ///< Owner and observer references. Initial value: 1 for the owning coroutine.
             promise_lifecycle _status     : 8  { e_inited };         ///< Current lifecycle state of the coroutine (see @c promise_lifecycle).
-            uint32_t          _frame_size : 32 { 0 };                ///< Coroutine frame size, including control block; 0 means the frame is destroyed.
+            uint32_t          _frame_size : 32 { 0 };                ///< Immutable allocation size, including the control block; set before the frame is constructed.
         };
         traits::async_router_handle* _control_router { nullptr };    ///< Optional router for external join/cancel; set by @c setup_control_block().
 
@@ -106,8 +105,8 @@ namespace ace::core {
         static bool untrack(void* v_block);
 
         /**
-         * @brief Convert a promise address to the @c control_block* that precedes it.
-         * @param address  Raw promise address returned by @c operator new.
+         * @brief Convert a coroutine frame address to its prefix @c control_block.
+         * @param address  Frame address returned by @c promise_traits::operator new.
          * @return Pointer to the control block.
          */
         static control_block* get_block_from_address(void* address);
@@ -328,7 +327,7 @@ namespace ace::core {
         end: return is_untracked(block);
     }
 
-    // NOTE: Gets control block pointer from the raw promise address
+    // NOTE: Gets control block pointer from the raw coroutine frame address.
     inline control_block* control_block::get_block_from_address(void* address) {
         return reinterpret_cast<control_block*>(static_cast<uint8_t*>(address) - control_block_size);
     }

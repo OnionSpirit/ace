@@ -165,9 +165,10 @@
    `const&`, но не по изменяемой `T&`.
 9. Значения `automaton` потребляются через `ping()`; `join()` делает ping + cancel,
    а специализированный `async_handle` отменяет automaton в деструкторе.
-10. Coroutine lambdas запрещены из-за открытого B13 в `agents/ISSUES.md`.
-    Использовать именованные coroutine functions/helper-методы с явными
-    параметрами. Обычные некорутинные lambda разрешены.
+10. Coroutine lambdas разрешены после решения B13. Для capturing coroutine
+    lambda объект closure обязан жить до завершения или отмены возвращённой
+    корутины; немедленный вызов временной capturing lambda небезопасен, если
+    корутина переживает closure.
 11. Короткие алиасы futures и console под `#ifdef ACE_H` доступны только если
     `ace/ace.h` подключён раньше соответствующего заголовка. Иначе использовать
     полные имена `ace::futures::*` и `ace::console::*`.

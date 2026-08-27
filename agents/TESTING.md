@@ -2,11 +2,11 @@
 
 Цель: 95-100% покрытия кодовой базы + проверка всех механик и их взаимодействий.
 
-> **Статус (2026-08-23):** GCC 16 coverage union покрывает **2262/2398 =
-> 94.33%** уникальных исполняемых строк `include/ace/**`. Текущая default
-> конфигурация после добавления AR19 регистрирует 293 Meson-теста; последний
-> зафиксированный до AR19 прогон прошёл 291 из 292 тестов, единственный сбой —
-> открытый B29 из `agents/ISSUES.md`.
+> **Статус:** GCC 16 coverage union от 2026-08-23 покрывает **2262/2398 =
+> 94.33%** уникальных исполняемых строк `include/ace/**`. После B13 текущая
+> default-конфигурация регистрирует 297 Meson-тестов. Прогон 2026-08-27 в
+> окружении без рабочего `io_uring` дал 253/297: 43 падения относятся к B38,
+> ещё одно — к B29; все B13 regressions прошли.
 
 ## Требования к генерации тестов (agent instructions)
 
@@ -305,12 +305,12 @@ GoogleTest автоматически увеличивал seed между ит�
 | P3 | `automaton_tag_action` | `action()` = suspend_never, без control_block | ✅ |
 | P4 | `return_traits_void` | return_void(), `_return_value` отсутствует | ✅ |
 | P5 | `return_traits_typed` | return_value(v), `_return_value` содержит значение | ✅ |
-| P6 | `yield_value` | yield_value(v) → `_return_value` сохраняется, status = e_executed_with_value | ⬜ |
-| P7 | `await_transform_future` | future-тип → `_busy_future = nullptr` | ✅ |
-| P8 | `await_transform_busy` | busy-future-тип → `_busy_future = &future` | ⬜ |
-| P9 | `operator_new_new` | Аллокация: control_block перед promise, frame_size корректен | ✅ |
-| P10 | `operator_delete` | Деаллокация: disown вызывается, память освобождается | ⬜ |
-| P11 | `operator_delete_sized` | sized delete — тот же путь что и unsized | ⬜ |
+| P6 | `await_transform_future` | timeout определяется как router-based future, не busy future | ✅ |
+| P7 | `operator_new_layout` | Prefix block хранит точный immutable размер allocation | ✅ |
+| P8 | `operator_new_preserves_frame_canary` | Инициализация prefix metadata не меняет байты frame | ✅ |
+| P9 | `observe_preserves_named_coroutine_arguments` | `observe()` сохраняет value/reference arguments named coroutine | ✅ |
+| P10 | `observe_preserves_lambda_coroutine_captures` | Lambda-coroutine с живым closure сохраняет value/reference captures | ✅ |
+| P11 | `observed_lambda_coroutine_cancels_safely` | Captures сохраняются через suspend, observe и cancel | ✅ |
 | P12 | `setup_trace` | setup_trace() возвращает уникальный возрастающий ID | ✅ |
 
 #### `routing.h` — `router_slot_fixture`
@@ -351,24 +351,20 @@ GoogleTest автоматически увеличивал seed между ит�
 
 | # | Тест | Что проверяет | Статус |
 |---|------|--------------|--------|
-| CB1 | `control_block_init` | После создания: _weak_refcount=1, _strong_refcount=1, _status=e_inited | ✅ |
-| CB2 | `disown_strong` | disown() декрементит _strong_refcount и _weak_refcount | ✅ |
-| CB3 | `disown_last` | Последний disown() → _frame_size=0, возвращает is_untracked=true | ✅ |
-| CB4 | `watch_unwatch` | watch() инкрементит _weak_refcount, unwatch() декрементит | ✅ |
-| CB5 | `is_untracked` | Если оба счётчика = 0 → true | ✅ |
-| CB6 | `is_disowned` | _frame_size == 0 → true | ✅ |
-| CB7 | `get_block_from_address` | Корректно вычисляет адрес control_block из promise | ✅ |
-| CB8 | `control_block_handle_default` | По умолчанию: _block = nullptr | ✅ |
-| CB9 | `handle_cancel` | cancel() вызывает router->cancel() и ставит e_detached | ⬜ |
-| CB10 | `handle_cancel_no_router` | cancel() без роутера — no-op | ✅ |
-| CB11 | `handle_done` | done() → _frame_size == 0 | ✅ |
-| CB12 | `handle_finished` | finished() → _status == e_finished | ✅ |
-| CB13 | `handle_is_idle` | is_idle() когда handle не ссылается на блок | ✅ |
-| CB14 | `handle_forward` | forward() вызывает _control_router->redirect() | ⬜ |
-| CB15 | `handle_forward_null` | forward(nullptr) → false | ✅ |
-| CB16 | `handle_forward_done` | forward() на завершённой корутине → false | ✅ |
-| CB17 | `handle_copy` | Копирование инкрементит weak_refcount | ✅ |
-| CB18 | `handle_destroy` | Деструктор декрементит weak_refcount | ✅ |
+| CB1 | `control_block_init` | Default refcount, frame size и lifecycle status | ✅ |
+| CB2 | `unwatch_last` | Последний `untrack()` обнуляет refcount | ✅ |
+| CB3 | `watch_unwatch` | `track()`/`untrack()` меняют единый refcount | ✅ |
+| CB4 | `is_untracked` | Только нулевой refcount считается untracked | ✅ |
+| CB5 | `get_block_from_address` | Frame address преобразуется в preceding control block | ✅ |
+| CB6 | `control_block_handle_default` | Default handle idle и не terminal | ✅ |
+| CB7 | `handle_cancel_no_router` | Cancel idle handle — безопасный no-op | ✅ |
+| CB8 | `handle_copy` | Копирование handle добавляет reference | ✅ |
+| CB9 | `handle_done` | Failed lifecycle считается terminal | ✅ |
+| CB10 | `handle_finished` | Только `e_finished` считается successful completion | ✅ |
+| CB11 | `handle_is_idle` | Default handle не ссылается на block | ✅ |
+| CB12 | `handle_forward_null` | `forward(nullptr)` отклоняется | ✅ |
+| CB13 | `handle_forward_done` | Forward без установленного router отклоняется | ✅ |
+| CB14 | `handle_destroy` | Destructor handle освобождает reference | ✅ |
 
 ---
 
@@ -833,12 +829,12 @@ co_await/co_yield операцию (снимается при её успешн�
 | BK19 | `backup_cancel_via_spawn_handle` | spawn + `async_handle::cancel` → backup сработал, join=false | ✅ |
 | BK20 | `backup_stack_many_records_fires_lifo` | 64 arena-backed list nodes → callbacks выполняются строго в обратном порядке | ✅ |
 
-> ⚠️ **Открытый B13 из `agents/ISSUES.md`:** `observe()` на
-> лямбда-корутине перед `schedule()`/spawn портит захваченные ссылки — GCC
-> размещает closure лямбды в кадре так, что он накладывается на поле `_block`
-> promise, и `setup_control_block()` затирает захват. Поэтому тесты отмены
-> используют helper-функции (не лямбды) и отмену изнутри раннера
-> (spawn + async_handle). Баг воспроизводится на чистом HEAD.
+> **B13 решён:** prefix metadata больше не записывается в coroutine frame.
+> Coroutine lambdas разрешены при условии, что capturing closure живёт до
+> completion/cancellation возвращённой корутины. Backup regressions сохраняют
+> named helpers, поскольку их explicit parameters делают lifetime тестов
+> однозначным; отдельные lambda regressions находятся в
+> `promise_traits_fixture`.
 
 ---
 
@@ -988,7 +984,7 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/io_hanged_fixture.cpp` | `io_hanged_fixture` | 5 |
 | `tests/moving_average_fixture.cpp` | `moving_average_fixture` | 7 |
 | `tests/omniptr_fixture.cpp` | `omniptr_fixture` | 12 |
-| `tests/promise_traits_fixture.cpp` | `promise_traits_fixture` | 8 |
+| `tests/promise_traits_fixture.cpp` | `promise_traits_fixture` | 12 |
 | `tests/queue_fixture.cpp` | `queue_fixture` | 10 |
 | `tests/router_slot_fixture.cpp` | `router_slot_fixture` | 9 |
 | `tests/runner_fixture.cpp` | `runner_fixture` | 8 |
@@ -998,13 +994,14 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/spawn_fixture.cpp` | `spawn_fixture` | 10 |
 | `tests/timer_fixture.cpp` | `timer_fixture` | 9 |
 | `tests/yield_fixture.cpp` | `yield_fixture` | 8 |
-| **Итого: 33 файла** | | **291** |
+| **Итого: 33 файла** | | **295** |
 
-Default Meson configuration (`ace_entry=false`) регистрирует **293** теста:
-291 GTests, `discover_tests.unit` и `ace_tests.discovery_consistency`. Конфигурация
-`ace_entry=true` дополнительно регистрирует `ace_entry.fallback`, всего 294.
-Наличие 291 discovered GTests не означает 291 successful GTests: B29 остаётся
-единственным известным failure текущих GCC-прогонов.
+Default Meson configuration (`ace_entry=false`) регистрирует **297** тестов:
+295 GTests, `discover_tests.unit` и `ace_tests.discovery_consistency`. Конфигурация
+`ace_entry=true` дополнительно регистрирует `ace_entry.fallback`, всего 298.
+Наличие 295 discovered GTests не означает green suite: в актуальном окружении
+полный GCC/ASan-прогон дополнительно блокирует B38, а B29 остаётся независимым
+некорректным regression.
 
 ---
 
@@ -1030,9 +1027,26 @@ Default Meson configuration (`ace_entry=false`) регистрирует **293**
 python3 discover_tests.py discover tests/*_fixture.cpp
 ```
 
-Команда возвращает 291 уникальное active GTest name. Meson выполняет эту же
+Команда возвращает 295 уникальных active GTest names. Meson выполняет эту же
 команду при setup, регистрирует каждый name отдельным `--gtest_filter`, а
 `ace_tests.discovery_consistency` через `verify` подтверждает совпадение списка
 source declarations с `ace_tests --gtest_list_tests`.
+
+### Проверка B13 (2026-08-27)
+
+- До production fix `operator_new_layout` получил `_frame_size == 0` вместо
+  `273`, а `operator_new_preserves_frame_canary` обнаружил запись в начало
+  frame; оба теста детерминированно падали на Clang 22 + ASan.
+- После fix шесть целевых checks (пять B13 regressions и `async_prefetch`)
+  прошли 6/6 на GCC 16 и Clang 22 с ASan. Весь
+  `promise_traits_fixture` прошёл 20 shuffle-повторов на каждом compiler:
+  240/240 test executions на compiler.
+- ASan+UBSan binaries обоих compiler собраны; в recover-режиме целевые tests
+  проходят 6/6 без B13 diagnostics. Clean UBSan run блокирует известный B68 в
+  Nukes до входа в GTest.
+- `discover_tests.py verify` успешно подтвердил source/runtime inventory 295
+  GTests для GCC и Clang.
+- Полный GCC/ASan Meson suite: 253/297. Из 44 failures 43 имеют B38
+  null-ring stack, один — B29; новых B13 failures нет.
 
 ---

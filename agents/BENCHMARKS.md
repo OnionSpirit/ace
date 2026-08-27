@@ -1,6 +1,6 @@
 # ACE Framework - Benchmarking Guide
 
-Дата актуализации: 2026-08-23.
+Дата актуализации: 2026-08-28.
 
 ## Когда нужен бенчмарк
 
@@ -96,7 +96,7 @@ release-путь: `debug=false`, `optimization=3` и `b_ndebug=true`; поэто
 
 | Исходный тест | Нагрузка | Бенчмарк |
 |---------------|----------|----------|
-| `tests/timer_fixture.cpp`: `timer_fixture.do_timer_on_runner_parallel_test` | 100k таймеров на 4 runner-ах | `bm_timer_parallel` (BM3) |
+| `tests/timer_fixture.cpp`: `timer_fixture.do_timer_on_runner_parallel_test` | 1100 таймеров на 4 runner-ах; тяжёлый вариант оставлен benchmark-у | `bm_timer_parallel` (BM3, 100k) |
 | `tests/cutex_fixture.cpp`: `cutex_fixture.cutex_race` | 800k capture/release операций | `bm_cutex_race_capture` (BM1) |
 | `tests/cutex_fixture.cpp`: `cutex_fixture.cutex_race_resheduling` | 800k capture/sync операций | `bm_cutex_race_sync` (BM2) |
 | `tests/cross_mechanic_fixture.cpp`: `cross_mechanic_fixture.multi_runner_cutex_count` | 16k операций на 4 runner-ах | `bm_multi_runner_cutex` (BM6) |
@@ -112,6 +112,41 @@ release-путь: `debug=false`, `optimization=3` и `b_ndebug=true`; поэто
 - Для I/O отдельно фиксировать kernel, версию liburing и характеристики устройства.
 - Обнаруженный функциональный дефект заносить в `agents/ISSUES.md`; benchmark не
   должен скрывать ошибку или менять ожидаемый контракт ради стабильного числа.
+
+## Direct registration clock: baseline и результат 2026-08-28
+
+Изменение B73 затронуло timer hot path, но существующие BM3/BM5/BM9/BM19 уже
+изолируют bulk relative timers, диапазон wheel slots, короткие timers и absolute
+deadlines. Новый сценарий не добавлялся. До и после изменения использовалась
+release-сборка GCC 16.2.1 (`-O3`, `NDEBUG`), по пять последовательных повторов
+каждого сценария с `--benchmark_report_aggregates_only=true`. CPU: 12 logical
+threads, L3 32 MiB. Измерения выполнялись при разном load average, поэтому малые
+различия real time нельзя трактовать как точную регрессию.
+
+Медианы исходного call-count cache → промежуточного pending-epoch варианта →
+финального direct-registration варианта:
+
+| Бенчмарк | Real, ms | CPU, ms | Pending → direct |
+|----------|---------:|--------:|------------------|
+| BM3 `bm_timer_parallel` | 474.62 → 483 → 477 | 24.80 → 72.1 → 59.0 | Real -1.2%, CPU -18.2% |
+| BM5 `bm_timer_ordering` | 503 → 511 → 509 | 29.4 → 31.3 → 45.2 | Real -0.4%; fresh polling reads увеличивают CPU длинного sparse-сценария |
+| BM9 `bm_timeout_short` | 7.05 → 10.4 → 9.23 | 4.93 → 5.79 → 5.15 | Real -11.3%, CPU -11.1% |
+| BM19 `bm_expire_absolute` | 21.0 → 21.0 → 21.0 | 4.44 → 5.40 → 4.99 | Real без изменения, CPU -7.6% |
+
+Отдельный контрольный прототип менял только тело `cached_now()` на безусловный
+`steady_clock::now()`. Он действительно был быстрее pending-epoch решения в
+основных relative-сценариях: BM3 475/46.0 ms, BM5 503/44.6 ms и BM9 8.20/4.59 ms
+(real/CPU); BM19 дал 26.0/5.33 ms. Однако этот прототип не проходил correctness:
+таймеры 256-501 ms завершались примерно на 1.2 ms раньше, 500 us timeout — за
+8 us, а отложенный absolute `expire` выбирал неверную ветвь. Поэтому финальный
+вариант сохраняет прямые clock reads, но также исправляет deadline calculation.
+
+Финальная схема устраняет двойное enqueue/dequeue и обязательный следующий
+epoch: relative timer читает `steady_clock` при регистрации и сразу помещается в
+wheel; `ping()` также получает fresh timestamp. Это возвращает большую часть
+регрессии промежуточного решения, но строгий deadline contract всё ещё дороже
+неточного call-count cache, особенно по CPU в BM3/BM5. Измеренный отдельным
+100M-call циклом `steady_clock::now()` стоил около 17.7 ns на этом host.
 
 ## Проверка и результаты 2026-08-23
 

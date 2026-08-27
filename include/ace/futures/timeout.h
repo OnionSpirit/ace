@@ -45,15 +45,31 @@ namespace ace::futures {
 /**
  * @brief Future that suspends the coroutine for a relative duration.
  *
- * @details The duration is converted to milliseconds at construction time.
- * Minimum resolution is 1 ms (limited by the clock tick duration).
+ * @details Positive durations are rounded up to milliseconds at construction
+ * time. Registration samples monotonic time directly and immediately inserts
+ * the resulting absolute deadline into the wheel. Zero and negative durations
+ * remain immediate. Scheduler load may delay completion, but a positive
+ * timeout never completes before its armed deadline.
  */
+struct expire;
+
 class ACE_AWAIT_NODISCARD timeout : public core::traits::future_traits<timeout> {
 
-    services::duration_t _duration; ///< Suspension duration in milliseconds.
+    services::duration_t  _duration {}; ///< Relative suspension duration in milliseconds.
+    services::timepoint_t _expires;  ///< Absolute deadline when @c _absolute is set.
+    bool                  _absolute {}; ///< Whether this future preserves an absolute deadline.
+
+    /**
+     * @brief Constructs the storage shared by @c expire.
+     * @param expires Absolute monotonic deadline to preserve until routing.
+     */
+    explicit timeout(const services::timepoint_t expires)
+        : _expires(expires)
+        , _absolute(true) {}
 
     struct timeout_router;
     friend timeout_router;
+    friend expire;
 
 public:
 
@@ -63,16 +79,19 @@ public:
      * @brief Construct a timeout future.
      * @tparam I  Integer representation type of the duration.
      * @tparam T  Period type of the duration.
-     * @param t   Duration to wait.  Converted to @c std::chrono::milliseconds.
+     * @param t Duration to wait. Positive values are rounded up to
+     * @c std::chrono::milliseconds; non-positive values become zero.
      */
     template <typename I, typename T>
     requires std::is_integral_v<I>
     explicit timeout(std::chrono::duration<I, T> t) {
-        _duration = std::chrono::duration_cast<std::chrono::milliseconds>(t);
-        // NOTE: Negative durations must not reach the time wheel — a negative slot
-        // offset would make it index a slot out of range (std::out_of_range).
-        if (_duration < services::duration_t::zero()) [[unlikely]]
+        if (t <= decltype(t)::zero()) [[unlikely]] {
             _duration = services::duration_t::zero();
+            return;
+        }
+        // Positive sub-millisecond waits round up to the wheel tick so they
+        // cannot become immediate and complete before the requested duration.
+        _duration = std::chrono::ceil<std::chrono::milliseconds>(t);
     };
 
     /// @brief Default constructor — zero duration.
@@ -91,23 +110,24 @@ public:
 /**
  * @brief Future that suspends the coroutine until an absolute timepoint.
  *
- * @details Computed as @c expires - clock::current_time() and delegated to
- * @c timeout.
+ * @details Preserves the supplied absolute deadline until the future is routed
+ * to the clock. Delaying construction, scheduling or @c co_await therefore
+ * never shifts the deadline as a relative timeout would.
  *
  * @par Example
  * @code{.cpp}
- * auto deadline = ace::core::clock::current_time() + std::chrono::seconds(5);
+ * auto deadline = std::chrono::ceil<std::chrono::milliseconds>(
+ *     std::chrono::steady_clock::now()) + std::chrono::seconds(5);
  * co_await ace::futures::expire(deadline);
  * @endcode
  */
 struct ACE_AWAIT_NODISCARD expire : timeout {
     /**
      * @brief Construct from an absolute timepoint.
-     * @param expires  The absolute deadline.  The computed duration is
-     *                 @c expires - clock::current_time().
+     * @param expires Absolute monotonic deadline preserved until routing.
      */
     explicit expire(services::timepoint_t expires)
-        : timeout(expires - services::clock::current_time()) {}
+        : timeout(expires) {}
 
     /// @brief Default constructor — zero duration.
     expire() = default;
@@ -161,7 +181,10 @@ struct ACE_FUTURE_TIMEOUT_SPACE timeout_router : runner_router {
      * @param node Task node to schedule for wake-up.
      */
     void redirect(const omni_node node) override {
-        _injected_node = services::clock::subscribe(node, _timeout->_duration);
+        if (_timeout->_absolute)
+            _injected_node = services::clock::subscribe_at(node, _timeout->_expires);
+        else
+            _injected_node = services::clock::subscribe(node, _timeout->_duration);
     }
 
     /**

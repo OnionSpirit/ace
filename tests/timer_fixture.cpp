@@ -1,8 +1,7 @@
-#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <iostream>
-#include <ranges>
+#include <thread>
 #include <vector>
 
 #include "environment.h"
@@ -18,45 +17,80 @@ namespace tool = ace::core::tools;
 namespace {
 
 struct timer_fixture : base_fixture {
-    static auto fancy(ace::services::timepoint_t timepoint) {
-        const auto offset =
-            std::chrono::time_point_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now()).time_since_epoch()
-            - std::chrono::time_point_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now()).time_since_epoch();
-        return std::chrono::time_point<std::chrono::system_clock, std::chrono::milliseconds>{
-            std::chrono::time_point_cast<std::chrono::milliseconds>(
-                timepoint + offset).time_since_epoch()
-        };
-    }
+    struct relative_observation {
+        int  id {};
+        long requested_us {};
+        long elapsed_us {};
+    };
+
+    struct absolute_observation {
+        int id {};
+        ace::services::timepoint_t deadline {};
+        std::chrono::steady_clock::time_point woke_at {};
+    };
 
     template <typename Rep, typename Period>
-    ace::task timer_waiter_valued(std::chrono::duration<Rep, Period> dur,
-                                  ace::bus<int>& ch) {
-        ace::println("Timeout launched for: {}", dur);
+    static ace::task observe_timeout(
+        int id,
+        std::chrono::duration<Rep, Period> dur,
+        ace::bus<relative_observation>& ch)
+    {
+        const auto start = std::chrono::steady_clock::now();
         co_await ace::timeout(dur);
-        ace::println("Timeout released after: {}", dur);
-        ch << dur.count();
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        ch << relative_observation {
+            id,
+            std::chrono::duration_cast<std::chrono::microseconds>(dur).count(),
+            std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()
+        };
         co_return;
     }
 
     template <typename Rep, typename Period>
     ace::task timer_waiter(std::chrono::duration<Rep, Period> dur,
                            ace::bus<int>& ch) {
-        const auto start = ace::services::clock::current_time();
+        const auto start = std::chrono::steady_clock::now();
         co_await ace::timeout(dur);
-        const auto end = ace::services::clock::current_time();
-        ch << (end - start).count();
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        ch << static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
         co_return;
     }
 
-    ace::task expire_waiter_valued(ace::services::timepoint_t tp,
-                                   ace::bus<ace::services::timepoint_t>& ch) {
-        ace::println("Expires at: {}", fancy(tp));
-        co_await ace::expire(tp);
-        ace::println("Expired at: {}", fancy(tp));
-        ch << tp;
+    static ace::task observe_expire(
+        int id,
+        ace::services::timepoint_t deadline,
+        ace::bus<absolute_observation>& ch)
+    {
+        co_await ace::expire(deadline);
+        ch << absolute_observation {id, deadline, std::chrono::steady_clock::now()};
         co_return;
+    }
+
+    static ace::task blocking_registration_timeout(ace::bus<relative_observation>& result) {
+        // Blocking before registration ensures the timeout deadline is derived
+        // from the actual subscribe point rather than an older cached timestamp.
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        co_await observe_timeout(0, std::chrono::milliseconds(10), result);
+    }
+
+    static ace::task register_while_release_budget_is_exhausted(
+        ace::bus<relative_observation>& result)
+    {
+        co_await ace::timeout(std::chrono::milliseconds(10));
+        co_await observe_timeout(0, std::chrono::milliseconds(10), result);
+    }
+
+    static ace::task delayed_absolute_race(ace::bus<int>& result) {
+        const auto deadline = std::chrono::ceil<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(10));
+        auto absolute = ace::expire(deadline);
+
+        // The absolute deadline is in the past before co_await. Converting it
+        // to a relative delay at construction would let the 5 ms branch win.
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        int winner = co_await (absolute or ace::timeout(std::chrono::milliseconds(5)));
+        result << winner;
     }
 
     static ace::task timer_or_timer() {
@@ -114,7 +148,6 @@ struct timer_fixture : base_fixture {
     }
 
     ace::bus<int> _int_channel {};
-    ace::bus<ace::services::timepoint_t> _tp_channel {};
 };
 
 // Verifies that an or-composition completes when its shorter timer expires.
@@ -145,8 +178,8 @@ TEST_F(timer_fixture, do_and_await_test) {
     ASSERT_TRUE(ace::empty());
     const auto ms_time = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start_time).count();
-    // A small scheduling allowance avoids requiring an exact 100 ms clock boundary.
-    EXPECT_GE(ms_time, 95);
+    // The clock contract forbids completion before the longer branch's deadline.
+    EXPECT_GE(ms_time, 100);
 }
 
 // Verifies that each scheduled timeout fires within its per-timer tolerance.
@@ -155,41 +188,50 @@ TEST_F(timer_fixture, do_timer_on_runner_test) {
     const std::vector<long> expected {
         501, 495, 450, 401, 395, 350, 300, 256, 250, 200, 150, 100, 50, 10, 0
     };
-    for (long d : expected)
-        ace::schedule(timer_waiter_valued(std::chrono::milliseconds(d), _int_channel));
+    ace::bus<relative_observation> observations;
+    for (std::size_t id = 0; id < expected.size(); ++id)
+        ace::schedule(observe_timeout(
+            static_cast<int>(id), std::chrono::milliseconds(expected[id]), observations));
     ace::run();
     ASSERT_TRUE(ace::empty());
 
-    auto res = fetch(_int_channel);
+    auto res = fetch(observations);
     ASSERT_EQ(expected.size(), res.size());
-    for (long d : expected) {
-        // Timers sharing a wheel slot have no deadline ordering guarantee, so match by value.
-        const bool found = std::ranges::any_of(
-            res, [d](long v) { return v >= d - 1 and v <= d + 50; });
-        EXPECT_TRUE(found) << "timer " << d << "ms did not fire on time";
+    for (const auto& observation : res) {
+        ASSERT_GE(observation.id, 0);
+        ASSERT_LT(static_cast<std::size_t>(observation.id), expected.size());
+        // Matching by ID proves every individual timer completed and its
+        // externally observed elapsed time did not precede its own request.
+        EXPECT_GE(observation.elapsed_us, observation.requested_us);
+        EXPECT_LT(observation.elapsed_us, observation.requested_us + 100000);
     }
 }
 
 // Verifies that every absolute deadline is delivered by expire().
 TEST_F(timer_fixture, do_expire_on_runner_test) {
     using namespace std::chrono_literals;
-    const auto now = ace::services::clock::current_time();
+    const auto now = std::chrono::ceil<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now());
     std::vector<ace::services::timepoint_t> expected;
+    ace::bus<absolute_observation> observations;
     for (long d : {501l, 495l, 450l, 401l, 395l, 350l, 300l, 256l,
                    250l, 200l, 150l, 100l, 50l, 10l, 0l}) {
         expected.push_back(now + std::chrono::milliseconds(d));
-        ace::schedule(expire_waiter_valued(expected.back(), _tp_channel));
+        ace::schedule(observe_expire(
+            static_cast<int>(expected.size() - 1), expected.back(), observations));
     }
     ace::run();
     ASSERT_TRUE(ace::empty());
 
-    auto res = fetch(_tp_channel);
+    auto res = fetch(observations);
     ASSERT_EQ(expected.size(), res.size());
-    for (const auto& d : expected) {
-        // expire_waiter_valued reports requested deadlines, whose wake order is unspecified.
-        const bool found = std::ranges::any_of(
-            res, [&d](const auto& value) { return value == d; });
-        EXPECT_TRUE(found) << "deadline not reached";
+    for (const auto& observation : res) {
+        ASSERT_GE(observation.id, 0);
+        ASSERT_LT(static_cast<std::size_t>(observation.id), expected.size());
+        EXPECT_EQ(expected[observation.id], observation.deadline);
+        // The precise wake timestamp is compared directly with the requested
+        // absolute deadline, so publishing the input cannot make this pass.
+        EXPECT_GE(observation.woke_at, observation.deadline);
     }
 }
 
@@ -198,7 +240,7 @@ TEST_F(timer_fixture, do_timer_on_runner_parallel_test) {
     using namespace std::chrono_literals;
     ace::cfg::g_config._runners_amount = 4;
     ace::reload();
-    constexpr long sets_count = 10000;
+    constexpr long sets_count = 110;
     constexpr long max_in_set = 500;
     constexpr long set_step = 50;
     constexpr long set_size = max_in_set / set_step;
@@ -229,7 +271,7 @@ TEST_F(timer_fixture, do_timer_on_runner_parallel_test) {
 
     long real_sum {}, exp_sum {};
     for (int i = 0; i < sets_count; ++i)
-        for (int q = 0; q < max_in_set; q += set_step)
+        for (int q = set_step; q <= max_in_set; q += set_step)
             exp_sum += q;
     for (auto r : res) real_sum += r;
     // Measured elapsed values include scheduling overhead and should exceed raw durations.
@@ -259,9 +301,63 @@ TEST_F(timer_fixture, timeout_short) {
     EXPECT_TRUE(ace::empty());
     auto res = fetch(_int_channel);
     ASSERT_EQ(1u, res.size());
-    EXPECT_GE(res[0], 0);
+    EXPECT_GE(res[0], 10);
     // The generous upper bound detects a stuck timer while tolerating loaded CI hosts.
     EXPECT_LT(res[0], 500);
+}
+
+// Verifies that a timestamp sampled before blocking user code cannot shorten a later timeout.
+TEST_F(timer_fixture, timeout_uses_registration_timestamp) {
+    ace::bus<relative_observation> observations;
+    ace::schedule(blocking_registration_timeout(observations));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+
+    const auto res = fetch(observations);
+    ASSERT_EQ(1u, res.size());
+    EXPECT_GE(res[0].elapsed_us, res[0].requested_us);
+}
+
+// Verifies that a lagging wheel cursor cannot shorten a newly registered timeout.
+TEST_F(timer_fixture, timeout_while_release_budget_is_exhausted) {
+    ace::bus<relative_observation> observations;
+    ace::bus<int> bulk_results;
+    ace::schedule(register_while_release_budget_is_exhausted(observations));
+    for (int i = 0; i < 1100; ++i)
+        ace::schedule(timer_waiter(std::chrono::milliseconds(10), bulk_results));
+
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    ASSERT_EQ(1100u, fetch(bulk_results).size());
+    const auto result = fetch(observations);
+    ASSERT_EQ(1u, result.size());
+    // The fresh registration timestamp, rather than a lagging release cursor,
+    // defines the lower bound for the newly created timeout.
+    EXPECT_GE(result[0].elapsed_us, result[0].requested_us);
+}
+
+// Verifies that a positive sub-millisecond timeout rounds up instead of becoming immediate.
+TEST_F(timer_fixture, timeout_positive_submillisecond_never_completes_early) {
+    ace::bus<relative_observation> observations;
+    ace::schedule(observe_timeout(0, std::chrono::microseconds(500), observations));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+
+    const auto res = fetch(observations);
+    ASSERT_EQ(1u, res.size());
+    EXPECT_GE(res[0].elapsed_us, 500);
+}
+
+// Verifies that expire preserves an absolute deadline across delayed co_await.
+TEST_F(timer_fixture, expire_past_deadline_beats_new_relative_timeout) {
+    ace::bus<int> result;
+    ace::schedule(delayed_absolute_race(result));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+
+    const auto res = fetch(result);
+    ASSERT_EQ(1u, res.size());
+    EXPECT_EQ(0, res[0]);
 }
 
 // Verifies that twenty concurrent timeouts all publish exactly one completion.

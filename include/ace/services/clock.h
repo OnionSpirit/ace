@@ -23,8 +23,8 @@
  * 1. @c co_await timeout(500ms) creates a @c timeout future.
  * 2. @c await_suspend() installs a @c timeout_router.
  * 3. The runner calls @c router.redirect(node) → @c clock::subscribe(node, 500ms).
- * 4. @c hierarchical_time_wheel::subscribe() selects a wheel level and
- *    inserts the timer.
+ * 4. @c hierarchical_time_wheel::subscribe() samples monotonic time, computes
+ *    a rounded-up absolute deadline and inserts the timer directly into a wheel.
  * 5. When 500ms elapses, @c clock::ping() → @c hierarchical_time_wheel::advance()
  *    pops the timer and calls @c runner::reattach().
  *
@@ -36,6 +36,7 @@
 #define ACE_SERVICES_CLOCK_H
 #include <bit>
 #include <chrono>
+#include <cstdint>
 
 #include "ace/core/async.h"
 #include "ace/core/traits/service.h"
@@ -57,39 +58,29 @@ namespace ace::services {
         )
     );
 
-    /**
-     * @brief Cached millisecond timepoint of the steady clock.
-     * @details The cache is refreshed every 16 calls or when older than 1 ms
-     * (one wheel tick), keeping timer release accuracy while avoiding a clock
-     * read on every call.
-     * @return The cached millisecond timepoint.
-     */
-    inline auto cached_now() {
-        // NOTE: thread_local — the clock service is per-runner (per-thread), so the cached
-        // timestamp and refresh counter must not be shared across threads (data race otherwise).
-        thread_local auto cached_ts = std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now()
-        );
-        thread_local uint32_t refresh_counter = 0;
-        ++refresh_counter;
-        // NOTE: May need to update it always instead of counter because it may cause burst release
-        if (refresh_counter % 16 == 0) {
-            cached_ts = std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now());
-        }
-        return cached_ts;
+    /// @brief Precise monotonic timestamp used to derive millisecond wheel deadlines.
+    using precise_timepoint_t = std::chrono::steady_clock::time_point;
+
+    /// @brief Floors a precise timestamp to the wheel's millisecond timeline.
+    inline timepoint_t floor_to_tick(const precise_timepoint_t timestamp) {
+        return std::chrono::time_point_cast<std::chrono::milliseconds>(timestamp);
+    }
+
+    /// @brief Rounds a precise timestamp up so a relative timer cannot expire early.
+    inline timepoint_t ceil_to_tick(const precise_timepoint_t timestamp) {
+        return std::chrono::ceil<std::chrono::milliseconds>(timestamp);
     }
 
     /**
      * @brief A stored timer — holds a task and its absolute expiry time.
      *
-     * @details @c _expires is the absolute deadline expressed on the wheel's
-     * release-bound time scale.  Keeping the deadline (instead of the original
+     * @details @c _expires is an absolute monotonic deadline at millisecond
+     * precision. Keeping the deadline (instead of the original
      * relative duration) lets every cascade recompute the exact remaining time,
      * independent of the insertion phase and of wheel stalls.
      */
     struct timer_record {
-        timepoint_t _expires {}; ///< Absolute expiry time (release-bound scale).
+        timepoint_t _expires {}; ///< Absolute monotonic expiry time.
         omni_node _context {};   ///< Task node to wake on expiry.
 
         /// @brief Default constructor — empty record.
@@ -160,9 +151,9 @@ namespace ace::services {
         }
 
         /**
-         * @brief Expires not more than @b max_count stored timers
-         * @param [in] max_count Max allowed expirations
-         * @return Amount of expired timers
+         * @brief Expires not more than @p max_count stored timers.
+         * @param max_count Max allowed expirations.
+         * @return Amount of expired timers.
          */
         int expire_up_to(const int max_count) {
 
@@ -345,7 +336,7 @@ namespace ace::services {
 
         std::vector<time_wheel> _time_wheels;                 ///< Wheel levels, finest first.
         timepoint_t             _current_ts;                  ///< Last observed time.
-        timepoint_t             _release_bound { cached_now() }; ///< Time lower bound, higher than all expired timers
+        timepoint_t             _release_bound;               ///< Logical wheel cursor, no later than observed time.
         const duration_t        _tick_duration;               ///< Duration of one finest tick.
         const std::size_t       _slot_count;                  ///< Number of slots per wheel.
         int                     _release_budget { };          ///< Remaining expirations for this ping.
@@ -353,7 +344,7 @@ namespace ace::services {
 
         ACE_CACHE_LINE(1)
 
-        std::size_t             _pending_timer_count { 0 };   ///< Number of timers currently subscribed.
+        std::size_t             _timer_count         { 0 };   ///< Number of timers currently subscribed.
         bool                    _stopped            { false };///< Whether the wheel is empty and idle.
 
 
@@ -433,6 +424,48 @@ namespace ace::services {
             _release_bound += interval;
         }
 
+        /**
+         * @brief Inserts a task according to an already computed absolute deadline.
+         * @param node Task node to wake.
+         * @param expires Absolute monotonic deadline.
+         * @return Inserted timer node used for cancellation.
+         */
+        timer_node* insert_timer(const omni_node node, const timepoint_t expires) {
+            duration_t remaining = expires - _release_bound;
+            if (remaining < duration_t::zero()) [[unlikely]]
+                remaining = duration_t::zero();
+
+            const auto idx = select_time_wheel(remaining);
+            const auto wheel_index = idx ? idx.value() : 0;
+
+            if (wheel_index == 0) {
+                const auto hand_offset = static_cast<std::size_t>(
+                    (remaining / _time_wheels[0]._tick_duration) % _slot_count);
+                return _time_wheels[0].insert(node, expires, hand_offset);
+            }
+
+            const auto to_next_wrap =
+                _time_wheels[wheel_index]._tick_duration - lower_wheel_phase(wheel_index);
+            const auto hand_offset = static_cast<std::size_t>(
+                (remaining - to_next_wrap) / _time_wheels[wheel_index]._tick_duration);
+            return _time_wheels[wheel_index].insert(node, expires, hand_offset);
+        }
+
+        /**
+         * @brief Synchronizes an idle wheel before inserting a new deadline.
+         * @param timestamp Fresh monotonic timestamp sampled at registration.
+         * @details An idle wheel has no timers whose position depends on its
+         * cursor, so both cached time and release bound can jump directly to
+         * the registration timestamp without advancing every inactive tick.
+         */
+        void synchronize_if_stopped(const precise_timepoint_t timestamp) {
+            if (_stopped) {
+                _current_ts = floor_to_tick(timestamp);
+                _release_bound = _current_ts;
+                _stopped = false;
+            }
+        }
+
     public:
 
         /**
@@ -445,7 +478,7 @@ namespace ace::services {
         template <typename rep_t, typename period_t>
         explicit hierarchical_time_wheel(const std::chrono::duration<rep_t, period_t> tick_duration,
                                          const std::size_t slot_count)
-            : _current_ts(cached_now())
+            : _current_ts(floor_to_tick(std::chrono::steady_clock::now()))
             , _release_bound(_current_ts)
             , _tick_duration(std::chrono::duration_cast<duration_t>(tick_duration))
             , _slot_count((slot_count > 0) && ((slot_count & (slot_count - 1)) == 0)
@@ -469,12 +502,13 @@ namespace ace::services {
         }
 
         /**
-         * @brief Advances the wheel by the elapsed time, expiring due timers
+         * @brief Advances the wheel by the elapsed time, expiring due timers.
+         * @param timestamp Fresh monotonic timestamp sampled for this advance.
          * @return Amount of expired timers
          */
-        std::size_t advance() {
+        std::size_t advance(const precise_timepoint_t timestamp) {
 
-            adjust();
+            adjust(timestamp);
             const duration_t passed = elapsed();
 
             if (passed < _tick_duration) [[unlikely]]
@@ -482,13 +516,13 @@ namespace ace::services {
 
             const auto advanced_ticks = _time_wheels[0].advance(passed);
             const auto expired = _release_limit - _release_budget;
-            _pending_timer_count -= expired;
+            _timer_count -= expired;
             advance_release_bound(_tick_duration * advanced_ticks);
             return expired;
         }
 
         /**
-         * @brief Subscribes a task to the wheel by the passed duration
+         * @brief Subscribes a task using a deadline sampled at registration.
          * @param [in] node Task to subscribe
          * @param [in] duration Subscription duration
          * @return Inserted node ptr
@@ -498,30 +532,34 @@ namespace ace::services {
             if (duration < duration_t::zero()) [[unlikely]]
                 duration = duration_t::zero();
 
-            const auto idx = select_time_wheel(duration);
-
-            if (not idx) [[unlikely]] {
+            if (duration == duration_t::zero()) [[unlikely]] {
                 core::runner::reattach(node);
                 return nullptr;
             }
-            ++_pending_timer_count;
 
-            const timepoint_t expires = _release_bound + duration;
-            const auto wheel_index = idx.value();
+            const auto timestamp = std::chrono::steady_clock::now();
+            synchronize_if_stopped(timestamp);
+            ++_timer_count;
+            return insert_timer(node, ceil_to_tick(timestamp + duration));
+        }
 
-            if (wheel_index == 0) {
-                const auto hand_offset = (duration / _time_wheels[0]._tick_duration) % _slot_count;
-                return _time_wheels[0].insert(node, expires, hand_offset);
+        /**
+         * @brief Subscribes a task to an absolute monotonic deadline.
+         * @param node Task to subscribe.
+         * @param expires Absolute millisecond deadline.
+         * @return Timer node used for cancellation, or @c nullptr if already due.
+         */
+        timer_node* subscribe_at(omni_node node, const timepoint_t expires) {
+            const auto timestamp = std::chrono::steady_clock::now();
+            synchronize_if_stopped(timestamp);
+
+            if (expires <= timestamp) [[unlikely]] {
+                core::runner::reattach(node);
+                return nullptr;
             }
 
-            // NOTE: The upper wheel's hand advances once per round of the wheel below.
-            // The first advance happens not exactly one round after insertion but after
-            // (round - phase) where phase is the lower wheels' current position.  The hand
-            // offset must therefore be computed from the next wrap, otherwise timers in
-            // upper wheels expire up to one wheel tick late.
-            const auto to_next_wrap = _time_wheels[wheel_index]._tick_duration - lower_wheel_phase(wheel_index);
-            const auto hand_offset = static_cast<std::size_t>((duration - to_next_wrap) / _time_wheels[wheel_index]._tick_duration);
-            return _time_wheels[wheel_index].insert(node, expires, hand_offset);
+            ++_timer_count;
+            return insert_timer(node, expires);
         }
 
         /**
@@ -558,16 +596,16 @@ namespace ace::services {
         }
 
         /**
-         * @brief Gets current timepoint
-         * @return current timepoint
+         * @brief Gets the clock service's cached millisecond snapshot.
+         * @return Timestamp processed by the most recent wheel advance or idle-wheel synchronization.
          */
         [[nodiscard]] auto current_time() const { return _current_ts; }
 
         /**
          * @brief Adjusting the wheel before the next advance
          */
-        void adjust() {
-            _current_ts = cached_now();
+        void adjust(const precise_timepoint_t timestamp) {
+            _current_ts = floor_to_tick(timestamp);
             _release_budget = _release_limit;
             // NOTE: If the wheel didn't reach empty state and become stopped, then no effect.
             // NOTE: Else increasing with inactivity time
@@ -576,10 +614,10 @@ namespace ace::services {
         }
 
         /**
-         * @return Whether the wheel holds no pending timers
+         * @return Whether the wheel holds no active timers.
          */
         [[nodiscard]] bool empty() {
-            return _stopped = _pending_timer_count == 0;
+            return _stopped = _timer_count == 0;
         }
 
         /**
@@ -589,7 +627,7 @@ namespace ace::services {
         void detach(timer_node* node) {
             // NOTE: Pushing context back to the runner. It is already marked as canceled
             core::runner::reattach(node->data()->_context);
-            _pending_timer_count -= (node->remove() & 0b1);
+            _timer_count -= (node->remove() & 0b1);
         }
 
     };
@@ -615,9 +653,9 @@ namespace ace::services {
      *
      * @details On each @c ping(), calls @c hierarchical_time_wheel::advance() to
      * expire due timers.  Provides @c subscribe() (used by @c timeout future)
-     * and @c detach() (for timer cancellation).  The @c current_time()
-     * static method returns the cached timepoint, updated every 16 calls
-     * for performance.
+     * and @c detach() (for timer cancellation). Each registration samples the
+     * monotonic clock once to compute its exact deadline, while each @c ping()
+     * samples it once to advance the wheel.
      */
     struct clock : core::traits::service_traits<clock, core::service_spawn_mode::e_thread_local> {
 
@@ -628,8 +666,8 @@ namespace ace::services {
         static thread_local hierarchical_time_wheel _wheel;
 
         /**
-         * @brief Returns the cached current timepoint.
-         * @return The wheel's last observed time.
+         * @brief Returns the cached millisecond snapshot without a system clock read.
+         * @return Timestamp processed by the most recent wheel advance or idle-wheel synchronization.
          */
         static auto current_time() { return inspect()._wheel.current_time(); }
 
@@ -646,7 +684,19 @@ namespace ace::services {
          * @return The inserted timer node, or @c nullptr for immediate expiry.
          */
         [[nodiscard]] static timer_node* subscribe(omni_node node, const duration_t duration) {
-            return touch(node->_data._coroutine.promise()._runner.as<runner_pool_t>())._wheel.subscribe(node, duration);
+            return touch(node->_data._coroutine.promise()._runner.as<runner_pool_t>())
+                ._wheel.subscribe(node, duration);
+        }
+
+        /**
+         * @brief Subscribes a task to an absolute monotonic deadline.
+         * @param node Task node to wake.
+         * @param expires Absolute millisecond deadline.
+         * @return Timer node used for cancellation, or @c nullptr if already due.
+         */
+        [[nodiscard]] static timer_node* subscribe_at(omni_node node, const timepoint_t expires) {
+            return touch(node->_data._coroutine.promise()._runner.as<runner_pool_t>())
+                ._wheel.subscribe_at(node, expires);
         }
 
         /**
@@ -654,7 +704,7 @@ namespace ace::services {
          * @return @c true while timers remain pending.
          */
         static bool ping() {
-            _wheel.advance();
+            _wheel.advance(std::chrono::steady_clock::now());
             return not _wheel.empty();
         }
     };

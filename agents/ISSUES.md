@@ -202,7 +202,7 @@
 
 ### B29. Некорректный regression блокирует проверку B16
 
-- **Статус:** Решено 2026-08-27.
+- **Статус:** Решено 2026-08-28.
 - **Приоритет:** Высокий.
 - **Файл:** `tests/yield_fixture.cpp:227-243`.
 - **Симптом:**
@@ -291,23 +291,20 @@
 
 ### B34. Нижняя граница timer-теста нестабильна относительно scheduler timing
 
-- **Статус:** Открыто.
+- **Статус:** Решено 2026-08-27.
 - **Приоритет:** Средний.
 - **Файлы и символы:** `tests/timer_fixture.cpp`
-  (`timer_fixture.do_or_await_test`); `include/ace/services/clock.h`
-  (`cached_now()`).
+  (`timer_fixture.do_or_await_test`); `include/ace/services/clock.h`.
 - **Симптом:** в трёхкратном shuffled GCC/ASan-прогоне без блокирующего B29 тест
   один раз измерил 98 ms при `EXPECT_GE(..., 100 ms)`; остальные итерации прошли.
-  Поведение `cached_now()` с обновлением на каждом 16-м вызове является намеренным
-  контрактом B6 и не должно изменяться или переоткрываться из-за этой записи.
-  Нестабильность отлична от B14, хотя может взаимодействовать с process state.
-- **Предлагаемое решение:** определить production timing contract либо изменить
-  тестовый контракт так, чтобы он использовал внешнее измерение через steady
-  clock и ограниченный допуск scheduler/timer, не скрывающий преждевременное
-  завершение.
-- **Проверка решения:** выполнить много shuffled/repeated прогонов с разными seed
-  в GCC/ASan, отдельно и в полном suite без B29, и подтвердить одновременно
-  стабильность теста и соблюдение выбранной временной границы.
+  Причиной мог быть устаревший cached timestamp: clock обновлял его лишь каждый
+  16-й вызов, а тест наблюдал преждевременное завершение.
+- **Решение:** relative timer читает fresh monotonic timestamp непосредственно
+  при регистрации, округляет абсолютный deadline вверх до tick и сразу
+  вставляется в wheel. Timer tests измеряют фактическое время внешним
+  `steady_clock` и не допускают completion раньше deadline.
+- **Проверка решения:** целевой набор timer/runner/cancellation прошёл 10
+  shuffled повторов, 150/150, seeds 82821..82830.
 
 ### B37. Fire-and-forget write fallback теряет command и moved buffer
 
@@ -843,24 +840,28 @@
   send boundaries, поэтому нельзя считать один `recv_buf` одним message без
   framing/EOF protocol.
 
-### B64. Timer tests публикуют requested values вместо фактического времени
+### B64. Timer tests публиковали requested values вместо фактического времени
 
-- **Статус:** Открыто; тестовый аудит 2026-08-27.
+- **Статус:** Частично решено 2026-08-27.
 - **Приоритет:** Высокий.
 - **Файл:** `tests/timer_fixture.cpp`.
-- **Ложноположительные сценарии:** `do_timer_on_runner_test` отправляет в channel
-  исходную duration, поэтому tolerance проверяет вход теста; `do_expire_on_runner_test`
-  отправляет заданный deadline, а не wake timestamp; `timeout_short` допускает
-  elapsed >= 0 для timeout 10 ms. Parallel test создаёт 100000 timers в
-  correctness suite, имеет слабую sum-проверку и одновременно служит benchmark.
-- **Предлагаемое решение:** измерять `steady_clock` непосредственно вокруг await,
-  сопоставлять уникальный timer ID с requested/observed timestamps, отдельно
-  проверять нижнюю и разумную верхнюю границы. Для absolute expire проверять, что
-  wake не раньше deadline. Масштаб correctness сделать детерминированным и
-  умеренным; тяжёлую нагрузку оставить benchmark-у.
-- **Проверка решения:** zero/negative/sub-ms/boundary wheel slots, concurrent
-  timers, cancel, multi-runner; статистически устойчивые допуски без принятия
-  мгновенного completion. Много повторов/shuffle по B34.
+- **Исходные ложноположительные сценарии:** `do_timer_on_runner_test` отправлял
+  в channel исходную duration, поэтому tolerance проверял вход теста;
+  `do_expire_on_runner_test` отправлял заданный deadline, а не wake timestamp;
+  `timeout_short` допускал elapsed >= 0 для timeout 10 ms. Parallel test создавал
+  100000 timers в correctness suite, имел слабую sum-проверку и одновременно
+  служил benchmark.
+- **Решение:** runner timer/expire tests теперь измеряют `steady_clock`
+  непосредственно вокруг await, сопоставляют уникальный timer ID с
+  requested/observed timestamps и проверяют нижнюю и разумную верхнюю границы.
+  Absolute expire сравнивает wake timestamp с deadline. Correctness-нагрузка
+  уменьшена до 1100 timers, тяжёлая 100k-нагрузка оставлена BM3.
+- **Проверка решения:** zero/sub-ms/boundary wheel slots, concurrent timers,
+  multi-runner и базовый cancel; статистически устойчивые допуски без принятия
+  мгновенного completion; 10 shuffled повторов по B34.
+- **Осталось:** отдельные negative-duration и cancel-before/after-clock boundary
+  regressions T2/T5-T7; базовая cancellation остаётся покрыта
+  `cross_mechanic_fixture.cancel_spawned_with_timeout`.
 
 ### B65. Ownership/console/outcast tests используют `SUCCEED` вместо наблюдаемых инвариантов
 
@@ -920,8 +921,8 @@
 - **Расхождения:** README называет `automaton<T>` eager и diagram запускает его
   вызовом, тогда как implementation/INDEX/test фиксируют lazy
   `suspend_always`; test inventory и compiler status в INDEX синхронизированы
-  при решении B13, но clock Doxygen всё ещё обещает refresh `cached_now()` при
-  возрасте >1 ms, но код и решённый B6 задают только каждый 16-й вызов;
+  при решении B13; clock Doxygen и timing contract синхронизированы с
+  direct-registration clock при решении B6/B73;
   `agents/TESTING.md` приписывает `hanged_command_defaults` проверки, которых в
   test body нет.
 - **Предлагаемое решение:** после исправления соответствующих production/test
@@ -929,7 +930,7 @@
   документа. Не менять implementation для совпадения с устаревшим текстом без
   отдельного API-решения.
 - **Проверка решения:** ручная cross-reference проверка coroutine table/diagram,
-  test counts и compiler status; Doxygen соответствует B6; fixture map точно
+  test counts и compiler status; Doxygen соответствует B6/B73; fixture map точно
   описывает assertions. Добавить lightweight doc/count consistency checks там,
   где это не требует дублировать данные.
 
@@ -1028,6 +1029,29 @@
   `arena_fixture.nukes_node_allocator_uses_durable_arena_and_preserves_overalignment`
   проверяет lifetime и alignment 256. Clang 22 ASan shuffled repeats проходят
   без прежнего teardown UAF.
+
+### B73. Cached timestamp мог преждевременно завершать relative и absolute timers
+
+- **Статус:** Решено 2026-08-28.
+- **Приоритет:** Высокий.
+- **Файлы:** `include/ace/services/clock.h`, `include/ace/futures/timeout.h`,
+  `tests/timer_fixture.cpp`.
+- **Симптом:** `cached_now()` обновлялся только каждый 16-й вызов. Relative timer
+  мог вычисляться от timestamp, взятого до длительной coroutine работы, а
+  `expire` превращал absolute deadline в relative duration при construction.
+  Дополнительно вычисление deadline от отстающего `_release_bound` смешивало
+  логический cursor wheel с наблюдаемым monotonic временем.
+- **Решение:** relative timer один раз читает `steady_clock` при регистрации,
+  вычисляет округлённый вверх absolute deadline и сразу вставляется в wheel.
+  `clock::ping()` читает fresh timestamp для продвижения wheel. Absolute timers
+  сохраняют исходный deadline, положительные sub-ms durations округляются вверх
+  до 1 ms, а `_release_bound` остаётся только логическим cursor wheel. Pending
+  arming, epoch state и дополнительный slot requeue полностью удалены.
+- **Регрессии и проверка:** `timeout_uses_registration_timestamp`,
+  `timeout_while_release_budget_is_exhausted`,
+  `timeout_positive_submillisecond_never_completes_early`,
+  `expire_past_deadline_beats_new_relative_timeout`, усиленные timer/expire tests;
+  22/22 targeted и 150/150 shuffled repetitions прошли.
 
 ### B36. `is_debug` имел инвертированную семантику
 
@@ -1281,14 +1305,12 @@
 
 ### B6. `cached_now()` нарушал точность таймеров
 
-- **Статус:** Решено.
+- **Статус:** Решено повторно 2026-08-28; см. B73.
 - **Файл:** `include/ace/services/clock.h`.
-- **Уточнённый контракт:** обновление timestamp каждый 16-й вызов является
-  намеренным текущим поведением. Возраст кэша не создаёт отдельного refresh.
-- **Статус решения:** запись о дополнительном refresh при возрасте 1 ms была
-  устаревшей документацией; production-код изменять не требуется.
-- **Проверка:** timer/compose tests проверяют наблюдаемую точность, не полагаясь на
-  refresh каждого вызова.
+- **Решение:** call-count cache удалён. Clock читает fresh monotonic timestamp
+  при регистрации timer и при каждом `ping()`; deadline следует контракту B73.
+- **Проверка:** timer/compose tests проверяют фактическое внешнее время; targeted
+  suite 22/22 и shuffled repeats 150/150 прошли.
 
 ### B7. `channel_router::cancel()` зацикливался
 

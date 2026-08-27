@@ -268,6 +268,14 @@ Timer futures route to the clock's hierarchical time wheel. I/O queries route to
 the current thread's `io_uring` controller. Channels and `cutex` maintain waiter
 queues. `ace::reattach()` can move a suspended coroutine to another runner.
 
+The thread-local clock samples `std::chrono::steady_clock` once when a timer is
+registered and once on each clock-service poll. A positive relative timeout is
+converted immediately to an absolute deadline and rounded up to the 1 ms wheel
+tick, so it cannot complete before its requested duration. `expire` preserves
+its absolute steady-clock deadline. Scheduler load can make either operation
+late; no hard upper bound on lateness is guaranteed. `clock::current_time()` is
+the most recently processed millisecond snapshot, not a fresh time query.
+
 ACE also overloads logical composition for futures:
 
 - `a or b` resumes when one operation wins.

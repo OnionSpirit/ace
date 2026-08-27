@@ -419,10 +419,15 @@ Oversize query завершает await-path с `-EOVERFLOW`, а direct kernel w
 ### Clock
 
 `include/ace/services/clock.h` реализует hierarchical time wheel. `clock` -
-thread-local service; `subscribe` вставляет timer record, `detach` отменяет его,
-а `ping` продвигает wheel и reattach-ит истёкшие tasks. Timer records хранят
-абсолютный deadline и `omni_node`. Cascade переносит записи с грубых уровней на
-мелкие; release budget ограничивает объём работы одного ping.
+thread-local service. Relative `subscribe` один раз читает `steady_clock`, сразу
+вычисляет абсолютный deadline с округлением вверх до 1 ms и напрямую вставляет
+timer record в wheel. Absolute `subscribe_at` сохраняет исходный deadline и тоже
+не использует промежуточную очередь. `clock::ping()` делает один свежий clock
+read для продвижения wheel; `detach` отменяет timer. Cascade переносит записи с
+грубых уровней на мелкие, а release budget ограничивает объём истечений одного
+ping. `_release_bound` остаётся логическим cursor wheel и не служит источником
+новых deadline. `current_time()` возвращает последний обработанный millisecond
+snapshot, а не свежий timestamp.
 
 `include/ace/futures/timeout.h` предоставляет relative `timeout` и absolute
 `expire`. Cancellation удаляет timer и возвращает waiter в runner.
@@ -570,7 +575,7 @@ yield_fixture.cpp
 
 Fixture classes и helper coroutine functions объявляются в
 `tests/environment.h`; каждый fixture source содержит относящиеся к нему
-`TEST`/`TEST_F`. Текущая source inventory - **314 Google Test**. Meson discover
+`TEST`/`TEST_F`. Текущая source inventory - **318 Google Test**. Meson discover
 mode регистрирует каждый GTest отдельным процессом с точным `--gtest_filter`.
 
 Помимо source GTests, стандартная конфигурация регистрирует tooling tests:
@@ -585,10 +590,12 @@ mode регистрирует каждый GTest отдельным процес
 
 ### Текущий результат
 
-- Clang 22 + ASan: targeted B29/B38/B68 checks прошли 40 shuffled executions;
+- Clang 22 + ASan: timer/runner regressions для direct-registration clock прошли 10 shuffled
+  повторов (150/150), targeted B29/B38/B68 checks прошли 40 shuffled executions;
   все `io_entity_fixture` проходят 28/28 одним host-процессом с доступным
   `io_uring`; migration regression проходит 20/20 повторов. Full host binary
-  не показывает LSan leaks, но остаётся известный timing failure B34.
+  не показывает LSan leaks; прежний timing failure B34 закрыт внешними
+  steady-clock assertions и повторными прогонами.
   Официальный host Meson suite проходит 312/312, включая LSan capability и
   discovery; под ptrace LSan capability корректно отмечается SKIP.
 - GCC 16 + ASan+UBSan и GCC 16 + TSan: B29, B68, launcher и discovery прошли

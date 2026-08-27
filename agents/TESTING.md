@@ -3,8 +3,8 @@
 Цель: 95-100% покрытия кодовой базы + проверка всех механик и их взаимодействий.
 
 > **Статус:** GCC 16 coverage union от 2026-08-23 покрывает **2262/2398 =
-> 94.33%** уникальных исполняемых строк `include/ace/**`. После B13 текущая
-> default-конфигурация регистрирует 318 ACE Meson-тестов: 314 GTests, две
+> 94.33%** уникальных исполняемых строк `include/ace/**`. После B73 текущая
+> default-конфигурация регистрирует 322 ACE Meson-теста: 318 GTests, две
 > Python unit checks, discovery consistency и LSan capability. B29/B38/B66/B68
 > regressions проходят; successful-I/O tests всё ещё требуют доступного
 > `io_uring` и не становятся fallback tests.
@@ -188,12 +188,14 @@ meson test -C build-cov
 --gtest_shuffle --gtest_random_seed=230823 --gtest_repeat=3
 ```
 
-GoogleTest автоматически увеличивал seed между итерациями. Прогон **не прошёл
-стабильно**: в одной из трёх итераций `timer_fixture.do_or_await_test` измерил
-98 ms и нарушил `EXPECT_GE(..., 100 ms)`; две другие итерации прошли. Эта
-нестабильность зарегистрирована как B34 и по прямому указанию пользователя в
-рамках данной работы не исправлялась. Исключение B29 не устраняет остаточные
-пробелы review B32/B33 и transition-move риски B30/B31.
+GoogleTest автоматически увеличивал seed между итерациями. Исторически один из
+трёх прогонов измерял 98 ms в `timer_fixture.do_or_await_test` (B34). После
+перехода clock на fresh registration timestamp и внешние `steady_clock`
+assertions целевой набор из 15 timer/runner/cancellation tests прошёл 10
+shuffled повторов, **150/150**, seeds 82821..82830. Это закрывает
+преждевременное completion B34;
+исключение B29 по-прежнему не устраняет остаточные пробелы review B32/B33 и
+transition-move риски B30/B31.
 
 ### Regression coverage B15-B22
 
@@ -657,7 +659,11 @@ GoogleTest автоматически увеличивал seed между ит�
 
 | # | Тест | Что проверяет | Статус |
 |---|------|--------------|--------|
-| CL1-CL18 | Все тесты clock | ⬜ (timeout тесты покрывают базовый сценарий) |
+| CL1 | `timeout_uses_registration_timestamp` | Блокировка до subscribe не сокращает новый timeout | ✅ |
+| CL2 | `timeout_while_release_budget_is_exhausted` | Отстающий release cursor не сокращает новый timeout | ✅ |
+| CL3 | `timeout_positive_submillisecond_never_completes_early` | Positive sub-ms округляется вверх | ✅ |
+| CL4 | `expire_past_deadline_beats_new_relative_timeout` | Absolute deadline сохраняется до routing | ✅ |
+| CL5-CL18 | Остальные прямые тесты wheel/cascade/budget | ⬜ |
 
 ---
 
@@ -669,13 +675,16 @@ GoogleTest автоматически увеличивал seed между ит�
 |---|------|--------------|--------|
 | T1 | `timeout_zero` | timeout(0ms) → почти мгновенное завершение | ✅ |
 | T2 | `timeout_negative` | Отрицательный timeout → поведение | ⬜ |
-| T3 | `expire_past` | expire(время в прошлом) → мгновенное завершение | ⬜ |
-| T4 | `expire_future` | expire(время в будущем) → задержка | ⬜ |
+| T3 | `expire_past_deadline_beats_new_relative_timeout` | Просроченный absolute expire выигрывает у нового relative timeout | ✅ |
+| T4 | `do_expire_on_runner_test` | Future expire просыпается не раньше каждого deadline | ✅ |
 | T5 | `timeout_cancel_before_clock` | cancel до того как clock обработал | ⬜ |
 | T6 | `timeout_cancel_after_clock` | cancel после того как таймер истёк | ⬜ |
 | T7 | `timeout_router_cancel_reattach` | cancel() возвращает ноду в runner | ⬜ |
 | T8 | `timeout_multiple_concurrent` | 20 одновременных таймеров → все завершаются | ✅ |
 | T9 | `timeout_short` | timeout(10ms) → допустимая погрешность | ✅ (добавлен) |
+| T10 | `timeout_uses_registration_timestamp` | Блокировка до регистрации не сокращает timeout | ✅ |
+| T11 | `timeout_positive_submillisecond_never_completes_early` | 500 us timeout не становится immediate | ✅ |
+| T12 | `timeout_while_release_budget_is_exhausted` | Новый timeout точен при backlog > release budget | ✅ |
 
 ---
 
@@ -1022,13 +1031,13 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/socket_echo_fixture.cpp` | `socket_echo_fixture` | 2 |
 | `tests/spawn_extra_fixture.cpp` | `spawn_extra_fixture` | 8 |
 | `tests/spawn_fixture.cpp` | `spawn_fixture` | 10 |
-| `tests/timer_fixture.cpp` | `timer_fixture` | 9 |
+| `tests/timer_fixture.cpp` | `timer_fixture` | 13 |
 | `tests/yield_fixture.cpp` | `yield_fixture` | 8 |
 | `tests/nukes_alignment_fixture.cpp` | `nukes_alignment_fixture` | 5 |
-| **Итого: 35 файлов** | | **314** |
+| **Итого: 35 файлов** | | **318** |
 
-Default Meson configuration (`ace_entry=false`) регистрирует **318 ACE** tests:
-314 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
+Default Meson configuration (`ace_entry=false`) регистрирует **322 ACE** tests:
+318 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
 `ace_tests.discovery_consistency` и `ace_tests.lsan_capability`. Последний
 становится Meson SKIP при недоступном под ptrace LSan; остальные checks выполняются
 с `detect_leaks=0` только в auto mode. `ace_entry=true` добавляет fallback test.
@@ -1036,11 +1045,11 @@ Default Meson configuration (`ace_entry=false`) регистрирует **318 A
 Clang 22 + ASan targeted B29/B38/B68 tests прошли 40 shuffled executions.
 Host ASan+LSan: `io_entity_fixture` проходит 28/28 одним процессом без leaks;
 `connection_link_read_preserves_runner_after_migration` проходит 20/20 повторов.
-Single-process ASan+LSan прогон проходит 307/307 при исключении известного B34
-и не сообщает leaks. В предшествующем полном прогоне B34 воспроизвёлся как
-98 ms вместо 100 ms; остальные tests прошли.
-Официальный host `meson test -C build --suite ace` проходит 312/312: Meson
-process isolation не воспроизвёл B34, а LSan capability и discovery green.
+Исторический single-process ASan+LSan прогон проходил 307/307 при исключении B34
+и не сообщал leaks. B34 закрыт direct-registration regressions и 10 shuffled повторами;
+новый полный ASan+LSan прогон в этой работе не выполнялся.
+Предшествующий host `meson test -C build --suite ace` проходил 312/312: Meson
+process isolation не воспроизводил B34, а LSan capability и discovery были green.
 GCC 16 ASan+UBSan и TSan clean configurations прошли по 6 targeted launcher,
 discovery, B29 и B68 tests. Full `--suite ace` в этом sandbox закономерно имеет
 successful-I/O failures с `-EPERM`; B38 crash не воспроизводится.

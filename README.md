@@ -39,7 +39,12 @@ flowchart TB
 ```
 
 The dispatcher owns one runner per configured thread. Runner 0 executes on the
-thread that calls `ace::run()`; additional runners use worker threads. Suspended
+thread that calls `ace::run()`; additional runners use persistent worker threads.
+Automatic `schedule()` uses bounded load-aware sampling, while an explicit
+runner target bypasses balancing. `schedule()` is safe for concurrent external
+producers, including producers that exit before the queued task completes. Work
+published while an active `run()` still has runnable work is included in that run;
+publication after quiescence is processed by the next `run()`. Suspended
 coroutines are routed to a timer, synchronization primitive, another runner, or
 an I/O service and are reattached when they can continue.
 
@@ -127,8 +132,10 @@ int main() {
 }
 ```
 
-`ace::run()` blocks while the dispatcher processes scheduled work. The default
-runner count is one. Configure more runners before scheduling work:
+`ace::run()` blocks while the dispatcher processes scheduled work. Concurrent
+`run()` calls are rejected. The default runner count is one; `reload()` rejects
+zero runners and active/pending work transactionally. Configure more runners
+before scheduling work:
 
 ```cpp
 int main() {

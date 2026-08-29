@@ -26,6 +26,7 @@
 
 #include <concepts>
 #include <coroutine>
+#include <limits>
 #include <type_traits>
 #include <optional>
 
@@ -430,8 +431,11 @@ namespace ace::core::traits {
          * without a separate heap allocation.
          * @param mem_size  Compiler-requested coroutine frame size.
          * @return Pointer to the coroutine frame area after the control block.
+         * @throws std::bad_alloc when the size overflows or arena allocation fails.
          */
-        void* operator new(size_t mem_size) noexcept {
+        void* operator new(size_t mem_size) {
+            if (mem_size > std::numeric_limits<size_t>::max() - control_block_size)
+                throw std::bad_alloc {};
             const auto frame_size = mem_size + control_block_size;
             const auto ptr = static_cast<uint8_t*>(arena::get_instance().allocate(frame_size));
             void* mem_ptr = ptr + control_block_size;

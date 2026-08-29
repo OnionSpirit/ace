@@ -336,8 +336,9 @@ public:                                                                         
              * @brief Stores the awaiting task node for later re-attachment.
              * @param node Task node of the suspended coroutine.
              */
-            void redirect(omni_node node) override {
+            bool redirect(omni_node node) override {
                 _query->_waiter = node;
+                return true;
             }
 
             /**

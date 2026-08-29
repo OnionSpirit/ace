@@ -1,4 +1,6 @@
 #include <iostream>
+#include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -18,6 +20,22 @@ struct queue_fixture : ::testing::Test {
     tool::slab_mempool<test_payload> _mempool {};
     tool::queue<test_payload> _queue {_mempool};
 };
+
+struct throwing_payload {
+    static inline bool throw_on_copy = false;
+    int value {};
+
+    explicit throwing_payload(const int input = 0) noexcept : value(input) {}
+    throwing_payload(const throwing_payload& other) : value(other.value) {
+        if (throw_on_copy)
+            throw std::runtime_error {"copy failure"};
+    }
+    throwing_payload(throwing_payload&&) noexcept = default;
+    ~throwing_payload() noexcept = default;
+};
+
+static_assert(not noexcept(std::declval<tool::queue<throwing_payload>&>().enqueue(
+    std::declval<const throwing_payload&>())));
 
 // Verifies that a fully returned slab is reused from its original head node.
 TEST_F(queue_fixture, slab_mempool_alloc_free) {
@@ -148,4 +166,19 @@ TEST_F(queue_fixture, queue_order) {
     for (int i = 0; i < 10; ++i)
         EXPECT_EQ(i * 10, _queue.dequeue().value);
     EXPECT_TRUE(_queue.empty());
+}
+
+// Verifies that a throwing payload constructor returns its node and leaves the queue usable.
+TEST_F(queue_fixture, throwing_payload_rolls_back_enqueue) {
+    tool::slab_mempool<throwing_payload> pool;
+    tool::queue<throwing_payload> queue(pool);
+    const throwing_payload rejected {7};
+    throwing_payload::throw_on_copy = true;
+    EXPECT_THROW(queue.enqueue(rejected), std::runtime_error);
+    EXPECT_TRUE(queue.empty());
+
+    throwing_payload::throw_on_copy = false;
+    queue.enqueue(throwing_payload {9});
+    EXPECT_EQ(9, queue.dequeue().value);
+    EXPECT_TRUE(queue.empty());
 }

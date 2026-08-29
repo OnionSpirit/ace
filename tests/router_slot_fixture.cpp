@@ -16,7 +16,7 @@ struct router_slot_fixture : ::testing::Test {
 
         static void reset_counter() { alive_count = 0; }
 
-        void redirect(ace::omni_node) override {}
+        bool redirect(ace::omni_node) override { return true; }
         void cancel() override {}
     };
 

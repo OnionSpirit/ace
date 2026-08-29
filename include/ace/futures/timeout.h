@@ -180,11 +180,12 @@ struct ACE_FUTURE_TIMEOUT_SPACE timeout_router : runner_router {
      * @brief Subscribes the suspended task to the clock service.
      * @param node Task node to schedule for wake-up.
      */
-    void redirect(const omni_node node) override {
+    bool redirect(const omni_node node) override {
         if (_timeout->_absolute)
             _injected_node = services::clock::subscribe_at(node, _timeout->_expires);
         else
             _injected_node = services::clock::subscribe(node, _timeout->_duration);
+        return true;
     }
 
     /**

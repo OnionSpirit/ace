@@ -317,7 +317,10 @@ namespace ace::core {
         explicit join_handler_router(const control_block_handle& handle) : _handle{handle} {}
 
         /// @brief Forward the waiting node to the target's control block.
-        void redirect(const omni_node node) override { _handle.forward(node); }
+        bool redirect(const omni_node node) override {
+            _handle.forward(node);
+            return true;
+        }
 
         /// @brief No-op — cancellation is handled by the control block.
         void cancel() override {  }
@@ -343,7 +346,10 @@ namespace ace::core {
         explicit ping_router(const control_block_handle& handle) : _handle{handle} {}
 
         /// @brief Register the waiting node as the automaton's yield waiter.
-        void redirect(const omni_node node) override { _handle.set_yield_waiter(node); }
+        bool redirect(const omni_node node) override {
+            _handle.set_yield_waiter(node);
+            return true;
+        }
 
         /// @brief Drop the yield waiter registration.
         void cancel() override { _handle.cancel_yield(); }
@@ -369,7 +375,10 @@ namespace ace::core {
         explicit join_router(const control_block_handle& handle) : _handle{handle} {}
 
         /// @brief Register the waiting node as the automaton's yield waiter.
-        void redirect(const omni_node node) override { _handle.set_yield_waiter(node); }
+        bool redirect(const omni_node node) override {
+            _handle.set_yield_waiter(node);
+            return true;
+        }
 
         /// @brief Drop the yield waiter registration.
         void cancel() override { _handle.cancel_yield(); }

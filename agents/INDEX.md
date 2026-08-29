@@ -245,6 +245,12 @@ ace::task parent() {
 SPSC, MPSC и MPMC. Основные операции: synchronous `push`, awaitable `pull`,
 `pending_push` и stream-like `operator<<`/`operator>>`. Короткие aliases `local`,
 `bridge`, `funnel` и `bus` зависят от include-order правила, описанного ниже.
+Dynamic queues используют queue-local reclamation: MPSC producers синхронизируют
+tail handoff через `acq_rel`, MPMC сериализует только competing consumer
+head/reclamation transitions, а freelist metadata защищена отдельным per-instance
+gate. Channel waiter gate атомарно связывает waiter registration с publication
+data; post-registration recheck исключает lost wakeup. Глобального lock между
+разными channels нет.
 
 ### Cutex
 
@@ -361,16 +367,37 @@ include order, описанном в ограничениях.
 ### Dispatcher и runner
 
 `dispatcher` из `include/ace/core/dispatcher.h` владеет runners. Главный поток
-исполняет первый runner внутри `run()`, остальные работают в `std::jthread`.
-Round-robin выбирает destination для новых задач.
+исполняет первый runner внутри `run()`, остальные обслуживаются persistent
+`std::jthread`. Автоматический O(1) power-of-two-choices selector сравнивает
+rotating anchor и случайного peer по атомарному runnable load.
+
+| Операция | Сложность | Примечание |
+|----------|-----------|------------|
+| automatic `schedule` selection | O(1) worst-case | два relaxed load и thread-local xorshift/cursor |
+| runnable load publish/release | O(1) worst-case | atomic RMW; activity notify только на 0↔1 transition |
+| local attach/reattach | O(1) amortized | local queue, без межrunner contention |
+| external attach/reattach | O(1) amortized | один target MPSC; Nukes freelist transitions сериализованы per-runner |
+| runner source fairness | O(1) worst-case | проверка alternate source раз в 16 pulls; bounded starvation |
+| worker wake/sleep | O(1) | atomic epoch wait/notify, bounded polling backoff |
+| `empty()`/quiescence scan | O(N) | control path, не selection/update hot path |
+| `reload()` и first worker start | O(N) | cold path по числу runner-ов |
+
+`schedule()` безопасен для concurrent external producers. Если publication
+происходит пока активный `run()` ещё удерживается runnable work, задача входит в
+тот же цикл; после уже наблюдённой quiescence она ожидает следующего `run()`.
+Acquire-проверка quiescence публикует вызывающему thread все записи завершённых
+tasks до возврата из `run()`. Поскольку `empty()` последовательно читает N
+runners, dispatcher принимает этот snapshot только при неизменившемся
+`activity_epoch` до и после scan; cross-runner handoff поэтому не может скрыть
+работу между уже просмотренным destination и ещё не просмотренным source.
 
 `runner` из `include/ace/core/runner.h` содержит:
 
 - local `reg_queue` для своих задач;
 - MPSC insert queue для cross-thread задач;
 - low-priority service queue для polling tasks;
-- `attach`/`attach_front`, `reattach`/`reattach_front`, `yank`, `run` и load
-  velocity;
+- `attach`/`attach_front`, `reattach`/`reattach_front`, `yank`, `run` и
+  атомарный runnable load;
 - carrier path для typed async и automaton.
 
 ### Routing
@@ -387,7 +414,8 @@ ownership steal, `release`, `reset` и `get`. Размер задаётся
 
 `include/ace/core/signal.h` определяет `signal_handler`, `termination_signal`,
 `interruption_signal`, `sig_pipe_t` и `make_signal`. Service loop различает
-`e_shutdown`, `e_idle` и `e_break`.
+`e_shutdown`, `e_idle` и `e_break`. Редкий signal control path сериализует
+push/pop, поскольку pipe читают несколько service runner-ов и `reset_signal()`.
 
 ## io_uring и clock
 
@@ -397,7 +425,10 @@ ownership steal, `release`, `reset` и `get`. Размер задаётся
 каждого runner. Он готовит и отправляет socket, bind, connect, listen, accept,
 send/receive, read/write, open/close, cancel и nop operations через `io_uring`.
 Overflow SQEs буферизуются как `kernel_entity` и применяются после появления места
-в ring. `kernel_observer` принимает CQE и возвращает waiter его runner.
+в ring. Overflow branch не вызывает `io_uring_get_sqe()`: получение SQE само
+резервирует slot, поэтому свежий slot запрашивается только непосредственно перед
+подготовкой direct или deferred operation. `kernel_observer` принимает CQE и
+возвращает waiter его runner.
 
 `kernel_controller::available()` создаёт controller текущего потока при первом
 вызове, привязывает polling service к текущему runner и сообщает доступность
@@ -449,18 +480,25 @@ frames, I/O/iovec и framework containers. Малые chunks идут в
 `arena_allocator<T>` адаптирует arena к стандартным containers.
 
 Nukes dynamic queues используют отдельно настроенный
-`nukes_node_allocator<T>` поверх thread-safe process-lifetime
-`nukes_node_arena`. Он намеренно не является thread-local `arena`: static queue
-может быть уничтожена после teardown owner thread, поэтому её nodes должны
-оставаться валидны до завершения процесса.
+`nukes_node_allocator<T>` поверх process-wide new/delete backend
+`nukes_node_arena`. Он намеренно не является thread-local `arena`: каждый node
+освобождается независимо от создавшего thread, а static queue может безопасно
+выполнить teardown после завершения producer-а.
+
+`subprojects/nukes.wrap` закрепляет проверенный upstream commit, а
+`subprojects/packagefiles/nukes-b75.patch` содержит ACE-specific queue,
+freelist и batch corrections. Payload destruction/reconstruction выполняется
+вне freelist gate, поэтому re-entrant destructor не удерживает reclamation lock.
 
 Cross-thread release protocol:
 
-- pooled chunk возвращается owner thread через MPSC channel;
+- pooled chunk возвращается owner thread через intrusive atomic MPSC stack без
+  отдельной node allocation;
 - transient chunk освобождается сразу, а released bytes атомарно учитываются у
   owner;
 - owner корректирует accounting при drain;
-- runner threads должны завершиться до уничтожения owner storage.
+- каждый chunk удерживает lifetime reference; owner thread может завершиться,
+  а pool уничтожается последним foreign releaser после drain.
 
 Memory limit делится между runners. При breach arena либо использует transient
 fallback, либо бросает `std::bad_alloc` согласно `_breach_memory_limit`.
@@ -472,7 +510,6 @@ fallback, либо бросает `std::bad_alloc` согласно `_breach_mem
 | `include/ace/core/tools/queue.h` | `queue<T>`, `q_node<T>`, `slab_mempool<T>`. |
 | `include/ace/core/tools/omniptr.h` | Type-agnostic pointer `omniptr<T...>`. |
 | `include/ace/core/tools/id_alloc.h` | `id_allocator`, `async_id_allocator`. |
-| `include/ace/core/tools/moving_average.h` | Fixed-window moving average. |
 | `include/ace/core/tools/lifetime.h` | Debug lifetime tracer. |
 | `include/ace/core/tools/macro.h` | Cache-line, router storage, diagnostics, `is_debug` и inline macros. |
 
@@ -562,7 +599,7 @@ dispatcher_fixture.cpp         fs_fixture.cpp
 future_traits_fixture.cpp      get_runner_fixture.cpp
 id_alloc_fixture.cpp           io_any_fixture.cpp
 io_buffer_fixture.cpp          io_entity_fixture.cpp
-io_hanged_fixture.cpp          moving_average_fixture.cpp
+io_hanged_fixture.cpp
 nukes_alignment_fixture.cpp
 omniptr_fixture.cpp            promise_traits_fixture.cpp
 queue_fixture.cpp              router_slot_fixture.cpp

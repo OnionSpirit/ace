@@ -270,18 +270,7 @@ namespace ace::core {
          * @details Drains the @c _waiters queue and re-attaches each async to
          * its own runner pool.  Called automatically from the destructor.
          */
-        void release_waiters() {
-            if constexpr (is_spawnable_rule<promise_rule_t>) {
-                if (_coroutine.promise()._waiters) {
-                    omni_node waiter = _coroutine.promise()._waiters->pop_node();
-                    while (waiter.operator bool() and waiter->_data.is_exist()) {
-                        waiter->_data.release_future();
-                        waiter->_data._coroutine.promise()._runner.as<runner_pool_t>()->push_node(waiter);
-                        waiter = _coroutine.promise()._waiters->pop_node();
-                    }
-                }
-            }
-        }
+        void release_waiters();
 
         /**
          * @brief Allocate a debug trace ID for this async.
@@ -588,12 +577,6 @@ namespace ace::core {
              *         promise.
              */
             auto get_return_object() noexcept { return async{coroutine_t::from_promise(*this)}; }
-
-            /**
-             * @brief C++20 protocol — fallback when allocation fails.
-             * @return A default-constructed (null) @c async.
-             */
-            static auto get_return_object_on_allocation_failure() { return async(nullptr); }
 
             /**
              * @brief Lazily initialise the control block for external observation.

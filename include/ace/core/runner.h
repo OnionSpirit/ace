@@ -2,15 +2,17 @@
  * @file runner.h
  * @brief Per-thread task runner — the core execution unit of the ACE runtime.
  *
- * @details Each @c runner owns a lock-free MPSC task queue (@c _pool), an
- * inter-thread insertion queue (@c _insert_pool), and a service
+ * @details Each @c runner owns a single-thread local task queue (@c _pool), an
+ * MPSC inter-thread insertion queue (@c _insert_pool), and a service
  * pool (@c _service_pool).  The dispatcher assigns tasks to runners via
  * @c attach() / @c attach_front().
  *
  * ### Execution loop
  *
- * @c run() processes up to 128 tasks per call (the @c yank_limit).  Every
- * 16 tasks it drains the @c _insert_pool and processes service tasks.
+ * @c run() processes up to 128 tasks per call (the @c yank_limit). Every
+ * 16 completed pulls it gives a non-empty alternate task source a turn and
+ * processes service tasks, bounding starvation without switching after the
+ * first item of a newly selected FIFO source.
  *
  * ### Task lifecycle inside a runner
  *
@@ -26,11 +28,9 @@
 #ifndef ACE_RUNNER_H
 #define ACE_RUNNER_H
 
-#include <queue>
-#include <chrono>
+#include <atomic>
 #include <nukes/dynamic/mpsc_queue.h>
 
-#include "ace/core/tools/moving_average.h"
 #include "ace/core/tools/macro.h"
 #include "ace/core/async.h"
 
@@ -41,12 +41,13 @@ namespace ace::core {
      * @brief Per-thread coroutine execution manager.
      *
      * @details Owns three task queues:
-     *  - @c _pool — lock-free MPSC queue for local tasks (fast path).
-     *  - @c _insert_pool — lock-free MPSC queue for cross-thread inserts.
+     *  - @c _pool — single-thread queue for local tasks (fast path).
+     *  - @c _insert_pool — MPSC queue for cross-thread inserts. Nukes owns the
+     *    queue-local reclamation protocol, so producers need no runner-wide gate.
      *  - @c _service_pool — queue for low-priority polling tasks (service routines).
      *
-     * Tracks @c _tasks_amount for velocity calculation (used by the balancer
-     * for weighted task distribution).
+     * Publishes the number of runnable or currently executing nodes through
+     * @c load(). Suspended nodes owned by an external router are not counted.
      */
     struct runner {
 
@@ -69,17 +70,18 @@ namespace ace::core {
         ACE_CACHE_LINE(0)
 
         mutable runner_pool_t           _pool               {}; ///< Pool of the assigned tasks
-        tools::moving_average           _quants             {}; ///< Average amount of the time quants for the run operation call
+        runner_pool_t                   _service_pool       {}; ///< Pool of low-priority polling tasks (service routines).
 
         ACE_CACHE_LINE(1)
 
-        runner_pool_t                   _service_pool       {}; ///< Pool of low-priority polling tasks (service routines).
-        long                            _tasks_amount       {}; ///< Number of tasks currently attached to this runner.
-        pull_source                     _pull_source        { pull_source::e_local_pool }; ///< Pool selected for the next fetch.
+        mutable insert_pool_t           _insert_pool        {}; ///< Pool for the interthread insertion
 
-        ACE_CACHE_LINE(2)
+        ACE_CACHE_LINE(6)
 
-        mutable insert_pool_t           _insert_pool   {}; ///< Pool for the interthread insertion
+        std::atomic<std::size_t>         _runnable_load  {};                             ///< Runnable and currently executing nodes.
+        std::atomic<std::uint64_t>       _wake_epoch     {};                             ///< Changes whenever work is published to this runner.
+        std::atomic<std::uint64_t>*      _activity_epoch {};                             ///< Dispatcher transition notification; null for standalone runners.
+        pull_source                      _pull_source    { pull_source::e_local_pool };  ///< Pool selected for the next fetch.
 
         static thread_local omni_runner current_runner_ptr; ///< Runner active on the current thread (set inside @c run()).
 
@@ -144,24 +146,50 @@ namespace ace::core {
         static void reattach_front(omni_node&& node, const omni_runner local_runner_ptr = current_runner_ptr);
 
         /**
-         * @details Calculates runner's velocity
-         * @return Velocity value
+         * @brief Returns the published scheduling load.
+         * @details Counts nodes that are queued or currently executing. Nodes
+         * suspended in an external router are excluded until reattachment.
+         * @return Current runnable load.
          */
-        double velocity() const noexcept;
+        [[nodiscard]] std::size_t load() const noexcept {
+            return _runnable_load.load(std::memory_order_relaxed);
+        }
 
         /**
-         * @details Clears runner's velocity
+         * @brief Checks quiescence with acquire semantics.
+         * @details Observing zero synchronizes with the final runnable release,
+         * making task writes visible before @c run() returns or reload proceeds.
          */
-        void clear_velocity() noexcept { _quants.clear(); }
+        [[nodiscard]] bool quiescent() const noexcept {
+            return _runnable_load.load(std::memory_order_acquire) == 0;
+        }
 
         /**
-         * @details Calculates runner's velocity
-         * @param interval Interval to add to time spent moving average
-         * @return Velocity value
+         * @brief Connects this runner to the dispatcher's activity epoch.
+         * @param activity_epoch Epoch notified on idle-to-active and active-to-idle transitions.
+         * @warning The pointed-to atomic must outlive this runner.
          */
-        template<typename Rep, typename Period>
-        double upgrade_velocity(std::chrono::duration<Rep, Period> interval) noexcept {
-            return static_cast<double>(_tasks_amount) / static_cast<double>(_quants.add(interval.count()));
+        void bind_activity_epoch(std::atomic<std::uint64_t>* activity_epoch) noexcept {
+            _activity_epoch = activity_epoch;
+        }
+
+        /// @brief Returns the current per-runner wake sequence.
+        [[nodiscard]] std::uint64_t wake_epoch() const noexcept {
+            return _wake_epoch.load(std::memory_order_acquire);
+        }
+
+        /**
+         * @brief Blocks until this runner's wake sequence changes.
+         * @param observed Sequence value previously returned by @c wake_epoch().
+         */
+        void wait_for_work(const std::uint64_t observed) const noexcept {
+            _wake_epoch.wait(observed, std::memory_order_acquire);
+        }
+
+        /// @brief Wakes a worker waiting for this runner.
+        void notify_worker() noexcept {
+            _wake_epoch.fetch_add(1, std::memory_order_release);
+            _wake_epoch.notify_one();
         }
 
         /**
@@ -225,6 +253,24 @@ namespace ace::core {
         omni_node fetch_task_node();
 
     private:
+
+        /// @brief Publishes one newly runnable node before queue insertion.
+        void acquire_runnable() noexcept;
+
+        /// @brief Removes one node after it leaves the runnable state.
+        void release_runnable() noexcept;
+
+        /// @brief Captures one insertion node without racing the SPMC freelist consumer path.
+        [[nodiscard]] insert_node_ptr capture_insert_node() noexcept;
+
+        /// @brief Pops one insertion node while excluding concurrent freelist capture/release.
+        [[nodiscard]] insert_node_ptr pop_insert_node() noexcept;
+
+        /// @brief Publishes one node while excluding other insertion-queue transitions.
+        [[nodiscard]] bool push_insert_node(insert_node_ptr node) noexcept;
+
+        /// @brief Returns one completed node to the insertion freelist safely.
+        void release_insert_node(insert_node_ptr node) noexcept;
 
         /**
          * @brief Carrier wrapper for valued tasks: resumes the inner coroutine
@@ -368,37 +414,97 @@ namespace ace::core {
 
     inline runner::runner(runner &&t) noexcept {
         this->_pool = std::move(t._pool);
-        this->_quants = std::move(t._quants);
+        this->_service_pool = std::move(t._service_pool);
         this->_insert_pool = std::move(t._insert_pool);
-        this->_tasks_amount = t._tasks_amount;
-        t._tasks_amount = 0;
+        this->_pull_source = t._pull_source;
+        this->_runnable_load.store(
+            t._runnable_load.exchange(0, std::memory_order_relaxed),
+            std::memory_order_relaxed);
+        this->_wake_epoch.store(
+            t._wake_epoch.load(std::memory_order_relaxed),
+            std::memory_order_relaxed);
+        this->_activity_epoch = t._activity_epoch;
+        t._activity_epoch = nullptr;
     };
 
     inline runner& runner::operator=(runner &&t) noexcept {
         this->_pool = std::move(t._pool);
-        this->_quants = std::move(t._quants);
+        this->_service_pool = std::move(t._service_pool);
         this->_insert_pool = std::move(t._insert_pool);
-        this->_tasks_amount = t._tasks_amount;
-        t._tasks_amount = 0;
+        this->_pull_source = t._pull_source;
+        this->_runnable_load.store(
+            t._runnable_load.exchange(0, std::memory_order_relaxed),
+            std::memory_order_relaxed);
+        this->_wake_epoch.store(
+            t._wake_epoch.load(std::memory_order_relaxed),
+            std::memory_order_relaxed);
+        this->_activity_epoch = t._activity_epoch;
+        t._activity_epoch = nullptr;
         return *this;
     };
+
+
+    inline void runner::acquire_runnable() noexcept {
+        const std::size_t previous = _runnable_load.fetch_add(1, std::memory_order_seq_cst);
+        if (previous == 0) {
+            notify_worker();
+            if (_activity_epoch) {
+                _activity_epoch->fetch_add(1, std::memory_order_seq_cst);
+                _activity_epoch->notify_all();
+            }
+        }
+    }
+
+
+    inline void runner::release_runnable() noexcept {
+        const std::size_t previous = _runnable_load.fetch_sub(1, std::memory_order_seq_cst);
+        if (previous == 1 and _activity_epoch) {
+            _activity_epoch->fetch_add(1, std::memory_order_seq_cst);
+            _activity_epoch->notify_all();
+        }
+    }
+
+
+    inline runner::insert_node_ptr runner::capture_insert_node() noexcept {
+        insert_node_ptr node = nullptr;
+        const bool captured = _insert_pool._mempool.capture(node);
+        return captured ? node : nullptr;
+    }
+
+
+    inline runner::insert_node_ptr runner::pop_insert_node() noexcept {
+        return _insert_pool.pop_node();
+    }
+
+
+    inline bool runner::push_insert_node(insert_node_ptr node) noexcept {
+        return _insert_pool.push_node(node);
+    }
+
+
+    inline void runner::release_insert_node(insert_node_ptr node) noexcept {
+        _insert_pool.release_node(node);
+    }
 
 
     inline void runner::reattach_impl(omni_node& node, const omni_runner local_runner_ptr) {
         using namespace nukes::detail::nodes;
         if (not node or not node->_data.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach' idle context" };
-        const omni_runner target_runner_ptr = node->_data._coroutine.promise()._runner;
-        if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
+        omni_runner target_runner_ptr = node->_data._coroutine.promise()._runner;
+        if (not target_runner_ptr) [[unlikely]]
             throw std::logic_error {
                 "'reattach' operation can't be applied to 'ace::core::async<...>'s "
                 "which are not running at the 'ace::core::runner'"
             };
+        target_runner_ptr.as<runner>()->acquire_runnable();
         node->_data.release_router();
         if (local_runner_ptr == target_runner_ptr)
             local_runner_ptr->_pool.push_node(node);
-        else
-            target_runner_ptr->_insert_pool.push_node(node);
+        else if (not target_runner_ptr->push_insert_node(node)) {
+            target_runner_ptr.as<runner>()->release_runnable();
+            throw std::runtime_error { "failed to publish a reattached task" };
+        }
     }
 
 
@@ -406,19 +512,22 @@ namespace ace::core {
         using namespace nukes::detail::nodes;
         if (not node or not node->_data.is_exist()) [[unlikely]]
             throw std::runtime_error { "trying to 'reattach_front' idle context" };
-        const omni_runner target_runner_ptr = node->_data._coroutine.promise()._runner;
-        if (not target_runner_ptr or not local_runner_ptr) [[unlikely]]
+        omni_runner target_runner_ptr = node->_data._coroutine.promise()._runner;
+        if (not target_runner_ptr) [[unlikely]]
             throw std::logic_error {
                 "'reattach_front' operation can't be applied to 'ace::core::async<...>'s "
                 "which are not running at the 'ace::core::runner'"
             };
+        target_runner_ptr.as<runner>()->acquire_runnable();
         node->_data.release_router();
         if (local_runner_ptr == target_runner_ptr) {
             node->_data.prefetch();
             local_runner_ptr->_pool.push_node_front(node);
             local_runner_ptr->_pull_source = pull_source::e_local_pool;
-        } else
-            target_runner_ptr->_insert_pool.push_node(node);
+        } else if (not target_runner_ptr->push_insert_node(node)) {
+            target_runner_ptr.as<runner>()->release_runnable();
+            throw std::runtime_error { "failed to publish a reattached task" };
+        }
     }
 
 
@@ -441,39 +550,51 @@ namespace ace::core {
     }
 
 
+    template<typename returnT, template <typename> typename promise_rule_t>
+    requires is_rule<promise_rule_t>
+    void async<returnT, promise_rule_t>::release_waiters() {
+        if constexpr (is_spawnable_rule<promise_rule_t>) {
+            if (_coroutine.promise()._waiters) {
+                omni_node waiter = _coroutine.promise()._waiters->pop_node();
+                while (waiter.operator bool() and waiter->_data.is_exist()) {
+                    waiter->_data.release_future();
+                    runner::reattach(waiter);
+                    waiter = _coroutine.promise()._waiters->pop_node();
+                }
+            }
+        }
+    }
+
+
     template <typename async_return_t, template <typename> typename promise_rule_t>
         requires is_spawnable_rule<promise_rule_t>
     void runner::attach(async<async_return_t, promise_rule_t> &&new_task) {
-        ++_tasks_amount;
         new_task._coroutine.promise()._runner = &_pool;
-        if (insert_node_ptr new_node; _insert_pool._mempool.capture(new_node)) {
+        if (insert_node_ptr new_node = capture_insert_node()) {
             if constexpr (std::is_void_v<async_return_t>)
                 new_node->_data = std::move(new_task);
             else
                 new_node->_data = carrier(std::move(new_task));
-            reattach(new_node, this);
+            reattach(new_node, current_runner_ptr);
+            return;
         }
+        throw std::bad_alloc {};
     }
 
 
     template <typename async_return_t, template <typename> typename promise_rule_t>
         requires is_spawnable_rule<promise_rule_t>
     void runner::attach_front(async<async_return_t, promise_rule_t> &&new_task) {
-        ++_tasks_amount;
         new_task._coroutine.promise()._runner = &_pool;
-        if (pool_node_ptr new_node; _pool._mempool.capture(new_node)) {
+        if (insert_node_ptr new_node = capture_insert_node()) {
             if constexpr (std::is_void_v<async_return_t>)
                 new_node->_data = std::move(new_task);
             else
                 new_node->_data = carrier(std::move(new_task));
-            reattach_front(new_node, this);
+            reattach_front(new_node, current_runner_ptr);
+            return;
         }
-    }
-
-
-    inline double runner::velocity() const noexcept {
-        if (_quants.value() == 0) [[unlikely]] return 0.0;
-        return static_cast<double>(_tasks_amount) / static_cast<double>(_quants.value());
+        throw std::bad_alloc {};
     }
 
 
@@ -504,14 +625,20 @@ namespace ace::core {
 
         // NOTE: If task is idle, releasing its node.
         if (not is_resumable) {
-            _insert_pool.release_node(task_unit);
-            --_tasks_amount;
+            release_insert_node(task_unit);
+            release_runnable();
             return true;
         }
 
         // NOTE: Forwarding the async via passed router if needed
         if (task_unit->_data._coroutine.promise()._runner_router) [[likely]] {
-            task_unit->_data._coroutine.promise()._runner_router->redirect(task_unit);
+            const bool ownership_transferred =
+                task_unit->_data._coroutine.promise()._runner_router->redirect(task_unit);
+            release_runnable();
+            if (not ownership_transferred) {
+                task_unit->_data.release_router();
+                reattach(task_unit, current_runner_ptr);
+            }
             return true;
         }
 
@@ -548,14 +675,20 @@ namespace ace::core {
 
         // NOTE: If task is idle, releasing its node.
         if (not is_resumable) {
-            _insert_pool.release_node(service_unit);
-            --_tasks_amount;
+            release_insert_node(service_unit);
+            release_runnable();
             return true;
         }
 
         // NOTE: Forwarding the async via passed router if needed
         if (service_unit->_data._coroutine.promise()._runner_router) [[likely]] {
-            service_unit->_data._coroutine.promise()._runner_router->redirect(service_unit);
+            const bool ownership_transferred =
+                service_unit->_data._coroutine.promise()._runner_router->redirect(service_unit);
+            release_runnable();
+            if (not ownership_transferred) {
+                service_unit->_data.release_router();
+                reattach(service_unit, current_runner_ptr);
+            }
             return true;
         }
 
@@ -569,9 +702,11 @@ namespace ace::core {
         int i = 0;
         current_runner_ptr = this;
         for (constexpr int yank_limit = 128; i < yank_limit and yank(); ++i) {
-            if (i % 16 == 0) {
+            if (i % 16 == 15) {
                 yank_service();
-                // NOTE: Trying to switch between pools
+                // Bound starvation without abandoning the source after its
+                // first item. This lets an externally published FIFO batch
+                // reach the local queue before a just-suspended task reruns.
                 if (_pull_source == pull_source::e_local_pool and not _insert_pool.empty())
                     _pull_source = pull_source::e_interthread_pool;
                 else if (_pull_source == pull_source::e_interthread_pool and not _pool.empty())
@@ -594,7 +729,7 @@ namespace ace::core {
         }
         // NOTE: Trying to fetch from interthread pool
         if (_pull_source == pull_source::e_interthread_pool) {
-            task_unit = _insert_pool.pop_node();
+            task_unit = pop_insert_node();
             // NOTE: In case when cannot fetch then switching to local pool
             if (not task_unit)
                 _pull_source = pull_source::e_local_pool;

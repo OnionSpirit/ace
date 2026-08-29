@@ -4,7 +4,7 @@
 
 > **Статус:** GCC 16 coverage union от 2026-08-23 покрывает **2262/2398 =
 > 94.33%** уникальных исполняемых строк `include/ace/**`. После B73 текущая
-> default-конфигурация регистрирует 322 ACE Meson-теста: 318 GTests, две
+> default-конфигурация регистрирует 334 ACE Meson-теста: 330 GTests, две
 > Python unit checks, discovery consistency и LSan capability. B29/B38/B66/B68
 > regressions проходят; successful-I/O tests всё ещё требуют доступного
 > `io_uring` и не становятся fallback tests.
@@ -121,7 +121,6 @@ tests, отклоняет parameterized macros и дубликаты. Семь u
 | `signal` | 10/10 | 100% |
 | `id_alloc` | 12/12 | 100% |
 | `lifetime` | 11/11 | 100% |
-| `moving_average` | 34/34 | 100% |
 | `omniptr` | 27/27 | 100% |
 | `queue` | 95/100 | 95.00% |
 | `future` | 9/9 | 100% |
@@ -218,6 +217,8 @@ transition-move риски B30/B31.
 | B68 | `nukes_alignment_fixture.*`, `arena_fixture.nukes_node_allocator_uses_durable_arena_and_preserves_overalignment` | ✅ Three freelists preserve 1/8/16/32/64/128/256-byte node alignment and ACE config uses durable storage |
 | B70 | `io_entity_fixture.outcast_command_completion_releases_payload_before_pool_return` | ✅ Successful completion очищает payload перед `raw_release()`; full LSan clean |
 | B71 | `io_entity_fixture.connection_link_read_preserves_runner_after_migration` | ✅ Status preflight сохраняет thread-local service на current runner; 20/20 host repeats |
+| B76 | `base_fixture.kernelic_overflow_buffer_stress`, `context_fixture.do_runner_test` | ✅ 6000 deferred I/O completions без ghost SQE; bounded standalone runner полностью дренирует service work |
+| B77 | `cutex_fixture.cutex_race` | ✅ Activity-epoch validation не позволяет `run()` принять несогласованный snapshot при cross-runner handoff |
 | B54 | `io_entity_fixture.connection_link_stalled_read_keeps_runner_responsive_and_cancels`, `connection_link_read_preserves_partial_eof_and_error_results`, `connection_link_read_preserves_runner_after_migration` | ✅ 3/3 проходят на host с доступным io_uring |
 
 ---
@@ -269,18 +270,6 @@ transition-move риски B30/B31.
 | I2 | `id_alloc_unique` | Последовательные alloc() дают уникальные ID | ✅ |
 | I3 | `id_alloc_exhaust` | Исчерпание пула (если есть лимит) | ⬜ |
 | I4 | `async_id_allocator` | Синглтон + alloc/free работает | ✅ |
-
-#### `moving_average.h` — `moving_average_fixture`
-
-| # | Тест | Что проверяет | Статус |
-|---|------|--------------|--------|
-| M1 | `moving_average_basic` | add(val) → value() возвращает среднее | ✅ |
-| M2 | `moving_average_zero` | value() при отсутствии данных = 0 | ✅ |
-| M3 | `moving_average_window` | После 4+ значений окно скользит корректно | ✅ |
-| M4 | `moving_average_stability` | Постоянное значение → среднее = значение | ✅ |
-| M5 | `moving_average_clear` | clear() сбрасывает все значения | ✅ (добавлен) |
-| M6 | `moving_average_copy` | Копирование сохраняет состояние | ✅ (добавлен) |
-| M7 | `moving_average_move` | Move очищает источник | ✅ (добавлен) |
 
 #### `lifetime.h` — тесты в `omniptr_fixture`
 
@@ -452,14 +441,20 @@ transition-move риски B30/B31.
 | D5 | `reload_same` | reload() без изменений — без эффекта | ⬜ |
 | D6 | `empty_after_run` | Все раннеры idle → empty() = true | ✅ |
 | D7 | `empty_with_tasks` | Есть задачи → empty() = false | ⬜ |
-| D8 | `interrupt_signal` | interrupt() посылает e_break → не падает | ✅ |
-| D9 | `terminate_signal` | terminate() посылает e_shutdown → не падает | ✅ |
-| D10 | `reset_signal` | reset_signal() очищает signal_pipe (вызывается в TearDown) | ⬜ |
-| D11 | `round_robin_distribution` | Задачи распределяются равномерно по раннерам | ⬜ |
+| D8 | `interrupt_signal` | interrupt() публикует конкретный `interruption_signal` и только его | ✅ |
+| D9 | `terminate_signal` | terminate() публикует конкретный `termination_signal` и только его | ✅ |
+| D10 | `reset_signal_drains_all_pending_signals` | mixed batch дренируется полностью, повторный reset идемпотентен | ✅ |
+| D11 | `balanced_selection_uses_every_runner` | равный load распределяется по всем 4 runner-ам без index bias | ✅ |
 | D12 | `worker_round_lifecycle` | worker_round() обрабатывает задачи, спит при idle | ⬜ |
 | D13 | `config_fetch` | fetch_config() читает g_config._runners_amount | ⬜ |
 | D14 | `multi_runner_parallelism` | 4 раннера = задачи выполняются параллельно | ⬜ |
 | D15 | `multiple_schedule_run` | Последовательные schedule+run работают | ✅ (добавлен) |
+| D16 | `balanced_selection_scales_to_sixty_four_runners` | полный tie-cycle посещает все 64 runner-а | ✅ |
+| D17 | `selection_avoids_explicitly_overloaded_runner` | автоматический selector избегает runner с зарезервированной очередью | ✅ |
+| D18 | `concurrent_schedule_producers_preserve_every_task` | 4 external producer-а публикуют 1000 задач без потерь | ✅ |
+| D19 | `concurrent_schedule_during_run_executes_before_quiescence` | publication во время активного run видна до quiescence | ✅ |
+| D20 | `reload_zero_is_transactional` | zero отклоняется без разрушения прежних runner-ов | ✅ |
+| D21 | `reload_busy_is_transactional` | busy reload отклоняется и сохраняет pending work | ✅ |
 
 ---
 
@@ -702,7 +697,7 @@ transition-move риски B30/B31.
 | CH6 | `channel_empty` | empty() на пустом/непустом | ✅ |
 | CH7 | `pull_suspends` | pull на пустом канале → корутина суспендится | ⬜ |
 | CH8 | `mpsc_channel` | Несколько producer-ов, один consumer | ✅ |
-| CH9 | `channel_mpmc` | Несколько producer-ов и consumer-ов | ⬜ |
+| CH9 | `channel_mpmc` | 4 producer-а и 4 consumer-а: exact-once delivery и отсутствие stale waiters | ✅ |
 | CH10 | `channel_st` | channel_st (single-thread) вариант | ⬜ |
 | CH11 | `channel_bounded` | bounded шина: push блокируется при заполнении | ⬜ |
 | CH12 | `channel_dyn` | dyn шина: динамическое расширение | ⬜ |
@@ -710,6 +705,19 @@ transition-move риски B30/B31.
 | CH14 | `channel_notify` | notify пробуждает ожидающих | ⬜ |
 | CH15 | `channel_router_redirect` | redirect сохраняет waiter | ⬜ |
 | CH16 | `channel_sp_sc` | SPSC режим | ⬜ |
+| CH17 | `do_dynamic_channel_on_runner_test` | sender-first bidirectional delivery, FIFO progress и пустая waiter queue | ✅ |
+
+#### `nukes_concurrency_fixture`
+
+| # | Тест | Что проверяет | Статус |
+|---|------|--------------|--------|
+| NQ1 | `mpsc_multi_producer_fifo_and_exact_once` | 4P/1C, 80k значений, exact-once и per-producer FIFO | ✅ |
+| NQ2 | `mpmc_multi_producer_consumer_exact_once` | 4P/4C, 80k значений без loss/duplication | ✅ |
+| NQ3 | `mpmc_prefilled_fifo` | Строгий FIFO prefilled MPMC | ✅ |
+| NQ4 | `mpsc_batch_excludes_dummy_and_drains_snapshot` | MPSC batch возвращает весь FIFO snapshot без dummy | ✅ |
+| NQ5 | `mpmc_batch_excludes_dummy_and_reuses_nodes` | MPMC batch, точный drain и reuse | ✅ |
+| NQ6 | `mpsc_node_api_reuses_live_storage` | Внешний node ownership и восстановленный payload lifetime | ✅ |
+| NQ7 | `dynamic_queue_move_transfers_ownership` | Move переносит queue/dummy/pool и оставляет source inert | ✅ |
 
 ---
 
@@ -753,7 +761,7 @@ transition-move риски B30/B31.
 | SP6 | `roaming_true` | roaming(true) → _roaming = true | ✅ |
 | SP7 | `roaming_false` | roaming(false) → _roaming = false | ✅ |
 | SP8 | `polling_true` | polling(true) → задача идёт в _service_pool | ✅ |
-| SP9 | `get_runner_inside_runner` | get_runner внутри runner → не-nullptr | ✅ |
+| SP9 | `polling_false` | polling(false) оставляет suspended task в local pool | ✅ |
 | SP10 | `check_valued_spawn_command` | spawn valued-таски (async<int>), join → возвращает значение, spawner и spawnee на одном раннере | ✅ |
 | SP11 | `check_valued_post_command` | post valued-тасок + and-композиция (4 таски) → правильный порядок значений, join возвращает std::optional<int> | ✅ |
 | SP12 | `check_valued_spawn_cancel` | spawn valued-таски (async<int>), cancel до завершения → join возвращает std::nullopt (статус не e_finished) | ✅ |
@@ -873,13 +881,15 @@ framework containers. Чанки ≤ 4096 обслуживаются `std::pmr::
 большие — transient-malloc. `allocate_as<T>(count)` поддерживает оба пути и проверяет
 переполнение. `arena_allocator<T>` подключает arena к стандартным контейнерам; backup
 использует `std::stack` поверх `std::list<backup_record, arena_allocator<backup_record>>`.
-Заголовок чанка хранит владельца, поэтому pooled foreign-free возвращается через MPSC
-канал, а transient foreign-free освобождается сразу с отложенной коррекцией accounting.
+Заголовок чанка хранит владельца, поэтому pooled foreign-free возвращается через
+intrusive atomic MPSC stack без node allocation, а transient foreign-free
+освобождается сразу с отложенной коррекцией accounting.
 Лимит `_max_allocation_size` общий для всех клиентов arena.
 
 Nukes nodes, configured by ACE through `nukes_node_allocator<T>`, instead use
-the thread-safe process-lifetime `nukes_node_arena`. It remains available through
-static queue teardown, while `arena_allocator<T>` keeps its thread-local protocol.
+the process-wide new/delete-backed `nukes_node_arena`. Nodes can be returned by
+any thread and through static queue teardown, while `arena_allocator<T>` keeps
+its thread-local protocol.
 
 | # | Тест | Что проверяет | Статус |
 |---|------|--------------|--------|
@@ -888,7 +898,7 @@ static queue teardown, while `arena_allocator<T>` keeps its thread-local protoco
 | AR3 | `chunk_reuse_after_free` | повторная аллокация переиспользует pooled chunk | ✅ |
 | AR4 | `pool_never_returns_to_system` | освобождённые pooled chunks удерживаются до деструктора arena | ✅ |
 | AR5 | `arena_is_thread_local` | у каждого треда свой singleton arena | ✅ |
-| AR6 | `cross_thread_free_returns_to_owner` | foreign pooled-free возвращается владельцу через канал | ✅ |
+| AR6 | `cross_thread_free_returns_to_owner` | foreign pooled-free возвращается владельцу через intrusive stack | ✅ |
 | AR7 | `channel_drain_cadence` | формула `N=max/occupied` управляет drain cadence | ✅ |
 | AR8 | `limit_zero_drains_every_alloc` | max=0 дренирует канал перед каждой аллокацией | ✅ |
 | AR9 | `occupied_zero_drains_every_alloc` | occupied=0 не делит на ноль и дренирует канал | ✅ |
@@ -903,11 +913,9 @@ static queue teardown, while `arena_allocator<T>` keeps its thread-local protoco
 | AR18 | `cross_thread_iovec_release` | iovec storage безопасно возвращается owner arena с другого треда | ✅ |
 | AR19 | `is_debug_matches_build_configuration` | `is_debug` соответствует наличию `NDEBUG` | ✅ |
 | AR20 | `nukes_node_allocator_uses_durable_arena_and_preserves_overalignment` | Nukes node storage remains valid through teardown and preserves 256-byte alignment | ✅ |
+| AR21 | `owner_storage_outlives_departed_thread` | pooled/transient chunks удерживают arena после завершения owner thread | ✅ |
 
 > 📝 Замечания по реализации:
-> - `pop_batch()` из nukes оказался нерабочим для вычитывания (итератор стартует с
->   dummy-ноды очереди — первый `*it` читает мусор), поэтому канал дренируется обычным
->   `pop()` в цикле.
 > - Счётчик операций инкрементируется только в ветке формулы утилизации (ветки
 >   «max==0» и «occupied==0» счётчик не двигают) — нумерация операций не совпадает с
 >   фактическим числом операций.
@@ -958,7 +966,7 @@ static queue teardown, while `arena_allocator<T>` keeps its thread-local protoco
 | X25 | `stress_spawn_cancel` | 100 spawn → cancel всех → нет утечек | ✅ |
 | X26 | `channel_clean_after_run` | Каналы пусты после run (no waiter leak) | ✅ (добавлен) |
 | X27 | `or_ping_automaton_loop_no_value_loss` | 2 automaton → or-гонка ping в цикле (8 итераций) → проверка что cancel_yield не разрушает автоматон и не теряет co_yield значения | ✅ (добавлен) |
-| X29 | `kernelic_overflow_buffer_stress` | 6000 висящих read (>4096 ring) → overflow-буфер kernel_entity → все завершаются | ✅ (добавлен, покрывает B8/B9) |
+| X29 | `kernelic_overflow_buffer_stress` | 6000 висящих read (>4096 ring) → overflow-буфер kernel_entity без ghost SQE → все завершаются | ✅ (покрывает B8/B9/B76; host repeats 10/10) |
 | X30 | `reattach_nullptr_noop` | reattach(nullptr) → await_ready=true, задача не суспендится | ✅ (добавлен) |
 | X31 | `reattach_cross_runner_migration` | 2 раннера: задача мигрирует между ними через reattach_router::redirect | ✅ (добавлен) |
 | X32 | `cancel_spawned_with_channel` (переоткрыт) | spawn → channel.pull → cancel — БЫЛ DISABLED (hang, B7); после фикса channel_router::cancel проходит стабильно | ✅ (переоткрыт) |
@@ -999,10 +1007,10 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 
 | Fixture source | Fixture | GTests |
 |----------------|---------|-------:|
-| `tests/arena_fixture.cpp` | `arena_fixture` | 20 |
+| `tests/arena_fixture.cpp` | `arena_fixture` | 21 |
 | `tests/backup_fixture.cpp` | `backup_fixture` | 20 |
 | `tests/base_fixture.cpp` | `base_fixture` | 18 |
-| `tests/channel_extra_fixture.cpp` | `channel_extra_fixture` | 4 |
+| `tests/channel_extra_fixture.cpp` | `channel_extra_fixture` | 5 |
 | `tests/channel_fixture.cpp` | `channel_fixture` | 1 |
 | `tests/compose_extra_fixture.cpp` | `compose_extra_fixture` | 3 |
 | `tests/console_fixture.cpp` | `console_fixture` | 4 |
@@ -1011,7 +1019,7 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/cross_mechanic_fixture.cpp` | `cross_mechanic_fixture` | 14 |
 | `tests/cutex_extra_fixture.cpp` | `cutex_extra_fixture` | 5 |
 | `tests/cutex_fixture.cpp` | `cutex_fixture` | 4 |
-| `tests/dispatcher_fixture.cpp` | `dispatcher_fixture` | 7 |
+| `tests/dispatcher_fixture.cpp` | `dispatcher_fixture` | 15 |
 | `tests/fs_fixture.cpp` | `fs_fixture` | 4 |
 | `tests/future_traits_fixture.cpp` | `future_traits_fixture` | 8 |
 | `tests/get_runner_fixture.cpp` | `get_runner_fixture` | 1 |
@@ -1020,27 +1028,56 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/io_buffer_fixture.cpp` | `io_buffer_fixture` | 25 |
 | `tests/io_entity_fixture.cpp` | `io_entity_fixture` | 28 |
 | `tests/io_hanged_fixture.cpp` | `io_hanged_fixture` | 5 |
-| `tests/moving_average_fixture.cpp` | `moving_average_fixture` | 7 |
 | `tests/omniptr_fixture.cpp` | `omniptr_fixture` | 12 |
 | `tests/promise_traits_fixture.cpp` | `promise_traits_fixture` | 12 |
-| `tests/queue_fixture.cpp` | `queue_fixture` | 10 |
+| `tests/queue_fixture.cpp` | `queue_fixture` | 11 |
 | `tests/router_slot_fixture.cpp` | `router_slot_fixture` | 9 |
 | `tests/runner_fixture.cpp` | `runner_fixture` | 8 |
 | `tests/service_fixture.cpp` | `service_fixture` | 3 |
 | `tests/signal_fixture.cpp` | `signal_fixture` | 4 |
 | `tests/socket_echo_fixture.cpp` | `socket_echo_fixture` | 2 |
-| `tests/spawn_extra_fixture.cpp` | `spawn_extra_fixture` | 8 |
+| `tests/spawn_extra_fixture.cpp` | `spawn_extra_fixture` | 9 |
 | `tests/spawn_fixture.cpp` | `spawn_fixture` | 10 |
 | `tests/timer_fixture.cpp` | `timer_fixture` | 13 |
 | `tests/yield_fixture.cpp` | `yield_fixture` | 8 |
 | `tests/nukes_alignment_fixture.cpp` | `nukes_alignment_fixture` | 5 |
-| **Итого: 35 файлов** | | **318** |
+| `tests/nukes_concurrency_fixture.cpp` | `nukes_concurrency_fixture` | 7 |
+| **Итого: 35 файлов** | | **330** |
 
-Default Meson configuration (`ace_entry=false`) регистрирует **322 ACE** tests:
-318 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
+Default Meson configuration (`ace_entry=false`) регистрирует **334 ACE** tests:
+330 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
 `ace_tests.discovery_consistency` и `ace_tests.lsan_capability`. Последний
 становится Meson SKIP при недоступном под ptrace LSan; остальные checks выполняются
 с `detect_leaks=0` только в auto mode. `ace_entry=true` добавляет fallback test.
+
+Проверка B48-B52/B62/B74/N8 (2026-08-30): Clang 22 ASan Meson run завершил
+331/353 tests успешно, 21 I/O test ожидаемо упал из-за недоступного `io_uring`
+(`-EPERM`/failed operations), `ace_tests.lsan_capability` пропущен под ptrace;
+sanitizer diagnostics в scheduler/arena tests нет. Из 322 ACE GTests прошёл
+301, а все 21 failure относятся к I/O environment. GCC 16 TSan targeted set
+из 38 dispatcher/runner/spawn/signal/arena/emergency tests прошёл 38/38 без race.
+
+Проверка B75 (2026-08-30): Clang 22 ASan direct/channel set прошёл 9/9;
+sender-first, MPMC channel и channel cancellation прошли 20 shuffled повторов.
+GCC 16 TSan direct Nukes set прошёл 7/7, integration set
+channel/dispatcher/signal — 8/8 без sanitizer diagnostics. Полный Clang 22 ASan
+Meson suite внутри sandbox: 312/334 успешно, 21 I/O failure из-за запрещённого
+`io_uring`, LSan capability пропущен под ptrace; B75/scheduler sanitizer
+diagnostics отсутствуют, все 7 новых Nukes tests прошли. Последующий host run с
+доступным `io_uring` выявил B76 в overflow SQE path и неполный standalone-runner
+test drain. После исправления targeted Meson regressions прошли 2/2,
+`do_runner_test` — 50/50 direct repeats, `kernelic_overflow_buffer_stress` —
+10/10 direct host repeats. Финальный полный Clang 22 ASan Meson suite прошёл
+**334/334**, включая `ace_tests.lsan_capability`, без sanitizer diagnostics.
+
+Проверка B77 (2026-08-30): до исправления `cutex_fixture.cutex_race`
+воспроизводил преждевременный возврат `run()` в 6 из 20 диагностических
+прогонов. После epoch-validation Clang 22 ASan прошёл 100 in-process повторов
+`cutex_race` + `cutex_race_resheduling` и 100 отдельных процессов
+`cutex_race`; GCC 16 TSan прошёл 20 повторов обоих сценариев без race
+diagnostics. Финальный host Clang 22 ASan Meson suite прошёл **334/334**,
+включая LSan capability и I/O tests; ещё три полных повтора прошли
+**1002/1002**.
 
 Clang 22 + ASan targeted B29/B38/B68 tests прошли 40 shuffled executions.
 Host ASan+LSan: `io_entity_fixture` проходит 28/28 одним процессом без leaks;
@@ -1080,7 +1117,7 @@ successful-I/O failures с `-EPERM`; B38 crash не воспроизводитс
 python3 discover_tests.py discover tests/*_fixture.cpp
 ```
 
-Команда возвращает 307 уникальных active GTest name. Meson выполняет эту же
+Команда возвращает 322 уникальных active GTest name. Meson выполняет эту же
 команду при setup, регистрирует каждый name отдельным `--gtest_filter`, а
 `ace_tests.discovery_consistency` через `verify` подтверждает совпадение списка
 source declarations с `ace_tests --gtest_list_tests`.

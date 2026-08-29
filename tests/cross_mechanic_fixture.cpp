@@ -1,11 +1,15 @@
 #include <chrono>
+#include <atomic>
 #include <optional>
 #include <set>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include "environment.h"
 
 #include <ace/futures/cutex.h>
+#include <ace/futures/get_runner.h>
 #include <ace/futures/post.h>
 #include <ace/futures/spawn.h>
 #include <ace/futures/timeout.h>
@@ -82,8 +86,16 @@ ace::task push_value(ace::bus<int>& channel, int value) {
     co_return;
 }
 
-ace::task delayed_completion(ace::bus<int>& channel) {
-    co_await ace::timeout(std::chrono::milliseconds(10));
+ace::task report_runner(
+    std::vector<ace::core::runner*>& runners,
+    const std::size_t index)
+{
+    runners[index] = co_await ace::get_runner {};
+}
+
+ace::task delayed_completion(ace::bus<int>& channel, std::atomic_bool& started) {
+    started.store(true, std::memory_order_release);
+    co_await ace::timeout(std::chrono::milliseconds(50));
     channel << 1;
 }
 
@@ -219,6 +231,7 @@ TEST_F(cross_mechanic_fixture, cancel_spawned_with_channel) {
     EXPECT_EQ(1, values[0]);
     // A second 1 is the failed-join marker; marker 2 would mean pull resumed.
     EXPECT_EQ(1, values[1]);
+    EXPECT_EQ(nullptr, channel._waiters.pop_node());
 }
 
 // Verifies timeout composition used as the bounded side of a channel race.
@@ -251,23 +264,27 @@ TEST_F(cross_mechanic_fixture, cutex_with_timeout) {
 // Verifies that scheduled work completes across four configured runners.
 TEST_F(cross_mechanic_fixture, multi_runner_spawn) {
     configure_runners(4);
-    ace::bus<int> channel;
-    for (int value = 0; value < 8; ++value)
-        ace::schedule(push_value(channel, value));
+    std::vector<ace::core::runner*> runners(8);
+    for (std::size_t task = 0; task < runners.size(); ++task)
+        ace::schedule(report_runner(runners, task));
 
     ace::run();
     EXPECT_TRUE(ace::empty());
-    const auto values = fetch(channel);
-    EXPECT_EQ(8u, values.size());
+    EXPECT_GE(std::set<ace::core::runner*>(runners.begin(), runners.end()).size(), 2u);
 }
 
-// Verifies that a completed timeout task remains valid around an interrupt signal.
+// Verifies that interrupt is issued while a timeout is suspended and the wait resumes after reset.
 TEST_F(cross_mechanic_fixture, interrupt_during_timeout) {
     ace::bus<int> channel;
-    ace::schedule(delayed_completion(channel));
-    ace::run();
+    std::atomic_bool started = false;
+    ace::schedule(delayed_completion(channel, started));
+    std::jthread runtime([] { ace::run(); });
+    while (not started.load(std::memory_order_acquire))
+        std::this_thread::yield();
     ace::interrupt();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
     ace::reset_signal();
+    runtime.join();
     EXPECT_TRUE(ace::empty());
 
     const auto values = fetch(channel);

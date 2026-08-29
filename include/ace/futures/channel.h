@@ -1,6 +1,6 @@
 /**
  * @file channel.h
- * @brief Lock-free MPMC channel for async message passing between coroutines.
+ * @brief Concurrent MPMC channel for async message passing between coroutines.
  *
  * @details The @c ace::futures::channel<T> is a multi-producer/multi-consumer
  * message-passing primitive.  Producers push data via @c push() or
@@ -22,7 +22,7 @@
  * | @c channel<T> | Fully dynamic data and waiters |
  * | @c channel_static<T, N, _> | Static data buffer (N slots) |
  * | @c channel_dyn<T> | Alias for @c channel<T> |
- * | @c channel_st<T> | Uses @c std::queue + @c reg_queue (non-lock-free) |
+ * | @c channel_st<T> | Uses @c std::queue + @c reg_queue |
  *
  * @see ace::futures::cutex
  */
@@ -35,6 +35,9 @@
 #include <nukes/bounded/mpsc_queue.h>
 #include <nukes/bounded/mpmc_queue.h>
 #include <nukes/bounded/spsc_queue.h>
+
+#include <atomic>
+#include <thread>
 
 #include <ace/core/traits/future.h>
 #include <ace/core/runner.h>
@@ -63,11 +66,13 @@ namespace ace::futures {
     };
 
 /**
- * @brief Lock-free MPMC channel with configurable allocation policy.
+ * @brief Concurrent MPMC channel with configurable allocation policy.
  *
- * @details Supports async @c pull() (returns awaitable) and non-blocking
+ * @details Supports async @c pull() (returns awaitable) and non-suspending
  * @c push().  Blocking producers should use @c pending_push() which
- * suspends until a slot is available.
+ * suspends until a slot is available. Dynamic MPMC consumers and per-channel
+ * waiter publication use short queue-local critical sections; unrelated
+ * channel instances never contend on a global lock.
  *
  * @tparam data_t               Storable data type.
  * @tparam data_buffer_size_v   Bounded data buffer size (for static policy).
@@ -148,6 +153,17 @@ class channel {
 
     struct channel_router;
     friend channel_router;
+
+    mutable std::atomic_flag _waiter_gate = ATOMIC_FLAG_INIT; ///< Couples waiter registration with notification.
+
+    void lock_waiters() const noexcept {
+        while (_waiter_gate.test_and_set(std::memory_order_acquire))
+            std::this_thread::yield();
+    }
+
+    void unlock_waiters() const noexcept {
+        _waiter_gate.clear(std::memory_order_release);
+    }
 
     /**
      * @brief Wakes up one waiter, if any.
@@ -339,13 +355,13 @@ public:
     pull_impl() =delete;
 
     /**
-     * @brief Binds the pull to the channel's waiter and data queues.
-     * @param waiters   Waiter queue to register on suspension.
-     * @param container Data queue to pop from.
+     * @brief Binds the pull to its owning channel and queues.
+     * @param owner Owning channel.
      */
-    pull_impl(waiters_storage_t* waiters, data_storage_t* container)
-            : _waiters(waiters), _container(container) {};
+    explicit pull_impl(channel* owner)
+        : _owner(owner), _waiters(&owner->_waiters), _container(&owner->_container) {};
 
+    channel* _owner; ///< Owning channel coordinating waiter registration.
     waiters_storage_t* _waiters;  ///< Waiter queue of the owning channel.
     data_storage_t* _container;   ///< Data queue of the owning channel.
 
@@ -376,32 +392,42 @@ ACE_FUTURE_CHANNEL_META
 /**
  * @brief Router that keeps suspended pullers in the channel's waiter queue.
  *
- * @details On @c redirect() the waiting task is enqueued into the waiter
- * storage; on @c cancel() all waiters are woken (the nukes queues do not
- * support single-node ejection).
+ * @details On @c redirect() the waiting task is enqueued and publication is
+ * rechecked to close the gap between @c await_suspend() and runner routing.
+ * On @c cancel() all waiters are woken (the Nukes queues do not support
+ * single-node ejection).
  */
 struct ACE_FUTURE_CHANNEL_SPACE channel_router : runner_router {
 
-    /// @brief Default construction is forbidden — a waiter queue is required.
+    /// @brief Default construction is forbidden — channel storage is required.
     channel_router() = delete;
 
     /**
-     * @brief Binds the router to the channel's waiter queue.
-     * @param waiters Waiter queue of the owning channel.
+     * @brief Binds the router to the channel's waiter and data queues.
+     * @param owner Owning channel used for waiter/data coordination.
      */
-    explicit channel_router(waiters_storage_t* waiters) : _waiters(waiters) {};
+    explicit channel_router(channel* owner)
+        : _owner(owner) {};
 
     /**
      * @brief Registers the suspended task in the waiter queue.
      * @param node Task node of the suspended puller.
      */
-    void redirect(omni_node node) override {
-        using namespace nukes::detail::nodes;
-        // if constexpr (access_mode_v == access_mode::e_regular)
-        //     _waiters->push_node(node);
-        // else {
-            _waiters->push_node(node);
-        // }
+    bool redirect(omni_node node) override {
+        _self = node.template as<waiters_pool_node_t>();
+        _owner->lock_waiters();
+        _owner->_waiters.push_node(node);
+        waiters_pool_node_t* ready = nullptr;
+        if (not _owner->_container.empty())
+            ready = _owner->_waiters.pop_node();
+        _owner->unlock_waiters();
+
+        if (not ready)
+            return true;
+        if (node.template as<waiters_pool_node_t>() == ready)
+            return false;
+        core::runner::reattach(ready);
+        return true;
     }
 
     /**
@@ -412,17 +438,31 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_router : runner_router {
     void cancel() override {
         // NOTE: Reattaching all tasks because mpmc-queue doesn't allow ejection.
         // NOTE: Target canceled task will be marked as detached and Runner will drop it
-        // TODO: Batch read needed
-        auto* node = _waiters->pop_node();
+        auto* const owner = _owner;
+        auto* const self = _self;
+        omni_node self_node {};
+        owner->lock_waiters();
+        auto* node = owner->_waiters.pop_node();
+        owner->unlock_waiters();
         while (node) {
-            core::runner::reattach(node);
-            node = _waiters->pop_node();
+            if (node == self)
+                self_node = node;
+            else
+                core::runner::reattach(node);
+            owner->lock_waiters();
+            node = owner->_waiters.pop_node();
+            owner->unlock_waiters();
         }
+        // Reattaching the owner last may destroy this in-place router. Do not
+        // access members or locals that own resources after this call.
+        if (self_node)
+            core::runner::reattach(self_node);
     }
 
     ~channel_router() override = default;
 
-    waiters_storage_t* _waiters; ///< Waiter queue of the owning channel.
+    channel* _owner; ///< Channel coupling the waiter and data queues.
+    waiters_pool_node_t* _self {}; ///< Node owning this in-place router after redirect.
 };
 
 
@@ -431,7 +471,10 @@ struct ACE_FUTURE_CHANNEL_SPACE channel_router : runner_router {
  */
 ACE_FUTURE_CHANNEL_MEMBER(void)
 notify() {
-    if (auto* node = _waiters.pop_node(); node) [[likely]]
+    lock_waiters();
+    auto* const node = _waiters.pop_node();
+    unlock_waiters();
+    if (node) [[likely]]
         core::runner::reattach(node);
 }
 
@@ -498,7 +541,7 @@ ACE_FUTURE_CHANNEL_SPACE pull_impl
  * @return The awaitable pull implementation.
  */
 ACE_FUTURE_CHANNEL_SPACE pull() {
-    return pull_impl{&_waiters, &_container};
+    return pull_impl{this};
 }
 
 
@@ -519,7 +562,7 @@ ACE_FUTURE_CHANNEL_MEMBER(bool)
  */
 pull_impl::await_suspend(auto ctx) {
     if (not _container->pop(_output_data)) {
-        ctx.promise()._runner_router = channel_router{_waiters};
+        ctx.promise()._runner_router = channel_router{_owner};
         return true;
     }
     return false;

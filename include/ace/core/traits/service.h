@@ -162,7 +162,7 @@ namespace ace::core::traits {
          * @brief Schedules the service coroutine and clears the detached flag.
          * @param rnr Runner to spawn the service on; @c nullptr lets the dispatcher choose.
          */
-        void respawn(runner* rnr = nullptr) noexcept {
+        void respawn(runner* rnr = nullptr) {
             schedule(service(dispatcher::get_sig_pipe()), rnr);
             detach_set(false);
         }
@@ -186,7 +186,9 @@ namespace ace::core::traits {
                     const auto action_result = co_await sig->action();
                     sig_pipe.push(std::move(sig));
                     switch (action_result) {
-                        case e_break: co_await std::suspend_always{};
+                        case e_break:
+                            co_await std::suspend_always{};
+                            break;
                         case e_shutdown: co_return;
                         case e_idle: break;
                         default:;
@@ -202,7 +204,7 @@ namespace ace::core::traits {
          * @return Process-wide instance for shared services or the calling
          * thread's instance for thread-local services.
          */
-        static derived_t& inspect_impl() noexcept {
+        static derived_t& inspect_impl() {
             if constexpr (spawn_mode_v == service_spawn_mode::e_thread_shared) {
                 static derived_t instance {};
                 return instance;
@@ -217,7 +219,7 @@ namespace ace::core::traits {
          * @param rnr Runner to spawn the service on.
          * @return Reference to the (possibly respawned) service instance.
          */
-        static derived_t& touch_impl(omni_runner rnr = nullptr) noexcept {
+        static derived_t& touch_impl(omni_runner rnr = nullptr) {
             auto& instance = inspect_impl();
             if (instance.detach_get()) instance.respawn(rnr.as<runner>());
             return instance;
@@ -226,11 +228,11 @@ namespace ace::core::traits {
     public:
 
         // NOTE: Gets service instance and respawns it if needed (thread-shared mode)
-        static derived_t& touch(const omni_runner rnr = nullptr) noexcept
+        static derived_t& touch(const omni_runner rnr = nullptr)
         requires (spawn_mode_v == service_spawn_mode::e_thread_shared) { return touch_impl(rnr); }
 
         // NOTE: Gets service instance and respawns it if needed (thread-local mode)
-        static derived_t& touch(const omni_runner rnr) noexcept
+        static derived_t& touch(const omni_runner rnr)
         requires (spawn_mode_v == service_spawn_mode::e_thread_local) { return touch_impl(rnr); }
 
         /**
@@ -238,7 +240,7 @@ namespace ace::core::traits {
          * @return Process-wide instance for shared mode or the calling thread's
          * thread-local instance for unique mode.
          */
-        static derived_t& inspect() noexcept {
+        static derived_t& inspect() {
             return inspect_impl();
         }
 

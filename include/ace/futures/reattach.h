@@ -121,9 +121,9 @@ struct ACE_FUTURE_REATTACH_SPACE reattach_router : runner_router {
      * @brief Re-points the task's runner and returns it to the target queue.
      * @param node Task node being migrated.
      */
-    void redirect(omni_node node) override {
+    bool redirect(omni_node node) override {
         node->_data._coroutine.promise()._runner = target_runner;
-        core::runner::reattach(node);
+        return false;
     }
 
     ~reattach_router() override = default;

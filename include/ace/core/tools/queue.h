@@ -16,8 +16,10 @@
 #ifndef ACE_COMMON_QUEUE_H
 #define ACE_COMMON_QUEUE_H
 
-#include <vector>
+#include <memory>
+#include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace ace::core::tools {
 
@@ -47,12 +49,16 @@ namespace ace::core::tools {
 
         /// @brief Placement-constructs the element from a copy.
         /// @param val Value to copy into storage.
-        void construct(const T& val) noexcept { new (storage) T(val); }
+        void construct(const T& val) noexcept(std::is_nothrow_copy_constructible_v<T>) {
+            new (storage) T(val);
+        }
         /// @brief Placement-constructs the element by move.
         /// @param val Value to move into storage.
-        void construct(T&& val) noexcept { new (storage) T(std::move(val)); }
+        void construct(T&& val) noexcept(std::is_nothrow_move_constructible_v<T>) {
+            new (storage) T(std::move(val));
+        }
         /// @brief Destroys the stored element.
-        void destruct() { data()->~T(); }
+        void destruct() noexcept { data()->~T(); }
 
         /**
          * @brief Unlinks this node from its owning queue in O(1).
@@ -81,25 +87,23 @@ namespace ace::core::tools {
          * @brief Allocates a new slab and links its nodes into the free list.
          */
         void grow() {
-            try {
-                auto* slab = new q_node<T>[CHUNK_SIZE];
-                slabs.push_back(slab);
+            auto slab_owner = std::make_unique<q_node<T>[]>(CHUNK_SIZE);
+            q_node<T>* slab = slab_owner.get();
+            slabs.push_back(slab);
 
-                for (size_t i = 0; i < CHUNK_SIZE - 1; ++i) {
-                    slab[i].next = &slab[i + 1];
-                }
-                slab[CHUNK_SIZE - 1].next = nullptr;
-
-                if (!free_head) {
-                    free_head = slab;
-                    free_tail = &slab[CHUNK_SIZE - 1];
-                } else {
-                    free_tail->next = slab;
-                    free_tail = &slab[CHUNK_SIZE - 1];
-                }
-            } catch (const std::exception& e) {
-                std::cerr << e.what() << std::endl;
+            for (size_t i = 0; i < CHUNK_SIZE - 1; ++i) {
+                slab[i].next = &slab[i + 1];
             }
+            slab[CHUNK_SIZE - 1].next = nullptr;
+
+            if (!free_head) {
+                free_head = slab;
+                free_tail = &slab[CHUNK_SIZE - 1];
+            } else {
+                free_tail->next = slab;
+                free_tail = &slab[CHUNK_SIZE - 1];
+            }
+            (void)slab_owner.release();
         }
 
     public:
@@ -115,7 +119,7 @@ namespace ace::core::tools {
          * @brief Takes a node from the free list, growing the pool if empty.
          * @return A cleared node ready for use.
          */
-        q_node<T>* alloc() noexcept {
+        q_node<T>* alloc() {
             if (!free_head) grow();
             q_node<T>* node = free_head;
             free_head = node->next;
@@ -153,6 +157,8 @@ namespace ace::core::tools {
      */
     template<typename T>
     class queue {
+        static_assert(std::is_nothrow_destructible_v<T>,
+            "queue payload destructors must be noexcept");
         q_node<T>* head = nullptr;          ///< First node of the queue.
         q_node<T>* tail = nullptr;          ///< Last node of the queue.
         slab_mempool<T>& mempool;           ///< Shared node allocator.
@@ -205,9 +211,14 @@ namespace ace::core::tools {
          * @param val Element to copy.
          * @return The newly enqueued node.
          */
-        q_node<T>* enqueue(const T& val) noexcept {
+        q_node<T>* enqueue(const T& val) {
             q_node<T>* node = mempool.alloc();
-            node->construct(val);
+            try {
+                node->construct(val);
+            } catch (...) {
+                mempool.free(node);
+                throw;
+            }
             node->owning_queue = this;
             node->prev = tail;
             node->next = nullptr;
@@ -222,9 +233,14 @@ namespace ace::core::tools {
          * @param val Element to move.
          * @return The newly enqueued node.
          */
-        q_node<T>* enqueue(T&& val) noexcept {
+        q_node<T>* enqueue(T&& val) {
             q_node<T>* node = mempool.alloc();
-            node->construct(std::move(val));
+            try {
+                node->construct(std::move(val));
+            } catch (...) {
+                mempool.free(node);
+                throw;
+            }
             node->owning_queue = this;
             node->prev = tail;
             node->next = nullptr;
@@ -257,7 +273,7 @@ namespace ace::core::tools {
          * @warning Assumes the queue is not empty (for performance).
          * @return The head element.
          */
-        T dequeue() noexcept {
+        T dequeue() noexcept(std::is_nothrow_move_constructible_v<T>) {
             // NOTE: Assumes queue is not empty (for performance)
             q_node<T>* node = head;
             T val = std::forward<T>(*node->data());

@@ -68,6 +68,9 @@ TEST_F(context_fixture, do_runner_test) {
     ace::core::runner runner;
     runner.attach(nested_context_suspender());
     ASSERT_TRUE(runner.run());
+    // println() schedules polling I/O, and one bounded run() call is not a
+    // drain contract. Pump until both the task and its service work complete.
+    while (runner.run()) {}
     // An empty runner here proves the nested suspension did not strand a task node.
     ASSERT_TRUE(runner.empty());
 }

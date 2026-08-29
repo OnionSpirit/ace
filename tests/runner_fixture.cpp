@@ -76,17 +76,19 @@ TEST_F(runner_fixture, runner_move) {
     EXPECT_TRUE(destination.empty());
 }
 
-// Verifies that an idle runner has zero scheduling velocity.
-TEST_F(runner_fixture, velocity_empty) {
+// Verifies that a newly constructed runner publishes no runnable work.
+TEST_F(runner_fixture, load_empty) {
     ace::core::runner runner;
-    EXPECT_EQ(0.0, runner.velocity());
+    EXPECT_EQ(0u, runner.load());
 }
 
-// Verifies that clear_velocity() leaves the scheduling metric at zero.
-TEST_F(runner_fixture, clear_velocity) {
+// Verifies that attach publishes runnable load and terminal execution removes it.
+TEST_F(runner_fixture, load_tracks_attach_completion) {
     ace::core::runner runner;
-    runner.clear_velocity();
-    EXPECT_EQ(0.0, runner.velocity());
+    runner.attach(dummy_task());
+    EXPECT_EQ(1u, runner.load());
+    EXPECT_TRUE(runner.run());
+    EXPECT_EQ(0u, runner.load());
 }
 
 // Verifies that a standalone runner preserves and resumes a timer-suspended task.

@@ -1,4 +1,5 @@
 #include <cstddef>
+#include <array>
 #include <cstdint>
 #include <future>
 #include <limits>
@@ -372,6 +373,28 @@ TEST_F(arena_fixture, destructor_returns_everything) {
     owner.join();
     foreign.join();
 
+    EXPECT_EQ(baseline_chunks, ace::core::arena::live_system_chunks.load());
+}
+
+// Verifies that outstanding pooled and transient chunks keep owner storage alive after thread exit.
+TEST_F(arena_fixture, owner_storage_outlives_departed_thread) {
+    ace::cfg::g_config._max_allocation_size = 0;
+    // Initialize the releasing thread's arena before taking the process-wide
+    // baseline: libstdc++ may obtain a pool bookkeeping block eagerly.
+    auto& foreign = ace::core::arena::get_instance();
+    const auto baseline_chunks = ace::core::arena::live_system_chunks.load();
+    std::promise<std::array<void*, 2>> chunks_ready;
+    auto chunks_future = chunks_ready.get_future();
+    std::thread owner([&] {
+        auto& arena = ace::core::arena::get_instance();
+        chunks_ready.set_value({arena.allocate(256), arena.allocate(5000)});
+    });
+    owner.join();
+
+    const auto chunks = chunks_future.get();
+    EXPECT_GT(ace::core::arena::live_system_chunks.load(), baseline_chunks);
+    foreign.deallocate(chunks[0], 256);
+    foreign.deallocate(chunks[1], 5000);
     EXPECT_EQ(baseline_chunks, ace::core::arena::live_system_chunks.load());
 }
 

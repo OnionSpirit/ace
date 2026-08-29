@@ -313,7 +313,7 @@ namespace ace::futures {
          * @brief Destructor. Automatically calls @c release() if not already released.
          * @warning Throws logical exception if @c cutex was captured by @c sync() and not released manually
          */
-        ~proxy() {
+        ~proxy() noexcept(false) {
             if (not _is_released) {
                 _cutex.release();
                 if (_is_manual)
@@ -380,8 +380,9 @@ struct ACE_FUTURE_CAPTURE_FUTURE_SPACE cutex_router : runner_router {
      * @brief Enqueues the waiting task into the cutex's waiter queue.
      * @param node Task node of the suspended waiter.
      */
-    void redirect(omni_node node) override {
+    bool redirect(omni_node node) override {
         _cutex->_control->_waiters.push_node(node);
+        return true;
     }
 
     // NOTE: Tasks is resuming with wiped router.

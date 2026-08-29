@@ -374,7 +374,7 @@
 
 ### B39. Coroutine allocation-failure protocol внутренне противоречив
 
-- **Статус:** Открыто.
+- **Статус:** Решено 2026-08-30: throwing allocation, overflow check, null hook удалён.
 - **Приоритет:** Высокий.
 - **Файлы и символы:** `include/ace/core/traits/promise.h`
   (`promise_traits::operator new()`), `include/ace/core/async.h`
@@ -539,7 +539,8 @@
 
 ### B48. `dispatcher::worker_state::_pending` образует data race
 
-- **Статус:** Открыто.
+- **Статус:** Решено 2026-08-30: atomic runnable load/activity epochs заменили `_pending`;
+  acquire quiescence публикует результаты завершённых tasks вызывающему `run()`.
 - **Приоритет:** Критический.
 - **Файл:** `include/ace/core/dispatcher.h` (`worker_state`, `worker_round()`,
   `worker_tf()`, `run()`).
@@ -557,7 +558,7 @@
 
 ### B49. `reload()` меняет конфигурацию нетранзакционно и принимает ноль runner-ов
 
-- **Статус:** Открыто.
+- **Статус:** Решено 2026-08-30: validate/prepare/commit, zero/busy rejection сохраняет state.
 - **Приоритет:** Высокий.
 - **Файл:** `include/ace/core/dispatcher.h` (`fetch_config()`, `reload()`,
   `round_robin()`, `schedule()`, `run()`).
@@ -576,7 +577,7 @@
 
 ### B50. Полностью переработать weighted scheduler как O(1) load-aware balancer
 
-- **Статус:** Открыто; требуется отдельное архитектурное решение до реализации.
+- **Статус:** Решено 2026-08-30: O(1) power-of-two choices по atomic runnable load.
 - **Приоритет:** Критический для multi-runner производительности и correctness.
 - **Файлы и символы:** `include/ace/core/dispatcher.h` (`schedule()`,
   `_aggregate_velocity`, `_runner_selector`), `include/ace/core/runner.h`
@@ -624,7 +625,7 @@
 
 ### B51. `reset_signal()` извлекает не более одного сигнала
 
-- **Статус:** Открыто.
+- **Статус:** Решено 2026-08-30: drain до первого неуспешного `pop`.
 - **Приоритет:** Средний/высокий.
 - **Файл:** `include/ace/core/dispatcher.h` (`ace::reset_signal()`).
 - **Симптом:** условие `while (not pop(sgl) and not empty())` прекращает цикл при
@@ -640,7 +641,7 @@
 
 ### B52. `noexcept` публичных scheduler/container APIs не соответствует операциям
 
-- **Статус:** Открыто; требуется аудит контрактов.
+- **Статус:** Решено 2026-08-30: throwing contracts и transactional rollback согласованы.
 - **Приоритет:** Высокий.
 - **Файлы и символы:** `include/ace/core/dispatcher.h` (`reload`, `schedule`,
   `run`), `include/ace/core/traits/service.h` (`respawn`, `touch`),
@@ -799,7 +800,7 @@
 
 ### B62. Tests roaming/polling/multi-runner/interrupt не наблюдают семантику
 
-- **Статус:** Открыто; тестовый аудит 2026-08-27.
+- **Статус:** Решено 2026-08-30: tests наблюдают flags, pools, runner IDs и active interrupt.
 - **Приоритет:** Высокий.
 - **Файлы:** `tests/spawn_extra_fixture.cpp`,
   `tests/cross_mechanic_fixture.cpp`, `tests/dispatcher_fixture.cpp`.
@@ -1021,14 +1022,115 @@
   разрушалась до статической queue, и её destructor обращался к уже освобождённой
   node storage; Clang ASan сообщал use-after-free.
 - **Решение:** ACE однократно настраивает singleton `node_allocation` шаблоном
-  `nukes_node_allocator<T>`. Он использует синхронизированный
-  process-lifetime `nukes_node_arena`; прежний `arena_allocator<T>` остаётся
+  `nukes_node_allocator<T>`. Он использует независимый от thread lifetime
+  process-wide new/delete backend `nukes_node_arena`; прежний `arena_allocator<T>` остаётся
   thread-local allocator для coroutine, I/O и backup storage.
 - **Регрессии и проверка:** `nukes_alignment_fixture` проверяет отсутствие legacy
   `sync`, destruction payload для `release`/`raw_release`.
   `arena_fixture.nukes_node_allocator_uses_durable_arena_and_preserves_overalignment`
   проверяет lifetime и alignment 256. Clang 22 ASan shuffled repeats проходят
   без прежнего teardown UAF.
+
+### B74. Coroutine frame переживал thread-local arena внешнего producer-а
+
+- **Статус:** Решено 2026-08-30.
+- **Приоритет:** Критический.
+- **Файлы:** `include/ace/core/arena.h`, `include/ace/core/runner.h`,
+  `tests/arena_fixture.cpp`, `tests/dispatcher_fixture.cpp`.
+- **Симптом:** внешний thread создавал и передавал task в `schedule()`, завершался
+  до `run()`, а TLS arena освобождала frame, оставшийся в dispatcher queue; ASan
+  фиксировал heap-use-after-free. Дополнительно `attach()` ошибочно публиковал
+  external work в single-thread local `reg_queue`, теряя задачи.
+- **Решение:** каждый arena chunk удерживает owner-storage reference; thread exit
+  только retires owner, а последний foreign release дренирует и уничтожает pool.
+  `attach/attach_front` выбирают local fast path только по фактическому
+  `current_runner_ptr`, иначе используют MPSC insertion queue. Foreign arena
+  release переведён на allocation-free intrusive stack; небезопасные переходы
+  Nukes insertion freelist сериализованы, при этом async destructor выполняется
+  вне lock для re-entrant backup scheduling.
+- **Регрессии:** `arena_fixture.owner_storage_outlives_departed_thread` и
+  `dispatcher_fixture.concurrent_schedule_producers_preserve_every_task` под
+  ASan и TSAN.
+
+### B75. Dynamic Nukes queues небезопасно переиспользуют nodes при конкурентном доступе
+
+- **Статус:** Решено 2026-08-30.
+- **Приоритет:** Высокий.
+- **Файлы:** `subprojects/nukes/include/nukes/dynamic/{mpsc,mpmc}_queue.h`,
+  `{spmc,mpmc}_freelist.h`; потребители `include/ace/futures/channel.h` и
+  `include/ace/core/signal.h`.
+- **Симптом:** TSAN фиксирует одновременную инициализацию freelist node и запись
+  queue dummy/next по одному адресу при штатных MPSC/MPMC producer-consumer
+  сценариях. Отдельно sender-first bidirectional channel может оставить stale
+  waiter, поэтому dispatcher regressions больше не используют channel как
+  побочный collector.
+- **Решение:** Nukes закреплён на commit
+  `0b498630ac3c9dd801baf3f4df558916c3d7a557`, а исправления доставляются tracked
+  `subprojects/packagefiles/nukes-b75.patch`. Tail handoff использует `acq_rel`;
+  freelist metadata сериализована коротким per-instance gate с destruction и
+  reconstruction payload вне gate; MPMC/roaming consumers сериализуют только
+  head/reclamation. Dummy не попадает в detached batch, move обнуляет source.
+  Глобальной блокировки и общего contention между queue instances нет.
+- **Интеграция:** channel связывает publication data и waiter коротким локальным
+  gate и выполняет post-registration recheck. Router возвращает ownership result,
+  поэтому runner безопасно освобождает in-place router до immediate reattach;
+  cancel reattaches собственный node последним. Signal pipe использует исправленную
+  MPMC queue без отдельной сериализации. Runner переключает task source после
+  фактических 16 pulls, а не после первого, сохраняя sender-first FIFO progress.
+- **Проверка:** 7 direct Nukes tests покрывают MPSC 4P/1C, MPMC 4P/4C, exact-once,
+  FIFO, node reuse, move, batch/dummy и teardown. GCC 16 TSan: 7/7 direct и 8/8
+  channel/dispatcher/signal integration без diagnostics. Clang 22 ASan: direct и
+  channel tests 9/9; sender-first/MPMC/cancel набор прошёл 20 shuffled повторов.
+  BM25 фиксирует baseline/current в `agents/BENCHMARKS.md`.
+
+### B76. Overflow path резервировал и отправлял неприготовленные SQE
+
+- **Статус:** Решено 2026-08-30.
+- **Приоритет:** Критический.
+- **Файлы:** `include/ace/services/kernelic.h`, `tests/base_fixture.cpp`,
+  `tests/context_fixture.cpp`.
+- **Симптом:** host full suite завершал только 4096 из 6000 pipe reads в
+  `base_fixture.kernelic_overflow_buffer_stress`; CQE второй волны повторно
+  указывали на уже завершённые observers. Отдельно `context_fixture.do_runner_test`
+  ошибочно ожидал, что один bounded `runner::run()` полностью дренирует
+  асинхронный console service.
+- **Корневая причина:** `submit()` вызывал `io_uring_get_sqe()` до проверки
+  `_queries < max_entries`. После потребления первой SQ kernel снова возвращал
+  slots, но overflow branch буферизовал запросы, оставляя зарезервированные SQE
+  неприготовленными; следующий `io_uring_submit()` отправлял их со stale
+  `user_data`. Standalone runner test не учитывал документированный лимит 128
+  pulls на один вызов.
+- **Решение:** SQE запрашивается только внутри доступной capacity branch;
+  operation готовится до установки observer `user_data`, overflow не изменяет
+  SQ tail до `kernel_entity::apply()`. Standalone runner regression выполняет
+  bounded calls до полного drain.
+- **Проверка:** `kernelic_overflow_buffer_stress` завершает все 6000 запросов и
+  `do_runner_test` оставляет runner пустым; targeted host repeats прошли 10/10 и
+  50/50 соответственно.
+
+### B77. `run()` принимал несогласованный multi-runner empty snapshot
+
+- **Статус:** Решено 2026-08-30.
+- **Приоритет:** Критический.
+- **Файлы:** `include/ace/core/dispatcher.h`, `tests/cutex_fixture.cpp`.
+- **Симптом:** `cutex_fixture.cutex_race` нестабильно возвращался из первого
+  `ace::run()` при `ace::empty() == false` и незавершённом счётчике. После
+  уничтожения fixture оставшиеся racers обращались к освобождённому `cutex`,
+  что ASan диагностировал как heap-use-after-free.
+- **Корневая причина:** `empty()` сканирует runners последовательно. Во время
+  cross-runner handoff scan мог сначала увидеть destination пустым, затем задача
+  публиковалась в него, source обнулялся, и поздняя часть scan видела source уже
+  пустым. `_activity_epoch` фиксировал переход, но `run()` не сравнивал epoch
+  после завершения O(N) scan.
+- **Решение:** empty snapshot принимается только при одинаковом activity epoch
+  до и после scan; при изменении epoch scan повторяется. Проверка остаётся в
+  cold quiescence path и не добавляет операций в `schedule()`/runner hot path.
+- **Проверка:** `cutex_fixture.cutex_race` воспроизводил преждевременный возврат
+  в 6 из 20 диагностических прогонов до исправления. После исправления Clang 22
+  ASan прошёл 100 in-process повторов обоих cutex race-сценариев и 100 отдельных
+  процессов `cutex_race`; GCC 16 TSan прошёл 20 повторов обоих сценариев без
+  race diagnostics; полный host Clang 22 ASan Meson suite прошёл 334/334,
+  затем три повторных полных прохода — 1002/1002.
 
 ### B73. Cached timestamp мог преждевременно завершать relative и absolute timers
 
@@ -1077,7 +1179,7 @@
 
 | ID | Файл | TODO |
 |----|------|------|
-| T1 | `include/ace/futures/channel.h:415` | Добавить batch read. |
+| T1 | `include/ace/futures/channel.h` | Решено B75: Nukes batch исправлен; channel cancel сохраняет node-wise drain, чтобы гарантированно reattach собственный in-place router последним. |
 | T2 | `include/ace/core/async.h:55` | Перенести yield operation в generator. |
 | T3 | `include/ace/core/dispatcher.h:295` | Вернуть отложенную логику после появления spawn groups. |
 | T4 | `include/ace/core/traits/promise.h:73` | Перенести async routers в rules. |
@@ -1091,14 +1193,18 @@
 
 ### N1. `nukes::pop_batch()` непригоден для arena release queue
 
-- **Статус:** Открыто.
+- **Статус:** Решено 2026-08-30 в составе B75.
 - **Приоритет:** Низкий.
 - **Область:** `include/ace/core/arena.h` и внешняя очередь nukes.
 - **Симптом:** iterator batch-а начинает чтение с dummy-node, поэтому первый
   dereference возвращает мусор.
-- **Текущий путь:** arena дренирует очередь обычным `pop()` в цикле.
-- **Проверка решения:** отдельный тест batch-чтения без чтения dummy-node, затем
-  arena cross-thread release tests.
+- **Решение:** dynamic MPSC/MPMC/roaming batch фиксирует tail snapshot под
+  допустимым consumer protocol, извлекает только payload nodes и использует
+  `nullptr` как end sentinel; default batch инициализирован пустым.
+- **Проверка решения:** `mpsc_batch_excludes_dummy_and_drains_snapshot` и
+  `mpmc_batch_excludes_dummy_and_reuses_nodes` проверяют точный размер, FIFO,
+  отсутствие dummy и последующий reuse. Arena сохраняет allocation-free
+  intrusive foreign-release path и от Nukes batch не зависит.
 
 ### N2. Arena utilization counter не считает все операции
 
@@ -1189,7 +1295,7 @@
 
 ### N8. `dispatcher::run()` пересоздаёт threads и использует фиксированный polling cadence
 
-- **Статус:** Открыто; исследовать после B48-B50 и B52.
+- **Статус:** Решено 2026-08-30: persistent workers, atomic wake и bounded adaptive backoff.
 - **Приоритет:** Средний.
 - **Файл:** `include/ace/core/dispatcher.h` (`run()`, `worker_tf()`,
   `worker_round()`).

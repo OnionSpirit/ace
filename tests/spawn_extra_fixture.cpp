@@ -12,6 +12,17 @@ namespace {
 
 struct spawn_extra_fixture : base_fixture {};
 
+struct roaming_probe : ace::core::traits::future_traits<roaming_probe> {
+    bool observed = false;
+    IMPORT_FUTURE_ENV(roaming_probe)
+
+    bool await_suspend(auto coroutine) {
+        observed = coroutine.promise()._roaming;
+        return false;
+    }
+    bool await_resume() const noexcept { return observed; }
+};
+
 ace::task push_marker(ace::bus<int>& channel, int marker) {
     channel << marker;
     co_return;
@@ -59,12 +70,12 @@ ace::task post_priority_driver(ace::bus<int>& channel) {
 
 ace::task roaming_driver(ace::bus<int>& channel, bool enabled) {
     co_await ace::roaming(enabled);
-    channel << 1;
+    channel << static_cast<int>(co_await roaming_probe {});
 }
 
-ace::task polling_driver(ace::bus<int>& channel) {
-    co_await ace::polling(true);
-    channel << 1;
+ace::task polling_driver(const bool enabled) {
+    co_await ace::polling(enabled);
+    co_await ace::suspend {};
 }
 
 // Verifies that a spawned task completes and its handle becomes done.
@@ -155,19 +166,29 @@ TEST_F(spawn_extra_fixture, roaming_false) {
 
     const auto values = fetch(channel);
     ASSERT_EQ(1u, values.size());
-    EXPECT_EQ(1, values[0]);
+    EXPECT_EQ(0, values[0]);
 }
 
-// Verifies that polling mode does not prevent the task from completing as a service task.
+// Verifies that polling=true moves a suspended task into the service pool.
 TEST_F(spawn_extra_fixture, polling_true) {
-    ace::bus<int> channel;
-    ace::schedule(polling_driver(channel));
-    ace::run();
-    EXPECT_TRUE(ace::empty());
+    ace::core::runner runner;
+    runner.attach(polling_driver(true));
+    ASSERT_TRUE(runner.yank());
+    EXPECT_TRUE(runner.is_polling());
+    EXPECT_TRUE(runner.yank_service());
+    EXPECT_TRUE(runner.empty());
+}
 
-    const auto values = fetch(channel);
-    ASSERT_EQ(1u, values.size());
-    EXPECT_EQ(1, values[0]);
+// Verifies that polling=false keeps a suspended task in the normal task pool.
+TEST_F(spawn_extra_fixture, polling_false) {
+    ace::core::runner runner;
+    runner.attach(polling_driver(false));
+    ASSERT_TRUE(runner.yank());
+    EXPECT_FALSE(runner.is_polling());
+    // The insertion/local selector flips source on the first empty probe.
+    EXPECT_FALSE(runner.yank());
+    EXPECT_TRUE(runner.yank());
+    EXPECT_TRUE(runner.empty());
 }
 
 } // namespace

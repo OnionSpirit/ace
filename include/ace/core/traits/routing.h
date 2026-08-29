@@ -12,9 +12,10 @@
  *    the @c router_slot stored in the coroutine's @c promise_type.
  * 3. The runner calls @c async::awake().  After resuming, it checks whether
  *    @c _runner_router is set.  If so, it calls
- *    @c router->forward(std::move(async)) instead of re-queuing.
- * 4. The router (owned by the future) enqueues the async in the future's
- *    own waiting structure (e.g., a channel waiters queue or a time-wheel slot).
+ *    @c router->redirect(node) instead of re-queuing.
+ * 4. A successful redirect transfers the node to the future's waiting
+ *    structure (e.g., a channel waiters queue or a time-wheel slot). A false
+ *    result asks the runner to clear the router and reattach immediately.
  * 5. When the future becomes ready, it calls @c runner::reattach(async) to
  *    return the async to its original runner.
  *
@@ -59,10 +60,12 @@ namespace ace::core::traits {
         runner_router_handle(runner_router_handle&&) noexcept = default;
 
         /**
-         * @brief Transfer the coroutine async into the future's storage.
+         * @brief Attempts to transfer the coroutine async into future storage.
          * @param node Queue node for the suspended coroutine async to enqueue.
+         * @return @c true when the router accepted ownership; @c false when the
+         * runner must clear the router and immediately reattach the node.
          */
-        virtual void redirect(forwarded_node_t node) {
+        virtual bool redirect(forwarded_node_t node) {
             throw std::logic_error("runner_router_handle::redirect(...) - called but not overridden");
         };
 

@@ -8,8 +8,8 @@
 /// Chunks up to @c kMaxSize bytes are served from a
 /// @c std::pmr::unsynchronized_pool_resource backed by a custom memory resource.
 /// The pool retains freed chunks in its
-/// free lists and returns its blocks to the system only when the arena — a
-/// thread-local singleton destroyed at thread exit — is destroyed.
+/// free lists. Thread exit retires the arena owner; storage is destroyed once
+/// the last outstanding chunk is released, which may happen on another thread.
 ///
 /// Requests larger than @c kMaxSize are served by @c malloc() directly and are
 /// freed back to the system immediately on deallocation (transient chunks).
@@ -17,10 +17,12 @@
 /// channel.
 ///
 /// The chunk header stores a pointer to the owner's @c extern_release context.
-/// A pooled chunk deallocated on a foreign thread is handed back through its
-/// @c nukes::dynamic::mpsc_queue.  A transient chunk is freed immediately and
+/// A pooled chunk deallocated on a foreign thread is handed back through an
+/// intrusive atomic MPSC stack. A transient chunk is freed immediately and
 /// atomically reports its size through @c extern_release::_released_bytes; the
 /// owner subtracts all reported bytes while processing the release context.
+/// Every chunk also holds one lifetime reference to that context, so queued
+/// coroutine frames remain valid after their producer thread exits.
 /// The owner drains its channel according to the utilization formula:
 ///     N = max_allocation_size / occupied_bytes
 /// every N-th allocation/deallocation operation drains the channel; with no
@@ -33,16 +35,19 @@
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <memory_resource>
 #include <new>
 #include <type_traits>
 
-#include <nukes/dynamic/mpsc_queue.h>
+#include <nukes/details/node_allocation.h>
 
 #include "ace/core/config.h"
 #include "ace/core/tools/macro.h"
 
 namespace ace::core {
+
+    struct arena;
 
     struct extern_release_debug;
     struct extern_release_release;
@@ -60,8 +65,10 @@ namespace ace::core {
 
     /// @brief State accessed by foreign threads when they release arena-owned chunks.
     struct extern_release_base {
-        nukes::dynamic::mpsc_queue<chunk_header*> _channel;
+        std::atomic<chunk_header*> _released_chunks { nullptr };
         std::atomic<std::size_t> _released_bytes { 0 };
+        std::atomic<std::size_t> _references { 1 };
+        arena* _owner { nullptr };
     };
 
     /// @brief Debug build release state with exact transient allocation accounting.
@@ -103,9 +110,10 @@ namespace ace::core {
     /**
      * @brief Thread-local arena shared by framework allocations.
      *
-     * @details All arena state is touched from the owning thread only, except
-     * @c extern_release, whose queue and counters are accessed atomically by
-     * foreign threads.
+     * @details All pool state is touched by the owner while it is alive. The
+     * external-release queue and lifetime counter are atomic. After owner
+     * retirement, the last foreign releaser exclusively drains and destroys
+     * the storage.
      */
     struct arena : arena_stats<is_debug> {
 
@@ -123,8 +131,13 @@ namespace ace::core {
 
         /// @brief Returns the thread-local arena singleton.
         static arena& get_instance() {
-            static thread_local arena instance;
-            return instance;
+            struct owner {
+                arena* _instance { new arena };
+
+                ~owner() { _instance->retire(); }
+            };
+            static thread_local owner instance;
+            return *instance._instance;
         }
 
         /**
@@ -186,14 +199,21 @@ namespace ace::core {
                 if constexpr (is_debug) {
                     live_system_chunks.fetch_sub(1, std::memory_order_relaxed);
                 }
+                release_reference(*release, release == &_extern_release);
             } else if (release != &_extern_release) {
-                // NOTE: Pooled chunk owned by another arena — hand it back through its channel.
-                if (not release->_channel.push(std::move(chunk)))
-                    std::terminate();
+                // NOTE: The freed header becomes an intrusive stack node. Its
+                // owner pointer is no longer needed after `release` is saved.
+                auto* head = release->_released_chunks.load(std::memory_order_relaxed);
+                do {
+                    chunk->_release = reinterpret_cast<extern_release*>(head);
+                } while (not release->_released_chunks.compare_exchange_weak(
+                    head, chunk, std::memory_order_release, std::memory_order_relaxed));
+                release_reference(*release, false);
             } else {
                 // NOTE: Local pooled chunk — back to the pool free list (never to the system).
                 _small_pool.deallocate(chunk, size);
                 _occupied -= size;
+                release_reference(*release, true);
             }
             maybe_drain(false);
         }
@@ -235,6 +255,25 @@ namespace ace::core {
         static inline std::atomic<std::size_t> live_system_chunks { 0 };
 
     private:
+
+        arena() { _extern_release._owner = this; }
+
+        /// @brief Releases the thread owner's lifetime reference at thread exit.
+        void retire() noexcept { release_reference(_extern_release, false); }
+
+        /**
+         * @brief Releases one owner-storage reference held by an allocated chunk.
+         * @details Local releases cannot destroy the arena because its thread
+         * owner reference is still held, so they use relaxed ordering.  A
+         * foreign release may be the last reference after owner-thread exit;
+         * acquire-release ordering then makes every queued chunk visible before
+         * the arena drains and destroys its pool.
+         */
+        static void release_reference(extern_release& release, const bool local) noexcept {
+            const auto order = local ? std::memory_order_relaxed : std::memory_order_acq_rel;
+            if (release._references.fetch_sub(1, order) == 1)
+                delete release._owner;
+        }
 
         template <typename release_t>
         static void note_malloc_allocate(release_t& release) noexcept {
@@ -322,6 +361,7 @@ namespace ace::core {
             auto* chunk = static_cast<chunk_header*>(mem);
             chunk->_release = &_extern_release;
             chunk->_size = transient ? (total | kTransientFlag) : total;
+            _extern_release._references.fetch_add(1, std::memory_order_relaxed);
             return chunk;
         }
 
@@ -346,21 +386,22 @@ namespace ace::core {
         }
 
         /**
-         * @brief Drains the incoming channel, returning every chunk to the pool.
+         * @brief Drains the incoming intrusive stack, returning every chunk to the pool.
          * @details First accounts for transient chunks freed by foreign threads,
-         * then returns pooled chunks from the external release channel. Uses the
-         * plain per-node @c pop() loop — @c pop_batch() iterates from the queue
-         * dummy node and yields garbage on the first dereference, so it is
-         * unusable for batch consumption.
+         * then atomically detaches and returns all pooled chunks. Stack order is
+         * irrelevant because every chunk returns to the same PMR pool.
          */
         void drain_channel() {
             note_drain();
             _occupied -= _extern_release._released_bytes.exchange(0, std::memory_order_relaxed);
-            chunk_header* chunk = nullptr;
-            while (_extern_release._channel.pop(chunk)) {
+            auto* chunk = _extern_release._released_chunks.exchange(
+                nullptr, std::memory_order_acquire);
+            while (chunk) {
+                auto* const next = reinterpret_cast<chunk_header*>(chunk->_release);
                 const auto size = chunk_size_of(chunk->_size);
                 _occupied -= size;
                 _small_pool.deallocate(chunk, size);
+                chunk = next;
             }
         }
 
@@ -445,19 +486,18 @@ namespace ace::core {
     };
 
     /**
-     * @brief Thread-safe process-lifetime storage for Nukes queue nodes.
+     * @brief Thread-safe storage backend for Nukes queue nodes.
      *
      * @details Dynamic Nukes queues can be static and therefore outlive a
-     * thread-local @c arena.  This dedicated synchronized pool deliberately
-     * lives until process termination, preventing global queue teardown from
-     * observing storage released by a departed owner thread.
+     * thread-local @c arena. Each node uses the process new/delete resource,
+     * so storage remains independent of thread and static destruction order.
      */
     class nukes_node_arena {
     public:
         [[nodiscard]] static void* allocate(
             const std::size_t bytes, const std::size_t alignment)
         {
-            auto* const storage = resource().allocate(bytes, alignment);
+            auto* const storage = std::pmr::new_delete_resource()->allocate(bytes, alignment);
             _outstanding_bytes.fetch_add(bytes, std::memory_order_relaxed);
             return storage;
         }
@@ -467,7 +507,7 @@ namespace ace::core {
         {
             if (not storage)
                 return;
-            resource().deallocate(storage, bytes, alignment);
+            std::pmr::new_delete_resource()->deallocate(storage, bytes, alignment);
             _outstanding_bytes.fetch_sub(bytes, std::memory_order_relaxed);
         }
 
@@ -479,12 +519,6 @@ namespace ace::core {
     private:
         static inline std::atomic<std::size_t> _outstanding_bytes { 0 };
 
-        [[nodiscard]] static std::pmr::synchronized_pool_resource& resource() {
-            // Intentionally never destroyed: static queues may run their
-            // destructors after thread-local arenas have already been torn down.
-            static auto* instance = new std::pmr::synchronized_pool_resource {};
-            return *instance;
-        }
     };
 
     /**

@@ -3,10 +3,18 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <array>
+#include <barrier>
+#include <numeric>
+#include <thread>
+
 #include <ace/futures/spawn.h>
 #include <ace/net.h>
 
 #include <nukes/dynamic/regular_freelist.h>
+#include <nukes/dynamic/mpmc_queue.h>
+#include <nukes/dynamic/mpsc_queue.h>
 
 namespace {
 
@@ -115,6 +123,20 @@ ace::task compose_or_tasks(int count) {
 
 ace::task trivial_task() {
     co_return;
+}
+
+std::size_t legacy_weighted_select(
+    const std::vector<double>& velocities,
+    const double aggregate_velocity,
+    const double probability)
+{
+    double attractiveness_accumulator = 0.0;
+    for (std::size_t runner_id = 0; runner_id < velocities.size(); ++runner_id) {
+        attractiveness_accumulator += 1.0 - velocities[runner_id] / aggregate_velocity;
+        if (probability <= attractiveness_accumulator)
+            return runner_id;
+    }
+    return velocities.size();
 }
 
 ace::task pipe_roundtrip_worker(int read_fd, int write_fd, int count) {
@@ -580,6 +602,9 @@ BENCHMARK(bm_compose_or)->Unit(benchmark::kMillisecond);
 
 static void bm_schedule_throughput(benchmark::State& state) {
     constexpr int tasks = 200000;
+    const int runners = static_cast<int>(state.range(0));
+
+    configure_runners(runners);
 
     for (auto _ : state) {
         for (int i = 0; i < tasks; ++i)
@@ -593,8 +618,16 @@ static void bm_schedule_throughput(benchmark::State& state) {
     }
 
     state.SetItemsProcessed(state.iterations() * tasks);
+    reset_runners();
 }
-BENCHMARK(bm_schedule_throughput)->Unit(benchmark::kMillisecond);
+BENCHMARK(bm_schedule_throughput)
+    ->Arg(1)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(64)
+    ->Unit(benchmark::kMillisecond);
 
 // ==========================================================================
 // BM12 - io_buffer_append: scatter-gather buffer assembly
@@ -925,3 +958,182 @@ static void bm_nukes_node_release(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(bm_nukes_node_release)->Unit(benchmark::kNanosecond);
+
+// ===========================================================================
+// BM23 - legacy_weighted_selection: isolated old O(N) selection algorithm
+// ===========================================================================
+// Reproduces the production weighted-selection loop over synthetic equal loads.
+// Candidate probabilities are generated outside the measured selection helper,
+// so the result isolates the scan and exposes its scaling and index bias.
+
+static void bm_legacy_weighted_selection(benchmark::State& state) {
+    const std::size_t runners = static_cast<std::size_t>(state.range(0));
+    std::vector<double> velocities(runners, 1.0);
+    const double aggregate = std::accumulate(velocities.begin(), velocities.end(), 0.0);
+    std::uint64_t sequence = 0x9e3779b97f4a7c15ULL;
+    std::array<std::size_t, 64> selections {};
+
+    for (auto _ : state) {
+        sequence ^= sequence << 13;
+        sequence ^= sequence >> 7;
+        sequence ^= sequence << 17;
+        const double probability = static_cast<double>(sequence >> 11)
+            * (1.0 / static_cast<double>(1ULL << 53));
+        std::size_t selected = legacy_weighted_select(
+            velocities, aggregate, probability);
+        benchmark::DoNotOptimize(selected);
+        if (selected < selections.size())
+            ++selections[selected];
+    }
+
+    std::size_t selected_runners = 0;
+    for (std::size_t runner_id = 0; runner_id < runners; ++runner_id)
+        selected_runners += selections[runner_id] != 0;
+    state.counters["selected_runners"] = static_cast<double>(selected_runners);
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(bm_legacy_weighted_selection)
+    ->Arg(2)
+    ->Arg(4)
+    ->Arg(8)
+    ->Arg(16)
+    ->Arg(64)
+    ->Unit(benchmark::kNanosecond);
+
+// ===========================================================================
+// BM24 - repeated_short_run: dispatcher startup and quiescence overhead
+// ===========================================================================
+// Measures complete schedule/run cycles for tiny workloads. The zero-task case
+// isolates dispatcher startup/shutdown; the other cases show when useful work
+// becomes large enough to amortize worker lifecycle and idle waiting.
+
+static void bm_repeated_short_run(benchmark::State& state) {
+    const int runners = static_cast<int>(state.range(0));
+    const int tasks = static_cast<int>(state.range(1));
+    configure_runners(runners);
+
+    for (auto _ : state) {
+        for (int task_id = 0; task_id < tasks; ++task_id)
+            ace::schedule(trivial_task());
+        ace::run();
+        if (not ace::empty()) {
+            state.SkipWithError("Dispatcher not empty after short run");
+            break;
+        }
+    }
+
+    state.counters["tasks"] = static_cast<double>(tasks);
+    state.SetItemsProcessed(state.iterations() * std::max(tasks, 1));
+    reset_runners();
+}
+
+static void repeated_short_run_args(benchmark::internal::Benchmark* benchmark) {
+    for (const int runners : {1, 2, 4, 8, 16})
+        for (const int tasks : {0, 1, 10, 100})
+            benchmark->Args({runners, tasks});
+}
+
+BENCHMARK(bm_repeated_short_run)
+    ->Apply(repeated_short_run_args)
+    ->Unit(benchmark::kMicrosecond);
+
+// ===========================================================================
+// BM25 - dynamic_queue_throughput: concurrent Nukes queue/reclamation cost
+// ===========================================================================
+// Transfers a fixed batch of unique integers while excluding worker creation
+// from the timed interval. The checksum converts loss or duplication into a
+// benchmark error instead of reporting throughput for a corrupted run.
+
+template <typename queue_t>
+static void bm_dynamic_queue_throughput(benchmark::State& state) {
+    constexpr std::uint64_t messages_per_producer = 16'384;
+    const auto producer_count = static_cast<std::size_t>(state.range(0));
+    const auto consumer_count = static_cast<std::size_t>(state.range(1));
+    const auto message_count = producer_count * messages_per_producer;
+    const auto expected_sum = message_count * (message_count + 1) / 2;
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        queue_t queue;
+        std::barrier start_gate(
+            static_cast<std::ptrdiff_t>(producer_count + consumer_count + 1));
+        std::atomic<std::size_t> producers_done {};
+        std::atomic<std::size_t> consumed {};
+        std::atomic<std::uint64_t> checksum {};
+        std::atomic<bool> failed {};
+        std::vector<std::thread> workers;
+        workers.reserve(producer_count + consumer_count);
+
+        for (std::size_t consumer = 0; consumer < consumer_count; ++consumer) {
+            workers.emplace_back([&] {
+                start_gate.arrive_and_wait();
+                const auto deadline = std::chrono::steady_clock::now()
+                    + std::chrono::seconds(10);
+                while (consumed.load(std::memory_order_relaxed) < message_count) {
+                    std::uint64_t value {};
+                    if (queue.pop(value)) {
+                        checksum.fetch_add(value, std::memory_order_relaxed);
+                        consumed.fetch_add(1, std::memory_order_relaxed);
+                        continue;
+                    }
+                    if (producers_done.load(std::memory_order_acquire) == producer_count) {
+                        if (std::chrono::steady_clock::now() >= deadline) {
+                            failed.store(true, std::memory_order_release);
+                            break;
+                        }
+                    }
+                    std::this_thread::yield();
+                }
+            });
+        }
+
+        for (std::size_t producer = 0; producer < producer_count; ++producer) {
+            workers.emplace_back([&, producer] {
+                start_gate.arrive_and_wait();
+                const auto first = producer * messages_per_producer + 1;
+                for (std::uint64_t offset = 0; offset < messages_per_producer; ++offset) {
+                    auto value = first + offset;
+                    while (not queue.push(std::move(value)))
+                        std::this_thread::yield();
+                }
+                producers_done.fetch_add(1, std::memory_order_release);
+            });
+        }
+
+        state.ResumeTiming();
+        start_gate.arrive_and_wait();
+        for (auto& worker : workers)
+            worker.join();
+        state.PauseTiming();
+
+        if (failed.load(std::memory_order_acquire)
+            or consumed.load(std::memory_order_relaxed) != message_count
+            or checksum.load(std::memory_order_relaxed) != expected_sum) {
+            state.SkipWithError("Dynamic queue lost or duplicated messages");
+            break;
+        }
+        state.ResumeTiming();
+    }
+
+    state.counters["producers"] = static_cast<double>(producer_count);
+    state.counters["consumers"] = static_cast<double>(consumer_count);
+    state.SetItemsProcessed(state.iterations() * message_count);
+}
+
+static void bm_dynamic_mpsc_queue(benchmark::State& state) {
+    bm_dynamic_queue_throughput<nukes::dynamic::mpsc_queue<std::uint64_t>>(state);
+}
+BENCHMARK(bm_dynamic_mpsc_queue)
+    ->Args({1, 1})
+    ->Args({4, 1})
+    ->UseRealTime()
+    ->Unit(benchmark::kMillisecond);
+
+static void bm_dynamic_mpmc_queue(benchmark::State& state) {
+    bm_dynamic_queue_throughput<nukes::dynamic::mpmc_queue<std::uint64_t>>(state);
+}
+BENCHMARK(bm_dynamic_mpmc_queue)
+    ->Args({1, 1})
+    ->Args({4, 4})
+    ->UseRealTime()
+    ->Unit(benchmark::kMillisecond);

@@ -554,7 +554,6 @@ ping() {
         const auto cqe = cqe_s[i];
         const auto identity = io_uring_cqe_get_data(cqe);
         const auto observer = static_cast<kernel_observer*>(identity);
-
         if (observer == nullptr) {
             --_queries;
             continue;
@@ -603,19 +602,21 @@ submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept
     if (not observer->_runner_identity)
         observer->_runner_identity = core::runner::get().as<runner_pool_t>();
     touch(observer->_runner_identity);
-    io_uring_sqe *sqe = io_uring_get_sqe(&_ring);
-    if (_queries < static_cast<int>(max_entries) and sqe) [[likely]] {
-        io_uring_sqe_set_data(sqe, observer);
-        ++_queries;
-        io_uring_foo(sqe, params...);
-        _need_submission = true;
-        return true;
+    if (_queries < static_cast<int>(max_entries)) [[likely]] {
+        io_uring_sqe* const sqe = io_uring_get_sqe(&_ring);
+        if (sqe) [[likely]] {
+            ++_queries;
+            io_uring_foo(sqe, params...);
+            io_uring_sqe_set_data(sqe, observer);
+            _need_submission = true;
+            return true;
+        }
     }
     // NOTE: The ring has no free SQE slots (more than 4096 pending
-    // requests).  Defer the request WITHOUT holding an sqe — apply() will
-    // fetch a fresh slot on the next ping() once the CQ drains.  Holding
-    // a fetched slot across submissions would let io_uring_submit emit a
-    // stale, half-prepared entry and produce a bogus CQE for the observer.
+    // requests). Defer the request WITHOUT fetching or holding an SQE —
+    // apply() will fetch a fresh slot after the CQ drains. Even calling
+    // io_uring_get_sqe() here would reserve a slot; a later submit would then
+    // emit that unprepared SQE with stale user_data.
     if (not _submission_buffer.enqueue(kernel_entity{io_uring_foo, observer, params...}))
         return false;
     ++_queries;
@@ -654,8 +655,8 @@ apply() {
     if (not _observer) [[unlikely]] return false;
     io_uring_sqe* sqe = io_uring_get_sqe(&_ring);
     if (not sqe) [[unlikely]] return false;
-    io_uring_sqe_set_data(sqe, _observer);
     _action(_io_uring_foo, sqe, _params);
+    io_uring_sqe_set_data(sqe, _observer);
     return true;
 }
 

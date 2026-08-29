@@ -8,8 +8,8 @@
  *  - @c termination_signal — requests the service to shut down (@c e_shutdown).
  *  - @c interruption_signal — requests the service to suspend (@c e_break).
  *
- * Signals are delivered through a per-dispatcher @c sig_pipe_t (lock-free
- * MPSC queue).  The dispatcher exposes @c ace::interrupt() and
+ * Signals are delivered through a per-dispatcher MPMC @c sig_pipe_t.
+ * The dispatcher exposes @c ace::interrupt() and
  * @c ace::terminate() to push signals, and @c ace::reset_signal() to drain
  * the pipe.
  *
@@ -17,6 +17,10 @@
  */
 #ifndef ACE_SIGNAL_H
 #define ACE_SIGNAL_H
+
+#include <memory>
+
+#include <nukes/dynamic/mpmc_queue.h>
 
 #include "ace/core/async.h"
 
@@ -44,8 +48,13 @@ namespace ace::core {
         virtual ~signal_handler() = default;
     };
 
-    /// @brief Alias for the signal pipe type (lock-free MPSC queue).
-    typedef nukes::dynamic::mpsc_queue<std::unique_ptr<signal_handler>> sig_pipe_t;
+    /**
+     * @brief Dispatcher signal pipe supporting concurrent publishers and services.
+     * @details Nukes performs consumer ownership and node reclamation with
+     * per-instance synchronization; no dispatcher-wide serialization is needed.
+     */
+    using sig_pipe_t =
+        nukes::dynamic::mpmc_queue<std::unique_ptr<signal_handler>>;
 
     /**
      * @brief Signal that requests service shutdown (@c e_shutdown).

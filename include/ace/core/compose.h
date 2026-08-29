@@ -660,8 +660,9 @@ struct ACE_OR_AWAIT_FUTURE_SPACE or_await_router final : runner_router {
      * @brief Stores the suspended caller until the race resolves.
      * @param node Task node of the suspended caller.
      */
-    void redirect(omni_node node) override {
+    bool redirect(omni_node node) override {
         _or_await->_waiter = node;
+        return true;
     }
 
     /**
@@ -729,8 +730,9 @@ struct ACE_AND_AWAIT_FUTURE_SPACE and_await_router final : runner_router {
      * @brief Stores the suspended caller until both futures finish.
      * @param node Task node of the suspended caller.
      */
-    void redirect(omni_node node) override {
+    bool redirect(omni_node node) override {
         _and_await->_waiter = node;
+        return true;
     }
 
     /**
@@ -795,8 +797,9 @@ struct ACE_AND_AWAIT_COMPOSED_FUTURE_SPACE and_await_composed_router final : run
      * @brief Stores the suspended caller until all futures finish.
      * @param node Task node of the suspended caller.
      */
-    void redirect(omni_node node) override {
+    bool redirect(omni_node node) override {
         _and_await_composed->_waiter = node;
+        return true;
     }
 
     /**
@@ -862,8 +865,9 @@ struct ACE_OR_AWAIT_COMPOSED_FUTURE_SPACE or_await_composed_router final : runne
      * @brief Stores the suspended caller until the race resolves.
      * @param node Task node of the suspended caller.
      */
-    void redirect(omni_node node) override {
+    bool redirect(omni_node node) override {
         _or_await_composed->_waiter = node;
+        return true;
     }
 
     /**

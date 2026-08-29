@@ -1,6 +1,6 @@
 # ACE Framework - Benchmarking Guide
 
-Дата актуализации: 2026-08-28.
+Дата актуализации: 2026-08-30.
 
 ## Когда нужен бенчмарк
 
@@ -59,7 +59,7 @@ release-путь: `debug=false`, `optimization=3` и `b_ndebug=true`; поэто
 |------|-----------|
 | `benchmarks/main.cpp` | Google Benchmark entry point. |
 | `benchmarks/environment.h` | 4 helpers: `configure_runners`, `reset_runners`, `fetch_into`, `fetch`. |
-| `benchmarks/benchmarks.cpp` | 22 numbered benchmark scenarios (BM1-BM22) and 28 named coroutine helpers. |
+| `benchmarks/benchmarks.cpp` | 25 numbered benchmark scenarios (BM1-BM25). |
 
 ## Инвентарь
 
@@ -87,6 +87,65 @@ release-путь: `debug=false`, `optimization=3` и `b_ndebug=true`; поэто
 | BM20 | `bm_compose_variadic` | Variadic AND/OR из трёх и более futures. |
 | BM21 | `bm_connection_link_idle_cancel` | Responsiveness и cancellation для 1/10/100 idle `connection_link` reads. |
 | BM22 | `bm_nukes_node_release` | Reuse-path capture/release в local Nukes node pool. |
+| BM23 | `bm_legacy_weighted_selection` | Изолированный baseline прежней weighted-selection формулы для 2/4/8/16/64 runners. |
+| BM24 | `bm_repeated_short_run` | Повторные schedule/run циклы с 0/1/10/100 задачами и 1/2/4/8/16 runners. |
+| BM25 | `bm_dynamic_mpsc_queue`, `bm_dynamic_mpmc_queue` | Direct concurrent queue/reclamation throughput: MPSC 1P/1C и 4P/1C, MPMC 1P/1C и 4P/4C по 16384 сообщений на producer. |
+
+## B75: dynamic Nukes queue reclamation (2026-08-30)
+
+Baseline и result измерены release-сборкой GCC 16.2.1 (`-O3`, `NDEBUG`) на одном
+host (12 logical CPU, L3 32 MiB), пятью повторами с медианами и
+`--benchmark_min_time=0.05s`. BM25 исключает создание worker threads из timed
+interval, но включает concurrent transfer и join; checksum превращает loss или
+duplication в benchmark error, а `UseRealTime()` делает throughput производным
+от wall time всего transfer. JSON: `/tmp/ace-b75-baseline-direct.json`,
+`/tmp/ace-b75-baseline-mpsc.json`, `/tmp/ace-b75-baseline-mpmc11.json`,
+`/tmp/ace-b75-baseline-mpmc44.json` и `/tmp/ace-b75-current-direct.json`.
+
+| Сценарий | Baseline median real | Current median real | Изменение |
+|----------|---------------------:|--------------------:|----------:|
+| MPSC 1P/1C | 0.979 ms | 0.436 ms | -55.5% |
+| MPSC 4P/1C | 4/5 повторов завершились loss/duplication; единственный успешный 5.57 ms | 3.63 ms, 5/5 корректно | correctness восстановлен; успешный sample -34.8% |
+| MPMC 1P/1C | 0.668 ms | 0.471 ms | -29.5% |
+| MPMC 4P/4C | 6.85 ms | 5.58 ms | -18.5% |
+
+Интеграционный контроль тем же способом: BM7 `bm_channel_push_pull` улучшился
+с 3.94 до 2.95 ms (-25.1%), BM15 `bm_channel_pending_push` — с 1.405 до
+1.31 ms (-6.7%). BM11 после корректировки source quota дал 13.1/23.9/31.8/35.1
+ms для 1/4/16/64 runners; это сопоставимо с финальным B50/N8 диапазоном при иной
+системной нагрузке и не показывает возврата линейного O(N) selection path.
+
+## B50/N8: load-aware selection и persistent workers (2026-08-30)
+
+Baseline и current измерены одной release-сборкой GCC 16.2.1 (`-O3`, `NDEBUG`),
+на одном host (12 logical CPU, L3 32 MiB), по пять повторов с медианами и
+`--benchmark_min_time=0.05s`. JSON: `/tmp/ace-b50-n8-baseline.json` и
+`/tmp/ace-b50-n8-current-final.json`. Baseline load average был 0.42/0.26/0.43,
+current — 2.55/2.40/2.03, поэтому небольшие различия следует считать шумом.
+
+BM11, 200k задач, median baseline → current:
+
+| Runners | Real, ms | CPU, ms | Real change |
+|--------:|---------:|--------:|------------:|
+| 1 | 13.1 → 12.6 | 12.0 → 12.6 | -3.8% |
+| 2 | 17.3 → 14.0 | 15.7 → 13.4 | -19.1% |
+| 4 | 26.5 → 22.6 | 19.3 → 21.7 | -14.7% |
+| 8 | 33.8 → 26.2 | 20.0 → 25.5 | -22.5% |
+| 16 | 43.2 → 29.7 | 20.1 → 25.5 | -31.3% |
+| 64 | 75.3 → 33.6 | 22.0 → 27.0 | -55.4% |
+
+BM24 показывает устранение thread-startup/1 ms floor. Median real time для
+пустого `run()`: 1053 → 0.007 us (1 runner), 2080 → 0.066 us (2),
+3411 → 0.228 us (4), 6302 → 0.733 us (8), 11877 → 1.74 us (16).
+Для 100 задач: 2058 → 5.11 us, 3087 → 11.5 us, 4756 → 13.3 us,
+7599 → 18.7 us и 14581 → 25.6 us соответственно.
+
+BM23 также уточнил исходный диагноз: при согласованных положительных velocity
+прежний accumulator обычно пересекает threshold на втором runner-е
+(`selected_runners=2` для всех N), поэтому фактический normal path не рос
+линейно. Однако формула оставалась индексно смещённой, data-racy и имела O(N)
+fallback при несогласованных метриках. Новый power-of-two-choices path всегда
+читает ровно две load-метрики и выполняет O(1) selection/update.
 
 ## Происхождение нагрузочных сценариев
 

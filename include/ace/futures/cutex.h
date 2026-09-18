@@ -62,7 +62,7 @@ namespace ace::futures {
     struct cutex_control {
 
         // NOTE: <int> instead of <uint64_t> because unsigned type may ruin process on overflow after subtract
-        std::atomic<long>                           _users            {0};         ///< Number of active users (0 = unlocked).
+        std::atomic<long>                           _users            {0};            ///< Number of active users (0 = unlocked).
         nukes::dynamic::roaming_mpsc_queue<task>    _waiters          { };            ///< Tasks waiting to acquire the mutex.
 
         /**
@@ -232,7 +232,7 @@ namespace ace::futures {
         cutex& _cutex;                    ///< Managed mutex.
         omni_runner _runner {};           ///< Original runner (for @c sync() restore).
         bool _is_released { true };    ///< @c Equals true when the mutex is not held.
-        bool _is_manual { false };     ///< @c Equals true if requires manual @c release(). @c cutex captured by @c sync()
+        bool _is_synced { false };     ///< @c Equals true if requires manual @c release(). @c cutex captured by @c sync()
         bool _roaming_state { true };  ///< Task @c roaming value before interacting with @c cutex
 
     public:
@@ -262,7 +262,7 @@ namespace ace::futures {
             if (not _is_released)
                 throw std::logic_error {"duplicated 'capture()/sync()' operation before 'release()'"};
             _is_released = false;
-            _is_manual = false;
+            _is_synced = false;
             return _cutex.capture(false);
         };
 
@@ -281,7 +281,7 @@ namespace ace::futures {
             if (not _is_released)
                 throw std::logic_error {"duplicated 'capture()/sync()' operation before 'release()'"};
             _is_released = false;
-            _is_manual = true;
+            _is_synced = true;
             // NOTE: Creating capture future
             auto capt = _cutex.capture(true);
             // NOTE: Storing original runner and roaming value
@@ -300,7 +300,7 @@ namespace ace::futures {
             if (not _is_released) {
                 _cutex.release();
                 _is_released = true;
-                _is_manual = false;
+                _is_synced = false;
             }
             // NOTE: Reattaching task to the original runner
             co_await ace::reattach{_runner};
@@ -316,7 +316,7 @@ namespace ace::futures {
         ~proxy() noexcept(false) {
             if (not _is_released) {
                 _cutex.release();
-                if (_is_manual)
+                if (_is_synced)
                     throw std::logic_error {"manual 'release()' required on 'sync()' type of lock"};
             }
         }

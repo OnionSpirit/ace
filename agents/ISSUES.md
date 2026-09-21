@@ -1,6 +1,6 @@
 # ACE Framework - Issues and Technical Debt
 
-Дата актуализации: 2026-08-27.
+Дата актуализации: 2026-09-21.
 
 Этот файл является единым реестром известных багов, TODO, нестабильностей и
 технических нюансов, требующих решения. Закрытые записи не удаляются: их статус
@@ -22,15 +22,21 @@
 
 ### B11. `cutex::proxy::~proxy()` бросает из `noexcept`-деструктора
 
-- **Статус:** Открыто.
+- **Статус:** Исследуется; исходный `noexcept` устранён в ветке `slope`,
+  поведение при misuse требует регресс-проверки.
 - **Приоритет:** Низкий.
 - **Файл:** `include/ace/futures/cutex.h:316-320`.
-- **Симптом:** при `sync()`-захвате без ручного `release()` деструктор бросает
+- **Исходный симптом:** при `sync()`-захвате без ручного `release()` деструктор бросает
   `std::logic_error`; из-за неявного `noexcept` это вызывает `std::terminate()` и
   предупреждение GCC `-Wterminate`.
-- **Нюанс:** проверка misuse намеренная, но приложение не может обработать такое
-  завершение. Возможные направления: не бросать из деструктора либо выявлять
-  неправильное использование до разрушения proxy.
+- **Уточнение ревью 2026-09-21:** деструктор теперь явно объявлен
+  `noexcept(false)`. Описание прежнего неявного `noexcept` больше не соответствует
+  коду; отдельный тест забытого `release()` и выбранного exception contract
+  в этой работе не добавлялся и не запускался.
+- **Нюанс:** проверка misuse намеренная; контракт обработки ошибки при обычном
+  выходе и при раскрутке стека ещё требует проверки. Возможные направления:
+  не бросать из деструктора либо выявлять неправильное использование до
+  разрушения proxy.
 - **Проверка решения:** тест на забытый `release()` не должен аварийно завершать
   процесс и должен подтверждать выбранный контракт API.
 
@@ -522,14 +528,21 @@
 
 ### B47. `slab_mempool` маскирует allocation failure и затем разыменовывает null
 
-- **Статус:** Открыто.
+- **Статус:** Исследуется; исправление реализации присутствует в `slope`,
+  проверка отказов выделения slab/vector остаётся незавершённой.
 - **Приоритет:** Высокий.
 - **Файл:** `include/ace/core/tools/queue.h` (`grow()`, `alloc()`, enqueue APIs).
-- **Симптом:** `grow()` ловит exception, пишет в `std::cerr` и возвращается;
+- **Исходный симптом:** `grow()` ловит exception, пишет в `std::cerr` и возвращается;
   `alloc() noexcept` затем без проверки разыменовывает `free_head == nullptr`.
   Если `new[]` успешен, а `slabs.push_back()` бросает, новый slab также теряется.
   Placement-construction `T` вызывается из `noexcept enqueue`, хотя copy/move
   constructor `T` может бросить.
+- **Уточнение ревью 2026-09-21:** `grow()` использует `unique_ptr` до успешного
+  добавления slab в vector, `alloc()` и `enqueue()` распространяют исключения,
+  а `enqueue()` возвращает node при ошибке construction. Существующий
+  `queue_fixture.throwing_payload_rolls_back_enqueue` прошёл в составе десяти
+  shuffled повторов выбранного ASan-набора. Отказы `new[]` и роста vector
+  отдельно не инъецировались; вызывающие `noexcept` APIs отслеживаются в B52.
 - **Предлагаемое решение:** выбрать явный failure contract и обеспечить strong
   cleanup при каждом участке allocation/construction. Не продолжать после
   failure и не печатать из generic container как замену передаче ошибки.
@@ -641,15 +654,28 @@
 
 ### B52. `noexcept` публичных scheduler/container APIs не соответствует операциям
 
-- **Статус:** Решено 2026-08-30: throwing contracts и transactional rollback согласованы.
+- **Статус:** Открыто повторно 2026-09-21; исправление от 2026-08-30 неполное.
 - **Приоритет:** Высокий.
 - **Файлы и символы:** `include/ace/core/dispatcher.h` (`reload`, `schedule`,
   `run`), `include/ace/core/traits/service.h` (`respawn`, `touch`),
-  `include/ace/core/tools/queue.h` и связанные runner paths.
+  `include/ace/core/tools/queue.h`, `include/ace/core/runner.h`
+  (`yank`, `yank_service`), `include/ace/services/kernelic.h` (`submit`) и
+  `include/ace/futures/timeout.h` (`timeout_router::redirect`).
 - **Симптом:** функции помечены `noexcept`, но выполняют `vector::resize/reserve`,
   создают `std::jthread`, конструируют payloads, выделяют queue nodes и вызывают
   scheduling paths с потенциальными исключениями. Failure превращается в
   `std::terminate` вместо заявляемого/обрабатываемого результата.
+- **Оставшиеся пути, подтверждённые чтением кода 2026-09-21:**
+  `kernel_controller::submit() noexcept` вызывает теперь throwing `touch()` и
+  `_submission_buffer.enqueue()` без обработки. Отказ allocation при respawn
+  service или расширении overflow buffer завершит процесс. Аналогично
+  `runner::yank()/yank_service() noexcept` вызывают timeout-router, который
+  через `clock::subscribe()` может выделять память и запускать service уже вне
+  coroutine exception boundary. Снятие `noexcept` только с нижних функций
+  не обеспечивает заявленный error contract. Отдельный дефект rollback при
+  создании worker threads зарегистрирован в B79.
+- **Проверка ревью:** статическая проверка call paths; allocation и
+  thread-construction fault injection в ревью не выполнялась.
 - **Предлагаемое решение:** составить call graph потенциально throwing операций;
   для каждого публичного API либо снять `noexcept` и документировать `@throws`,
   либо полностью обработать failure с rollback/error result. Не ловить всё с
@@ -918,7 +944,7 @@
 - **Статус:** Открыто.
 - **Приоритет:** Средний.
 - **Файлы:** `README.md`, `agents/INDEX.md`, `agents/TESTING.md`,
-  `include/ace/services/clock.h`.
+  `agents/ISSUES.md`, `include/ace/services/clock.h`, `include/ace/core/arena.h`.
 - **Расхождения:** README называет `automaton<T>` eager и diagram запускает его
   вызовом, тогда как implementation/INDEX/test фиксируют lazy
   `suspend_always`; test inventory и compiler status в INDEX синхронизированы
@@ -926,8 +952,15 @@
   direct-registration clock при решении B6/B73;
   `agents/TESTING.md` приписывает `hanged_command_defaults` проверки, которых в
   test body нет.
+- **Дополнение ревью 2026-09-21:** README по-прежнему называет automaton eager
+  в таблице и диаграмме, а Nukes allocator — process-lifetime pool, хотя
+  `nukes_node_arena` использует `std::pmr::new_delete_resource()`. INDEX указывает
+  318 GTests, TESTING — 330; fixture map INDEX не включает
+  `nukes_concurrency_fixture.cpp`. В реестре B11 и B47 описывали прежнюю
+  реализацию, B52 и B77 были преждевременно закрыты. Эти четыре записи уточнены
+  при регистрации ревью; остальные расхождения требуют отдельной правки.
 - **Предлагаемое решение:** после исправления соответствующих production/test
-  issues выбрать authoritative contracts и синхронно обновить все четыре
+  issues выбрать authoritative contracts и синхронно обновить связанные
   документа. Не менять implementation для совпадения с устаревшим текстом без
   отдельного API-решения.
 - **Проверка решения:** ручная cross-reference проверка coroutine table/diagram,
@@ -1110,9 +1143,12 @@
 
 ### B77. `run()` принимал несогласованный multi-runner empty snapshot
 
-- **Статус:** Решено 2026-08-30.
+- **Статус:** Открыто повторно 2026-09-21; epoch-validation от 2026-08-30
+  не закрывает окно нулевого load при immediate reattach.
 - **Приоритет:** Критический.
-- **Файлы:** `include/ace/core/dispatcher.h`, `tests/cutex_fixture.cpp`.
+- **Файлы:** `include/ace/core/dispatcher.h`, `include/ace/core/runner.h`
+  (`yank`, `yank_service`), `include/ace/futures/reattach.h`,
+  `tests/cutex_fixture.cpp`, `tests/base_fixture.cpp`.
 - **Симптом:** `cutex_fixture.cutex_race` нестабильно возвращался из первого
   `ace::run()` при `ace::empty() == false` и незавершённом счётчике. После
   уничтожения fixture оставшиеся racers обращались к освобождённому `cutex`,
@@ -1122,15 +1158,93 @@
   публиковалась в него, source обнулялся, и поздняя часть scan видела source уже
   пустым. `_activity_epoch` фиксировал переход, но `run()` не сравнивал epoch
   после завершения O(N) scan.
-- **Решение:** empty snapshot принимается только при одинаковом activity epoch
+- **Частичное решение 2026-08-30:** empty snapshot принимается только при одинаковом activity epoch
   до и после scan; при изменении epoch scan повторяется. Проверка остаётся в
   cold quiescence path и не добавляет операций в `schedule()`/runner hot path.
-- **Проверка:** `cutex_fixture.cutex_race` воспроизводил преждевременный возврат
+- **Историческая проверка:** `cutex_fixture.cutex_race` воспроизводил преждевременный возврат
   в 6 из 20 диагностических прогонов до исправления. После исправления Clang 22
   ASan прошёл 100 in-process повторов обоих cutex race-сценариев и 100 отдельных
   процессов `cutex_race`; GCC 16 TSan прошёл 20 повторов обоих сценариев без
   race diagnostics; полный host Clang 22 ASan Meson suite прошёл 334/334,
   затем три повторных полных прохода — 1002/1002.
+- **Оставшаяся причина:** при `redirect() == false` runner сначала вызывает
+  `release_runnable()`, затем очищает router и вызывает `reattach()`. Когда
+  мигрирует последняя runnable-задача, между release и acquire на destination
+  все loads действительно равны нулю. Dispatcher может выполнить весь scan
+  внутри этого окна с неизменившимся epoch и вернуть управление до завершения
+  задачи. Та же последовательность присутствует в `yank_service()`.
+- **Проверка ревью 2026-09-21:** существующий ASan-бинарник с
+  `--gtest_filter=base_fixture.reattach_cross_runner_migration
+  --gtest_repeat=1000 --gtest_brief=1` в повторном прогоне дал 916 успешных и
+  84 неуспешных повторения: 0–1 результатов вместо двух, иногда
+  `ace::empty() == false` после `run()`. Существующий, более старый чем HEAD,
+  benchmark-бинарник с `--benchmark_filter=^bm_reattach_migration$
+  --benchmark_min_time=0.01s --benchmark_repetitions=3` сообщил
+  `Dispatcher not empty after reattach test` во всех трёх повторах.
+  Бинарники не пересобирались; benchmark не является подтверждением сборки
+  HEAD или измерением исправления. LSan был недоступен под ptrace; TSan-бинарник
+  не запустился из-за отсутствующей `libgtest.so.1.17.0`.
+- **Предлагаемое решение:** сохранять runnable accounting до публикации задачи
+  на destination; согласовать immediate reattach в обоих runner paths.
+- **Проверка решения:** regression должен проверять completion после одного
+  `run()` без дополнительного drain/run; last-task migration и immediate
+  reattach, shuffled/repeated ASan/TSan runs, отсутствие pending work и UAF.
+
+### B78. Обязательные входы сборки отсутствовали в Git
+
+- **Статус:** Решено в рабочем индексе 2026-09-21; commit ещё не создан,
+  чистая сборка не проверялась.
+- **Приоритет:** Высокий (P1).
+- **Файлы:** `subprojects/nukes.wrap`, `meson.build`,
+  `subprojects/packagefiles/nukes-b75.patch`, `tests/nukes_alignment_fixture.cpp`,
+  `tests/nukes_concurrency_fixture.cpp`, `tests/service_fixture.cpp`,
+  `tests/sanitized_test_runner.py`, `tests/sanitized_test_runner_test.py`.
+- **Симптом:** wrap требует отсутствующий в Git `nukes-b75.patch`, а Meson
+  ссылается на пять untracked test/tooling files. Локальное рабочее дерево
+  скрывало отсутствие обязательных входов; чистый checkout не мог воспроизвести
+  сборку. Новые ссылки ветки `slope` — patch и concurrency fixture; остальные
+  пропуски присутствовали ранее.
+- **Решение:** с разрешения пользователя шесть существующих файлов добавлены
+  в индекс Git без изменения содержимого. Generated files, dependency checkouts,
+  caches и посторонние patches не добавлялись.
+- **Проверка решения:** все 43 literal `tests/*` file inputs из Meson и patch
+  из `diff_files` суммарно присутствуют в `git ls-files`. Команды
+  `python3 -B tests/sanitized_test_runner_test.py` и
+  `python3 -B tests/discover_tests_test.py` прошли по 7/7 tests.
+  `git diff --check` и `git diff --cached --check -- tests` проходят.
+  Общий staged whitespace check сообщает 95 пустых context lines с обязательным
+  пробелом unified diff и пустую строку EOF в patch; содержимое patch сохранено.
+  `git apply --numstat subprojects/packagefiles/nukes-b75.patch` успешно
+  разбирает все семь target files; это проверка синтаксиса, не применимости к
+  pinned revision. Отдельный regression test для Git inventory не добавляется.
+- **Ограничение воспроизводимости:** при ревью локальный Nukes имел HEAD
+  `04e7cf0da79b217d0944e1902a594f2c2dfdc232`, а wrap закрепляет
+  `0b498630ac3c9dd801baf3f4df558916c3d7a557`. Сборку pinned commit с patch
+  необходимо проверить в изолированном чистом окружении; локальные успешные
+  тесты её не подтверждают. Текущий dependency checkout не изменялся.
+
+### B79. Ошибка создания workers разрушает TLS services начавших работу задач
+
+- **Статус:** Открыто.
+- **Приоритет:** Средний (P2).
+- **Файл:** `include/ace/core/dispatcher.h` (`run`, `ensure_workers`,
+  `worker_tf`, `stop_workers`).
+- **Симптом:** первый из создаваемых workers может начать timer/I/O-задачу,
+  пока создаются остальные потоки. Если следующий `std::jthread` бросит
+  исключение, rollback остановит уже созданные threads и уничтожит их TLS
+  services, хотя связанные задачи ещё не завершены. Следующий `run()` не
+  восстанавливает потерянное service state.
+- **Причина:** `_run_active` устанавливается до `ensure_workers()`, workers
+  сразу допускаются к исполнению; catch вызывает `stop_workers()` без
+  отдельного барьера завершения startup.
+- **Предлагаемое решение:** отделить reservation активного `run()` от допуска
+  workers к задачам; открывать startup barrier только после успешного создания
+  всех потоков. При отказе сохранять очередь и lifetime задач для retry.
+- **Проверка:** вывод подтверждён статическим анализом, fault injection не
+  запускался. Нужен контролируемый отказ создания второго или последующего
+  worker при наличии timer/I/O work: до успешного startup задачи не исполняются,
+  ошибка выходит из `run()`, повторный запуск выполняет задачи ровно один раз
+  без потери service state, UAF или зависания; ASan/TSan.
 
 ### B73. Cached timestamp мог преждевременно завершать relative и absolute timers
 

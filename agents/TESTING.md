@@ -1274,3 +1274,35 @@ python3 tests/sanitized_test_runner.py --sanitizers address,undefined \
 TSan shuffle использовал ту же команду с `--sanitizers thread` и binary из
 `/tmp/ace-toolkit-tsan`. Логи: `/tmp/ace-toolkit-{clang,gcc,tsan}-tests.log`,
 `/tmp/ace-toolkit-tsan-tests-rerun.log`, `/tmp/ace-toolkit-{gcc,tsan}-hooks-shuffle.log`.
+
+
+### Общая CRTP-база toolkit (2026-09-22)
+
+`testing_toolkit_contract.cpp` теперь использует вложенные `debug_tools` всех
+восьми toolkits и дополнительно проверяет их наследование от общего
+`ace::core::tools::testing_toolkit<Toolkit>`. Compile-time regression с удалённым
+конструктором проверяет выбор ещё неполного CRTP type без construction;
+отдельный assertion проверяет, что release bases разных toolkits различны.
+Оба контракта по-прежнему собираются с `-O0`, один с `NDEBUG`, другой без него.
+GTest inventory и fixture map не менялись: новых runtime scenarios нет.
+
+
+После CRTP-рефакторинга выполнены сборки GCC 16.2.1 и Clang 22.1.8 и полные
+host suites: **Clang ASan+UBSan+LSan 352/352**, **GCC ASan+UBSan+LSan 352/352**,
+**GCC TSan 351/351**. Во всех трёх профилях прошли debug/release contracts.
+Проверка `nm -C` для GCC/Clang показала по восемь hook/counter symbols в debug
+и ноль в release `-O0`. `git diff --check` прошёл. B81/B82 не изменялись.
+
+Команды (MODE = clang, gcc, tsan):
+
+```bash
+meson compile -C /tmp/ace-toolkit-MODE \
+  ace_tests ace_testing_toolkit_debug ace_testing_toolkit_release -j 2
+meson test -C /tmp/ace-toolkit-MODE --no-rebuild \
+  --suite ace --print-errorlogs --num-processes 4
+```
+
+Логи текущего шага: `/tmp/ace-crtp-{clang,gcc,tsan}-build.log` и
+`/tmp/ace-crtp-{clang,gcc,tsan}-tests.log`. Дополнительно GCC и Clang выполнили
+`-std=c++23 -fsyntax-only` contracts с `-DNDEBUG` и без него. Benchmarks
+повторно не запускались: менялся только compile-time выбор типа базы.

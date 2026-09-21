@@ -537,6 +537,7 @@ fallback, либо бросает `std::bad_alloc` согласно `_breach_mem
 | `include/ace/core/tools/omniptr.h` | Type-agnostic pointer `omniptr<T...>`. |
 | `include/ace/core/tools/id_alloc.h` | `id_allocator`, `async_id_allocator`. |
 | `include/ace/core/tools/lifetime.h` | Debug lifetime tracer. |
+| `include/ace/core/tools/testing_toolkit.h` | Общая CRTP-база: закрытый `define_tools()`, публичный `debug_tools`. |
 | `include/ace/core/tools/macro.h` | Cache-line, router storage, diagnostics, `is_debug` и inline macros. |
 
 ## Критические ограничения
@@ -689,11 +690,15 @@ Google Benchmark target `ace_benchmarks` включается `-Dbenchmarks=true
 ## Test-only toolkit bases (2026-09-22)
 
 Восемь владельцев используют отдельные `*_testing_toolkit` и
-`*_testing_toolkit_t`: `dispatcher`, `service_traits`, `slab_mempool`,
+`*_testing_toolkit::debug_tools`: `dispatcher`, `service_traits`, `slab_mempool`,
 `hierarchical_time_wheel`, `kernel_controller`, `arena`, `extern_release`,
-`nukes_node_arena`. Каждый alias получен через `decltype` собственной
-`consteval select_*()` с `if constexpr (is_debug)` и локальным пустым типом
-для release. В production-классе отсутствуют debug setters, counters и snapshot
+`nukes_node_arena`. Общий CRTP `ace::core::tools::testing_toolkit<derived_t>`
+из `include/ace/core/tools/testing_toolkit.h` содержит закрытый
+`static consteval define_tools()` с `if constexpr (is_debug)` и публичный
+`debug_tools`. Метод возвращает `std::type_identity`: derived toolkit ещё
+неполный при инстанцировании базы и не должен конструироваться. Alias извлекает
+выбранный тип — toolkit для debug или отдельный локальный пустой тип для release.
+В production-классе отсутствуют debug setters, counters и snapshot
 methods при `NDEBUG`; рабочие ownership/cadence/error fields сохраняются.
 
 `service_traits` выбирает базу отдельно для каждой пары derived type/spawn mode,

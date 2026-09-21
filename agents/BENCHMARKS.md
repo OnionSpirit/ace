@@ -351,3 +351,14 @@ JSON: `/tmp/ace-toolkit-perf-{1-baseline,2-current,3-current,4-baseline}.json`.
   --benchmark_min_time=0.05s --benchmark_repetitions=5 \
   --benchmark_out=results.json --benchmark_out_format=json
 ```
+
+
+### Перенос выбора toolkit в CRTP (2026-09-22)
+
+Общий `core::tools::testing_toolkit<Toolkit>` заменяет восемь повторяющихся
+consteval selectors и namespace aliases на унаследованный `debug_tools`.
+Этот шаг меняет только compile-time выбор базы, не добавляет state и не меняет
+тела runtime hooks или allocation/scheduler paths. Новые benchmarks и повторные
+измерения не требуются; числа раздела B80 относятся к предшествующему изменению,
+а не к новому замеру CRTP-версии. Debug/release contracts проверяют выбранные
+типы и отсутствие instrumentation в release.

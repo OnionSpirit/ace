@@ -29,6 +29,7 @@
 #include <functional>
 #include <thread>
 
+#include "ace/core/tools/testing_toolkit.h"
 #include "ace/core/tools/macro.h"
 #include "ace/core/runner.h"
 #include "ace/core/signal.h"
@@ -72,7 +73,8 @@ namespace ace {
 namespace ace::core {
 
     /** @brief Debug-only worker-start injection; access requires an idle dispatcher. */
-    struct dispatcher_testing_toolkit {
+    struct dispatcher_testing_toolkit
+        : tools::testing_toolkit<dispatcher_testing_toolkit> {
         /**
          * @brief Installs a callback immediately before each worker construction.
          * @param hook Callback receiving the runner index; nullptr disables injection.
@@ -87,19 +89,6 @@ namespace ace::core {
         inline static void (*_worker_start_hook)(std::size_t) = nullptr; ///< Cold-start fault injection.
     };
 
-    /** @brief Selects debug instrumentation or a distinct empty release base. */
-    consteval auto select_dispatcher_testing_toolkit() {
-        if constexpr (is_debug) {
-            return dispatcher_testing_toolkit {};
-        } else {
-            struct empty {};
-            return empty {};
-        }
-    }
-
-    /// @brief Build-selected instrumentation base; all translation units must agree on NDEBUG.
-    using dispatcher_testing_toolkit_t = decltype(select_dispatcher_testing_toolkit());
-
     /**
      * @brief Schedules and drives task execution across multiple runner threads.
      *
@@ -110,7 +99,7 @@ namespace ace::core {
      * The @c run() call blocks until all runner loads are zero. Tasks are
      * distributed by bounded load-aware sampling unless explicitly targeted.
      */
-    class dispatcher : public dispatcher_testing_toolkit_t {
+    class dispatcher : public dispatcher_testing_toolkit::debug_tools {
 
         /// @brief Creates runners and worker states from the current configuration.
         dispatcher() {
@@ -268,7 +257,7 @@ inline void ace::core::dispatcher::ensure_workers() {
     try {
         _workers.reserve(required);
         for (std::size_t runner_id = 1; runner_id < _runners.size(); ++runner_id) {
-            []<typename toolkit_t = dispatcher_testing_toolkit_t>(std::size_t id) {
+            []<typename toolkit_t = dispatcher_testing_toolkit::debug_tools>(std::size_t id) {
                 if constexpr (is_debug) {
                     if (toolkit_t::_worker_start_hook)
                         toolkit_t::_worker_start_hook(id);

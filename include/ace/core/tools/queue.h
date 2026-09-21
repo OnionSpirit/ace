@@ -21,12 +21,13 @@
 #include <utility>
 #include <vector>
 
-#include "ace/core/tools/macro.h"
+#include "ace/core/tools/testing_toolkit.h"
 
 namespace ace::core::tools {
 
     /** @brief Debug-only slab fault injection shared by all payload types on the current thread. */
-    struct slab_mempool_testing_toolkit {
+    struct slab_mempool_testing_toolkit
+        : testing_toolkit<slab_mempool_testing_toolkit> {
         /**
          * @brief Replaces the callback before slab allocation (false) or registration (true).
          * @param hook Callback that may throw; nullptr disables injection.
@@ -39,19 +40,6 @@ namespace ace::core::tools {
     protected:
         inline static thread_local void (*_slab_growth_hook)(bool) = nullptr;
     };
-
-    /** @brief Selects debug instrumentation or a distinct empty release base. */
-    consteval auto select_slab_mempool_testing_toolkit() {
-        if constexpr (is_debug) {
-            return slab_mempool_testing_toolkit {};
-        } else {
-            struct empty {};
-            return empty {};
-        }
-    }
-
-    /// @brief Build-selected instrumentation base; all translation units must agree on NDEBUG.
-    using slab_mempool_testing_toolkit_t = decltype(select_slab_mempool_testing_toolkit());
 
     template <typename T>
     class queue;
@@ -107,7 +95,7 @@ namespace ace::core::tools {
      * @tparam T  The element type stored in the nodes.
      */
     template<typename T>
-    class slab_mempool : public slab_mempool_testing_toolkit_t {
+    class slab_mempool : public slab_mempool_testing_toolkit::debug_tools {
         q_node<T>* free_head = nullptr;          ///< Head of the free-node list.
         q_node<T>* free_tail = nullptr;          ///< Tail of the free-node list.
         std::vector<q_node<T>*> slabs;           ///< All allocated slabs (for destruction).
@@ -117,7 +105,7 @@ namespace ace::core::tools {
          * @brief Allocates a new slab and links its nodes into the free list.
          */
         void grow() {
-            []<typename toolkit_t = slab_mempool_testing_toolkit_t> {
+            []<typename toolkit_t = slab_mempool_testing_toolkit::debug_tools> {
                 if constexpr (is_debug) {
                     if (toolkit_t::_slab_growth_hook)
                         toolkit_t::_slab_growth_hook(false);
@@ -125,7 +113,7 @@ namespace ace::core::tools {
             }();
             auto slab_owner = std::make_unique<q_node<T>[]>(CHUNK_SIZE);
             q_node<T>* slab = slab_owner.get();
-            []<typename toolkit_t = slab_mempool_testing_toolkit_t> {
+            []<typename toolkit_t = slab_mempool_testing_toolkit::debug_tools> {
                 if constexpr (is_debug) {
                     if (toolkit_t::_slab_growth_hook)
                         toolkit_t::_slab_growth_hook(true);

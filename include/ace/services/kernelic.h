@@ -34,6 +34,7 @@
 #include <limits>
 #include <liburing.h>
 
+#include "ace/core/tools/testing_toolkit.h"
 #include "ace/core/arena.h"
 #include "ace/core/traits/service.h"
 #include "ace/core/tools/queue.h"
@@ -41,7 +42,8 @@
 namespace ace::services {
 
     /** @brief Debug-only replacement of the calling thread's io_uring initializer. */
-    struct kernel_controller_testing_toolkit {
+    struct kernel_controller_testing_toolkit
+        : core::tools::testing_toolkit<kernel_controller_testing_toolkit> {
         using ring_init_fn = int (*)(unsigned, io_uring*, io_uring_params*);
         /**
          * @brief Replaces the queue initializer for deterministic tests.
@@ -55,19 +57,6 @@ namespace ace::services {
     protected:
         inline static thread_local ring_init_fn _ring_init_cb = io_uring_queue_init_params;
     };
-
-    /** @brief Selects debug instrumentation or a distinct empty release base. */
-    consteval auto select_kernel_controller_testing_toolkit() {
-        if constexpr (is_debug) {
-            return kernel_controller_testing_toolkit {};
-        } else {
-            struct empty {};
-            return empty {};
-        }
-    }
-
-    /// @brief Build-selected instrumentation base; all translation units must agree on NDEBUG.
-    using kernel_controller_testing_toolkit_t = decltype(select_kernel_controller_testing_toolkit());
 
     /**
      * @brief Polymorphic completion handler for @c io_uring operations.
@@ -117,7 +106,7 @@ namespace ace::services {
      * buffered in @c _submission_buffer (a queue of @c kernel_entity).
      */
     struct kernel_controller : core::traits::service_traits<kernel_controller, core::service_spawn_mode::e_thread_local>,
-                               kernel_controller_testing_toolkit_t {
+                               kernel_controller_testing_toolkit::debug_tools {
 
     private:
 
@@ -507,7 +496,7 @@ initialize() noexcept {
     _init_attempted = true;
     memset(&_ring_params, 0, sizeof(_ring_params));
     memset(&_ring, 0, sizeof(_ring));
-    const int result = []<typename toolkit_t = kernel_controller_testing_toolkit_t> {
+    const int result = []<typename toolkit_t = kernel_controller_testing_toolkit::debug_tools> {
         if constexpr (is_debug)
             return toolkit_t::_ring_init_cb(max_entries, &_ring, &_ring_params);
         else

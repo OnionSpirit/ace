@@ -61,8 +61,12 @@
 - **Симптом:** fault-injection setters/TLS callbacks доступны при NDEBUG;
   `nukes_node_arena` выполняет diagnostic atomic RMW на каждом allocate/free,
   `arena` сохраняет статистический API и global counter в release.
-- **Решение:** восемь named toolkit bases выбираются собственной consteval
-  функцией через глобальный is_debug; release получает пустой тип.
+- **Решение:** восемь named toolkits наследуют общий CRTP
+  `core::tools::testing_toolkit<derived_t>` из `core/tools/testing_toolkit.h`.
+  Его закрытый consteval `define_tools()` выбирает тип через глобальный
+  is_debug, а публичный `debug_tools` используется в наследовании владельцев.
+  `std::type_identity` позволяет выбрать неполный CRTP type без construction;
+  release получает пустой тип.
   Поля и методы перенесены в toolkit, обращения к ним compile-time conditional.
   Production ownership/cadence/error state сохранён. Debug hook scoping не
   меняется: slab общий per-thread, service отдельный per-specialization/thread.

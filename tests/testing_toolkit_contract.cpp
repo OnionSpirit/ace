@@ -5,6 +5,7 @@
 
 #include <ace/ace.h>
 #include <ace/core/tools/queue.h>
+#include <ace/core/tools/testing_toolkit.h>
 #include <ace/futures/timeout.h>
 #include <ace/services/kernelic.h>
 
@@ -25,6 +26,7 @@ template <typename T> concept transient_counter = requires(T& release) { release
 
 template <typename Selected, typename Toolkit, typename Owner>
 consteval bool toolkit_contract() {
+    static_assert(std::is_base_of_v<tools::testing_toolkit<Toolkit>, Toolkit>);
     static_assert(std::is_base_of_v<Selected, Owner>);
     static_assert(std::is_same_v<Selected, Toolkit> == is_debug);
     if constexpr (not is_debug)
@@ -43,23 +45,34 @@ static_assert(arena_counter<core::arena> == is_debug);
 static_assert(node_counter<core::nukes_node_arena> == is_debug);
 static_assert(transient_counter<core::extern_release> == is_debug);
 
-static_assert(toolkit_contract<core::dispatcher_testing_toolkit_t,
+static_assert(toolkit_contract<core::dispatcher_testing_toolkit::debug_tools,
     core::dispatcher_testing_toolkit, core::dispatcher>());
-static_assert(toolkit_contract<tools::slab_mempool_testing_toolkit_t,
+static_assert(toolkit_contract<tools::slab_mempool_testing_toolkit::debug_tools,
     tools::slab_mempool_testing_toolkit, tools::slab_mempool<int>>());
-static_assert(toolkit_contract<services::hierarchical_time_wheel_testing_toolkit_t,
+static_assert(toolkit_contract<services::hierarchical_time_wheel_testing_toolkit::debug_tools,
     services::hierarchical_time_wheel_testing_toolkit, services::hierarchical_time_wheel>());
-static_assert(toolkit_contract<services::kernel_controller_testing_toolkit_t,
+static_assert(toolkit_contract<services::kernel_controller_testing_toolkit::debug_tools,
     services::kernel_controller_testing_toolkit, services::kernel_controller>());
-static_assert(toolkit_contract<core::arena_testing_toolkit_t,
+static_assert(toolkit_contract<core::arena_testing_toolkit::debug_tools,
     core::arena_testing_toolkit, core::arena>());
-static_assert(toolkit_contract<core::extern_release_testing_toolkit_t,
+static_assert(toolkit_contract<core::extern_release_testing_toolkit::debug_tools,
     core::extern_release_testing_toolkit, core::extern_release>());
-static_assert(toolkit_contract<core::nukes_node_arena_testing_toolkit_t,
+static_assert(toolkit_contract<core::nukes_node_arena_testing_toolkit::debug_tools,
     core::nukes_node_arena_testing_toolkit, core::nukes_node_arena>());
-using clock_base = core::traits::service_traits_testing_toolkit_t<services::clock, core::service_spawn_mode::e_thread_local>;
+using clock_base = core::traits::service_traits_testing_toolkit<services::clock, core::service_spawn_mode::e_thread_local>::debug_tools;
 using clock_tools = core::traits::service_traits_testing_toolkit<services::clock, core::service_spawn_mode::e_thread_local>;
 static_assert(toolkit_contract<clock_base, clock_tools, services::clock>());
+
+// CRTP selection occurs while this type is incomplete and must never construct it.
+struct nonconstructible_toolkit : tools::testing_toolkit<nonconstructible_toolkit> {
+    nonconstructible_toolkit() = delete;
+    int value;
+};
+static_assert(std::is_same_v<nonconstructible_toolkit::debug_tools, nonconstructible_toolkit> == is_debug);
+static_assert(std::is_empty_v<nonconstructible_toolkit::debug_tools> != is_debug);
+// Each toolkit retains a distinct selected base even when instrumentation is disabled.
+static_assert(not std::is_same_v<core::arena_testing_toolkit::debug_tools,
+                                core::extern_release_testing_toolkit::debug_tools>);
 
 struct completion : services::kernel_observer {
     int result = -1;

@@ -35,6 +35,7 @@
 #ifndef ACE_CORE_SERVICE_H
 #define ACE_CORE_SERVICE_H
 
+#include "ace/core/tools/testing_toolkit.h"
 #include "ace/core/dispatcher.h"
 #include "ace/core/signal.h"
 #include "ace/core/async.h"
@@ -85,7 +86,8 @@ namespace ace::core::traits {
      * @tparam spawn_mode_v Service ownership mode.
      */
     template <typename derived_t, service_spawn_mode spawn_mode_v>
-    struct service_traits_testing_toolkit {
+    struct service_traits_testing_toolkit
+        : tools::testing_toolkit<service_traits_testing_toolkit<derived_t, spawn_mode_v>> {
         /**
          * @brief Installs a current-thread callback before service scheduling.
          * @param hook Test callback, or nullptr to restore normal scheduling.
@@ -99,21 +101,6 @@ namespace ace::core::traits {
         inline static thread_local void (*_respawn_hook)() = nullptr; ///< Service-start fault injection.
     };
 
-    /** @brief Selects debug instrumentation or a distinct empty release base. */
-    template <typename derived_t, service_spawn_mode spawn_mode_v>
-    consteval auto select_service_traits_testing_toolkit() {
-        if constexpr (is_debug) {
-            return service_traits_testing_toolkit<derived_t, spawn_mode_v> {};
-        } else {
-            struct empty {};
-            return empty {};
-        }
-    }
-
-    /// @brief Build-selected instrumentation base; all translation units must agree on NDEBUG.
-    template <typename derived_t, service_spawn_mode spawn_mode_v>
-    using service_traits_testing_toolkit_t = decltype(select_service_traits_testing_toolkit<derived_t, spawn_mode_v>());
-
     /**
      * @brief CRTP base class for background polling services.
      *
@@ -126,7 +113,7 @@ namespace ace::core::traits {
      * @tparam spawn_mode_v   Spawn mode — thread-local or thread-shared.
      */
     template <typename derived_t, service_spawn_mode spawn_mode_v>
-    class service_traits : public service_traits_testing_toolkit_t<derived_t, spawn_mode_v> {
+    class service_traits : public service_traits_testing_toolkit<derived_t, spawn_mode_v>::debug_tools {
 
         /**
          * @brief Compile-time check of the derived type contract.

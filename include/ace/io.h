@@ -377,6 +377,7 @@ public:                                                                         
          *                  and the router slot to install the @c query_router into).
          * @return @c true when the operation was submitted and the caller must suspend,
          *         @c false when the query is silent (@c _is_silent) or submission failed.
+         * Allocation failure completes with -ENOMEM without suspending.
          */
         bool await_suspend(auto coroutine) {
             _runner_identity = coroutine.promise()._runner.template as<runner_pool_t>();
@@ -396,7 +397,12 @@ public:                                                                         
                 _res = initialization_error;
                 return false;
             }
-            if (static_cast<query_core_t*>(this)->setup_query(this) and not _is_silent) {
+            const bool submitted = static_cast<query_core_t*>(this)->setup_query(this);
+            if (_submission_error not_eq 0) {
+                _res = _submission_error;
+                return false;
+            }
+            if (submitted and not _is_silent) {
                 coroutine.promise()._runner_router = query_router{this};
                 return true;
             }

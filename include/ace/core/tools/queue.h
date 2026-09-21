@@ -10,7 +10,7 @@
  *
  * Components:
  *  - @c q_node<T> — doubly-linked node with in-place storage for @c T.
- *  - @c slab_mempool<T> — pre-allocated slab allocator for nodes.
+ *  - @c slab_mempool<T> — on-demand slab allocator for nodes.
  *  - @c queue<T> — intrusive doubly-linked FIFO queue.
  */
 #ifndef ACE_COMMON_QUEUE_H
@@ -22,6 +22,13 @@
 #include <vector>
 
 namespace ace::core::tools {
+
+    /**
+     * @brief Optional current-thread fault injection before slab allocation (false)
+     * or ownership registration (true); nullptr disables injection.
+     * @warning Test-only. Restore before leaving the test; callbacks may throw.
+     */
+    inline thread_local void (*slab_growth_hook_for_testing)(bool) = nullptr;
 
     template <typename T>
     class queue;
@@ -87,8 +94,12 @@ namespace ace::core::tools {
          * @brief Allocates a new slab and links its nodes into the free list.
          */
         void grow() {
+            if (slab_growth_hook_for_testing)
+                slab_growth_hook_for_testing(false);
             auto slab_owner = std::make_unique<q_node<T>[]>(CHUNK_SIZE);
             q_node<T>* slab = slab_owner.get();
+            if (slab_growth_hook_for_testing)
+                slab_growth_hook_for_testing(true);
             slabs.push_back(slab);
 
             for (size_t i = 0; i < CHUNK_SIZE - 1; ++i) {
@@ -107,8 +118,8 @@ namespace ace::core::tools {
         }
 
     public:
-        /// @brief Constructs the pool with one pre-allocated slab.
-        slab_mempool() { grow(); }
+        /// @brief Constructs an empty pool; allocation errors occur at alloc(), not TLS initialization.
+        slab_mempool() noexcept = default;
 
         /// @brief Destroys the pool, freeing all slabs.
         ~slab_mempool() {
@@ -118,6 +129,8 @@ namespace ace::core::tools {
         /**
          * @brief Takes a node from the free list, growing the pool if empty.
          * @return A cleared node ready for use.
+         * @throws std::bad_alloc if slab allocation or ownership registration fails.
+         * The pool remains usable after failure.
          */
         q_node<T>* alloc() {
             if (!free_head) grow();

@@ -1,3 +1,5 @@
+#include "allocation_failure.h"
+
 #include <chrono>
 #include <cstddef>
 #include <iostream>
@@ -374,3 +376,94 @@ TEST_F(timer_fixture, timeout_multiple_concurrent) {
 }
 
 } // namespace
+
+
+namespace {
+
+struct exhausted_timer_pool {
+    slab_failure_scope failure {slab_failure_scope::allocation};
+    std::vector<ace::services::timer_node*> held;
+    exhausted_timer_pool() {
+        auto& pool = ace::services::timer_record::_timer_mempool;
+        try {
+            // Consume existing capacity as earlier shuffled tests may have grown it.
+            while (true) held.push_back(pool.alloc());
+        } catch (const std::bad_alloc&) {}
+    }
+    ~exhausted_timer_pool() {
+        for (auto* node : held)
+            ace::services::timer_record::_timer_mempool.free(node);
+    }
+};
+
+ace::task catch_timer_failure(bool absolute, bool& caught, bool& continued) {
+    try {
+        if (absolute)
+            co_await ace::expire(ace::services::ceil_to_tick(std::chrono::steady_clock::now() + 10ms));
+        else
+            co_await ace::timeout(10ms);
+    } catch (const std::bad_alloc&) {
+        caught = true;
+    }
+    continued = true;
+}
+
+ace::task successful_timer(bool& completed) {
+    co_await ace::timeout(1ms);
+    completed = true;
+}
+
+ace::task uncaught_timer_failure(bool& destroyed) {
+    struct cleanup { bool& flag; ~cleanup() { flag = true; } } guard {destroyed};
+    co_await ace::timeout(10ms);
+}
+
+} // namespace
+
+// Verifies timeout service allocation failure is catchable in the awaiting coroutine.
+TEST_F(timer_fixture, service_allocation_failure_rethrows_at_await) {
+    bool caught = false;
+    bool continued = false;
+    {
+        const service_failure_scope<ace::services::clock> failure;
+        ace::schedule(catch_timer_failure(false, caught, continued));
+        ace::run();
+    }
+    EXPECT_TRUE(caught);
+    EXPECT_TRUE(continued);
+    bool completed = false;
+    ace::schedule(successful_timer(completed));
+    ace::run();
+    EXPECT_TRUE(completed);
+}
+
+// Verifies relative and absolute insertion failures retain no phantom timer count.
+TEST_F(timer_fixture, timer_allocation_failure_rolls_back_count_and_allows_retry) {
+    for (const bool absolute : {false, true}) {
+        bool caught = false;
+        bool continued = false;
+        {
+            const exhausted_timer_pool failure;
+            ace::schedule(catch_timer_failure(absolute, caught, continued));
+            ace::run();
+        }
+        EXPECT_TRUE(caught);
+        EXPECT_TRUE(continued);
+        // Quiescence proves the clock stopped after the failed insertion.
+        EXPECT_TRUE(ace::empty());
+    }
+    bool completed = false;
+    ace::schedule(successful_timer(completed));
+    ace::run();
+    EXPECT_TRUE(completed);
+}
+
+// Verifies an uncaught registration error follows coroutine failure and destroys its frame.
+TEST_F(timer_fixture, uncaught_registration_failure_cleans_up_task) {
+    bool destroyed = false;
+    const service_failure_scope<ace::services::clock> failure;
+    ace::schedule(uncaught_timer_failure(destroyed));
+    ace::run();
+    EXPECT_TRUE(destroyed);
+    EXPECT_TRUE(ace::empty());
+}

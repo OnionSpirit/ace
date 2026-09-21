@@ -1,3 +1,5 @@
+#include "allocation_failure.h"
+
 #include <array>
 #include <atomic>
 #include <cerrno>
@@ -854,4 +856,112 @@ TEST_F(io_entity_fixture, connection_recv_string_uses_logical_size) {
     { auto close = connection.close(); }
     run_dispatcher();
     ::close(socket_fds[1]);
+}
+
+
+namespace {
+
+struct counted_observer final : ace::services::kernel_observer {
+    int calls = 0;
+    int result = INT_MIN;
+    void on_result(int value) override { ++calls; result = value; }
+};
+
+ace::task submit_with_service_failure(bool& accepted, int& error, counted_observer& observer) {
+    const service_failure_scope<ace::services::kernel_controller> failure;
+    accepted = ace::services::kernel_controller::nop(&observer);
+    error = observer._submission_error;
+    co_return;
+}
+
+ace::task submit_until_overflow_failure(
+    std::vector<counted_observer>& observers, std::size_t& accepted, int& error)
+{
+    const slab_failure_scope failure {slab_failure_scope::allocation};
+    for (auto& observer : observers) {
+        if (not ace::services::kernel_controller::nop(&observer)) {
+            error = observer._submission_error;
+            co_return;
+        }
+        ++accepted;
+    }
+}
+
+} // namespace
+
+// Verifies direct submission rejects service allocation failure without a callback.
+TEST_F(io_entity_fixture, direct_submit_returns_false_on_service_allocation_failure) {
+    ASSERT_TRUE(ace::services::kernel_controller::available());
+    counted_observer observer;
+    bool accepted = true;
+    int error = 0;
+    ace::schedule(submit_with_service_failure(accepted, error, observer));
+    ace::run();
+    EXPECT_FALSE(accepted);
+    EXPECT_EQ(-ENOMEM, error);
+    EXPECT_EQ(0, observer.calls);
+    EXPECT_TRUE(ace::empty());
+}
+
+// Verifies awaited I/O returns -ENOMEM instead of suspending on rejected submission.
+TEST_F(io_entity_fixture, awaited_io_returns_enomem_on_service_allocation_failure) {
+    ASSERT_TRUE(ace::services::kernel_controller::available());
+    int pipe_fds[2];
+    ASSERT_EQ(0, ::pipe(pipe_fds));
+    int result = INT_MIN;
+    {
+        const service_failure_scope<ace::services::kernel_controller> failure;
+        ace::schedule(read_after_kernel_init_failure(pipe_fds[0], result));
+        ace::run();
+    }
+    EXPECT_EQ(-ENOMEM, result);
+    EXPECT_TRUE(ace::empty());
+    ::close(pipe_fds[0]);
+    ::close(pipe_fds[1]);
+}
+
+// Verifies overflow allocation failure preserves accepted requests and drains query accounting.
+TEST_F(io_entity_fixture, overflow_allocation_failure_preserves_accepted_requests) {
+    ASSERT_TRUE(ace::services::kernel_controller::available());
+    // Existing shuffled tests can leave reusable overflow slabs; fill them too.
+    std::vector<counted_observer> observers(32768);
+    std::size_t accepted = 0;
+    int error = 0;
+    ace::schedule(submit_until_overflow_failure(observers, accepted, error));
+    ace::run();
+    EXPECT_GE(accepted, ace::services::kernel_controller::max_entries);
+    ASSERT_LT(accepted, observers.size());
+    EXPECT_EQ(-ENOMEM, error);
+    for (std::size_t i = 0; i < accepted; ++i) {
+        EXPECT_EQ(1, observers[i].calls) << i;
+        EXPECT_EQ(0, observers[i].result) << i;
+    }
+    EXPECT_EQ(0, observers[accepted].calls);
+    EXPECT_TRUE(ace::empty());
+    // Successful retry proves both the ring and the overflow queue remain usable.
+    counted_observer retry;
+    EXPECT_TRUE(ace::services::kernel_controller::nop(&retry));
+    ace::run();
+    EXPECT_EQ(1, retry.calls);
+}
+
+// Verifies fire-and-forget allocation failure releases the command and reports -ENOMEM.
+TEST_F(io_entity_fixture, file_output_reports_allocation_failure_without_fallback_bytes) {
+    ASSERT_TRUE(ace::services::kernel_controller::available());
+    int pipe_fds[2];
+    ASSERT_EQ(0, ::pipe2(pipe_fds, O_NONBLOCK));
+    ace::fs::file_link link {pipe_fds[1], true};
+    outcast_init_failure.store(INT_MIN, std::memory_order_relaxed);
+    const outcast_handler_override handler {record_outcast_init_failure};
+    {
+        const service_failure_scope<ace::services::kernel_controller> failure;
+        ace::schedule(write_file_link(link, "allocation failure"));
+        ace::run();
+    }
+    EXPECT_EQ(-ENOMEM, outcast_init_failure.load(std::memory_order_relaxed));
+    char byte;
+    EXPECT_EQ(-1, ::read(pipe_fds[0], &byte, 1));
+    EXPECT_EQ(EAGAIN, errno);
+    ::close(pipe_fds[0]);
+    ::close(pipe_fds[1]);
 }

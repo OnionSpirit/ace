@@ -22,23 +22,20 @@
 
 ### B11. `cutex::proxy::~proxy()` бросает из `noexcept`-деструктора
 
-- **Статус:** Исследуется; исходный `noexcept` устранён в ветке `slope`,
-  поведение при misuse требует регресс-проверки.
+- **Статус:** Решено; контракт проверен 2026-09-21.
 - **Приоритет:** Низкий.
-- **Файл:** `include/ace/futures/cutex.h:316-320`.
-- **Исходный симптом:** при `sync()`-захвате без ручного `release()` деструктор бросает
-  `std::logic_error`; из-за неявного `noexcept` это вызывает `std::terminate()` и
-  предупреждение GCC `-Wterminate`.
-- **Уточнение ревью 2026-09-21:** деструктор теперь явно объявлен
-  `noexcept(false)`. Описание прежнего неявного `noexcept` больше не соответствует
-  коду; отдельный тест забытого `release()` и выбранного exception contract
-  в этой работе не добавлялся и не запускался.
-- **Нюанс:** проверка misuse намеренная; контракт обработки ошибки при обычном
-  выходе и при раскрутке стека ещё требует проверки. Возможные направления:
-  не бросать из деструктора либо выявлять неправильное использование до
-  разрушения proxy.
-- **Проверка решения:** тест на забытый `release()` не должен аварийно завершать
-  процесс и должен подтверждать выбранный контракт API.
+- **Файл:** `include/ace/futures/cutex.h` (`cutex::proxy::~proxy`).
+- **Исходный симптом:** при `sync()`-захвате без ручного `release()` деструктор
+  бросал `std::logic_error` из неявного `noexcept`, вызывая `std::terminate()`.
+- **Решение:** деструктор явно объявлен `noexcept(false)`, сначала освобождает
+  cutex, затем сообщает о пропущенном ручном `release()`. Этот существующий
+  контракт сохранён и закреплён регресс-тестом; release после `sync()` обязателен.
+- **Ограничение:** ошибка misuse при раскрутке другого исключения по-прежнему
+  может вызвать `std::terminate`; тест подтверждает catchable diagnostic при
+  обычном выходе из scope, а не разрешает пропускать release при unwinding.
+- **Проверка:** `cutex_fixture.missing_sync_release_is_catchable_and_unlocks`
+  перехватывает `std::logic_error` внутри корутины и повторно захватывает mutex.
+  Прошёл в полном Clang 22 ASan+UBSan/LSan suite и десяти shuffled повторах.
 
 ### B13. Lambda-coroutine повреждает захваты при `observe()`
 
@@ -368,7 +365,7 @@
 - **Регресс-тесты:**
   `io_entity_fixture.kernelic_init_failure_reports_availability_and_rejects_ring_operations`,
   `io_query_returns_kernel_init_error_without_submission` и
-  `console_output_reports_kernel_init_error_and_releases_command` используют
+  `file_output_reports_kernel_init_error_without_fallback_bytes` используют
   deterministic injected `-EPERM` и проверяют status API, direct APIs, query,
   destructor safety и outcast cleanup. `base_fixture.kernel_controller_nop`
   проверяет successful CQE path при доступном ring, иначе exact negative init
@@ -528,27 +525,25 @@
 
 ### B47. `slab_mempool` маскирует allocation failure и затем разыменовывает null
 
-- **Статус:** Исследуется; исправление реализации присутствует в `slope`,
-  проверка отказов выделения slab/vector остаётся незавершённой.
+- **Статус:** Решено; fault-injection coverage добавлено 2026-09-21.
 - **Приоритет:** Высокий.
 - **Файл:** `include/ace/core/tools/queue.h` (`grow()`, `alloc()`, enqueue APIs).
-- **Исходный симптом:** `grow()` ловит exception, пишет в `std::cerr` и возвращается;
-  `alloc() noexcept` затем без проверки разыменовывает `free_head == nullptr`.
-  Если `new[]` успешен, а `slabs.push_back()` бросает, новый slab также теряется.
-  Placement-construction `T` вызывается из `noexcept enqueue`, хотя copy/move
-  constructor `T` может бросить.
-- **Уточнение ревью 2026-09-21:** `grow()` использует `unique_ptr` до успешного
-  добавления slab в vector, `alloc()` и `enqueue()` распространяют исключения,
-  а `enqueue()` возвращает node при ошибке construction. Существующий
-  `queue_fixture.throwing_payload_rolls_back_enqueue` прошёл в составе десяти
-  shuffled повторов выбранного ASan-набора. Отказы `new[]` и роста vector
-  отдельно не инъецировались; вызывающие `noexcept` APIs отслеживаются в B52.
-- **Предлагаемое решение:** выбрать явный failure contract и обеспечить strong
-  cleanup при каждом участке allocation/construction. Не продолжать после
-  failure и не печатать из generic container как замену передаче ошибки.
-- **Проверка решения:** failing allocator/injected vector growth и throwing
-  payload constructors; первый slab и последующие growth; отсутствие null
-  dereference, terminate и leak; очередь остаётся согласованной.
+- **Исходный симптом:** `grow()` поглощал exception, после чего `alloc()`
+  разыменовывал пустой free list. Отказ `slabs.push_back()` после успешного
+  выделения терял slab; `noexcept enqueue` также завершал процесс при throwing
+  payload constructor.
+- **Решение:** `unique_ptr` владеет новым slab до регистрации в vector;
+  `alloc()` и `enqueue()` распространяют ошибку, а enqueue возвращает node при
+  ошибке construction. Pool создаётся пустым; allocation начинается в `alloc()`,
+  чтобы отказ не происходил при TLS initialization. Test-only current-thread
+  hook инъецирует ошибку перед allocation и перед ownership registration.
+- **Регрессии:** `queue_fixture.throwing_payload_rolls_back_enqueue`,
+  `slab_allocation_failure_preserves_queue` и
+  `slab_registration_failure_preserves_queue` проверяют исключение, пустую
+  согласованную очередь и успешный retry. B52 отдельно проверяет отказ роста
+  timer/I/O pools после исчерпания доступных nodes.
+- **Проверка:** полный Clang 22 ASan+UBSan host suite с LSan и десять shuffled
+  повторов allocation/scheduler набора прошли без leaks и sanitizer diagnostics.
 
 ### B48. `dispatcher::worker_state::_pending` образует data race
 
@@ -654,35 +649,51 @@
 
 ### B52. `noexcept` публичных scheduler/container APIs не соответствует операциям
 
-- **Статус:** Открыто повторно 2026-09-21; исправление от 2026-08-30 неполное.
+- **Статус:** Решено 2026-09-21 после дополнения исправления от 2026-08-30.
 - **Приоритет:** Высокий.
 - **Файлы и символы:** `include/ace/core/dispatcher.h` (`reload`, `schedule`,
   `run`), `include/ace/core/traits/service.h` (`respawn`, `touch`),
-  `include/ace/core/tools/queue.h`, `include/ace/core/runner.h`
-  (`yank`, `yank_service`), `include/ace/services/kernelic.h` (`submit`) и
-  `include/ace/futures/timeout.h` (`timeout_router::redirect`).
-- **Симптом:** функции помечены `noexcept`, но выполняют `vector::resize/reserve`,
-  создают `std::jthread`, конструируют payloads, выделяют queue nodes и вызывают
-  scheduling paths с потенциальными исключениями. Failure превращается в
-  `std::terminate` вместо заявляемого/обрабатываемого результата.
-- **Оставшиеся пути, подтверждённые чтением кода 2026-09-21:**
-  `kernel_controller::submit() noexcept` вызывает теперь throwing `touch()` и
-  `_submission_buffer.enqueue()` без обработки. Отказ allocation при respawn
-  service или расширении overflow buffer завершит процесс. Аналогично
-  `runner::yank()/yank_service() noexcept` вызывают timeout-router, который
-  через `clock::subscribe()` может выделять память и запускать service уже вне
-  coroutine exception boundary. Снятие `noexcept` только с нижних функций
-  не обеспечивает заявленный error contract. Отдельный дефект rollback при
-  создании worker threads зарегистрирован в B79.
-- **Проверка ревью:** статическая проверка call paths; allocation и
-  thread-construction fault injection в ревью не выполнялась.
-- **Предлагаемое решение:** составить call graph потенциально throwing операций;
-  для каждого публичного API либо снять `noexcept` и документировать `@throws`,
-  либо полностью обработать failure с rollback/error result. Не ловить всё с
-  продолжением в частично изменённом состоянии.
-- **Проверка решения:** injected allocation/thread-construction/payload failures,
-  transactional state checks, отсутствие terminate и leak. Добавить compile-time
-  `noexcept(...)` assertions для принятого контракта.
+  `include/ace/core/tools/queue.h`, `include/ace/services/kernelic.h` (`submit`),
+  `include/ace/futures/timeout.h` (`timeout_router::redirect`),
+  `include/ace/services/clock.h`, `include/ace/io.h`, `include/ace/fs.h`,
+  `include/ace/net.h`.
+- **Симптом:** allocation, payload construction и создание threads выполнялись
+  через `noexcept` boundaries. После частичного снятия `noexcept` I/O submit
+  всё ещё мог завершить процесс при отказе `touch()`/overflow enqueue, а timeout
+  registration бросала вне coroutine exception boundary. Timer count
+  увеличивался до успешной вставки.
+- **Решение:** scheduler/container paths передают исключения вызывающему;
+  direct I/O submit сохраняет bool API и при allocation failure возвращает
+  `false` с observer error `-ENOMEM`, не публикуя запрос и не вызывая callback.
+  Awaited query возвращает `-ENOMEM` без suspension. Fire-and-forget command
+  завершается локально через обычный cleanup и fail handler. Accepted requests
+  сохраняют CQE и accounting при отказе следующего overflow allocation.
+  Timeout router сохраняет exception и возвращает waiter runner-у;
+  `await_resume()` перебрасывает его внутри корутины. Необработанная ошибка
+  использует обычный `e_failed` lifecycle. Timer count меняется только после
+  успешной вставки; slab pools инициализируются без выделения памяти.
+  Wheel хранится в function-local TLS service instance: C++ повторяет
+  initialization после ошибки, не предоставляя частично сконструированный
+  namespace-scope TLS object. Timeout cancel очищает node до `detach()`,
+  который может уничтожить router при немедленном reattach.
+  Отказ worker startup и retry отдельно закрыты B79.
+- **Регрессии:** четыре allocation-failure tests в `io_entity_fixture`
+  проверяют direct bool, awaited errno, сохранение принятых overflow requests и
+  outcast cleanup без fallback bytes. В `timer_fixture`
+  `service_allocation_failure_rethrows_at_await`,
+  `timer_allocation_failure_rolls_back_count_and_allows_retry` и
+  `uncaught_registration_failure_cleans_up_task` проверяют service/relative/
+  absolute failure, retry и уничтожение frame без phantom timers.
+  Два `clock_initialization_fixture` tests проверяют первый allocation и
+  partial construction на свежем потоке с последующим успешным timeout.
+  Существующие cancellation/backup/compose tests обнаружили обращение к router
+  после уничтожающего `detach()` под GCC UBSan.
+- **Проверка:** итоговый Clang 22 ASan+UBSan/LSan host suite — 348/348,
+  GCC 16 TSan — 347/347 после TLS/cancel исправлений. Четыре I/O fault tests
+  ранее прошли пять shuffled host-повторов, scheduler/allocation/cutex набор —
+  десять; два новых clock-initialization tests — 40 executions. Негативные
+  варианты без catch/count rollback воспроизводят abort/hang (см. TESTING).
+  Compile-time assertions уже проверяют throwing queue API.
 
 ### B53. `socket::setup_query()` скрывает отказ submission
 
@@ -692,6 +703,10 @@
 - **Симптом:** метод вызывает `kernel_controller::socket(...)`, игнорирует его
   bool-result и всегда возвращает `true`. При отказе controller query сообщает,
   что suspension установлена, хотя CQE не будет; coroutine может зависнуть.
+- **Уточнение 2026-09-21:** B52 добавил проверку `_submission_error` в общем
+  query boundary: init/allocation failure больше не приводит к suspension.
+  Сам `socket::setup_query()` всё ещё игнорирует bool; отдельная socket
+  submission-failure регрессия остаётся необходимой.
 - **Предлагаемое решение:** вернуть фактический submit result и согласовать с
   общим `io::query::await_suspend/await_resume` contract: немедленный отказ
   должен давать определённую ошибку, а не sentinel `INT_MIN` или ложный success.
@@ -941,36 +956,29 @@
 
 ### B67. Пользовательская и агентская документация противоречит текущему коду
 
-- **Статус:** Открыто.
+- **Статус:** Решено 2026-09-21.
 - **Приоритет:** Средний.
 - **Файлы:** `README.md`, `agents/INDEX.md`, `agents/TESTING.md`,
-  `agents/ISSUES.md`, `include/ace/services/clock.h`, `include/ace/core/arena.h`.
-- **Расхождения:** README называет `automaton<T>` eager и diagram запускает его
-  вызовом, тогда как implementation/INDEX/test фиксируют lazy
-  `suspend_always`; test inventory и compiler status в INDEX синхронизированы
-  при решении B13; clock Doxygen и timing contract синхронизированы с
-  direct-registration clock при решении B6/B73;
-  `agents/TESTING.md` приписывает `hanged_command_defaults` проверки, которых в
-  test body нет.
-- **Дополнение ревью 2026-09-21:** README по-прежнему называет automaton eager
-  в таблице и диаграмме, а Nukes allocator — process-lifetime pool, хотя
-  `nukes_node_arena` использует `std::pmr::new_delete_resource()`. INDEX указывает
-  318 GTests, TESTING — 330; fixture map INDEX не включает
-  `nukes_concurrency_fixture.cpp`. В реестре B11 и B47 описывали прежнюю
-  реализацию, B52 и B77 были преждевременно закрыты. Эти четыре записи уточнены
-  при регистрации ревью; остальные расхождения требуют отдельной правки.
-- **Предлагаемое решение:** после исправления соответствующих production/test
-  issues выбрать authoritative contracts и синхронно обновить связанные
-  документа. Не менять implementation для совпадения с устаревшим текстом без
-  отдельного API-решения.
-- **Проверка решения:** ручная cross-reference проверка coroutine table/diagram,
-  test counts и compiler status; Doxygen соответствует B6/B73; fixture map точно
-  описывает assertions. Добавить lightweight doc/count consistency checks там,
-  где это не требует дублировать данные.
+  `agents/ISSUES.md`, Doxygen изменённых scheduler/I/O/timer/container APIs.
+- **Расхождения:** README называл lazy `automaton<T>` eager, а Nukes new/delete
+  backend — process-lifetime pool. INDEX и TESTING расходились по inventory,
+  карте fixtures и результатам проверок; несколько описаний тестов не
+  соответствовали фактическим assertions. B11/B47 описывали прежнюю реализацию,
+  а B52/B77 были закрыты до проверки оставшихся failure paths.
+- **Решение:** coroutine table/diagram и allocator contract исправлены по коду;
+  карты fixtures и test names сверены с source discovery, результаты sanitizer
+  прогонов отделены от исторических записей. README/INDEX/Doxygen описывают
+  allocation error contract, timer registration и transactional worker startup.
+  B11/B47/B52/B77 актуализированы вместе с проверяющими их regressions.
+- **Проверка:** ручная сверка с кодом и test assertions; source discovery
+  подтверждает inventory, полный Meson run включает runtime discovery
+  consistency. Coverage percentage сохранён с датой исходного измерения;
+  новый coverage run не заявляется.
 
 ### B68. Nukes freelists размещают over-aligned nodes в обычном `malloc` storage
 
-- **Статус:** Решено локальным vendored patch 2026-08-27.
+- **Статус:** Решено 2026-08-27; исправления опубликованы в закреплённом Nukes
+  commit `7fe452b2054f97c0ec3d707dfd934b5474fcc1fe` без локального patch.
 - **Приоритет:** Критический.
 - **Файлы и граница ACE:**
   `subprojects/nukes/include/nukes/dynamic/{mpmc,spmc,regular}_freelist.h`,
@@ -1019,7 +1027,7 @@
 - **Решение:** completion очищает buffer до `raw_release()`, сохраняя intended
   lifetime самого command и освобождая принадлежащие buffer arena chunks.
 - **Регресс-тест:**
-  `io_entity_fixture.outcast_command_completion_releases_payload_before_pool_return`;
+  `io_entity_fixture.file_output_reuses_completed_outcast_commands_without_payload_leaks`;
   полный host ASan+LSan-прогон не сообщает leaks, Meson suite проходит 312/312.
 - **Связь с B37:** исправлен successful completion lifecycle. Reject/fallback
   ownership после успешной инициализации ring остаётся отдельной открытой B37.
@@ -1097,12 +1105,13 @@
   сценариях. Отдельно sender-first bidirectional channel может оставить stale
   waiter, поэтому dispatcher regressions больше не используют channel как
   побочный collector.
-- **Решение:** Nukes закреплён на commit
-  `0b498630ac3c9dd801baf3f4df558916c3d7a557`, а исправления доставляются tracked
-  `subprojects/packagefiles/nukes-b75.patch`. Tail handoff использует `acq_rel`;
+- **Решение:** исправления опубликованы в Nukes; `subprojects/nukes.wrap`
+  закрепляет commit `7fe452b2054f97c0ec3d707dfd934b5474fcc1fe` без локального
+  patch. Commit включает обязательный `dynamic/serialized_freelist.h`.
+  Tail handoff использует `acq_rel`;
   freelist metadata сериализована коротким per-instance gate с destruction и
   reconstruction payload вне gate; MPMC/roaming consumers сериализуют только
-  head/reclamation. Dummy не попадает в detached batch, move обнуляет source.
+  head/reclamation. Move обнуляет source.
   Глобальной блокировки и общего contention между queue instances нет.
 - **Интеграция:** channel связывает publication data и waiter коротким локальным
   gate и выполняет post-registration recheck. Router возвращает ownership result,
@@ -1110,10 +1119,11 @@
   cancel reattaches собственный node последним. Signal pipe использует исправленную
   MPMC queue без отдельной сериализации. Runner переключает task source после
   фактических 16 pulls, а не после первого, сохраняя sender-first FIFO progress.
-- **Проверка:** 7 direct Nukes tests покрывают MPSC 4P/1C, MPMC 4P/4C, exact-once,
-  FIFO, node reuse, move, batch/dummy и teardown. GCC 16 TSan: 7/7 direct и 8/8
-  channel/dispatcher/signal integration без diagnostics. Clang 22 ASan: direct и
-  channel tests 9/9; sender-first/MPMC/cancel набор прошёл 20 shuffled повторов.
+- **Проверка:** пять текущих direct concurrency tests покрывают MPSC 4P/1C,
+  MPMC 4P/4C, exact-once, FIFO, node reuse, move и teardown. Вместе с пятью
+  alignment/lifetime tests прошли 50 executions под ASan+UBSan 2026-09-21;
+  полный host suite также прошёл. Исторические GCC 16 TSan direct/integration
+  и Clang 22 ASan channel runs описаны в `agents/TESTING.md`.
   BM25 фиксирует baseline/current в `agents/BENCHMARKS.md`.
 
 ### B76. Overflow path резервировал и отправлял неприготовленные SQE
@@ -1143,8 +1153,8 @@
 
 ### B77. `run()` принимал несогласованный multi-runner empty snapshot
 
-- **Статус:** Открыто повторно 2026-09-21; epoch-validation от 2026-08-30
-  не закрывает окно нулевого load при immediate reattach.
+- **Статус:** Решено 2026-09-21: epoch-validation дополнен непрерывным
+  runnable accounting при immediate reattach.
 - **Приоритет:** Критический.
 - **Файлы:** `include/ace/core/dispatcher.h`, `include/ace/core/runner.h`
   (`yank`, `yank_service`), `include/ace/futures/reattach.h`,
@@ -1184,67 +1194,62 @@
   Бинарники не пересобирались; benchmark не является подтверждением сборки
   HEAD или измерением исправления. LSan был недоступен под ptrace; TSan-бинарник
   не запустился из-за отсутствующей `libgtest.so.1.17.0`.
-- **Предлагаемое решение:** сохранять runnable accounting до публикации задачи
-  на destination; согласовать immediate reattach в обоих runner paths.
-- **Проверка решения:** regression должен проверять completion после одного
-  `run()` без дополнительного drain/run; last-task migration и immediate
-  reattach, shuffled/repeated ASan/TSan runs, отсутствие pending work и UAF.
+- **Решение:** в `yank()` и `yank_service()` source вызывает
+  `release_runnable()` после публикации через reattach, сохраняя непрерывный
+  load до destination acquire. Epoch-validation остаётся обязательной для
+  согласованного multi-runner snapshot.
+- **Регрессии:** `runner_fixture.declined_redirect_retains_source_load` и
+  `polling_declined_redirect_retains_source_load` детерминированно наблюдают
+  публичный source load до publication. В
+  `dispatcher_fixture.last_task_migration_completes_in_one_run` последняя
+  regular/polling task завершает 400 migrations за один `ace::run()`.
+- **Проверка:** полный Clang 22 ASan+UBSan/LSan host suite и десять shuffled
+  повторов scheduler/allocation/cutex набора прошли без diagnostics.
 
 ### B78. Обязательные входы сборки отсутствовали в Git
 
-- **Статус:** Решено в рабочем индексе 2026-09-21; commit ещё не создан,
-  чистая сборка не проверялась.
+- **Статус:** Решено; отсутствовавшие файлы сохранены в commit `39de353`,
+  dependency delivery обновлён 2026-09-21.
 - **Приоритет:** Высокий (P1).
 - **Файлы:** `subprojects/nukes.wrap`, `meson.build`,
-  `subprojects/packagefiles/nukes-b75.patch`, `tests/nukes_alignment_fixture.cpp`,
-  `tests/nukes_concurrency_fixture.cpp`, `tests/service_fixture.cpp`,
-  `tests/sanitized_test_runner.py`, `tests/sanitized_test_runner_test.py`.
-- **Симптом:** wrap требует отсутствующий в Git `nukes-b75.patch`, а Meson
-  ссылается на пять untracked test/tooling files. Локальное рабочее дерево
-  скрывало отсутствие обязательных входов; чистый checkout не мог воспроизвести
-  сборку. Новые ссылки ветки `slope` — patch и concurrency fixture; остальные
-  пропуски присутствовали ранее.
-- **Решение:** с разрешения пользователя шесть существующих файлов добавлены
-  в индекс Git без изменения содержимого. Generated files, dependency checkouts,
-  caches и посторонние patches не добавлялись.
-- **Проверка решения:** все 43 literal `tests/*` file inputs из Meson и patch
-  из `diff_files` суммарно присутствуют в `git ls-files`. Команды
-  `python3 -B tests/sanitized_test_runner_test.py` и
-  `python3 -B tests/discover_tests_test.py` прошли по 7/7 tests.
-  `git diff --check` и `git diff --cached --check -- tests` проходят.
-  Общий staged whitespace check сообщает 95 пустых context lines с обязательным
-  пробелом unified diff и пустую строку EOF в patch; содержимое patch сохранено.
-  `git apply --numstat subprojects/packagefiles/nukes-b75.patch` успешно
-  разбирает все семь target files; это проверка синтаксиса, не применимости к
-  pinned revision. Отдельный regression test для Git inventory не добавляется.
-- **Ограничение воспроизводимости:** при ревью локальный Nukes имел HEAD
-  `04e7cf0da79b217d0944e1902a594f2c2dfdc232`, а wrap закрепляет
-  `0b498630ac3c9dd801baf3f4df558916c3d7a557`. Сборку pinned commit с patch
-  необходимо проверить в изолированном чистом окружении; локальные успешные
-  тесты её не подтверждают. Текущий dependency checkout не изменялся.
+  `tests/nukes_alignment_fixture.cpp`, `tests/nukes_concurrency_fixture.cpp`,
+  `tests/service_fixture.cpp`, `tests/sanitized_test_runner.py`,
+  `tests/sanitized_test_runner_test.py`.
+- **Симптом:** wrap требовал отсутствующий в Git dependency patch, а Meson
+  ссылался на пять untracked test/tooling files. Локальное дерево скрывало
+  отсутствие обязательных входов; чистый checkout не воспроизводил сборку.
+- **Решение:** с разрешения пользователя отсутствовавшие файлы добавлены в Git
+  и сохранены в `39de353`. Исправленный Nukes, включая недостающий header,
+  опубликован в отдельном репозитории и закреплён на
+  `7fe452b2054f97c0ec3d707dfd934b5474fcc1fe`; старый patch и `diff_files`
+  удалены. Generated files, dependency checkouts, caches и посторонние patches
+  не добавляются.
+- **Проверка:** source/runtime discovery и обе Python infrastructure unit suites
+  входят в успешный полный host Meson run. Изолированные текущие ACE sources
+  с чистым checkout опубликованного Nukes без patch прошли GCC 16
+  ASan+UBSan/LSan Meson suite 348/348. Новые fixture/helper files видимы Git;
+  сборка не зависит от прежнего локального dependency дерева.
 
 ### B79. Ошибка создания workers разрушает TLS services начавших работу задач
 
-- **Статус:** Открыто.
+- **Статус:** Решено 2026-09-21.
 - **Приоритет:** Средний (P2).
 - **Файл:** `include/ace/core/dispatcher.h` (`run`, `ensure_workers`,
   `worker_tf`, `stop_workers`).
-- **Симптом:** первый из создаваемых workers может начать timer/I/O-задачу,
-  пока создаются остальные потоки. Если следующий `std::jthread` бросит
-  исключение, rollback остановит уже созданные threads и уничтожит их TLS
-  services, хотя связанные задачи ещё не завершены. Следующий `run()` не
-  восстанавливает потерянное service state.
-- **Причина:** `_run_active` устанавливается до `ensure_workers()`, workers
-  сразу допускаются к исполнению; catch вызывает `stop_workers()` без
-  отдельного барьера завершения startup.
-- **Предлагаемое решение:** отделить reservation активного `run()` от допуска
-  workers к задачам; открывать startup barrier только после успешного создания
-  всех потоков. При отказе сохранять очередь и lifetime задач для retry.
-- **Проверка:** вывод подтверждён статическим анализом, fault injection не
-  запускался. Нужен контролируемый отказ создания второго или последующего
-  worker при наличии timer/I/O work: до успешного startup задачи не исполняются,
-  ошибка выходит из `run()`, повторный запуск выполняет задачи ровно один раз
-  без потери service state, UAF или зависания; ASan/TSan.
+- **Симптом:** первый worker мог начать timer/I/O-задачу, пока создавались
+  остальные. Отказ следующего `std::jthread` останавливал уже созданные threads
+  и уничтожал TLS services незавершённых задач; retry не восстанавливал их state.
+- **Причина:** `_run_active` устанавливался до `ensure_workers()` и сразу
+  допускал workers к исполнению; rollback не имел отдельного startup barrier.
+- **Решение:** `_run_active` резервирует единственный вызов `run()`, а отдельный
+  `_execution_enabled` открывается только после успешного создания всех workers.
+  При отказе workers завершаются, не начав задач, очередь остаётся для retry.
+- **Регрессия:**
+  `dispatcher_fixture.partial_worker_start_failure_preserves_tasks_for_retry`
+  инъецирует `std::system_error` перед вторым worker, проверяет нулевой счётчик
+  начатых timer-задач после отказа и exact-once completion после retry.
+- **Проверка:** полный Clang 22 ASan+UBSan/LSan host suite и десять shuffled
+  повторов scheduler/allocation/cutex набора прошли без diagnostics.
 
 ### B73. Cached timestamp мог преждевременно завершать relative и absolute timers
 
@@ -1293,7 +1298,7 @@
 
 | ID | Файл | TODO |
 |----|------|------|
-| T1 | `include/ace/futures/channel.h` | Решено B75: Nukes batch исправлен; channel cancel сохраняет node-wise drain, чтобы гарантированно reattach собственный in-place router последним. |
+| T1 | `include/ace/futures/channel.h` | Решено B75: channel cancel сохраняет node-wise drain, чтобы гарантированно reattach собственный in-place router последним. |
 | T2 | `include/ace/core/async.h:55` | Перенести yield operation в generator. |
 | T3 | `include/ace/core/dispatcher.h:295` | Вернуть отложенную логику после появления spawn groups. |
 | T4 | `include/ace/core/traits/promise.h:73` | Перенести async routers в rules. |
@@ -1304,21 +1309,6 @@
 | T9 | `include/ace/core/traits/routing.h:228` | Заменить `memcpy` на копирование только указателя. |
 
 ## Открытые технические нюансы
-
-### N1. `nukes::pop_batch()` непригоден для arena release queue
-
-- **Статус:** Решено 2026-08-30 в составе B75.
-- **Приоритет:** Низкий.
-- **Область:** `include/ace/core/arena.h` и внешняя очередь nukes.
-- **Симптом:** iterator batch-а начинает чтение с dummy-node, поэтому первый
-  dereference возвращает мусор.
-- **Решение:** dynamic MPSC/MPMC/roaming batch фиксирует tail snapshot под
-  допустимым consumer protocol, извлекает только payload nodes и использует
-  `nullptr` как end sentinel; default batch инициализирован пустым.
-- **Проверка решения:** `mpsc_batch_excludes_dummy_and_drains_snapshot` и
-  `mpmc_batch_excludes_dummy_and_reuses_nodes` проверяют точный размер, FIFO,
-  отсутствие dummy и последующий reuse. Arena сохраняет allocation-free
-  intrusive foreign-release path и от Nukes batch не зависит.
 
 ### N2. Arena utilization counter не считает все операции
 

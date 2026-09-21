@@ -34,6 +34,9 @@
 #ifndef ACE_FUTURE_TIMEOUT_H
 #define ACE_FUTURE_TIMEOUT_H
 
+#include <exception>
+#include <utility>
+
 #include <ace/services/clock.h>
 #include <ace/core/traits/future.h>
 #include <ace/core/async.h>
@@ -66,6 +69,8 @@ class ACE_AWAIT_NODISCARD timeout : public core::traits::future_traits<timeout> 
     explicit timeout(const services::timepoint_t expires)
         : _expires(expires)
         , _absolute(true) {}
+
+    std::exception_ptr _registration_error; ///< Error delivered to the awaiting coroutine.
 
     struct timeout_router;
     friend timeout_router;
@@ -104,7 +109,15 @@ public:
      */
     bool await_suspend(auto coroutine);
 
-    void await_resume() {} ///< No value produced.
+    /**
+     * @brief Completes the wait or rethrows a clock registration failure.
+     * @throws std::bad_alloc if service startup or timer insertion ran out of memory.
+     * The exception is delivered inside the awaiting coroutine and can be caught there.
+     */
+    void await_resume() {
+        if (_registration_error)
+            std::rethrow_exception(std::exchange(_registration_error, {}));
+    }
 };
 
 /**
@@ -181,20 +194,28 @@ struct ACE_FUTURE_TIMEOUT_SPACE timeout_router : runner_router {
      * @param node Task node to schedule for wake-up.
      */
     bool redirect(const omni_node node) override {
-        if (_timeout->_absolute)
-            _injected_node = services::clock::subscribe_at(node, _timeout->_expires);
-        else
-            _injected_node = services::clock::subscribe(node, _timeout->_duration);
-        return true;
+        try {
+            auto* inserted = _timeout->_absolute
+                ? services::clock::subscribe_at(node, _timeout->_expires)
+                : services::clock::subscribe(node, _timeout->_duration);
+            // Immediate reattachment destroys this router inside subscribe().
+            // Only a retained timer leaves the router alive for this assignment.
+            if (inserted)
+                _injected_node = inserted;
+            return true;
+        } catch (...) {
+            _timeout->_registration_error = std::current_exception();
+            return false;
+        }
     }
 
     /**
      * @brief Cancels the pending timer and returns the node to its runner.
      */
     void cancel() override {
-        if (_injected_node) {
-            services::clock::detach(_injected_node);
-            _injected_node = nullptr;
+        if (auto* injected = std::exchange(_injected_node, nullptr)) {
+            // detach() reattaches the task and destroys this in-place router.
+            services::clock::detach(injected);
         }
     }
 

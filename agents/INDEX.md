@@ -1,6 +1,6 @@
 # ACE Framework - Project Navigation Index
 
-Дата актуализации: 2026-08-23.
+Дата актуализации: 2026-09-21.
 
 Этот документ описывает текущую архитектуру, публичные API, инварианты и файловую
 карту ACE. Он намеренно ссылается на файлы и символы, а не на номера строк:
@@ -262,8 +262,10 @@ queue. `cutex::proxy` обеспечивает RAII, `capture()` сохраня�
 Критический race между неуспешным `try_lock()` и enqueue закрывает
 `pending_notify()`: если release видит ожидающего, но queue ещё пуста, отдельная
 task повторяет notification. Изменения counter, queue или routing обязаны
-сохранять этот инвариант. Открытый destructor contract описан в
-[B11](ISSUES.md#b11-cutexproxydestructor-бросает-из-noexcept-деструктора).
+сохранять этот инвариант. После `sync()` обязателен ручной `release()`:
+деструктор `noexcept(false)` сначала освобождает cutex, затем сообщает
+`std::logic_error`, если release пропущен. При обычном выходе исключение можно
+перехватить; бросать его во время раскрутки другого исключения небезопасно (B11).
 
 ## I/O ownership
 
@@ -390,6 +392,11 @@ tasks до возврата из `run()`. Поскольку `empty()` посл�
 runners, dispatcher принимает этот snapshot только при неизменившемся
 `activity_epoch` до и после scan; cross-runner handoff поэтому не может скрыть
 работу между уже просмотренным destination и ещё не просмотренным source.
+При immediate reattach source сохраняет свой runnable count до публикации на
+destination, включая polling tasks; между ними нет окна ложной quiescence.
+Reservation активного `run()` отделена от разрешения workers исполнять задачи:
+допуск открывается только после создания всех threads. Ошибка startup выходит
+из `run()`, оставляет очереди нетронутыми и допускает повторный запуск.
 
 `runner` из `include/ace/core/runner.h` содержит:
 
@@ -440,6 +447,12 @@ fire-and-forget file/socket/console writes сообщают ошибку чер�
 `io::outcast::fail_cb_handler`, не выполняя blocking fallback. Внутренняя
 `set_queue_init_for_testing()` предоставляет deterministic init-failure injection
 и требует отсутствия I/O in flight на текущем потоке.
+Отказ allocation при запуске service или расширении overflow queue возвращает
+`false` из direct submit и записывает `-ENOMEM` в `kernel_observer::_submission_error`.
+Rejected observer остаётся у вызывающего и не получает CQE/callback. Awaited
+query возвращает эту ошибку без suspension; outcast сам завершает command через
+обычный cleanup/error handler. Query accounting меняется только после принятия
+запроса.
 
 Iovec storage использует общую arena. Большие physical chunks обслуживаются
 transient path. Публичные byte lengths остаются `size_t` до kernel boundary;
@@ -462,6 +475,14 @@ snapshot, а не свежий timestamp.
 
 `include/ace/futures/timeout.h` предоставляет relative `timeout` и absolute
 `expire`. Cancellation удаляет timer и возвращает waiter в runner.
+Ошибка регистрации, включая `std::bad_alloc`, сохраняется router-ом и
+перебрасывается из `await_resume()` в ожидающую корутину. Необработанное
+исключение использует обычный coroutine failure lifecycle. Timer count
+увеличивается после успешной вставки, поэтому отказ не оставляет phantom timer.
+Wheel принадлежит function-local TLS clock instance: при ошибке первого
+construction C++ повторяет initialization при следующем обращении; частично
+созданный wheel не публикуется. Cancel очищает свой timer pointer до detach,
+поскольку detach может немедленно уничтожить router при reattach.
 
 ## Service, arena и tools
 
@@ -485,9 +506,9 @@ Nukes dynamic queues используют отдельно настроенны�
 освобождается независимо от создавшего thread, а static queue может безопасно
 выполнить teardown после завершения producer-а.
 
-`subprojects/nukes.wrap` закрепляет проверенный upstream commit, а
-`subprojects/packagefiles/nukes-b75.patch` содержит ACE-specific queue,
-freelist и batch corrections. Payload destruction/reconstruction выполняется
+`subprojects/nukes.wrap` закрепляет опубликованный Nukes commit
+`7fe452b2054f97c0ec3d707dfd934b5474fcc1fe`, включающий исправления queues и
+freelists; локальный dependency patch не требуется. Payload destruction/reconstruction выполняется
 вне freelist gate, поэтому re-entrant destructor не удерживает reclamation lock.
 
 Cross-thread release protocol:
@@ -504,6 +525,11 @@ Memory limit делится между runners. При breach arena либо и�
 fallback, либо бросает `std::bad_alloc` согласно `_breach_memory_limit`.
 
 ### Tools
+
+`slab_mempool<T>` создаётся пустым без allocation и получает первый slab при
+`alloc()`. Отказ выделения или регистрации ownership распространяет исключение,
+освобождает временный slab и сохраняет pool пригодным для retry. Это исключает
+выделение памяти при TLS initialization из `noexcept` I/O paths.
 
 | Файл | Символы |
 |------|---------|
@@ -585,13 +611,14 @@ fallback, либо бросает `std::bad_alloc` согласно `_breach_mem
 
 ### Текущая карта
 
-Test executable собирается из `tests/main.cpp`, `tests/environment.h` и **35
+Test executable собирается из `tests/main.cpp`, `tests/environment.h` и **36
 fixture source files**:
 
 ```text
 arena_fixture.cpp              backup_fixture.cpp
 base_fixture.cpp               channel_extra_fixture.cpp
-channel_fixture.cpp            compose_extra_fixture.cpp
+channel_fixture.cpp            clock_initialization_fixture.cpp
+compose_extra_fixture.cpp
 console_fixture.cpp            context_fixture.cpp
 control_block_fixture.cpp      cross_mechanic_fixture.cpp
 cutex_extra_fixture.cpp        cutex_fixture.cpp
@@ -600,7 +627,7 @@ future_traits_fixture.cpp      get_runner_fixture.cpp
 id_alloc_fixture.cpp           io_any_fixture.cpp
 io_buffer_fixture.cpp          io_entity_fixture.cpp
 io_hanged_fixture.cpp
-nukes_alignment_fixture.cpp
+nukes_alignment_fixture.cpp   nukes_concurrency_fixture.cpp
 omniptr_fixture.cpp            promise_traits_fixture.cpp
 queue_fixture.cpp              router_slot_fixture.cpp
 runner_fixture.cpp             service_fixture.cpp
@@ -612,7 +639,8 @@ yield_fixture.cpp
 
 Fixture classes и helper coroutine functions объявляются в
 `tests/environment.h`; каждый fixture source содержит относящиеся к нему
-`TEST`/`TEST_F`. Текущая source inventory - **318 Google Test**. Meson discover
+`TEST`/`TEST_F`. Общие fault-injection scopes находятся в
+`tests/allocation_failure.h`. Текущая source inventory - **344 Google Test**. Meson discover
 mode регистрирует каждый GTest отдельным процессом с точным `--gtest_filter`.
 
 Помимо source GTests, стандартная конфигурация регистрирует tooling tests:
@@ -627,21 +655,22 @@ mode регистрирует каждый GTest отдельным процес
 
 ### Текущий результат
 
-- Clang 22 + ASan: timer/runner regressions для direct-registration clock прошли 10 shuffled
-  повторов (150/150), targeted B29/B38/B68 checks прошли 40 shuffled executions;
-  все `io_entity_fixture` проходят 28/28 одним host-процессом с доступным
-  `io_uring`; migration regression проходит 20/20 повторов. Full host binary
-  не показывает LSan leaks; прежний timing failure B34 закрыт внешними
-  steady-clock assertions и повторными прогонами.
-  Официальный host Meson suite проходит 312/312, включая LSan capability и
-  discovery; под ptrace LSan capability корректно отмечается SKIP.
-- GCC 16 + ASan+UBSan и GCC 16 + TSan: B29, B68, launcher и discovery прошли
-  6/6 в отдельных clean build directories. Full successful-I/O suite по-прежнему
-  требует host с доступным `io_uring`.
+Проверка 2026-09-21 после исправлений TLS clock/cancel: Clang 22
+ASan+UBSan/LSan host Meson suite прошёл **348/348** (344 GTests и четыре
+infrastructure checks), GCC 16 TSan — **347/347** (LSan capability не
+регистрируется). Успешные host-прогоны включают `io_uring`.
+До последних TLS/cancel изменений дополнительно 33 scheduler/allocation/cutex
+tests прошли десять shuffled повторов, четыре I/O fault tests — пять
+host-повторов, десять standalone Nukes alignment/concurrency tests — пять
+ASan+UBSan повторов. Два новых clock-initialization tests прошли 40 целевых
+executions. Итоговая чистая GCC 16 ASan+UBSan/LSan сборка с опубликованным
+Nukes прошла 348/348; финальный набор из 39 tests прошёл 20 shuffled повторов
+на Clang ASan+UBSan и GCC TSan (по 780 executions). Команды и исторические
+результаты фиксируются в `TESTING.md`.
 
-Не заявлять общий green status до решения этих записей. Meson запускает каждый
-discovered GTest отдельным процессом; для проверки order dependencies дополнительно
-использовать подходящие shuffle/repeated runs по `TESTING.md`.
+Meson запускает каждый discovered GTest отдельным процессом; для проверки order
+dependencies дополнительно используются shuffle/repeated runs по `TESTING.md`.
+Результаты относятся к указанной конфигурации, а не к отсутствию открытых issues.
 
 ### Coverage
 

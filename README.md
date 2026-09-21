@@ -63,9 +63,10 @@ Programs still need the ACE and Nukes include paths and must link `liburing`.
 Meson's `ace_dep` supplies those requirements. Enabling `ace_entry` also builds a
 small static library that provides the optional weak `main()` entry point.
 
-Dynamic Nukes queue nodes used by ACE are allocated from a dedicated,
-thread-safe process-lifetime pool. This keeps static queues safe during process
-teardown; it is separate from ACE's thread-local coroutine and I/O arenas.
+Dynamic Nukes queue nodes used by ACE use a thread-safe, process-wide new/delete
+backend. Nodes can be released after the allocating thread exits, including
+during static queue teardown. This storage is separate from ACE's thread-local
+coroutine and I/O arenas.
 
 ### `io_uring` Availability
 
@@ -86,6 +87,9 @@ queries complete immediately with that same negative error; direct controller
 submit functions return `false`; file-registration functions return the error.
 Synchronous fire-and-forget file, socket, and console output reports it through
 `ace::io::outcast::fail_cb_handler` instead of falling back to a blocking write.
+If service startup or the submission queue runs out of memory, direct submits
+return `false`, awaited I/O returns `-ENOMEM`, and fire-and-forget output reports
+`-ENOMEM` through the same handler. A rejected request produces no completion.
 
 ## Include Order
 
@@ -148,20 +152,23 @@ int main() {
 }
 ```
 
+Workers start executing only after all worker threads have been created. If
+startup throws, scheduled tasks remain untouched and `ace::run()` can be retried.
+
 ## Coroutine Types
 
 | Type | Start policy | Purpose |
 |---|---|---|
 | `ace::async<T>` | Lazy | Returns `T`; starts when awaited or attached to a runner. |
 | `ace::promise<T>` | Eager | Starts when the coroutine function is called. |
-| `ace::automaton<T>` | Eager | Produces values with `co_yield` and a final value with `co_return`. |
+| `ace::automaton<T>` | Lazy | Produces values with `co_yield` and a final value with `co_return`. |
 | `ace::task` | Lazy | Alias for `ace::async<void>` and the type accepted by `ace::schedule()`. |
 
 ```mermaid
 stateDiagram-v2
-    [*] --> LazyCreated: call async or task
+    [*] --> LazyCreated: call async, task, or automaton
     LazyCreated --> Running: co_await, spawn, or schedule
-    [*] --> Running: call promise or automaton
+    [*] --> Running: call promise
     Running --> Suspended: co_await not ready
     Suspended --> Running: routed future becomes ready
     Running --> Yielded: automaton co_yield
@@ -282,6 +289,10 @@ tick, so it cannot complete before its requested duration. `expire` preserves
 its absolute steady-clock deadline. Scheduler load can make either operation
 late; no hard upper bound on lateness is guaranteed. `clock::current_time()` is
 the most recently processed millisecond snapshot, not a fresh time query.
+If clock startup or timer insertion fails, the exception is delivered by
+`co_await timeout(...)` or `co_await expire(...)` inside the waiting coroutine.
+It can be caught there; an uncaught exception follows normal coroutine failure
+and cleanup.
 
 ACE also overloads logical composition for futures:
 

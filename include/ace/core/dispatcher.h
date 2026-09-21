@@ -115,6 +115,9 @@ namespace ace::core {
         std::atomic<std::uint64_t> _activity_epoch      { };  ///< Runner active/idle transition sequence.
         std::atomic_bool           _run_active          { false }; ///< Whether a caller currently drives @c run().
 
+        std::atomic_bool _execution_enabled { false }; ///< Workers may execute only after successful startup.
+        inline static void (*_worker_start_hook)(std::size_t) = nullptr; ///< Cold-start fault injection.
+
         ACE_CACHE_LINE(2)
 
         sig_pipe_t _sig_pipe{};  ///< Signal pipe shared with all service routines.
@@ -160,6 +163,16 @@ namespace ace::core {
         }
 
     public:
+
+        /**
+         * @brief Installs a callback immediately before each worker construction.
+         * @param hook Callback receiving the runner index; nullptr disables injection.
+         * @warning Test-only; requires external synchronization and no active run.
+         * Exceptions simulate thread-construction failure and propagate from run().
+         */
+        static void set_worker_start_for_testing(void (*hook)(std::size_t)) noexcept {
+            _worker_start_hook = hook;
+        }
 
         /**
          * @brief Returns the dispatcher's signal pipe.
@@ -220,6 +233,7 @@ inline void ace::core::dispatcher::bind_runners() noexcept {
 }
 
 inline void ace::core::dispatcher::stop_workers() noexcept {
+    _execution_enabled.store(false, std::memory_order_release);
     for (auto& worker : _workers)
         worker.request_stop();
     for (std::size_t runner_id = 1; runner_id < _runners.size(); ++runner_id)
@@ -235,9 +249,12 @@ inline void ace::core::dispatcher::ensure_workers() {
     stop_workers();
     try {
         _workers.reserve(required);
-        for (std::size_t runner_id = 1; runner_id < _runners.size(); ++runner_id)
+        for (std::size_t runner_id = 1; runner_id < _runners.size(); ++runner_id) {
+            if (_worker_start_hook)
+                _worker_start_hook(runner_id);
             _workers.emplace_back(
                 std::bind_front(&dispatcher::worker_tf, this), runner_id);
+        }
     } catch (...) {
         stop_workers();
         throw;
@@ -257,9 +274,9 @@ inline void ace::core::dispatcher::worker_tf(
 
     while (not stoken.stop_requested()) {
         const std::uint64_t observed = local_runner.wake_epoch();
-        if (not _run_active.load(std::memory_order_acquire) or local_runner.load() == 0) {
+        if (not _execution_enabled.load(std::memory_order_acquire) or local_runner.load() == 0) {
             if (not stoken.stop_requested()
-                and (not _run_active.load(std::memory_order_acquire) or local_runner.load() == 0))
+                and (not _execution_enabled.load(std::memory_order_acquire) or local_runner.load() == 0))
                 local_runner.wait_for_work(observed);
             continue;
         }
@@ -370,7 +387,11 @@ namespace ace {
      * @brief Execute all scheduled tasks — blocks until the queue is empty.
      * @details Launches worker threads for runners 1..N-1, runs runner 0
      * on the calling thread, and polls until all runners report no tasks in an
-     * activity-epoch-stable snapshot.
+     * activity-epoch-stable snapshot. Workers start executing only after all
+     * threads have been constructed. A startup exception leaves scheduled tasks
+     * untouched, so the caller can retry run().
+     * @throws std::system_error on worker construction failure.
+     * @throws std::bad_alloc on worker storage allocation failure.
      */
     inline void run() {
         auto& self = core::dispatcher::get_instance();
@@ -386,6 +407,7 @@ namespace ace {
             throw;
         }
 
+        self._execution_enabled.store(true, std::memory_order_release);
         for (std::size_t runner_id = 1; runner_id < self._runners.size(); ++runner_id)
             self._runners[runner_id].notify_worker();
 
@@ -416,6 +438,7 @@ namespace ace {
                 self._activity_epoch.wait(observed, std::memory_order_acquire);
         }
 
+        self._execution_enabled.store(false, std::memory_order_release);
         self._run_active.store(false, std::memory_order_release);
     }
 

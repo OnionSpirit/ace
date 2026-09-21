@@ -1040,7 +1040,7 @@ BENCHMARK(bm_repeated_short_run)
 // ===========================================================================
 // BM25 - dynamic_queue_throughput: concurrent Nukes queue/reclamation cost
 // ===========================================================================
-// Transfers a fixed batch of unique integers while excluding worker creation
+// Transfers a fixed group of unique integers while excluding worker creation
 // from the timed interval. The checksum converts loss or duplication into a
 // benchmark error instead of reporting throughput for a corrupted run.
 

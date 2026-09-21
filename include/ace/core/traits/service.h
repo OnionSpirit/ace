@@ -110,6 +110,8 @@ namespace ace::core::traits {
         void(*detach_set)(bool) = nullptr; ///< Mode-dependent detached flag setter
         bool(*detach_get)()     = nullptr; ///< Mode-dependent detached flag getter
 
+        inline static thread_local void (*_respawn_hook)() = nullptr; ///< Service-start fault injection.
+
         friend derived_t;
 
         /**
@@ -163,6 +165,8 @@ namespace ace::core::traits {
          * @param rnr Runner to spawn the service on; @c nullptr lets the dispatcher choose.
          */
         void respawn(runner* rnr = nullptr) {
+            if (_respawn_hook)
+                _respawn_hook();
             schedule(service(dispatcher::get_sig_pipe()), rnr);
             detach_set(false);
         }
@@ -226,6 +230,14 @@ namespace ace::core::traits {
         }
 
     public:
+        /**
+         * @brief Installs a current-thread callback before service scheduling.
+         * @param hook Test callback, or nullptr to restore normal scheduling.
+         * @warning Test-only. Exceptions simulate allocation failure before publication.
+         */
+        static void set_respawn_for_testing(void (*hook)()) noexcept {
+            _respawn_hook = hook;
+        }
 
         // NOTE: Gets service instance and respawns it if needed (thread-shared mode)
         static derived_t& touch(const omni_runner rnr = nullptr)

@@ -239,6 +239,7 @@ namespace ace::services {
          * @param [in] node Context to await
          * @param [in] expires Absolute expiry of the timer (release-bound scale)
          * @param [in] hand_offset Slot offset relative to the current hand
+         * @throws std::bad_alloc on insertion failure; no timer is counted or owned.
          * @return Inserted node ptr
          */
         timer_node* insert(omni_node node, const timepoint_t expires, const std::size_t hand_offset) {
@@ -346,6 +347,8 @@ namespace ace::services {
 
         std::size_t             _timer_count         { 0 };   ///< Number of timers currently subscribed.
         bool                    _stopped            { false };///< Whether the wheel is empty and idle.
+
+        inline static thread_local void (*_initialization_hook)(std::size_t) = nullptr; ///< Constructor fault injection.
 
 
         /**
@@ -469,11 +472,22 @@ namespace ace::services {
     public:
 
         /**
+         * @brief Installs a current-thread callback before wheel storage allocation.
+         * @param hook Receives zero before level storage, then the one-based level
+         * index before allocating that level's slots; nullptr disables injection.
+         * @warning Test-only. Exceptions simulate constructor allocation failure.
+         */
+        static void set_initialization_for_testing(void (*hook)(std::size_t)) noexcept {
+            _initialization_hook = hook;
+        }
+
+        /**
          * @brief Constructs the full hierarchical wheel.
          * @tparam rep_t     Duration representation type.
          * @tparam period_t  Duration period type.
          * @param tick_duration Duration of one finest tick.
          * @param slot_count    Number of slots per level (rounded up to a power of two).
+         * @throws std::bad_alloc if level or slot storage cannot be allocated.
          */
         template <typename rep_t, typename period_t>
         explicit hierarchical_time_wheel(const std::chrono::duration<rep_t, period_t> tick_duration,
@@ -491,11 +505,16 @@ namespace ace::services {
             const auto max_round_ticks = INT64_MAX / tick_duration.count();
             const auto wheels_amount = std::min(fast_log(ticks_amount, _slot_count) + 1,
                                                 fast_log(max_round_ticks, _slot_count));
+            if (_initialization_hook)
+                _initialization_hook(0);
             _time_wheels.reserve(wheels_amount);
 
             auto tick = _tick_duration;
-            for (std::size_t i = 0; i < wheels_amount; ++i, tick *= static_cast<long>(_slot_count))
+            for (std::size_t i = 0; i < wheels_amount; ++i, tick *= static_cast<long>(_slot_count)) {
+                if (_initialization_hook)
+                    _initialization_hook(i + 1);
                 _time_wheels.emplace_back(tick, _slot_count, &_release_budget, this);
+            }
 
             for (std::size_t i = 0; i < (wheels_amount - 1); ++i)
                 _time_wheels[i]._upper_time_wheel = &_time_wheels[i + 1];
@@ -525,6 +544,7 @@ namespace ace::services {
          * @brief Subscribes a task using a deadline sampled at registration.
          * @param [in] node Task to subscribe
          * @param [in] duration Subscription duration
+         * @throws std::bad_alloc on insertion failure; no timer is counted or owned.
          * @return Inserted node ptr
          */
         timer_node* subscribe(omni_node node, duration_t duration) {
@@ -539,14 +559,16 @@ namespace ace::services {
 
             const auto timestamp = std::chrono::steady_clock::now();
             synchronize_if_stopped(timestamp);
+            auto* inserted = insert_timer(node, ceil_to_tick(timestamp + duration));
             ++_timer_count;
-            return insert_timer(node, ceil_to_tick(timestamp + duration));
+            return inserted;
         }
 
         /**
          * @brief Subscribes a task to an absolute monotonic deadline.
          * @param node Task to subscribe.
          * @param expires Absolute millisecond deadline.
+         * @throws std::bad_alloc on insertion failure; no timer is counted or owned.
          * @return Timer node used for cancellation, or @c nullptr if already due.
          */
         timer_node* subscribe_at(omni_node node, const timepoint_t expires) {
@@ -558,8 +580,9 @@ namespace ace::services {
                 return nullptr;
             }
 
+            auto* inserted = insert_timer(node, expires);
             ++_timer_count;
-            return insert_timer(node, expires);
+            return inserted;
         }
 
         /**
@@ -662,8 +685,13 @@ namespace ace::services {
         /// @brief Default constructor.
         clock() = default;
 
-        /// @brief Thread-local wheel instance.
-        static thread_local hierarchical_time_wheel _wheel;
+        /**
+         * @brief Wheel owned by the function-local thread-local clock instance.
+         * @details Failed construction is retried on the next inspect()/touch().
+         * Slot construction initializes the timer pool before this instance is
+         * registered for destruction, so queued records are destroyed first.
+         */
+        hierarchical_time_wheel _wheel {std::chrono::milliseconds(1), 256};
 
         /**
          * @brief Returns the cached millisecond snapshot without a system clock read.
@@ -692,6 +720,7 @@ namespace ace::services {
          * @brief Subscribes a task to an absolute monotonic deadline.
          * @param node Task node to wake.
          * @param expires Absolute millisecond deadline.
+         * @throws std::bad_alloc on insertion failure; no timer is counted or owned.
          * @return Timer node used for cancellation, or @c nullptr if already due.
          */
         [[nodiscard]] static timer_node* subscribe_at(omni_node node, const timepoint_t expires) {
@@ -704,16 +733,14 @@ namespace ace::services {
          * @return @c true while timers remain pending.
          */
         static bool ping() {
-            _wheel.advance(std::chrono::steady_clock::now());
-            return not _wheel.empty();
+            auto& wheel = inspect()._wheel;
+            wheel.advance(std::chrono::steady_clock::now());
+            return not wheel.empty();
         }
     };
 
     inline thread_local core::tools::slab_mempool<timer_record> timer_record::_timer_mempool =
         core::tools::slab_mempool<timer_record>();
-
-    inline thread_local hierarchical_time_wheel clock::_wheel =
-        hierarchical_time_wheel { std::chrono::milliseconds(1), 256 };
 
 }
 

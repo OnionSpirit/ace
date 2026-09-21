@@ -3,8 +3,8 @@
 Цель: 95-100% покрытия кодовой базы + проверка всех механик и их взаимодействий.
 
 > **Статус:** GCC 16 coverage union от 2026-08-23 покрывает **2262/2398 =
-> 94.33%** уникальных исполняемых строк `include/ace/**`. После B73 текущая
-> default-конфигурация регистрирует 334 ACE Meson-теста: 330 GTests, две
+> 94.33%** уникальных исполняемых строк `include/ace/**`. Текущая
+> default-конфигурация регистрирует 348 ACE Meson-тестов: 344 GTests, две
 > Python unit checks, discovery consistency и LSan capability. B29/B38/B66/B68
 > regressions проходят; successful-I/O tests всё ещё требуют доступного
 > `io_uring` и не становятся fallback tests.
@@ -196,7 +196,7 @@ shuffled повторов, **150/150**, seeds 82821..82830. Это закрыв�
 исключение B29 по-прежнему не устраняет остаточные пробелы review B32/B33 и
 transition-move риски B30/B31.
 
-### Regression coverage B15-B22
+### Regression coverage
 
 Статусы ниже согласованы с `agents/ISSUES.md`; наличие некорректного падающего
 теста не считается успешным regression coverage.
@@ -212,14 +212,19 @@ transition-move риски B30/B31.
 | B21 | `io_entity_fixture.entity_close_awaited_single_ownership`, `entity_close_discarded_single_ownership`, `entity_close_repeated_is_idempotent`, `direct_close_query_discard_remains_non_owning` | ✅ Реализованы и проходят в GCC-прогонах |
 | B22 | `base_fixture.udp_bind_transfers_sole_ownership`; supporting coverage `base_fixture.udp_sendto_recv_loop` | ✅ Реализован и проходит в GCC-прогонах |
 | B25 | `io_entity_fixture.io_query_lengths_preserve_uint_max_boundary`, `oversize_io_queries_return_eoverflow_without_submission`, `kernelic_rejects_oversize_lengths_without_submission` | ✅ Реализованы и проходят |
-| B38 | `io_entity_fixture.kernelic_init_failure_reports_availability_and_rejects_ring_operations`, `io_query_returns_kernel_init_error_without_submission`, `console_output_reports_kernel_init_error_and_releases_command` | ✅ Deterministic init-failure regressions проходят |
+| B38 | `io_entity_fixture.kernelic_init_failure_reports_availability_and_rejects_ring_operations`, `io_query_returns_kernel_init_error_without_submission`, `file_output_reports_kernel_init_error_without_fallback_bytes` | ✅ Deterministic init-failure regressions проходят |
 | B66 | `tests/sanitized_test_runner_test.py`, `ace_tests.discovery_consistency`, `ace_tests.lsan_capability` | ✅ Matrix и LSan capability policy реализованы |
 | B68 | `nukes_alignment_fixture.*`, `arena_fixture.nukes_node_allocator_uses_durable_arena_and_preserves_overalignment` | ✅ Three freelists preserve 1/8/16/32/64/128/256-byte node alignment and ACE config uses durable storage |
-| B70 | `io_entity_fixture.outcast_command_completion_releases_payload_before_pool_return` | ✅ Successful completion очищает payload перед `raw_release()`; full LSan clean |
+| B70 | `io_entity_fixture.file_output_reuses_completed_outcast_commands_without_payload_leaks` | ✅ Successful completion очищает payload перед `raw_release()`; full LSan clean |
 | B71 | `io_entity_fixture.connection_link_read_preserves_runner_after_migration` | ✅ Status preflight сохраняет thread-local service на current runner; 20/20 host repeats |
 | B76 | `base_fixture.kernelic_overflow_buffer_stress`, `context_fixture.do_runner_test` | ✅ 6000 deferred I/O completions без ghost SQE; bounded standalone runner полностью дренирует service work |
-| B77 | `cutex_fixture.cutex_race` | ✅ Activity-epoch validation не позволяет `run()` принять несогласованный snapshot при cross-runner handoff |
+| B77 | `runner_fixture.*declined_redirect_retains_source_load`, `dispatcher_fixture.last_task_migration_completes_in_one_run`, `cutex_fixture.cutex_race` | ✅ Source load удерживается до destination publication; regular/polling migration завершается за один run |
 | B54 | `io_entity_fixture.connection_link_stalled_read_keeps_runner_responsive_and_cancels`, `connection_link_read_preserves_partial_eof_and_error_results`, `connection_link_read_preserves_runner_after_migration` | ✅ 3/3 проходят на host с доступным io_uring |
+| B11 | `cutex_fixture.missing_sync_release_is_catchable_and_unlocks` | ✅ Пропущенный release после sync даёт catchable logic_error и освобождает mutex |
+| B47 | `queue_fixture.throwing_payload_rolls_back_enqueue`, `slab_allocation_failure_preserves_queue`, `slab_registration_failure_preserves_queue` | ✅ Construction/allocation/registration failures сохраняют очередь и допускают retry |
+| B52 | Четыре allocation-failure tests в `io_entity_fixture`, три в `timer_fixture`, два в `clock_initialization_fixture` | ✅ Direct false / awaited -ENOMEM / outcast cleanup; timeout exception, count rollback и retry первого TLS initialization |
+| B79 | `dispatcher_fixture.partial_worker_start_failure_preserves_tasks_for_retry` | ✅ Отказ второго worker не запускает задачи, retry выполняет их ровно один раз |
+
 
 ---
 
@@ -243,6 +248,9 @@ transition-move риски B30/B31.
 | Q8 | `q_node_remove` | q_node::remove() вызывает owning_queue->remove_node | ✅ |
 | Q9 | `queue_move_constructor` | Перемещённая очередь работает | ✅ |
 | Q10 | `queue_order` | Множественный enqueue → dequeue сохраняет FIFO порядок | ✅ |
+| Q11 | `throwing_payload_rolls_back_enqueue` | Throwing payload constructor возвращает node pool-у, queue остаётся usable | ✅ |
+| Q12 | `slab_allocation_failure_preserves_queue` | Отказ slab allocation сохраняет empty queue; следующий enqueue успешен | ✅ |
+| Q13 | `slab_registration_failure_preserves_queue` | Отказ ownership registration освобождает temporary slab и допускает retry | ✅ |
 
 #### `omniptr.h` — `omniptr_fixture`
 
@@ -301,7 +309,7 @@ transition-move риски B30/B31.
 |---|------|--------------|--------|
 | P1 | `permanent_tag_action` | `action()` = suspend_never | ✅ |
 | P2 | `differed_tag_action` | `action()` = suspend_always | ✅ |
-| P3 | `automaton_tag_action` | `action()` = suspend_never, без control_block | ✅ |
+| P3 | `automaton_tag_action` | `initial_result()` возвращает suspend_always: lazy start | ✅ |
 | P4 | `return_traits_void` | return_void(), `_return_value` отсутствует | ✅ |
 | P5 | `return_traits_typed` | return_value(v), `_return_value` содержит значение | ✅ |
 | P6 | `await_transform_future` | timeout определяется как router-based future, не busy future | ✅ |
@@ -418,13 +426,15 @@ transition-move риски B30/B31.
 | RN14 | `fetch_task_node_empty` | Оба пула пусты → null omni_node | ⬜ |
 | RN15 | `run_returns_false_when_idle` | run() когда нет задач → false | ✅ |
 | RN16 | `run_processes_128` | run() обрабатывает до 128 задач | ⬜ |
-| RN17 | `velocity_empty` | velocity() возвращает 0 на пустом раннере | ✅ |
-| RN18 | `clear_velocity` | clear_velocity() сбрасывает счётчики | ✅ |
+| RN17 | `load_empty` | Новый runner публикует нулевой runnable load | ✅ |
+| RN18 | `load_tracks_attach_completion` | Attach увеличивает load, completion возвращает его к нулю | ✅ |
 | RN19 | `empty_all_pools` | Все три пула пусты → empty() = true | ✅ |
 | RN20 | `empty_with_tasks` | Есть задачи в любом пуле → empty() = false | ✅ |
 | RN21 | `runner_move` | Move-конструктор переносит задачи | ✅ |
 | RN22 | `attach_and_run` | attach(task) + run() выполняет задачу | ✅ (добавлен) |
 | RN23 | `suspending_task_run` | Задача с таймаутом обрабатывается раннером | ✅ (добавлен) |
+| RN24 | `declined_redirect_retains_source_load` | Отказ router redirect сохраняет source load до reattach publication | ✅ |
+| RN25 | `polling_declined_redirect_retains_source_load` | Polling task сохраняет тот же непрерывный accounting | ✅ |
 
 ---
 
@@ -443,7 +453,7 @@ transition-move риски B30/B31.
 | D7 | `empty_with_tasks` | Есть задачи → empty() = false | ⬜ |
 | D8 | `interrupt_signal` | interrupt() публикует конкретный `interruption_signal` и только его | ✅ |
 | D9 | `terminate_signal` | terminate() публикует конкретный `termination_signal` и только его | ✅ |
-| D10 | `reset_signal_drains_all_pending_signals` | mixed batch дренируется полностью, повторный reset идемпотентен | ✅ |
+| D10 | `reset_signal_drains_all_pending_signals` | смешанный набор signals дренируется полностью, повторный reset идемпотентен | ✅ |
 | D11 | `balanced_selection_uses_every_runner` | равный load распределяется по всем 4 runner-ам без index bias | ✅ |
 | D12 | `worker_round_lifecycle` | worker_round() обрабатывает задачи, спит при idle | ⬜ |
 | D13 | `config_fetch` | fetch_config() читает g_config._runners_amount | ⬜ |
@@ -455,6 +465,8 @@ transition-move риски B30/B31.
 | D19 | `concurrent_schedule_during_run_executes_before_quiescence` | publication во время активного run видна до quiescence | ✅ |
 | D20 | `reload_zero_is_transactional` | zero отклоняется без разрушения прежних runner-ов | ✅ |
 | D21 | `reload_busy_is_transactional` | busy reload отклоняется и сохраняет pending work | ✅ |
+| D22 | `partial_worker_start_failure_preserves_tasks_for_retry` | Отказ второго worker происходит до исполнения задач; retry завершает каждую один раз | ✅ |
+| D23 | `last_task_migration_completes_in_one_run` | Последняя regular/polling task завершает 400 migrations за один run | ✅ |
 
 ---
 
@@ -516,7 +528,7 @@ transition-move риски B30/B31.
 | AH8 | `handle_cancel` | cancel() отменяет корутину | ⬜ |
 | AH9 | `check_valued_spawn_cancel` | join() на отменённой valued-таске → nullopt (cancel не даёт статусу стать e_finished) | ✅ |
 | AH10 | `check_valued_spawn_join_value` | join() на завершённой valued-таске → возвращает правильное значение из co_return | ✅ |
-| AH11 | `automaton_join_returns_nullopt_when_pending_yield_was_consumed` | Edge regression для B16 | ⚠️ Заблокирован B29: текущий тест нарушает await protocol и падает |
+| AH11 | `automaton_join_returns_nullopt_when_pending_yield_was_consumed` | Валидная ready/resume race возвращает nullopt после consumed yield и отменяет automaton (B16/B29) | ✅ |
 
 ---
 
@@ -577,10 +589,10 @@ transition-move риски B30/B31.
 | # | Тест | Что проверяет | Статус |
 |---|------|--------------|--------|
 | IH1 | `hanged_basic_fail_handler` | basic_fail_handler с отрицательным res бросает runtime_error | ✅ |
-| IH2 | `hanged_fail_handler_positive` | basic_fail_handler с неотрицательным res — no-op | ✅ |
+| IH2 | `hanged_fail_handler_positive` | Прямой basic_fail_handler бросает и для nonnegative result; условие вызова принадлежит command::on_result | ✅ |
 | IH3 | `hanged_command_pool_exists` | command_pool thread_local доступен | ✅ |
 | IH4 | `hanged_command_pool_capture` | capture() из пула возвращает команду | ✅ |
-| IH5 | `hanged_command_defaults` | command по умолчанию: buffer пуст, user_data пуст | ✅ |
+| IH5 | `hanged_command_defaults` | Captured command безопасно возвращается в pool; очистка payload этим тестом не проверяется | ✅ |
 
 #### `io_entity_fixture`
 
@@ -609,11 +621,15 @@ transition-move риски B30/B31.
 | IE21 | `kernelic_rejects_oversize_lengths_without_submission` | Direct kernel wrappers отклоняют oversize до liburing/ring access (B25) | ✅ |
 | IE22 | `kernelic_init_failure_reports_availability_and_rejects_ring_operations` | Init failure даёт status/error, безопасный submit/ping/registration/destructor (B38) | ✅ |
 | IE23 | `io_query_returns_kernel_init_error_without_submission` | Awaited I/O возвращает init errno без router/SQE (B38) | ✅ |
-| IE24 | `console_output_reports_kernel_init_error_and_releases_command` | Console outcast reports init error, cleans payload and returns command (B38) | ✅ |
-| IE25 | `outcast_command_completion_releases_payload_before_pool_return` | Successful outcast completion освобождает buffer до raw pool return (B70) | ✅ |
+| IE24 | `file_output_reports_kernel_init_error_without_fallback_bytes` | File output сообщает init error и не пишет fallback bytes (B38) | ✅ |
+| IE25 | `file_output_reuses_completed_outcast_commands_without_payload_leaks` | Повторные file writes переиспользуют completed commands без payload leaks (B70) | ✅ |
 | IE26 | `connection_link_stalled_read_keeps_runner_responsive_and_cancels` | Idle receive не блокирует timer и отменяется через query router (B54) | ✅ Host io_uring |
 | IE27 | `connection_link_read_preserves_partial_eof_and_error_results` | Link receive сохраняет partial read, EOF и negative errno (B54) | ✅ Host io_uring |
 | IE28 | `connection_link_read_preserves_runner_after_migration` | Completion receive возвращается к runner после двух migration steps (B54/B71) | ✅ Host io_uring; 20/20 repeats |
+| IE29 | `direct_submit_returns_false_on_service_allocation_failure` | Direct submit отклонён с -ENOMEM, CQE/callback не обещан | ✅ |
+| IE30 | `awaited_io_returns_enomem_on_service_allocation_failure` | Awaited query возвращает -ENOMEM без suspension | ✅ |
+| IE31 | `overflow_allocation_failure_preserves_accepted_requests` | Accepted requests завершаются exact-once, rejected request не получает callback, retry успешен | ✅ |
+| IE32 | `file_output_reports_allocation_failure_without_fallback_bytes` | Outcast сообщает -ENOMEM, освобождает command, не пишет fallback bytes | ✅ |
 
 #### `IoHangedFixture`, `IoAnyFixture`
 
@@ -680,6 +696,16 @@ transition-move риски B30/B31.
 | T10 | `timeout_uses_registration_timestamp` | Блокировка до регистрации не сокращает timeout | ✅ |
 | T11 | `timeout_positive_submillisecond_never_completes_early` | 500 us timeout не становится immediate | ✅ |
 | T12 | `timeout_while_release_budget_is_exhausted` | Новый timeout точен при backlog > release budget | ✅ |
+| T13 | `service_allocation_failure_rethrows_at_await` | Ошибка запуска clock перехватывается внутри awaiting coroutine, retry успешен | ✅ |
+| T14 | `timer_allocation_failure_rolls_back_count_and_allows_retry` | Relative/absolute insertion failure не оставляет timer count и позволяет retry | ✅ |
+| T15 | `uncaught_registration_failure_cleans_up_task` | Uncaught registration exception приводит к failure/cleanup frame | ✅ |
+
+#### `clock_initialization_fixture`
+
+| # | Тест | Что проверяет | Статус |
+|---|------|--------------|--------|
+| CI1 | `first_allocation_failure_rethrows_and_retries` | First-use TLS clock allocation failure доставляется в co_await; следующий timeout повторяет initialization | ✅ |
+| CI2 | `partial_initialization_failure_rethrows_and_retries` | Частично созданный wheel уничтожается; последующий timeout строит полное состояние | ✅ |
 
 ---
 
@@ -714,10 +740,8 @@ transition-move риски B30/B31.
 | NQ1 | `mpsc_multi_producer_fifo_and_exact_once` | 4P/1C, 80k значений, exact-once и per-producer FIFO | ✅ |
 | NQ2 | `mpmc_multi_producer_consumer_exact_once` | 4P/4C, 80k значений без loss/duplication | ✅ |
 | NQ3 | `mpmc_prefilled_fifo` | Строгий FIFO prefilled MPMC | ✅ |
-| NQ4 | `mpsc_batch_excludes_dummy_and_drains_snapshot` | MPSC batch возвращает весь FIFO snapshot без dummy | ✅ |
-| NQ5 | `mpmc_batch_excludes_dummy_and_reuses_nodes` | MPMC batch, точный drain и reuse | ✅ |
-| NQ6 | `mpsc_node_api_reuses_live_storage` | Внешний node ownership и восстановленный payload lifetime | ✅ |
-| NQ7 | `dynamic_queue_move_transfers_ownership` | Move переносит queue/dummy/pool и оставляет source inert | ✅ |
+| NQ4 | `mpsc_node_api_reuses_live_storage` | Внешний node ownership и восстановленный payload lifetime | ✅ |
+| NQ5 | `dynamic_queue_move_transfers_ownership` | Move переносит queue/dummy/pool и оставляет source inert | ✅ |
 
 ---
 
@@ -743,7 +767,12 @@ transition-move риски B30/B31.
 | CX14 | `cutex_high_contention` | 100+ корутин на одном cutex → порядок FIFO | ⬜ |
 | CX15 | `cutex_notify_no_waiter` | notify() без ожидающих → false | ⬜ |
 | CX16 | `cutex_router_redirect` | redirect сохраняет waiter в очередь | ⬜ |
-| CX17 | `set_rescheduling` | set_rescheduling/get_rescheduling работают | ✅ (добавлен) |
+| CX17 | `explicit_release_allows_reacquire` | Ручной release после sync позволяет повторный захват | ✅ |
+#### `cutex_fixture`: regression misuse contract
+
+| # | Тест | Что проверяет | Статус |
+|---|------|--------------|--------|
+| CX18 | `missing_sync_release_is_catchable_and_unlocks` | Пропущенный release после sync бросает catchable logic_error при обычном выходе и освобождает mutex | ✅ |
 
 ---
 
@@ -1012,43 +1041,92 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/base_fixture.cpp` | `base_fixture` | 18 |
 | `tests/channel_extra_fixture.cpp` | `channel_extra_fixture` | 5 |
 | `tests/channel_fixture.cpp` | `channel_fixture` | 1 |
+| `tests/clock_initialization_fixture.cpp` | `clock_initialization_fixture` | 2 |
 | `tests/compose_extra_fixture.cpp` | `compose_extra_fixture` | 3 |
 | `tests/console_fixture.cpp` | `console_fixture` | 4 |
 | `tests/context_fixture.cpp` | `context_fixture` | 13 |
 | `tests/control_block_fixture.cpp` | `control_block_fixture` | 14 |
 | `tests/cross_mechanic_fixture.cpp` | `cross_mechanic_fixture` | 14 |
 | `tests/cutex_extra_fixture.cpp` | `cutex_extra_fixture` | 5 |
-| `tests/cutex_fixture.cpp` | `cutex_fixture` | 4 |
-| `tests/dispatcher_fixture.cpp` | `dispatcher_fixture` | 15 |
+| `tests/cutex_fixture.cpp` | `cutex_fixture` | 5 |
+| `tests/dispatcher_fixture.cpp` | `dispatcher_fixture` | 17 |
 | `tests/fs_fixture.cpp` | `fs_fixture` | 4 |
 | `tests/future_traits_fixture.cpp` | `future_traits_fixture` | 8 |
 | `tests/get_runner_fixture.cpp` | `get_runner_fixture` | 1 |
 | `tests/id_alloc_fixture.cpp` | `id_alloc_fixture` | 3 |
 | `tests/io_any_fixture.cpp` | `io_any_fixture` | 6 |
 | `tests/io_buffer_fixture.cpp` | `io_buffer_fixture` | 25 |
-| `tests/io_entity_fixture.cpp` | `io_entity_fixture` | 28 |
+| `tests/io_entity_fixture.cpp` | `io_entity_fixture` | 32 |
 | `tests/io_hanged_fixture.cpp` | `io_hanged_fixture` | 5 |
 | `tests/omniptr_fixture.cpp` | `omniptr_fixture` | 12 |
 | `tests/promise_traits_fixture.cpp` | `promise_traits_fixture` | 12 |
-| `tests/queue_fixture.cpp` | `queue_fixture` | 11 |
+| `tests/queue_fixture.cpp` | `queue_fixture` | 13 |
 | `tests/router_slot_fixture.cpp` | `router_slot_fixture` | 9 |
-| `tests/runner_fixture.cpp` | `runner_fixture` | 8 |
+| `tests/runner_fixture.cpp` | `runner_fixture` | 10 |
 | `tests/service_fixture.cpp` | `service_fixture` | 3 |
 | `tests/signal_fixture.cpp` | `signal_fixture` | 4 |
 | `tests/socket_echo_fixture.cpp` | `socket_echo_fixture` | 2 |
 | `tests/spawn_extra_fixture.cpp` | `spawn_extra_fixture` | 9 |
 | `tests/spawn_fixture.cpp` | `spawn_fixture` | 10 |
-| `tests/timer_fixture.cpp` | `timer_fixture` | 13 |
+| `tests/timer_fixture.cpp` | `timer_fixture` | 16 |
 | `tests/yield_fixture.cpp` | `yield_fixture` | 8 |
 | `tests/nukes_alignment_fixture.cpp` | `nukes_alignment_fixture` | 5 |
-| `tests/nukes_concurrency_fixture.cpp` | `nukes_concurrency_fixture` | 7 |
-| **Итого: 35 файлов** | | **330** |
+| `tests/nukes_concurrency_fixture.cpp` | `nukes_concurrency_fixture` | 5 |
+| **Итого: 36 файлов** | | **344** |
 
-Default Meson configuration (`ace_entry=false`) регистрирует **334 ACE** tests:
-330 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
+Default Meson configuration (`ace_entry=false`) регистрирует **348 ACE** tests:
+344 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
 `ace_tests.discovery_consistency` и `ace_tests.lsan_capability`. Последний
 становится Meson SKIP при недоступном под ptrace LSan; остальные checks выполняются
-с `detect_leaks=0` только в auto mode. `ace_entry=true` добавляет fallback test.
+с `detect_leaks=0` только в auto mode. TSan profile не регистрирует LSan
+capability и содержит 347 tests. `ace_entry=true` добавляет fallback test.
+
+### Проверка исправлений ревью (2026-09-21)
+
+До последних двух clock-initialization regressions полный Clang 22
+ASan+UBSan host Meson suite прошёл **346/346**, включая I/O и LSan capability;
+GCC 16 TSan suite того же inventory прошёл **345/345**. Дополнительно
+33 scheduler/allocation/cutex tests прошли десять shuffled повторов, четыре I/O
+fault tests — пять host-повторов, десять standalone Nukes tests — пять
+ASan+UBSan повторов. Два новых clock-initialization tests прошли **40/40**
+executions в целевом прогоне. Итоговый inventory после их добавления — 344 GTests.
+
+Негативная проверка в отдельных копиях headers подтвердила, что регрессии
+ловят исходные дефекты: оба source-load tests получают 0 вместо 1, worker-start
+regression наблюдает преждевременно начатую задачу, timeout service-failure test
+аварийно завершается без exception routing, relative и отдельно absolute count
+rollback tests зависают без исправления. Все четыре I/O fault tests без catch в
+submit аварийно завершаются с `std::bad_alloc`. Expectations при этих проверках
+не изменялись.
+
+Первый полный GCC 16 ASan+UBSan прогон из чистого dependency checkout прошёл
+323/346: 23 failures обнаружили обращение к уничтоженному timeout router в
+`cancel()` после `detach()`. Исправление сохраняет и очищает node до detach;
+существующие cancellation/backup/compose tests покрывают этот lifecycle.
+После исправления cancel и lazy TLS clock construction итоговые host suites
+прошли полностью: **Clang 22 ASan+UBSan/LSan — 348/348**, **GCC 16 TSan —
+347/347**, без sanitizer diagnostics. Запущены команды:
+
+```bash
+meson test -C /tmp/ace-review-asan --suite ace --print-errorlogs --num-processes 4
+meson test -C /tmp/ace-review-tsan --suite ace --print-errorlogs --num-processes 4
+```
+
+Повторная полная GCC 16 ASan+UBSan/LSan проверка из изолированной копии
+текущих ACE sources с чистым checkout опубликованного Nukes
+`7fe452b2054f97c0ec3d707dfd934b5474fcc1fe` также прошла **348/348**:
+
+```bash
+meson test -C /tmp/ace-review-clean-build --suite ace --print-errorlogs --num-processes 4
+```
+
+Nukes checkout не имеет локальных изменений и не требует patch. Финальный
+focused набор из 39 tests прошёл 20 shuffled повторов (**780 executions**)
+на каждом из Clang ASan+UBSan и GCC TSan. Sanitizer diagnostics отсутствуют;
+ожидаемое сообщение `Unhandled exception.` относится к regression обычного
+uncaught coroutine failure lifecycle.
+
+### Исторические проверки
 
 Проверка B48-B52/B62/B74/N8 (2026-08-30): Clang 22 ASan Meson run завершил
 331/353 tests успешно, 21 I/O test ожидаемо упал из-за недоступного `io_uring`
@@ -1084,7 +1162,7 @@ Host ASan+LSan: `io_entity_fixture` проходит 28/28 одним проце
 `connection_link_read_preserves_runner_after_migration` проходит 20/20 повторов.
 Исторический single-process ASan+LSan прогон проходил 307/307 при исключении B34
 и не сообщал leaks. B34 закрыт direct-registration regressions и 10 shuffled повторами;
-новый полный ASan+LSan прогон в этой работе не выполнялся.
+на тот момент новый полный ASan+LSan прогон не выполнялся.
 Предшествующий host `meson test -C build --suite ace` проходил 312/312: Meson
 process isolation не воспроизводил B34, а LSan capability и discovery были green.
 GCC 16 ASan+UBSan и TSan clean configurations прошли по 6 targeted launcher,
@@ -1101,6 +1179,7 @@ successful-I/O failures с `-EPERM`; B38 crash не воспроизводитс
 |------|-----------|
 | `discover_tests.py` | Lexer-based `discover` и source/runtime `verify`; источник Meson registration names |
 | `tests/environment.h` | Общий `base_fixture` и shared test utilities; конкретные fixtures находятся рядом с тестами в split sources |
+| `tests/allocation_failure.h` | RAII current-thread slab allocation/registration и service-start failure injection |
 | `tests/main.cpp` | GTest entry point для `ace_tests` |
 | `tests/discover_tests_test.py` | Семь unit tests discovery lexer/parser/verification |
 | `tests/sanitized_test_runner.py` | Единая runtime sanitizer/LSan capability policy для executable и helper tests |
@@ -1110,14 +1189,14 @@ successful-I/O failures с `-EPERM`; B38 crash не воспроизводитс
 
 ### Индексация split tests
 
-Тесты и fixture-specific helpers расположены в 34 файлах
+Тесты и fixture-specific helpers расположены в 36 файлах
 `tests/*_fixture.cpp`; точные counts приведены в карте выше. Source discovery:
 
 ```bash
 python3 discover_tests.py discover tests/*_fixture.cpp
 ```
 
-Команда возвращает 322 уникальных active GTest name. Meson выполняет эту же
+Команда возвращает 344 уникальных active GTest name. Meson выполняет эту же
 команду при setup, регистрирует каждый name отдельным `--gtest_filter`, а
 `ace_tests.discovery_consistency` через `verify` подтверждает совпадение списка
 source declarations с `ace_tests --gtest_list_tests`.

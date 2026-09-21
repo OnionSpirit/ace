@@ -1,3 +1,5 @@
+#include "allocation_failure.h"
+
 #include <iostream>
 #include <stdexcept>
 #include <type_traits>
@@ -181,4 +183,28 @@ TEST_F(queue_fixture, throwing_payload_rolls_back_enqueue) {
     queue.enqueue(throwing_payload {9});
     EXPECT_EQ(9, queue.dequeue().value);
     EXPECT_TRUE(queue.empty());
+}
+
+
+// Verifies slab allocation failure leaves an empty pool reusable on the next enqueue.
+TEST_F(queue_fixture, slab_allocation_failure_preserves_queue) {
+    {
+        const slab_failure_scope failure {slab_failure_scope::allocation};
+        EXPECT_THROW(_queue.enqueue(test_payload {7}), std::bad_alloc);
+        EXPECT_TRUE(_queue.empty());
+    }
+    _queue.enqueue(test_payload {8});
+    EXPECT_EQ(8, _queue.dequeue().value);
+}
+
+// Verifies ownership registration failure releases the temporary slab and allows retry.
+TEST_F(queue_fixture, slab_registration_failure_preserves_queue) {
+    {
+        const slab_failure_scope failure {slab_failure_scope::registration};
+        EXPECT_THROW(_queue.enqueue(test_payload {7}), std::bad_alloc);
+        EXPECT_TRUE(_queue.empty());
+    }
+    // ASan/LSan also observes the unregistered slab's cleanup where supported.
+    _queue.enqueue(test_payload {8});
+    EXPECT_EQ(8, _queue.dequeue().value);
 }

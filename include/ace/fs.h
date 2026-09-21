@@ -47,9 +47,9 @@ namespace ace::fs {
      * @brief @c io_link for open files.
      *
      * @details Implements @c output_action() via async write through
-     * @c io::outcast::command, with a blocking @c ::write() fallback only
-     * when asynchronous dispatch is unavailable for reasons other than an
-     * @c io_uring initialization failure.
+     * @c io::outcast::command, with a blocking @c ::writev() fallback only
+     * when no runner context or command slot is available. Rejected submissions
+     * report the initialization error or @c -ENOMEM through the failure handler.
      * @c input_action() uses @c core::read_query for async reads.
      */
     struct ace::fs::file_link : io::link {
@@ -64,8 +64,8 @@ namespace ace::fs {
          * @details Tries to capture an @c io::outcast::command and submit a
          * @c writev operation through @c kernel_controller; falls back to a
          * blocking @c ::writev() when no runner context or command slot is
-         * available. An unavailable @c io_uring instead returns the command to
-         * its pool and reports the exact initialization error through
+         * available. A rejected submission returns the command to its pool and
+         * reports the initialization error or @c -ENOMEM through
          * @c io::outcast::fail_cb_handler.
          * @param buff Buffer to write.
          */
@@ -81,9 +81,9 @@ namespace ace::fs {
                 const auto* assembled = cmd->_buffer.assemble();
                 if (services::kernel_controller::writev(cmd, _fd, assembled->msg_iov, assembled->msg_iovlen, 0, 0))
                     return;
-                const int error = services::kernel_controller::initialization_error();
+                const int error = cmd->_submission_error;
                 if (error not_eq 0) {
-                    // No CQE will arrive after a failed init, so complete the
+                    // No CQE will arrive after a rejected submission, so complete the
                     // command locally through its normal result path.
                     cmd->on_result(error);
                     return;

@@ -1,5 +1,4 @@
 [wrap-git]
 directory = nukes
 url = https://github.com/OnionSpirit/nukes.git
-revision = 0b498630ac3c9dd801baf3f4df558916c3d7a557
-diff_files = nukes-b75.patch
+revision = 7fe452b2054f97c0ec3d707dfd934b5474fcc1fe

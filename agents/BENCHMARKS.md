@@ -1,6 +1,6 @@
 # ACE Framework - Benchmarking Guide
 
-Дата актуализации: 2026-08-30.
+Дата актуализации: 2026-09-21.
 
 ## Когда нужен бенчмарк
 
@@ -256,3 +256,54 @@ Clang 22 release-target успешно собрался, затем
 `--benchmark_min_time=0.01s`: 43.3 ms real, 40.9 ms CPU,
 4.88422M items/s при load average 2.73. Это только smoke result без baseline;
 вывод о регрессии или улучшении не делается.
+
+
+## Проверка исправлений B52/B77/B79 (2026-09-21)
+
+Использованы существующие BM9, BM11, BM16, BM24 и BM25; новые сценарии не
+понадобились. Baseline: ACE `39de353` и Nukes `04e7cf0` с недостающим
+`serialized_freelist.h` из прежнего dependency patch. Result: текущие
+исправления и чистый опубликованный Nukes
+`7fe452b2054f97c0ec3d707dfd934b5474fcc1fe`, без локального patch.
+Оба бинарника собраны GCC 16.2.1, Google Benchmark 1.8.4, `-O3`, `NDEBUG`,
+без sanitizers на одном host: 12 logical CPU, L3 32 MiB. Во время измерений
+сборки и test suites не выполнялись; частота CPU не фиксировалась.
+
+Выполнены четыре последовательные серии baseline/result/result/baseline,
+каждая с `--benchmark_min_time=0.05s --benchmark_repetitions=5`.
+Таблица показывает медиану десяти измерений каждой версии; для BM25 — wall
+clock, для остальных — CPU time Google Benchmark.
+
+| Сценарий | Baseline | Result | Разница времени |
+|----------|----------|--------|-----------------|
+| BM9, 20k таймеров по 1 ms | 3.251 ms | 3.248 ms | −0.1% |
+| BM11, 200k tasks, 1 runner | 12.50 ms | 12.61 ms | +0.9% |
+| BM11, 200k tasks, 4 runners | 21.80 ms | 20.35 ms | −6.7% |
+| BM11, 200k tasks, 16 runners | 23.76 ms | 23.92 ms | +0.6% |
+| BM24, 1 task, 1 runner | 0.06594 µs | 0.06564 µs | −0.5% |
+| BM24, 1 task, 4 runners | 0.6314 µs | 0.6250 µs | −1.0% |
+| BM25, MPSC 1P/1C | 0.4235 ms | 0.4304 ms | +1.6% |
+| BM25, MPSC 4P/1C | 3.428 ms | 3.418 ms | −0.3% |
+| BM25, MPMC 1P/1C | 0.4677 ms | 0.4657 ms | −0.4% |
+| BM25, MPMC 4P/4C | 5.651 ms | 5.672 ms | +0.4% |
+
+Заметного устойчивого замедления в этих нагрузках не обнаружено. Разница
+BM11/4 не доказывает ускорение: медианы двух baseline-серий менялись
+22.84 → 20.62 ms при result 20.38 → 20.33 ms. Для throughput concurrent
+scheduler CPU time не заменяет wall-clock latency. BM16 после исправления
+прошёл пять повторов без ошибки quiescence: медиана 9.61 ms wall / 9.24 ms CPU
+на 20k циклов миграции. Свежесобранный baseline BM16 дал ошибки корректности
+во всех пяти повторах (четыре `Dispatcher not empty after reattach test`, один
+`Could not gather two distinct runners`), поэтому сравнение скорости миграции
+с ним не приводится. Benchmark не заменяет correctness regressions B77.
+
+Команда сравнения (выполняется отдельно для каждого бинарника):
+
+```bash
+./ace_benchmarks \
+  '--benchmark_filter=^(bm_schedule_throughput/(1|4|16)|bm_repeated_short_run/(1|4)/1|bm_timeout_short|bm_dynamic_m(pmc|psc)_queue/.*)$' \
+  --benchmark_min_time=0.05s --benchmark_repetitions=5 \
+  --benchmark_out=results.json --benchmark_out_format=json
+./ace_benchmarks --benchmark_filter='^bm_reattach_migration$' \
+  --benchmark_min_time=0.05s --benchmark_repetitions=5
+```

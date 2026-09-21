@@ -310,8 +310,11 @@ namespace ace::futures {
         };
 
         /**
-         * @brief Destructor. Automatically calls @c release() if not already released.
-         * @warning Throws logical exception if @c cutex was captured by @c sync() and not released manually
+         * @brief Releases cutex ownership if still held; does not migrate the task.
+         * @throws std::logic_error after unlocking if @c sync() was used without
+         * an awaited manual @c release().
+         * @warning A missing manual release during stack unwinding terminates
+         * the process because the diagnostic would be a second exception.
          */
         ~proxy() noexcept(false) {
             if (not _is_released) {

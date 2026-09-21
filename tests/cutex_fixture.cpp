@@ -213,3 +213,28 @@ TEST_F(cutex_fixture, check_cutex_cancel_before_capture) {
 }
 
 } // namespace
+
+namespace {
+ace::task observe_missing_sync_release(ace::cutex& mutex, bool& caught, bool& reusable) {
+    try {
+        ace::guard guard(mutex);
+        co_await guard.sync();
+    } catch (const std::logic_error&) {
+        caught = true;
+    }
+    // The misuse diagnostic must still release ownership before throwing.
+    ace::guard next(mutex);
+    co_await next.capture();
+    reusable = true;
+}
+} // namespace
+
+// Verifies missing manual sync release raises a catchable diagnostic and unlocks the cutex.
+TEST_F(cutex_fixture, missing_sync_release_is_catchable_and_unlocks) {
+    bool caught = false;
+    bool reusable = false;
+    ace::schedule(observe_missing_sync_release(_cutex, caught, reusable));
+    ace::run();
+    EXPECT_TRUE(caught);
+    EXPECT_TRUE(reusable);
+}

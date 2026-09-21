@@ -65,6 +65,7 @@ namespace ace::services {
         virtual void on_result(int res) = 0;
 
         runner_pool_t* _runner_identity = nullptr;
+        int _submission_error = 0; ///< Last submit failure, negative errno; no CQE follows rejection.
         bool _on_cancel = false; ///< Next response will indicate count of canceled operations
         bool _multishot = false; ///< Mark if multishot is enabled
 
@@ -188,7 +189,11 @@ namespace ace::services {
          * @param [in] observer pointer to an external object that waits
          * for the operation result of the requested operation.
          * @param [in, out] params IO function params (without sqe).
-         * @warning IO function params shall be passed without SQE ptr.
+         * @return true if accepted; false on rejection. Allocation failure sets
+         * observer->_submission_error to -ENOMEM; initialization failure preserves
+         * the exact negative errno. Rejection publishes no request or callback.
+         * @warning IO function params shall be passed without SQE ptr and preparation
+         * functions must not throw. The observer remains caller-owned on rejection.
          *
          * Same order but observer ptr required instead of the SQE ptr:
          *
@@ -598,29 +603,34 @@ template <typename foo_t, typename ... Params> bool
 ACE_SERVICES_KERNEL_CONTROLLER_SPACE
 submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept {
     if (not observer) return false;
-    if (initialization_error() not_eq 0) return false;
-    if (not observer->_runner_identity)
-        observer->_runner_identity = core::runner::get().as<runner_pool_t>();
-    touch(observer->_runner_identity);
-    if (_queries < static_cast<int>(max_entries)) [[likely]] {
-        io_uring_sqe* const sqe = io_uring_get_sqe(&_ring);
-        if (sqe) [[likely]] {
-            ++_queries;
-            io_uring_foo(sqe, params...);
-            io_uring_sqe_set_data(sqe, observer);
-            _need_submission = true;
-            return true;
+    observer->_submission_error = initialization_error();
+    if (observer->_submission_error not_eq 0) return false;
+    try {
+        if (not observer->_runner_identity)
+            observer->_runner_identity = core::runner::get().as<runner_pool_t>();
+        touch(observer->_runner_identity);
+        if (_queries < static_cast<int>(max_entries)) [[likely]] {
+            io_uring_sqe* const sqe = io_uring_get_sqe(&_ring);
+            if (sqe) [[likely]] {
+                ++_queries;
+                io_uring_foo(sqe, params...);
+                io_uring_sqe_set_data(sqe, observer);
+                _need_submission = true;
+                return true;
+            }
         }
-    }
-    // NOTE: The ring has no free SQE slots (more than 4096 pending
-    // requests). Defer the request WITHOUT fetching or holding an SQE —
-    // apply() will fetch a fresh slot after the CQ drains. Even calling
-    // io_uring_get_sqe() here would reserve a slot; a later submit would then
-    // emit that unprepared SQE with stale user_data.
-    if (not _submission_buffer.enqueue(kernel_entity{io_uring_foo, observer, params...}))
+        // NOTE: The ring has no free SQE slots (more than 4096 pending
+        // requests). Defer the request WITHOUT fetching or holding an SQE —
+        // apply() will fetch a fresh slot after the CQ drains. Even calling
+        // io_uring_get_sqe() here would reserve a slot; a later submit would then
+        // emit that unprepared SQE with stale user_data.
+        _submission_buffer.enqueue(kernel_entity{io_uring_foo, observer, params...});
+        ++_queries;
+        return true;
+    } catch (const std::bad_alloc&) {
+        observer->_submission_error = -ENOMEM;
         return false;
-    ++_queries;
-    return true;
+    }
 }
 
 

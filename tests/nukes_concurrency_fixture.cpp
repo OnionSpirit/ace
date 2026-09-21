@@ -159,52 +159,6 @@ TEST_F(nukes_concurrency_fixture, mpmc_prefilled_fifo) {
     EXPECT_TRUE(queue.empty());
 }
 
-// Verifies MPSC batch extraction returns every payload in FIFO order and never exposes the dummy.
-TEST_F(nukes_concurrency_fixture, mpsc_batch_excludes_dummy_and_drains_snapshot) {
-    nukes::dynamic::mpsc_queue<std::uint64_t> queue;
-    constexpr std::uint64_t value_count = 10000;
-    for (std::uint64_t value = 0; value < value_count; ++value) {
-        auto pushed = value;
-        ASSERT_TRUE(queue.push(std::move(pushed)));
-    }
-
-    std::vector<std::uint64_t> values;
-    values.reserve(value_count);
-    for (const auto value : queue.pop_batch())
-        values.emplace_back(value);
-
-    ASSERT_EQ(value_count, values.size());
-    for (std::uint64_t expected = 0; expected < value_count; ++expected)
-        EXPECT_EQ(expected, values[expected]);
-    EXPECT_TRUE(queue.empty());
-}
-
-// Verifies MPMC batch extraction owns an exact FIFO snapshot and leaves the queue reusable.
-TEST_F(nukes_concurrency_fixture, mpmc_batch_excludes_dummy_and_reuses_nodes) {
-    nukes::dynamic::mpmc_queue<std::uint64_t> queue;
-    constexpr std::uint64_t value_count = 10000;
-    for (std::uint64_t value = 0; value < value_count; ++value) {
-        auto pushed = value;
-        ASSERT_TRUE(queue.push(std::move(pushed)));
-    }
-
-    std::vector<std::uint64_t> values;
-    values.reserve(value_count);
-    for (const auto value : queue.pop_batch())
-        values.emplace_back(value);
-
-    ASSERT_EQ(value_count, values.size());
-    for (std::uint64_t expected = 0; expected < value_count; ++expected)
-        EXPECT_EQ(expected, values[expected]);
-    EXPECT_TRUE(queue.empty());
-
-    std::uint64_t pushed = value_count;
-    ASSERT_TRUE(queue.push(std::move(pushed)));
-    std::uint64_t popped {};
-    ASSERT_TRUE(queue.pop(popped));
-    EXPECT_EQ(value_count, popped);
-}
-
 // Verifies external node ownership survives push/pop/release reuse in an MPSC queue.
 TEST_F(nukes_concurrency_fixture, mpsc_node_api_reuses_live_storage) {
     nukes::dynamic::mpsc_queue<std::uint64_t> queue;

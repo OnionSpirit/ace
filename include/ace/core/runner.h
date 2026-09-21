@@ -634,11 +634,12 @@ namespace ace::core {
         if (task_unit->_data._coroutine.promise()._runner_router) [[likely]] {
             const bool ownership_transferred =
                 task_unit->_data._coroutine.promise()._runner_router->redirect(task_unit);
-            release_runnable();
             if (not ownership_transferred) {
                 task_unit->_data.release_router();
                 reattach(task_unit, current_runner_ptr);
             }
+            // Keep the source counted until the destination owns the task.
+            release_runnable();
             return true;
         }
 
@@ -684,11 +685,12 @@ namespace ace::core {
         if (service_unit->_data._coroutine.promise()._runner_router) [[likely]] {
             const bool ownership_transferred =
                 service_unit->_data._coroutine.promise()._runner_router->redirect(service_unit);
-            release_runnable();
             if (not ownership_transferred) {
                 service_unit->_data.release_router();
                 reattach(service_unit, current_runner_ptr);
             }
+            // Polling tasks follow the same publication protocol as regular tasks.
+            release_runnable();
             return true;
         }
 
@@ -705,7 +707,7 @@ namespace ace::core {
             if (i % 16 == 15) {
                 yank_service();
                 // Bound starvation without abandoning the source after its
-                // first item. This lets an externally published FIFO batch
+                // first item. This lets an externally published FIFO group
                 // reach the local queue before a just-suspended task reruns.
                 if (_pull_source == pull_source::e_local_pool and not _insert_pool.empty())
                     _pull_source = pull_source::e_interthread_pool;

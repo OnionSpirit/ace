@@ -9,6 +9,8 @@
 #include <ace/ace.h>
 #include <ace/futures/channel.h>
 #include <ace/futures/get_runner.h>
+#include <ace/futures/timeout.h>
+#include <ace/futures/reattach.h>
 
 struct dispatcher_fixture : ::testing::Test {
     void TearDown() override {
@@ -118,7 +120,7 @@ TEST_F(dispatcher_fixture, terminate_signal) {
     EXPECT_TRUE(ace::core::dispatcher::get_sig_pipe().empty());
 }
 
-// Verifies that reset_signal() drains a mixed batch and is idempotent on an empty pipe.
+// Verifies that reset_signal() drains a mixed signal set and is idempotent on an empty pipe.
 TEST_F(dispatcher_fixture, reset_signal_drains_all_pending_signals) {
     ace::interrupt();
     ace::terminate();
@@ -275,4 +277,84 @@ TEST_F(dispatcher_fixture, reload_busy_is_transactional) {
     const auto values = fetch(completed);
     ASSERT_EQ(1u, values.size());
     EXPECT_EQ(7, values[0]);
+}
+
+namespace {
+
+void fail_second_worker(const std::size_t index) {
+    if (index == 2) {
+        // An incorrectly enabled first worker has time to execute queued tasks.
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));
+    }
+}
+
+struct worker_start_override {
+    worker_start_override() { ace::core::dispatcher::set_worker_start_for_testing(fail_second_worker); }
+    ~worker_start_override() { ace::core::dispatcher::set_worker_start_for_testing(nullptr); }
+};
+
+ace::task worker_start_task(std::atomic_size_t& started, std::atomic_size_t& finished) {
+    ++started;
+    // A task must not create a TLS clock on a worker that startup will destroy.
+    co_await ace::futures::timeout(std::chrono::milliseconds(1));
+    ++finished;
+}
+
+} // namespace
+
+// Verifies failed worker startup executes no tasks and a retry completes each once.
+TEST_F(dispatcher_fixture, partial_worker_start_failure_preserves_tasks_for_retry) {
+    ace::cfg::g_config._runners_amount = 1;
+    ASSERT_TRUE(ace::reload());
+    ace::cfg::g_config._runners_amount = 4;
+    ASSERT_TRUE(ace::reload());
+    std::atomic_size_t started = 0;
+    std::atomic_size_t finished = 0;
+    for (int i = 0; i < 4; ++i)
+        ace::schedule(worker_start_task(started, finished));
+    {
+        const worker_start_override injected_failure;
+        EXPECT_THROW(ace::run(), std::system_error);
+    }
+    EXPECT_EQ(0u, started.load());
+    EXPECT_EQ(0u, finished.load());
+    EXPECT_FALSE(ace::empty());
+    ace::run();
+    EXPECT_EQ(4u, started.load());
+    EXPECT_EQ(4u, finished.load());
+    EXPECT_TRUE(ace::empty());
+}
+
+namespace {
+ace::task migrate_last_task(
+    ace::core::runner* first, ace::core::runner* second, bool polling,
+    std::atomic_size_t& completed)
+{
+    co_await ace::futures::polling(polling);
+    for (int i = 0; i < 200; ++i) {
+        co_await ace::reattach(second);
+        co_await ace::reattach(first);
+    }
+    ++completed;
+}
+} // namespace
+
+// Verifies one run waits for the last migrating regular or polling task to finish.
+TEST_F(dispatcher_fixture, last_task_migration_completes_in_one_run) {
+    ace::cfg::g_config._runners_amount = 2;
+    ASSERT_TRUE(ace::reload());
+    std::vector<ace::core::runner*> discovered(2);
+    for (std::size_t i = 0; i < discovered.size(); ++i)
+        ace::schedule(report_runner(discovered, i));
+    ace::run();
+    ASSERT_NE(discovered[0], discovered[1]);
+    for (const bool polling : {false, true}) {
+        std::atomic_size_t completed = 0;
+        ace::schedule(migrate_last_task(discovered[0], discovered[1], polling, completed), discovered[0]);
+        ace::run();
+        // No second run or channel drain may conceal an early quiescence return.
+        EXPECT_EQ(1u, completed.load());
+        EXPECT_TRUE(ace::empty());
+    }
 }

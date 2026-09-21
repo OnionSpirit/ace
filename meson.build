@@ -85,6 +85,7 @@ if tests_enabled
         'tests/base_fixture.cpp',
         'tests/channel_extra_fixture.cpp',
         'tests/channel_fixture.cpp',
+        'tests/clock_initialization_fixture.cpp',
         'tests/compose_extra_fixture.cpp',
         'tests/console_fixture.cpp',
         'tests/context_fixture.cpp',
@@ -117,6 +118,7 @@ if tests_enabled
         'tests/yield_fixture.cpp',
     )
     test_sources = test_fixture_sources + files(
+        'tests/allocation_failure.h',
         'tests/environment.h',
         'tests/main.cpp',
     )

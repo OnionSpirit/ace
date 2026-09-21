@@ -412,9 +412,11 @@ namespace ace::net {
     protected:
 
         /**
-         * @brief Asynchronously writes a buffer to the socket via @c sendmsg,
-         *        with a blocking @c ::sendmsg fallback only when @c io_uring
-         *        initialized successfully.
+         * @brief Asynchronously writes a buffer to the socket via @c sendmsg.
+         * @details Uses blocking @c ::sendmsg only when no runner context or
+         * command slot is available. A rejected submission releases the command
+         * and reports the initialization error or @c -ENOMEM through
+         * @c io::outcast::fail_cb_handler.
          * @param buff  Scatter-gather buffer to send.
          */
         void output_action(io::buffer&& buff) override {
@@ -430,9 +432,9 @@ namespace ace::net {
                 const auto* assembled = cmd->_buffer.assemble();
                 if (services::kernel_controller::sendmsg(cmd, _fd, assembled, 0))
                     return;
-                const int error = services::kernel_controller::initialization_error();
+                const int error = cmd->_submission_error;
                 if (error not_eq 0) {
-                    // A failed init has no CQE, so complete the command locally
+                    // A rejected submission has no CQE, so complete the command locally
                     // through the same cleanup and error-reporting path.
                     cmd->on_result(error);
                     return;

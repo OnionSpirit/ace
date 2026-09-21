@@ -1,0 +1,104 @@
+#include <atomic>
+#include <chrono>
+#include <type_traits>
+#include <vector>
+
+#include <ace/ace.h>
+#include <ace/core/tools/queue.h>
+#include <ace/futures/timeout.h>
+#include <ace/services/kernelic.h>
+
+namespace core = ace::core;
+namespace services = ace::services;
+namespace tools = ace::core::tools;
+
+// A separate target compiles this contract with and without NDEBUG, including at O0.
+template <typename T> concept worker_hook = requires { T::set_worker_start_for_testing(nullptr); };
+template <typename T> concept service_hook = requires { T::set_respawn_for_testing(nullptr); };
+template <typename T> concept slab_hook = requires { T::set_growth_for_testing(nullptr); };
+template <typename T> concept wheel_hook = requires { T::set_initialization_for_testing(nullptr); };
+template <typename T> concept ring_hook = requires { T::set_queue_init_for_testing(nullptr); };
+template <typename T> concept arena_snapshot = requires(const T& arena) { arena.stats(); };
+template <typename T> concept arena_counter = requires { T::live_system_chunks; };
+template <typename T> concept node_counter = requires { T::outstanding_bytes(); };
+template <typename T> concept transient_counter = requires(T& release) { release._malloc_count; };
+
+template <typename Selected, typename Toolkit, typename Owner>
+consteval bool toolkit_contract() {
+    static_assert(std::is_base_of_v<Selected, Owner>);
+    static_assert(std::is_same_v<Selected, Toolkit> == is_debug);
+    if constexpr (not is_debug)
+        static_assert(std::is_empty_v<Selected>);
+    return true;
+}
+
+static_assert(worker_hook<core::dispatcher> == is_debug);
+static_assert(service_hook<services::clock> == is_debug);
+static_assert(service_hook<services::kernel_controller> == is_debug);
+static_assert(slab_hook<tools::slab_mempool<int>> == is_debug);
+static_assert(wheel_hook<services::hierarchical_time_wheel> == is_debug);
+static_assert(ring_hook<services::kernel_controller> == is_debug);
+static_assert(arena_snapshot<core::arena> == is_debug);
+static_assert(arena_counter<core::arena> == is_debug);
+static_assert(node_counter<core::nukes_node_arena> == is_debug);
+static_assert(transient_counter<core::extern_release> == is_debug);
+
+static_assert(toolkit_contract<core::dispatcher_testing_toolkit_t,
+    core::dispatcher_testing_toolkit, core::dispatcher>());
+static_assert(toolkit_contract<tools::slab_mempool_testing_toolkit_t,
+    tools::slab_mempool_testing_toolkit, tools::slab_mempool<int>>());
+static_assert(toolkit_contract<services::hierarchical_time_wheel_testing_toolkit_t,
+    services::hierarchical_time_wheel_testing_toolkit, services::hierarchical_time_wheel>());
+static_assert(toolkit_contract<services::kernel_controller_testing_toolkit_t,
+    services::kernel_controller_testing_toolkit, services::kernel_controller>());
+static_assert(toolkit_contract<core::arena_testing_toolkit_t,
+    core::arena_testing_toolkit, core::arena>());
+static_assert(toolkit_contract<core::extern_release_testing_toolkit_t,
+    core::extern_release_testing_toolkit, core::extern_release>());
+static_assert(toolkit_contract<core::nukes_node_arena_testing_toolkit_t,
+    core::nukes_node_arena_testing_toolkit, core::nukes_node_arena>());
+using clock_base = core::traits::service_traits_testing_toolkit_t<services::clock, core::service_spawn_mode::e_thread_local>;
+using clock_tools = core::traits::service_traits_testing_toolkit<services::clock, core::service_spawn_mode::e_thread_local>;
+static_assert(toolkit_contract<clock_base, clock_tools, services::clock>());
+
+struct completion : services::kernel_observer {
+    int result = -1;
+    void on_result(int value) override { result = value; }
+};
+
+ace::task smoke_task(std::atomic_size_t& completed) {
+    co_await ace::futures::timeout(std::chrono::milliseconds(1));
+    ++completed;
+}
+
+int main() {
+    // Exercise normal allocation, scheduler and timer paths in both modes.
+    tools::slab_mempool<int> pool;
+    tools::queue<int> queue(pool);
+    for (int i = 0; i < 1025; ++i) queue.enqueue(int {i});
+    for (int i = 0; i < 1025; ++i)
+        if (queue.dequeue() != i) return 1;
+    auto& arena = core::arena::get_instance();
+    auto* small = arena.allocate(64);
+    auto* large = arena.allocate(8192);
+    arena.deallocate(small, 64);
+    arena.deallocate(large, 8192);
+    auto* node = core::nukes_node_arena::allocate(256, 128);
+    core::nukes_node_arena::deallocate(node, 256, 128);
+
+    ace::cfg::g_config._runners_amount = 2;
+    if (not ace::reload()) return 2;
+    std::atomic_size_t completed = 0;
+    for (int i = 0; i < 64; ++i) ace::schedule(smoke_task(completed));
+    ace::run();
+    if (completed != 64 or not ace::empty()) return 3;
+    ace::cfg::g_config._runners_amount = 1;
+    if (not ace::reload()) return 4;
+
+    // A real ring verifies release calls liburing directly; failure remains an error.
+    if (not services::kernel_controller::available()) return 5;
+    completion observer;
+    if (not services::kernel_controller::nop(&observer)) return 6;
+    ace::run();
+    return observer.result == 0 ? 0 : 7;
+}

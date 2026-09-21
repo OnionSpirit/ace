@@ -4,8 +4,8 @@
 
 > **Статус:** GCC 16 coverage union от 2026-08-23 покрывает **2262/2398 =
 > 94.33%** уникальных исполняемых строк `include/ace/**`. Текущая
-> default-конфигурация регистрирует 348 ACE Meson-тестов: 344 GTests, две
-> Python unit checks, discovery consistency и LSan capability. B29/B38/B66/B68
+> default-конфигурация регистрирует 352 ACE Meson-теста: 346 GTests, две
+> Python unit checks, discovery consistency, LSan capability и два toolkit contracts. B29/B38/B66/B68
 > regressions проходят; successful-I/O tests всё ещё требуют доступного
 > `io_uring` и не становятся fallback tests.
 
@@ -1072,14 +1072,16 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/yield_fixture.cpp` | `yield_fixture` | 8 |
 | `tests/nukes_alignment_fixture.cpp` | `nukes_alignment_fixture` | 5 |
 | `tests/nukes_concurrency_fixture.cpp` | `nukes_concurrency_fixture` | 5 |
-| **Итого: 36 файлов** | | **344** |
+| `tests/testing_toolkit_fixture.cpp` | `testing_toolkit_fixture` | 2 |
+| **Итого: 37 файлов** | | **346** |
 
-Default Meson configuration (`ace_entry=false`) регистрирует **348 ACE** tests:
-344 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
-`ace_tests.discovery_consistency` и `ace_tests.lsan_capability`. Последний
+Default Meson configuration (`ace_entry=false`) регистрирует **352 ACE** tests:
+346 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
+`ace_tests.discovery_consistency`, `testing_toolkit.debug`, `testing_toolkit.release`
+и `ace_tests.lsan_capability`. Последний
 становится Meson SKIP при недоступном под ptrace LSan; остальные checks выполняются
 с `detect_leaks=0` только в auto mode. TSan profile не регистрирует LSan
-capability и содержит 347 tests. `ace_entry=true` добавляет fallback test.
+capability и содержит 351 tests. `ace_entry=true` добавляет fallback test.
 
 ### Проверка исправлений ревью (2026-09-21)
 
@@ -1178,6 +1180,7 @@ successful-I/O failures с `-EPERM`; B38 crash не воспроизводитс
 | Файл | Назначение |
 |------|-----------|
 | `discover_tests.py` | Lexer-based `discover` и source/runtime `verify`; источник Meson registration names |
+| `tests/testing_toolkit_contract.cpp` | Отдельные debug/release executable contracts: API absence, selected bases, runtime smoke |
 | `tests/environment.h` | Общий `base_fixture` и shared test utilities; конкретные fixtures находятся рядом с тестами в split sources |
 | `tests/allocation_failure.h` | RAII current-thread slab allocation/registration и service-start failure injection |
 | `tests/main.cpp` | GTest entry point для `ace_tests` |
@@ -1189,14 +1192,14 @@ successful-I/O failures с `-EPERM`; B38 crash не воспроизводитс
 
 ### Индексация split tests
 
-Тесты и fixture-specific helpers расположены в 36 файлах
+Тесты и fixture-specific helpers расположены в 37 файлах
 `tests/*_fixture.cpp`; точные counts приведены в карте выше. Source discovery:
 
 ```bash
 python3 discover_tests.py discover tests/*_fixture.cpp
 ```
 
-Команда возвращает 344 уникальных active GTest name. Meson выполняет эту же
+Команда возвращает 346 уникальных active GTest name. Meson выполняет эту же
 команду при setup, регистрирует каждый name отдельным `--gtest_filter`, а
 `ace_tests.discovery_consistency` через `verify` подтверждает совпадение списка
 source declarations с `ace_tests --gtest_list_tests`.
@@ -1219,3 +1222,55 @@ source declarations с `ace_tests --gtest_list_tests`.
   null-ring stack, один — B29; новых B13 failures нет.
 
 ---
+
+
+### Debug-only instrumentation (B80, 2026-09-22)
+
+| Check | Контракт |
+|-------|----------|
+| `testing_toolkit_fixture.slab_hook_is_shared_across_types_and_thread_local` | Hook общий для разных slab payloads текущего потока, не действует в другом потоке; RAII restoration |
+| `testing_toolkit_fixture.service_hook_is_isolated_per_specialization` | Hook одной CRTP specialization не затрагивает другую; после restoration успешен retry |
+| `testing_toolkit.debug` | Все восемь selected bases являются toolkit types; тестовые setters/statistics доступны; штатные allocation/dispatch/timer/NOP работают |
+| `testing_toolkit.release` | Все восемь selected bases пустые; test-only API отсутствует; те же штатные paths работают с `NDEBUG` и `-O0` |
+
+GTest target явно задаёт `b_ndebug=false`, независимо от project-level option.
+Два standalone contracts имеют противоположные `b_ndebug` и не входят в GTest
+source discovery. `nm -C` release binary дополнительно проверяется на отсутствие
+storage символов hooks/counters. Внешние translation units и ACE entry library
+должны согласовывать NDEBUG; смешивать ABI разных режимов нельзя.
+
+
+Результаты на host с доступным io_uring (GCC 16.2.1, Clang 22.1.8):
+
+- Clang ASan+UBSan+LSan: **352/352**, project-level `b_ndebug=true`.
+- GCC ASan+UBSan+LSan: **352/352**.
+- GCC TSan: первый запуск **350/351**, B82 (automaton membership assertion,
+  без sanitizer report); повторный полный запуск без параллельных сборок —
+  **351/351**. Первый сбой сохранён в ISSUES, не объявлен исправленным.
+- 43 теста hooks/queue/clock/dispatcher/I/O прошли 20 shuffled повторов
+  под GCC ASan+UBSan+LSan и GCC TSan: **860/860** в каждом режиме,
+  `--gtest_random_seed=527` (далее GTest увеличивает seed).
+- Расширенный shuffled набор с arena остановился на B81 в обоих режимах:
+  `promise_traits_uses_arena` зависит от ранее накопленных foreign releases.
+  Та же проверка падает на неизменённом `e09db55` под TSan. B81/B82 оставлены
+  отдельными задачами по решению пользователя; тесты не ослаблялись.
+- `nm -C` standalone contracts GCC/Clang: восемь hook/counter symbols в debug,
+  ни одного из проверяемых symbols в release при `-O0`.
+- Coverage повторно не измерялось; процент в начале документа исторический.
+
+Команды полных suites (после setup с соответствующим compiler/profile):
+
+```bash
+meson test -C /tmp/ace-toolkit-clang --suite ace --print-errorlogs --num-processes 4
+meson test -C /tmp/ace-toolkit-gcc --suite ace --print-errorlogs --num-processes 4
+meson test -C /tmp/ace-toolkit-tsan --suite ace --print-errorlogs --num-processes 4
+python3 tests/sanitized_test_runner.py --sanitizers address,undefined \
+  --leak-mode enabled --probe-executable /tmp/ace-toolkit-gcc/ace_tests -- \
+  /tmp/ace-toolkit-gcc/ace_tests \
+  '--gtest_filter=testing_toolkit_fixture.*:clock_initialization_fixture.*:queue_fixture.*:dispatcher_fixture.*:timer_fixture.*failure*:io_any_fixture.*' \
+  --gtest_repeat=20 --gtest_shuffle --gtest_random_seed=527 --gtest_break_on_failure
+```
+
+TSan shuffle использовал ту же команду с `--sanitizers thread` и binary из
+`/tmp/ace-toolkit-tsan`. Логи: `/tmp/ace-toolkit-{clang,gcc,tsan}-tests.log`,
+`/tmp/ace-toolkit-tsan-tests-rerun.log`, `/tmp/ace-toolkit-{gcc,tsan}-hooks-shuffle.log`.

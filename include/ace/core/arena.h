@@ -49,11 +49,7 @@ namespace ace::core {
 
     struct arena;
 
-    struct extern_release_debug;
-    struct extern_release_release;
-
-    /// @brief Build-specific external release state used by chunk headers.
-    using extern_release = std::conditional_t<is_debug, extern_release_debug, extern_release_release>;
+    struct extern_release;
 
     /// @brief Per-chunk header: owner release context + size/flags.
     struct chunk_header {
@@ -71,41 +67,86 @@ namespace ace::core {
         arena* _owner { nullptr };
     };
 
-    /// @brief Debug build release state with exact transient allocation accounting.
-    struct extern_release_debug : extern_release_base {
-        std::atomic<std::size_t> _malloc_count { 0 };
+    /** @brief Debug-only transient-allocation accounting shared with foreign releasers. */
+    struct extern_release_testing_toolkit {
+        std::atomic<std::size_t> _malloc_count { 0 }; ///< Outstanding transient chunks.
+        /// @brief Records one transient chunk allocated by the owner.
+        void note_malloc_allocate() noexcept { _malloc_count.fetch_add(1, std::memory_order_relaxed); }
+        /// @brief Records one transient chunk released by any thread.
+        void note_malloc_deallocate() noexcept { _malloc_count.fetch_sub(1, std::memory_order_relaxed); }
+        /// @brief Returns an atomic snapshot of outstanding transient chunks.
+        [[nodiscard]] std::size_t malloc_count() const noexcept { return _malloc_count.load(std::memory_order_relaxed); }
     };
 
-    /// @brief Release build state without debug-only transient allocation accounting.
-    struct extern_release_release : extern_release_base {};
+    /** @brief Selects debug instrumentation or a distinct empty release base. */
+    consteval auto select_extern_release_testing_toolkit() {
+        if constexpr (is_debug) {
+            return extern_release_testing_toolkit {};
+        } else {
+            struct empty {};
+            return empty {};
+        }
+    }
 
-    /**
-     * @brief Debug-only observability counters (empty in release builds).
-     *
-     * @details Enabled in debug builds only.  Tests are built with
-     * @c debug=true (no NDEBUG), which maps to @c is_debug == true.
-     */
-    template <bool Enabled>
-    struct arena_stats {
-        void note_pool_allocate(std::size_t) noexcept {}
-        void note_pool_deallocate(std::size_t) noexcept {}
-        void note_drain() noexcept {}
-        [[nodiscard]] std::size_t pool_held() const noexcept { return 0; }
-        [[nodiscard]] std::size_t drains() const noexcept { return 0; }
-    };
+    /// @brief Build-selected instrumentation base; all translation units must agree on NDEBUG.
+    using extern_release_testing_toolkit_t = decltype(select_extern_release_testing_toolkit());
 
-    /// @brief Stats specialization: real counters in debug builds.
-    template <>
-    struct arena_stats<true> {
-        std::size_t pool_held_bytes = 0;  ///< System bytes currently retained by the pmr pool.
-        std::size_t drain_count     = 0;  ///< Channel drains performed.
+    /// @brief Runtime release protocol plus the selected diagnostic base.
+    struct extern_release : extern_release_base, extern_release_testing_toolkit_t {};
 
+    /** @brief Debug-only arena observability; owner-local counters and a process-wide total. */
+    struct arena_testing_toolkit {
+        std::size_t pool_held_bytes = 0; ///< System bytes retained by the PMR pool.
+        std::size_t drain_count = 0; ///< Completed incoming release drains.
+        static inline std::atomic<std::size_t> live_system_chunks { 0 }; ///< Process-wide retained system chunks.
+
+        /// @brief Adds system bytes acquired by the owner-thread PMR resource.
         void note_pool_allocate(std::size_t bytes) noexcept { pool_held_bytes += bytes; }
+        /// @brief Subtracts system bytes returned by the owner-thread PMR resource.
         void note_pool_deallocate(std::size_t bytes) noexcept { pool_held_bytes -= bytes; }
+        /// @brief Records an owner-thread release-channel drain.
         void note_drain() noexcept { ++drain_count; }
+        /// @brief Returns system bytes retained by the owner-thread pool.
         [[nodiscard]] std::size_t pool_held() const noexcept { return pool_held_bytes; }
+        /// @brief Returns the number of owner-thread release-channel drains.
         [[nodiscard]] std::size_t drains() const noexcept { return drain_count; }
+
+        /** @brief Owner-thread snapshot; foreign-release counters are atomic. */
+        struct stats_view {
+            std::size_t in_use_bytes; ///< Bytes lent to users.
+            std::size_t pool_held_bytes; ///< System bytes retained by the pool.
+            std::size_t malloc_count; ///< Outstanding transient chunks.
+            std::size_t op_counter; ///< Production drain-cadence counter snapshot.
+            std::size_t drain_count; ///< Completed release-channel drains.
+            std::size_t live_system_chunks; ///< Process-wide retained system chunks.
+        };
+
+        /**
+         * @brief Returns diagnostics for the owning arena; debug builds only.
+         * @tparam arena_t Owning arena type, deferred until its definition is complete.
+         * @return Snapshot of allocation and release accounting.
+         * @warning Call on the owner thread, while the arena is alive.
+         */
+        template <typename arena_t = arena>
+        [[nodiscard]] stats_view stats() const noexcept {
+            const auto& owner = static_cast<const arena_t&>(*this);
+            return {owner._occupied, pool_held(), owner._extern_release.malloc_count(),
+                    owner._op_counter, drains(), live_system_chunks.load(std::memory_order_relaxed)};
+        }
     };
+
+    /** @brief Selects debug instrumentation or a distinct empty release base. */
+    consteval auto select_arena_testing_toolkit() {
+        if constexpr (is_debug) {
+            return arena_testing_toolkit {};
+        } else {
+            struct empty {};
+            return empty {};
+        }
+    }
+
+    /// @brief Build-selected instrumentation base; all translation units must agree on NDEBUG.
+    using arena_testing_toolkit_t = decltype(select_arena_testing_toolkit());
 
     /**
      * @brief Thread-local arena shared by framework allocations.
@@ -115,7 +156,8 @@ namespace ace::core {
      * retirement, the last foreign releaser exclusively drains and destroys
      * the storage.
      */
-    struct arena : arena_stats<is_debug> {
+    struct arena : arena_testing_toolkit_t {
+        friend arena_testing_toolkit;
 
         /// @brief Largest total chunk size served from the pmr pool.
         static constexpr std::size_t kMaxSize = 4096;
@@ -194,11 +236,15 @@ namespace ace::core {
                     _occupied -= size;
                 else
                     release->_released_bytes.fetch_add(size, std::memory_order_relaxed);
-                note_malloc_deallocate(*release);
+                [](auto& context) {
+                    if constexpr (is_debug)
+                        context.note_malloc_deallocate();
+                }(*release);
                 std::free(chunk);
-                if constexpr (is_debug) {
-                    live_system_chunks.fetch_sub(1, std::memory_order_relaxed);
-                }
+                []<typename toolkit_t = arena_testing_toolkit_t> {
+                    if constexpr (is_debug)
+                        toolkit_t::live_system_chunks.fetch_sub(1, std::memory_order_relaxed);
+                }();
                 release_reference(*release, release == &_extern_release);
             } else if (release != &_extern_release) {
                 // NOTE: The freed header becomes an intrusive stack node. Its
@@ -225,35 +271,6 @@ namespace ace::core {
             deallocate(mem_ptr, 0);
         }
 
-        /**
-         * @brief Snapshot of the current arena state (meaningful in debug builds).
-         */
-        struct stats_view {
-            std::size_t in_use_bytes;      ///< Bytes currently lent to users (pool + transient).
-            std::size_t pool_held_bytes;   ///< System bytes retained by the pmr pool.
-            std::size_t malloc_count;      ///< Outstanding transient malloc chunks.
-            std::size_t op_counter;        ///< Operation counter (utilization formula).
-            std::size_t drain_count;       ///< Channel drains performed.
-            std::size_t live_system_chunks;///< Process-wide chunks held by all arenas.
-        };
-
-        /**
-         * @brief Current arena statistics. Debug-only fields are zero on release builds.
-         */
-        [[nodiscard]] stats_view stats() const noexcept {
-            return stats_view {
-                _occupied,
-                pool_held(),
-                malloc_count_of(_extern_release),
-                _op_counter,
-                drains(),
-                live_system_chunks.load(std::memory_order_relaxed),
-            };
-        }
-
-        /// @brief Process-wide count of system chunks currently held by all arenas (debug builds).
-        static inline std::atomic<std::size_t> live_system_chunks { 0 };
-
     private:
 
         arena() { _extern_release._owner = this; }
@@ -273,26 +290,6 @@ namespace ace::core {
             const auto order = local ? std::memory_order_relaxed : std::memory_order_acq_rel;
             if (release._references.fetch_sub(1, order) == 1)
                 delete release._owner;
-        }
-
-        template <typename release_t>
-        static void note_malloc_allocate(release_t& release) noexcept {
-            if constexpr (std::is_same_v<std::remove_cvref_t<release_t>, extern_release_debug>)
-                release._malloc_count.fetch_add(1, std::memory_order_relaxed);
-        }
-
-        template <typename release_t>
-        static void note_malloc_deallocate(release_t& release) noexcept {
-            if constexpr (std::is_same_v<std::remove_cvref_t<release_t>, extern_release_debug>)
-                release._malloc_count.fetch_sub(1, std::memory_order_relaxed);
-        }
-
-        template <typename release_t>
-        [[nodiscard]] static std::size_t malloc_count_of(const release_t& release) noexcept {
-            if constexpr (std::is_same_v<std::remove_cvref_t<release_t>, extern_release_debug>)
-                return release._malloc_count.load(std::memory_order_relaxed);
-            else
-                return 0;
         }
 
         /// @brief Rounds @p value up to a multiple of @p alignment (power of two).
@@ -350,10 +347,14 @@ namespace ace::core {
             if (transient) {
                 mem = std::malloc(total);
                 if (not mem) throw std::bad_alloc();
-                note_malloc_allocate(_extern_release);
-                if constexpr (is_debug) {
-                    live_system_chunks.fetch_add(1, std::memory_order_relaxed);
-                }
+                [](auto& context) {
+                    if constexpr (is_debug)
+                        context.note_malloc_allocate();
+                }(_extern_release);
+                []<typename toolkit_t = arena_testing_toolkit_t> {
+                    if constexpr (is_debug)
+                        toolkit_t::live_system_chunks.fetch_add(1, std::memory_order_relaxed);
+                }();
             } else {
                 mem = _small_pool.allocate(total);
                 if (mem == nullptr) throw std::bad_alloc();
@@ -392,7 +393,10 @@ namespace ace::core {
          * irrelevant because every chunk returns to the same PMR pool.
          */
         void drain_channel() {
-            note_drain();
+            [](auto& owner) {
+                if constexpr (is_debug)
+                    owner.note_drain();
+            }(*this);
             _occupied -= _extern_release._released_bytes.exchange(0, std::memory_order_relaxed);
             auto* chunk = _extern_release._released_chunks.exchange(
                 nullptr, std::memory_order_acquire);
@@ -416,18 +420,22 @@ namespace ace::core {
                 : _arena(arena) {}
 
             void* do_allocate(std::size_t bytes, std::size_t alignment) override {
-                if constexpr (is_debug) {
-                    _arena->note_pool_allocate(bytes);
-                    live_system_chunks.fetch_add(1, std::memory_order_relaxed);
-                }
+                [](auto& owner, std::size_t size) {
+                    if constexpr (is_debug) {
+                        owner.note_pool_allocate(size);
+                        owner.live_system_chunks.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }(*_arena, bytes);
                 return std::pmr::new_delete_resource()->allocate(bytes, alignment);
             }
 
             void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override {
-                if constexpr (is_debug) {
-                    _arena->note_pool_deallocate(bytes);
-                    live_system_chunks.fetch_sub(1, std::memory_order_relaxed);
-                }
+                [](auto& owner, std::size_t size) {
+                    if constexpr (is_debug) {
+                        owner.note_pool_deallocate(size);
+                        owner.live_system_chunks.fetch_sub(1, std::memory_order_relaxed);
+                    }
+                }(*_arena, bytes);
                 std::pmr::new_delete_resource()->deallocate(p, bytes, alignment);
             }
 
@@ -485,6 +493,31 @@ namespace ace::core {
         }
     };
 
+    /** @brief Debug-only process-wide tracking of live Nukes node storage. */
+    struct nukes_node_arena_testing_toolkit {
+        /// @brief Bytes currently checked out to live Nukes nodes.
+        [[nodiscard]] static std::size_t outstanding_bytes() noexcept {
+            return _outstanding_bytes.load(std::memory_order_relaxed);
+        }
+
+    protected:
+        static inline std::atomic<std::size_t> _outstanding_bytes { 0 }; ///< Bytes in live nodes across threads.
+
+    };
+
+    /** @brief Selects debug instrumentation or a distinct empty release base. */
+    consteval auto select_nukes_node_arena_testing_toolkit() {
+        if constexpr (is_debug) {
+            return nukes_node_arena_testing_toolkit {};
+        } else {
+            struct empty {};
+            return empty {};
+        }
+    }
+
+    /// @brief Build-selected instrumentation base; all translation units must agree on NDEBUG.
+    using nukes_node_arena_testing_toolkit_t = decltype(select_nukes_node_arena_testing_toolkit());
+
     /**
      * @brief Thread-safe storage backend for Nukes queue nodes.
      *
@@ -492,13 +525,16 @@ namespace ace::core {
      * thread-local @c arena. Each node uses the process new/delete resource,
      * so storage remains independent of thread and static destruction order.
      */
-    class nukes_node_arena {
+    class nukes_node_arena : public nukes_node_arena_testing_toolkit_t {
     public:
         [[nodiscard]] static void* allocate(
             const std::size_t bytes, const std::size_t alignment)
         {
             auto* const storage = std::pmr::new_delete_resource()->allocate(bytes, alignment);
-            _outstanding_bytes.fetch_add(bytes, std::memory_order_relaxed);
+            []<typename toolkit_t = nukes_node_arena_testing_toolkit_t>(std::size_t size) {
+                if constexpr (is_debug)
+                    toolkit_t::_outstanding_bytes.fetch_add(size, std::memory_order_relaxed);
+            }(bytes);
             return storage;
         }
 
@@ -508,16 +544,11 @@ namespace ace::core {
             if (not storage)
                 return;
             std::pmr::new_delete_resource()->deallocate(storage, bytes, alignment);
-            _outstanding_bytes.fetch_sub(bytes, std::memory_order_relaxed);
+            []<typename toolkit_t = nukes_node_arena_testing_toolkit_t>(std::size_t size) {
+                if constexpr (is_debug)
+                    toolkit_t::_outstanding_bytes.fetch_sub(size, std::memory_order_relaxed);
+            }(bytes);
         }
-
-        /// @brief Bytes currently checked out to live Nukes nodes.
-        [[nodiscard]] static std::size_t outstanding_bytes() noexcept {
-            return _outstanding_bytes.load(std::memory_order_relaxed);
-        }
-
-    private:
-        static inline std::atomic<std::size_t> _outstanding_bytes { 0 };
 
     };
 

@@ -21,14 +21,37 @@
 #include <utility>
 #include <vector>
 
+#include "ace/core/tools/macro.h"
+
 namespace ace::core::tools {
 
-    /**
-     * @brief Optional current-thread fault injection before slab allocation (false)
-     * or ownership registration (true); nullptr disables injection.
-     * @warning Test-only. Restore before leaving the test; callbacks may throw.
-     */
-    inline thread_local void (*slab_growth_hook_for_testing)(bool) = nullptr;
+    /** @brief Debug-only slab fault injection shared by all payload types on the current thread. */
+    struct slab_mempool_testing_toolkit {
+        /**
+         * @brief Replaces the callback before slab allocation (false) or registration (true).
+         * @param hook Callback that may throw; nullptr disables injection.
+         * @return Previous callback, for scoped restoration.
+         * @warning Test-only; restore before leaving the current-thread test scope.
+         */
+        static auto set_growth_for_testing(void (*hook)(bool)) noexcept -> void (*)(bool) {
+            return std::exchange(_slab_growth_hook, hook);
+        }
+    protected:
+        inline static thread_local void (*_slab_growth_hook)(bool) = nullptr;
+    };
+
+    /** @brief Selects debug instrumentation or a distinct empty release base. */
+    consteval auto select_slab_mempool_testing_toolkit() {
+        if constexpr (is_debug) {
+            return slab_mempool_testing_toolkit {};
+        } else {
+            struct empty {};
+            return empty {};
+        }
+    }
+
+    /// @brief Build-selected instrumentation base; all translation units must agree on NDEBUG.
+    using slab_mempool_testing_toolkit_t = decltype(select_slab_mempool_testing_toolkit());
 
     template <typename T>
     class queue;
@@ -84,7 +107,7 @@ namespace ace::core::tools {
      * @tparam T  The element type stored in the nodes.
      */
     template<typename T>
-    class slab_mempool {
+    class slab_mempool : public slab_mempool_testing_toolkit_t {
         q_node<T>* free_head = nullptr;          ///< Head of the free-node list.
         q_node<T>* free_tail = nullptr;          ///< Tail of the free-node list.
         std::vector<q_node<T>*> slabs;           ///< All allocated slabs (for destruction).
@@ -94,12 +117,20 @@ namespace ace::core::tools {
          * @brief Allocates a new slab and links its nodes into the free list.
          */
         void grow() {
-            if (slab_growth_hook_for_testing)
-                slab_growth_hook_for_testing(false);
+            []<typename toolkit_t = slab_mempool_testing_toolkit_t> {
+                if constexpr (is_debug) {
+                    if (toolkit_t::_slab_growth_hook)
+                        toolkit_t::_slab_growth_hook(false);
+                }
+            }();
             auto slab_owner = std::make_unique<q_node<T>[]>(CHUNK_SIZE);
             q_node<T>* slab = slab_owner.get();
-            if (slab_growth_hook_for_testing)
-                slab_growth_hook_for_testing(true);
+            []<typename toolkit_t = slab_mempool_testing_toolkit_t> {
+                if constexpr (is_debug) {
+                    if (toolkit_t::_slab_growth_hook)
+                        toolkit_t::_slab_growth_hook(true);
+                }
+            }();
             slabs.push_back(slab);
 
             for (size_t i = 0; i < CHUNK_SIZE - 1; ++i) {

@@ -71,6 +71,35 @@ namespace ace {
 
 namespace ace::core {
 
+    /** @brief Debug-only worker-start injection; access requires an idle dispatcher. */
+    struct dispatcher_testing_toolkit {
+        /**
+         * @brief Installs a callback immediately before each worker construction.
+         * @param hook Callback receiving the runner index; nullptr disables injection.
+         * @warning Test-only; requires external synchronization and no active run.
+         * Exceptions simulate thread-construction failure and propagate from run().
+         */
+        static void set_worker_start_for_testing(void (*hook)(std::size_t)) noexcept {
+            _worker_start_hook = hook;
+        }
+
+    protected:
+        inline static void (*_worker_start_hook)(std::size_t) = nullptr; ///< Cold-start fault injection.
+    };
+
+    /** @brief Selects debug instrumentation or a distinct empty release base. */
+    consteval auto select_dispatcher_testing_toolkit() {
+        if constexpr (is_debug) {
+            return dispatcher_testing_toolkit {};
+        } else {
+            struct empty {};
+            return empty {};
+        }
+    }
+
+    /// @brief Build-selected instrumentation base; all translation units must agree on NDEBUG.
+    using dispatcher_testing_toolkit_t = decltype(select_dispatcher_testing_toolkit());
+
     /**
      * @brief Schedules and drives task execution across multiple runner threads.
      *
@@ -81,7 +110,7 @@ namespace ace::core {
      * The @c run() call blocks until all runner loads are zero. Tasks are
      * distributed by bounded load-aware sampling unless explicitly targeted.
      */
-    class dispatcher {
+    class dispatcher : public dispatcher_testing_toolkit_t {
 
         /// @brief Creates runners and worker states from the current configuration.
         dispatcher() {
@@ -116,7 +145,6 @@ namespace ace::core {
         std::atomic_bool           _run_active          { false }; ///< Whether a caller currently drives @c run().
 
         std::atomic_bool _execution_enabled { false }; ///< Workers may execute only after successful startup.
-        inline static void (*_worker_start_hook)(std::size_t) = nullptr; ///< Cold-start fault injection.
 
         ACE_CACHE_LINE(2)
 
@@ -163,16 +191,6 @@ namespace ace::core {
         }
 
     public:
-
-        /**
-         * @brief Installs a callback immediately before each worker construction.
-         * @param hook Callback receiving the runner index; nullptr disables injection.
-         * @warning Test-only; requires external synchronization and no active run.
-         * Exceptions simulate thread-construction failure and propagate from run().
-         */
-        static void set_worker_start_for_testing(void (*hook)(std::size_t)) noexcept {
-            _worker_start_hook = hook;
-        }
 
         /**
          * @brief Returns the dispatcher's signal pipe.
@@ -250,8 +268,12 @@ inline void ace::core::dispatcher::ensure_workers() {
     try {
         _workers.reserve(required);
         for (std::size_t runner_id = 1; runner_id < _runners.size(); ++runner_id) {
-            if (_worker_start_hook)
-                _worker_start_hook(runner_id);
+            []<typename toolkit_t = dispatcher_testing_toolkit_t>(std::size_t id) {
+                if constexpr (is_debug) {
+                    if (toolkit_t::_worker_start_hook)
+                        toolkit_t::_worker_start_hook(id);
+                }
+            }(runner_id);
             _workers.emplace_back(
                 std::bind_front(&dispatcher::worker_tf, this), runner_id);
         }

@@ -6,12 +6,11 @@
 /** @brief Scoped current-thread injection at slab allocation or registration. */
 struct slab_failure_scope {
     using hook_t = void (*)(bool);
-    hook_t previous = ace::core::tools::slab_growth_hook_for_testing;
-    explicit slab_failure_scope(hook_t hook) {
-        ace::core::tools::slab_growth_hook_for_testing = hook;
-    }
+    hook_t previous;
+    explicit slab_failure_scope(hook_t hook)
+        : previous(ace::core::tools::slab_mempool<int>::set_growth_for_testing(hook)) {}
     ~slab_failure_scope() {
-        ace::core::tools::slab_growth_hook_for_testing = previous;
+        ace::core::tools::slab_mempool<int>::set_growth_for_testing(previous);
     }
     static void allocation(bool registration) {
         if (not registration) throw std::bad_alloc {};

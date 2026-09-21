@@ -40,6 +40,35 @@
 
 namespace ace::services {
 
+    /** @brief Debug-only replacement of the calling thread's io_uring initializer. */
+    struct kernel_controller_testing_toolkit {
+        using ring_init_fn = int (*)(unsigned, io_uring*, io_uring_params*);
+        /**
+         * @brief Replaces the queue initializer for deterministic tests.
+         * @warning This test-only hook destroys any successfully initialized
+         * current-thread ring and must be called only when no I/O is in flight.
+         * Passing @c nullptr restores @c io_uring_queue_init_params().
+         * @param initializer Replacement initializer, or @c nullptr to restore liburing.
+         */
+        static void set_queue_init_for_testing(ring_init_fn initializer) noexcept;
+
+    protected:
+        inline static thread_local ring_init_fn _ring_init_cb = io_uring_queue_init_params;
+    };
+
+    /** @brief Selects debug instrumentation or a distinct empty release base. */
+    consteval auto select_kernel_controller_testing_toolkit() {
+        if constexpr (is_debug) {
+            return kernel_controller_testing_toolkit {};
+        } else {
+            struct empty {};
+            return empty {};
+        }
+    }
+
+    /// @brief Build-selected instrumentation base; all translation units must agree on NDEBUG.
+    using kernel_controller_testing_toolkit_t = decltype(select_kernel_controller_testing_toolkit());
+
     /**
      * @brief Polymorphic completion handler for @c io_uring operations.
      *
@@ -87,13 +116,14 @@ namespace ace::services {
      * The ring supports up to 4096 concurrent operations; overflow is
      * buffered in @c _submission_buffer (a queue of @c kernel_entity).
      */
-    struct kernel_controller : core::traits::service_traits<kernel_controller, core::service_spawn_mode::e_thread_local> {
+    struct kernel_controller : core::traits::service_traits<kernel_controller, core::service_spawn_mode::e_thread_local>,
+                               kernel_controller_testing_toolkit_t {
 
     private:
 
         friend core::traits::service_traits<kernel_controller, core::service_spawn_mode::e_thread_local>;
 
-        using ring_init_fn = int (*)(unsigned, io_uring*, io_uring_params*);
+        friend kernel_controller_testing_toolkit;
 
         struct kernel_entity;
 
@@ -103,7 +133,6 @@ namespace ace::services {
         static thread_local int _init_error;              ///< Zero on success, otherwise the negative liburing init error.
         static thread_local int _queries;                 ///< Number of in-flight operations.
         static thread_local bool _need_submission;        ///< Whether a submit is required on the next ping.
-        static thread_local ring_init_fn _ring_init_cb;   ///< Injectable queue initializer used by B38 regression tests.
 
         /// @brief Initializes this thread's ring once and records its result.
         static void initialize() noexcept;
@@ -140,15 +169,6 @@ namespace ace::services {
          * @return Zero on success, otherwise a negative @c errno value.
          */
         [[nodiscard]] static int initialization_error() noexcept;
-
-        /**
-         * @brief Replaces the queue initializer for deterministic tests.
-         * @warning This test-only hook destroys any successfully initialized
-         * current-thread ring and must be called only when no I/O is in flight.
-         * Passing @c nullptr restores @c io_uring_queue_init_params().
-         * @param initializer Replacement initializer, or @c nullptr to restore liburing.
-         */
-        static void set_queue_init_for_testing(ring_init_fn initializer) noexcept;
 
         /**
          * @brief Largest byte count representable by one io_uring SQE.
@@ -458,7 +478,6 @@ namespace ace::services {
     inline thread_local io_uring kernel_controller::_ring {};
     inline thread_local bool kernel_controller::_init_attempted {false};
     inline thread_local int kernel_controller::_init_error {-EAGAIN};
-    inline thread_local kernel_controller::ring_init_fn kernel_controller::_ring_init_cb {io_uring_queue_init_params};
 
     inline thread_local int kernel_controller::_queries {};
     inline thread_local bool kernel_controller::_need_submission {false};
@@ -477,7 +496,6 @@ ace::services::kernel_controller::kernel_entity::
 #define ACE_SERVICES_KERNEL_ENTITY_MEMBER(returnT) \
 inline returnT ACE_SERVICES_KERNEL_ENTITY_SPACE
 
-
 ACE_SERVICES_KERNEL_CONTROLLER_MEMBER()
 kernel_controller() {
     initialize();
@@ -489,7 +507,12 @@ initialize() noexcept {
     _init_attempted = true;
     memset(&_ring_params, 0, sizeof(_ring_params));
     memset(&_ring, 0, sizeof(_ring));
-    const int result = _ring_init_cb(max_entries, &_ring, &_ring_params);
+    const int result = []<typename toolkit_t = kernel_controller_testing_toolkit_t> {
+        if constexpr (is_debug)
+            return toolkit_t::_ring_init_cb(max_entries, &_ring, &_ring_params);
+        else
+            return io_uring_queue_init_params(max_entries, &_ring, &_ring_params);
+    }();
     _init_error = result == 0 ? 0 : result;
 }
 
@@ -511,23 +534,21 @@ initialization_error() noexcept {
     return _init_error;
 }
 
-ACE_SERVICES_KERNEL_CONTROLLER_MEMBER(void)
-set_queue_init_for_testing(ring_init_fn initializer) noexcept {
-    if (_init_error == 0)
-        io_uring_queue_exit(&_ring);
-    memset(&_ring_params, 0, sizeof(_ring_params));
-    memset(&_ring, 0, sizeof(_ring));
-    _queries = 0;
-    _need_submission = false;
-    _init_attempted = false;
-    _init_error = -EAGAIN;
+inline void ace::services::kernel_controller_testing_toolkit::set_queue_init_for_testing(ring_init_fn initializer) noexcept {
+    if (kernel_controller::_init_error == 0)
+        io_uring_queue_exit(&kernel_controller::_ring);
+    memset(&kernel_controller::_ring_params, 0, sizeof(kernel_controller::_ring_params));
+    memset(&kernel_controller::_ring, 0, sizeof(kernel_controller::_ring));
+    kernel_controller::_queries = 0;
+    kernel_controller::_need_submission = false;
+    kernel_controller::_init_attempted = false;
+    kernel_controller::_init_error = -EAGAIN;
     _ring_init_cb = initializer ? initializer : io_uring_queue_init_params;
-    initialize();
+    kernel_controller::initialize();
     // The service-only controller owns the ring lifetime even though changing
     // the test initializer must not schedule its polling coroutine.
-    (void)inspect();
+    (void)kernel_controller::inspect();
 }
-
 
 ACE_SERVICES_KERNEL_CONTROLLER_MEMBER(bool)
 ping() {
@@ -598,7 +619,6 @@ ping() {
     return _queries not_eq 0;
 }
 
-
 template <typename foo_t, typename ... Params> bool
 ACE_SERVICES_KERNEL_CONTROLLER_SPACE
 submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept {
@@ -633,7 +653,6 @@ submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept
     }
 }
 
-
 template <typename io_uring_foo_t, typename ... Args>
 ACE_SERVICES_KERNEL_ENTITY_SPACE
 kernel_entity(io_uring_foo_t foo, kernel_observer* observer, Args... args) {
@@ -644,7 +663,6 @@ kernel_entity(io_uring_foo_t foo, kernel_observer* observer, Args... args) {
     new (_params) std::tuple<Args...>(args...);
 }
 
-
 template <typename io_uring_foo_t, typename ... Args> void
 ACE_SERVICES_KERNEL_ENTITY_SPACE
 action_templ(void* io_uring_foo, io_uring_sqe* sqe, const uintptr_t* params) {
@@ -654,7 +672,6 @@ action_templ(void* io_uring_foo, io_uring_sqe* sqe, const uintptr_t* params) {
         foo(sqe, std::get<index_v>(tuple)...);
     }(std::make_index_sequence<sizeof...(Args)>{});
 }
-
 
 ACE_SERVICES_KERNEL_ENTITY_MEMBER(bool)
 apply() {

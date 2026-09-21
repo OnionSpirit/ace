@@ -1,6 +1,6 @@
 # ACE Framework - Issues and Technical Debt
 
-Дата актуализации: 2026-09-21.
+Дата актуализации: 2026-09-22.
 
 Этот файл является единым реестром известных багов, TODO, нестабильностей и
 технических нюансов, требующих решения. Закрытые записи не удаляются: их статус
@@ -19,6 +19,57 @@
    производительности - в `agents/BENCHMARKS.md`.
 
 ## Открытые баги
+
+### B81. Arena frame-accounting test зависит от предыдущих dispatcher tests
+
+- **Статус:** Открыто.
+- **Приоритет:** Средний.
+- **Файл:** `tests/arena_fixture.cpp`, `promise_traits_uses_arena`.
+- **Симптом:** shuffled запуск после dispatcher tests сравнивает 352 bytes
+  после allocation с 1168 bytes до allocation и падает на `EXPECT_GT`.
+- **Причина:** baseline snapshot берётся на общем owner arena с отложенными
+  foreign releases; следующая allocation может сначала списать эти releases.
+  Проверка требует изолированного arena, как остальные accounting tests.
+- **Объём:** по решению пользователя оставлено отдельной задачей; не исправлялось.
+- **Проверка:** воспроизведено на неизменённом ACE `e09db55` под GCC TSan:
+  `--gtest_filter=arena_fixture.*:dispatcher_fixture.* --gtest_shuffle
+  --gtest_random_seed=527 --gtest_repeat=20`; текущая версия также падает
+  под ASan/UBSan и TSan. Test expectations не изменялись.
+
+### B82. Нестабильное membership assertion в automaton OR regression
+
+- **Статус:** Исследуется; связь с B80 не установлена.
+- **Приоритет:** Средний.
+- **Файл:** `tests/cross_mechanic_fixture.cpp`,
+  `or_ping_automaton_loop_no_value_loss` / `race_automaton_pings`.
+- **Симптом:** полный GCC TSan suite один раз получил восемь значений,
+  не покрывающих ожидаемое множество; `expected.empty()` == false.
+  Санитайзер не сообщил data race. В этот момент параллельно шли другие сборки.
+- **Проверка:** `/tmp/ace-toolkit-tsan-tests.log`; отдельные 100 повторов
+  текущей версии и 1000 повторов baseline `e09db55` прошли. Повторный полный
+  TSan suite без параллельных сборок прошёл 351/351. Причина не установлена;
+  единичный сбой не считается устранённым.
+- **Объём:** по решению пользователя оставлено отдельной задачей; дальнейшее
+  расследование и исправление не выполнялись.
+
+### B80. Test-only hooks и диагностические counters присутствовали в release
+
+- **Статус:** Решено 2026-09-22.
+- **Приоритет:** Средний.
+- **Файлы:** `core/dispatcher.h`, `core/traits/service.h`, `core/tools/queue.h`,
+  `core/arena.h`, `services/clock.h`, `services/kernelic.h` под `include/ace/`.
+- **Симптом:** fault-injection setters/TLS callbacks доступны при NDEBUG;
+  `nukes_node_arena` выполняет diagnostic atomic RMW на каждом allocate/free,
+  `arena` сохраняет статистический API и global counter в release.
+- **Решение:** восемь named toolkit bases выбираются собственной consteval
+  функцией через глобальный is_debug; release получает пустой тип.
+  Поля и методы перенесены в toolkit, обращения к ним compile-time conditional.
+  Production ownership/cadence/error state сохранён. Debug hook scoping не
+  меняется: slab общий per-thread, service отдельный per-specialization/thread.
+- **Проверка:** debug/release standalone contracts, два GTests scope/isolation,
+  существующие fault-injection/arena regressions, полные sanitizer suites и
+  повторные allocator/scheduler benchmarks; результаты — в TESTING/BENCHMARKS.
+
 
 ### B11. `cutex::proxy::~proxy()` бросает из `noexcept`-деструктора
 

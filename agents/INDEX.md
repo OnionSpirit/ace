@@ -445,7 +445,7 @@ ring; `initialization_error()` возвращает `0` либо точный о
 `ping()` не касается ring и destructor не вызывает `queue_exit()`. Синхронные
 fire-and-forget file/socket/console writes сообщают ошибку через
 `io::outcast::fail_cb_handler`, не выполняя blocking fallback. Внутренняя
-`set_queue_init_for_testing()` предоставляет deterministic init-failure injection
+`set_queue_init_for_testing()` доступна только при `is_debug` и предоставляет deterministic init-failure injection
 и требует отсутствия I/O in flight на текущем потоке.
 Отказ allocation при запуске service или расширении overflow queue возвращает
 `false` из direct submit и записывает `-ENOMEM` в `kernel_observer::_submission_error`.
@@ -640,7 +640,7 @@ yield_fixture.cpp
 Fixture classes и helper coroutine functions объявляются в
 `tests/environment.h`; каждый fixture source содержит относящиеся к нему
 `TEST`/`TEST_F`. Общие fault-injection scopes находятся в
-`tests/allocation_failure.h`. Текущая source inventory - **344 Google Test**. Meson discover
+`tests/allocation_failure.h`. Текущая source inventory - **346 Google Test**. Meson discover
 mode регистрирует каждый GTest отдельным процессом с точным `--gtest_filter`.
 
 Помимо source GTests, стандартная конфигурация регистрирует tooling tests:
@@ -684,3 +684,32 @@ dependencies дополнительно используются shuffle/repeate
 Google Benchmark target `ace_benchmarks` включается `-Dbenchmarks=true`.
 Актуальные scenarios, baseline protocol и inventory находятся в
 `BENCHMARKS.md`; benchmark не заменяет correctness test.
+
+
+## Test-only toolkit bases (2026-09-22)
+
+Восемь владельцев используют отдельные `*_testing_toolkit` и
+`*_testing_toolkit_t`: `dispatcher`, `service_traits`, `slab_mempool`,
+`hierarchical_time_wheel`, `kernel_controller`, `arena`, `extern_release`,
+`nukes_node_arena`. Каждый alias получен через `decltype` собственной
+`consteval select_*()` с `if constexpr (is_debug)` и локальным пустым типом
+для release. В production-классе отсутствуют debug setters, counters и snapshot
+methods при `NDEBUG`; рабочие ownership/cadence/error fields сохраняются.
+
+`service_traits` выбирает базу отдельно для каждой пары derived type/spawn mode,
+с thread-local callback. Slab toolkit намеренно не шаблонный: callback один
+на поток для всех payload types. Scoped tests меняют его через
+`slab_mempool<int>::set_growth_for_testing()` и восстанавливают прежний callback.
+Kernel toolkit сохраняет reset-ring protocol, а release initialize вызывает
+`io_uring_queue_init_params()` напрямую. Debug/release определения классов
+нельзя смешивать между translation units одного executable.
+
+`tests/testing_toolkit_fixture.cpp` проверяет общую область slab hook,
+thread isolation и независимость CRTP service hooks.
+`tests/testing_toolkit_contract.cpp` компилируется в двух отдельных targets:
+проверяет inheritance, пустые release bases и отсутствие test API через concepts,
+а затем обычные allocation/scheduler/timer/I/O paths в обеих конфигурациях.
+
+Полные B80 host suites: GCC/Clang ASan+UBSan+LSan — по 352/352, повторный
+GCC TSan — 351/351. Исходный TSan сбой B82 и независимая от B80 shuffled
+зависимость B81 зарегистрированы отдельно; подробности в `TESTING.md`.

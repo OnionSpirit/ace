@@ -80,6 +80,41 @@ namespace ace::core {
 namespace ace::core::traits {
 
     /**
+     * @brief Debug-only service-start injection, isolated per service specialization and thread.
+     * @tparam derived_t Concrete service type.
+     * @tparam spawn_mode_v Service ownership mode.
+     */
+    template <typename derived_t, service_spawn_mode spawn_mode_v>
+    struct service_traits_testing_toolkit {
+        /**
+         * @brief Installs a current-thread callback before service scheduling.
+         * @param hook Test callback, or nullptr to restore normal scheduling.
+         * @warning Test-only. Exceptions simulate allocation failure before publication.
+         */
+        static void set_respawn_for_testing(void (*hook)()) noexcept {
+            _respawn_hook = hook;
+        }
+
+    protected:
+        inline static thread_local void (*_respawn_hook)() = nullptr; ///< Service-start fault injection.
+    };
+
+    /** @brief Selects debug instrumentation or a distinct empty release base. */
+    template <typename derived_t, service_spawn_mode spawn_mode_v>
+    consteval auto select_service_traits_testing_toolkit() {
+        if constexpr (is_debug) {
+            return service_traits_testing_toolkit<derived_t, spawn_mode_v> {};
+        } else {
+            struct empty {};
+            return empty {};
+        }
+    }
+
+    /// @brief Build-selected instrumentation base; all translation units must agree on NDEBUG.
+    template <typename derived_t, service_spawn_mode spawn_mode_v>
+    using service_traits_testing_toolkit_t = decltype(select_service_traits_testing_toolkit<derived_t, spawn_mode_v>());
+
+    /**
      * @brief CRTP base class for background polling services.
      *
      * @details Manages the service lifecycle: construction of the derived
@@ -91,7 +126,7 @@ namespace ace::core::traits {
      * @tparam spawn_mode_v   Spawn mode — thread-local or thread-shared.
      */
     template <typename derived_t, service_spawn_mode spawn_mode_v>
-    class service_traits {
+    class service_traits : public service_traits_testing_toolkit_t<derived_t, spawn_mode_v> {
 
         /**
          * @brief Compile-time check of the derived type contract.
@@ -109,8 +144,6 @@ namespace ace::core::traits {
 
         void(*detach_set)(bool) = nullptr; ///< Mode-dependent detached flag setter
         bool(*detach_get)()     = nullptr; ///< Mode-dependent detached flag getter
-
-        inline static thread_local void (*_respawn_hook)() = nullptr; ///< Service-start fault injection.
 
         friend derived_t;
 
@@ -165,8 +198,10 @@ namespace ace::core::traits {
          * @param rnr Runner to spawn the service on; @c nullptr lets the dispatcher choose.
          */
         void respawn(runner* rnr = nullptr) {
-            if (_respawn_hook)
-                _respawn_hook();
+            if constexpr (is_debug) {
+                if (this->_respawn_hook)
+                    this->_respawn_hook();
+            }
             schedule(service(dispatcher::get_sig_pipe()), rnr);
             detach_set(false);
         }
@@ -230,14 +265,6 @@ namespace ace::core::traits {
         }
 
     public:
-        /**
-         * @brief Installs a current-thread callback before service scheduling.
-         * @param hook Test callback, or nullptr to restore normal scheduling.
-         * @warning Test-only. Exceptions simulate allocation failure before publication.
-         */
-        static void set_respawn_for_testing(void (*hook)()) noexcept {
-            _respawn_hook = hook;
-        }
 
         // NOTE: Gets service instance and respawns it if needed (thread-shared mode)
         static derived_t& touch(const omni_runner rnr = nullptr)

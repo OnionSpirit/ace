@@ -114,6 +114,7 @@ if tests_enabled
         'tests/socket_echo_fixture.cpp',
         'tests/spawn_extra_fixture.cpp',
         'tests/spawn_fixture.cpp',
+        'tests/testing_toolkit_fixture.cpp',
         'tests/timer_fixture.cpp',
         'tests/yield_fixture.cpp',
     )
@@ -195,6 +196,7 @@ if tests_enabled
         ],
         override_options: [
             'debug=true',
+            'b_ndebug=false',
             'optimization=0',
         ] + test_sanitizer_options,
     )
@@ -256,6 +258,27 @@ if tests_enabled
       depends: [test_executable],
       suite: ['ace', 'sanitizer'],
     )
+
+    # Compile the same API contract in both modes; release O0 must need no optimizer.
+    foreach mode : ['debug', 'release']
+        toolkit_contract = executable(
+            'ace_testing_toolkit_' + mode,
+            'tests/testing_toolkit_contract.cpp',
+            dependencies: [ace_dep],
+            override_options: [
+                'debug=true',
+                'optimization=0',
+                'b_ndebug=' + (mode == 'release' ? 'true' : 'false'),
+            ] + test_sanitizer_options,
+        )
+        test(
+            'testing_toolkit.' + mode,
+            python,
+            args: sanitized_test_runner_common_args + ['--', toolkit_contract],
+            depends: [toolkit_contract],
+            suite: ['ace', 'sanitizer'],
+        )
+    endforeach
 
     if test_sanitizers.contains('address')
         test(

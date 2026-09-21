@@ -155,6 +155,20 @@ int main() {
 Workers start executing only after all worker threads have been created. If
 startup throws, scheduled tasks remain untouched and `ace::run()` can be retried.
 
+## Debug Instrumentation
+
+`is_debug` is true when `NDEBUG` is absent. Test-only hooks and allocator
+statistics are inherited from build-selected `*_testing_toolkit_t` bases.
+With `NDEBUG`, those bases are empty: injection setters, `arena::stats()`,
+`arena::live_system_chunks`, and `nukes_node_arena::outstanding_bytes()` are
+unavailable. Release I/O initializes liburing directly.
+
+Use the same `NDEBUG` setting in every translation unit of an executable,
+including any ACE entry library: the setting affects class definitions.
+Meson builds the fault-injection GTests with `b_ndebug=false` and separately
+checks the debug and release contracts, even when the project uses
+`-Db_ndebug=true`.
+
 ## Coroutine Types
 
 | Type | Start policy | Purpose |

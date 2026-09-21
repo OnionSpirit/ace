@@ -307,3 +307,47 @@ scheduler CPU time не заменяет wall-clock latency. BM16 после и�
 ./ace_benchmarks --benchmark_filter='^bm_reattach_migration$' \
   --benchmark_min_time=0.05s --benchmark_repetitions=5
 ```
+
+
+## B80: исключение test-only instrumentation из release (2026-09-22)
+
+Использованы существующие BM9, BM11, BM24 и BM25, без добавления сценариев.
+Baseline — чистый ACE `e09db55`; result — B80. Nukes одинаковый в обеих
+версиях: `7fe452b2054f97c0ec3d707dfd934b5474fcc1fe`.
+GCC 16.2.1, Google Benchmark 1.8.4, `-O3`, `NDEBUG`, без sanitizers;
+один host, 12 logical CPU, L3 32 MiB. Параллельные сборки и тесты завершены
+до измерений. Частота и CPU affinity вручную не фиксировались.
+
+Четыре последовательные серии baseline/result/result/baseline по пять
+повторов: `--benchmark_min_time=0.05s --benchmark_repetitions=5`.
+Таблица показывает медиану десяти измерений каждой версии; для BM25 — wall
+clock, для остальных — CPU time Google Benchmark.
+
+| Сценарий | Baseline | Result | Разница времени |
+|----------|----------|--------|-----------------|
+| BM9, 20k таймеров по 1 ms | 3.498 ms | 3.348 ms | −4.3% |
+| BM11, 200k tasks, 1 runner | 12.531 ms | 12.468 ms | −0.5% |
+| BM11, 200k tasks, 4 runners | 20.226 ms | 21.138 ms | +4.5% |
+| BM11, 200k tasks, 16 runners | 23.560 ms | 23.736 ms | +0.8% |
+| BM24, 1 task, 1 runner | 0.063 us | 0.064 us | +0.5% |
+| BM24, 1 task, 4 runners | 0.625 us | 0.637 us | +2.0% |
+| BM25, MPSC 1P/1C | 0.443 ms | 0.440 ms | −0.7% |
+| BM25, MPSC 4P/1C | 3.548 ms | 3.315 ms | −6.6% |
+| BM25, MPMC 1P/1C | 0.471 ms | 0.478 ms | +1.5% |
+| BM25, MPMC 4P/4C | 5.833 ms | 5.749 ms | −1.4% |
+
+Все повторы завершились без benchmark errors. Устойчивое изменение скорости
+не установлено: например, BM11/4 дал медианы отдельных серий
+20.10/20.17/21.96/20.65 ms. Проценты вычислены до округления значений таблицы.
+Отсутствие диагностических atomic RMW в release подтверждается кодом и
+проверкой символов, а не заявлением об ускорении на основании шумных чисел.
+
+JSON: `/tmp/ace-toolkit-perf-{1-baseline,2-current,3-current,4-baseline}.json`.
+Команда для каждого binary:
+
+```bash
+./ace_benchmarks \
+  '--benchmark_filter=^(bm_schedule_throughput/(1|4|16)|bm_repeated_short_run/(1|4)/1|bm_timeout_short|bm_dynamic_m(pmc|psc)_queue/.*)$' \
+  --benchmark_min_time=0.05s --benchmark_repetitions=5 \
+  --benchmark_out=results.json --benchmark_out_format=json
+```

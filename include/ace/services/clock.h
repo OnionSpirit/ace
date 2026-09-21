@@ -44,6 +44,35 @@
 
 namespace ace::services {
 
+    /** @brief Debug-only wheel-construction fault injection, isolated per thread. */
+    struct hierarchical_time_wheel_testing_toolkit {
+        /**
+         * @brief Installs a current-thread callback before wheel storage allocation.
+         * @param hook Receives zero before level storage, then the one-based level
+         * index before allocating that level's slots; nullptr disables injection.
+         * @warning Test-only. Exceptions simulate constructor allocation failure.
+         */
+        static void set_initialization_for_testing(void (*hook)(std::size_t)) noexcept {
+            _initialization_hook = hook;
+        }
+
+    protected:
+        inline static thread_local void (*_initialization_hook)(std::size_t) = nullptr; ///< Constructor fault injection.
+    };
+
+    /** @brief Selects debug instrumentation or a distinct empty release base. */
+    consteval auto select_hierarchical_time_wheel_testing_toolkit() {
+        if constexpr (is_debug) {
+            return hierarchical_time_wheel_testing_toolkit {};
+        } else {
+            struct empty {};
+            return empty {};
+        }
+    }
+
+    /// @brief Build-selected instrumentation base; all translation units must agree on NDEBUG.
+    using hierarchical_time_wheel_testing_toolkit_t = decltype(select_hierarchical_time_wheel_testing_toolkit());
+
     /// @brief Timepoint type of the wheel — millisecond-precision steady clock.
     using timepoint_t = decltype(
         std::chrono::time_point_cast<std::chrono::milliseconds, std::chrono::steady_clock, std::chrono::nanoseconds>(
@@ -329,7 +358,7 @@ namespace ace::services {
      * The default configuration uses 1ms ticks and 256-slot wheels, supporting
      * timers up to the int64 millisecond range (~292 million years).
      */
-    struct hierarchical_time_wheel {
+    struct hierarchical_time_wheel : public hierarchical_time_wheel_testing_toolkit_t {
 
     private:
 
@@ -347,8 +376,6 @@ namespace ace::services {
 
         std::size_t             _timer_count         { 0 };   ///< Number of timers currently subscribed.
         bool                    _stopped            { false };///< Whether the wheel is empty and idle.
-
-        inline static thread_local void (*_initialization_hook)(std::size_t) = nullptr; ///< Constructor fault injection.
 
 
         /**
@@ -472,16 +499,6 @@ namespace ace::services {
     public:
 
         /**
-         * @brief Installs a current-thread callback before wheel storage allocation.
-         * @param hook Receives zero before level storage, then the one-based level
-         * index before allocating that level's slots; nullptr disables injection.
-         * @warning Test-only. Exceptions simulate constructor allocation failure.
-         */
-        static void set_initialization_for_testing(void (*hook)(std::size_t)) noexcept {
-            _initialization_hook = hook;
-        }
-
-        /**
          * @brief Constructs the full hierarchical wheel.
          * @tparam rep_t     Duration representation type.
          * @tparam period_t  Duration period type.
@@ -505,14 +522,22 @@ namespace ace::services {
             const auto max_round_ticks = INT64_MAX / tick_duration.count();
             const auto wheels_amount = std::min(fast_log(ticks_amount, _slot_count) + 1,
                                                 fast_log(max_round_ticks, _slot_count));
-            if (_initialization_hook)
-                _initialization_hook(0);
+            []<typename toolkit_t = hierarchical_time_wheel_testing_toolkit_t>(std::size_t position) {
+                if constexpr (is_debug) {
+                    if (toolkit_t::_initialization_hook)
+                        toolkit_t::_initialization_hook(position);
+                }
+            }(0);
             _time_wheels.reserve(wheels_amount);
 
             auto tick = _tick_duration;
             for (std::size_t i = 0; i < wheels_amount; ++i, tick *= static_cast<long>(_slot_count)) {
-                if (_initialization_hook)
-                    _initialization_hook(i + 1);
+                []<typename toolkit_t = hierarchical_time_wheel_testing_toolkit_t>(std::size_t position) {
+                    if constexpr (is_debug) {
+                        if (toolkit_t::_initialization_hook)
+                            toolkit_t::_initialization_hook(position);
+                    }
+                }(i + 1);
                 _time_wheels.emplace_back(tick, _slot_count, &_release_budget, this);
             }
 

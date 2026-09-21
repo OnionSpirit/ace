@@ -42,8 +42,8 @@
 namespace ace::services {
 
     /** @brief Debug-only replacement of the calling thread's io_uring initializer. */
-    struct kernel_controller_testing_toolkit
-        : core::tools::testing_toolkit<kernel_controller_testing_toolkit> {
+    struct kernel_controller_testing
+        : core::tools::testing_mixin<kernel_controller_testing> {
         using ring_init_fn = int (*)(unsigned, io_uring*, io_uring_params*);
         /**
          * @brief Replaces the queue initializer for deterministic tests.
@@ -106,13 +106,13 @@ namespace ace::services {
      * buffered in @c _submission_buffer (a queue of @c kernel_entity).
      */
     struct kernel_controller : core::traits::service_traits<kernel_controller, core::service_spawn_mode::e_thread_local>,
-                               kernel_controller_testing_toolkit::debug_tools {
+                               kernel_controller_testing::debug_tools {
 
     private:
 
         friend core::traits::service_traits<kernel_controller, core::service_spawn_mode::e_thread_local>;
 
-        friend kernel_controller_testing_toolkit;
+        friend kernel_controller_testing;
 
         struct kernel_entity;
 
@@ -496,7 +496,7 @@ initialize() noexcept {
     _init_attempted = true;
     memset(&_ring_params, 0, sizeof(_ring_params));
     memset(&_ring, 0, sizeof(_ring));
-    const int result = []<typename toolkit_t = kernel_controller_testing_toolkit::debug_tools> {
+    const int result = []<typename toolkit_t = kernel_controller_testing::debug_tools> {
         if constexpr (is_debug)
             return toolkit_t::_ring_init_cb(max_entries, &_ring, &_ring_params);
         else
@@ -523,7 +523,7 @@ initialization_error() noexcept {
     return _init_error;
 }
 
-inline void ace::services::kernel_controller_testing_toolkit::set_queue_init_for_testing(ring_init_fn initializer) noexcept {
+inline void ace::services::kernel_controller_testing::set_queue_init_for_testing(ring_init_fn initializer) noexcept {
     if (kernel_controller::_init_error == 0)
         io_uring_queue_exit(&kernel_controller::_ring);
     memset(&kernel_controller::_ring_params, 0, sizeof(kernel_controller::_ring_params));

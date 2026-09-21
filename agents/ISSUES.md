@@ -62,7 +62,7 @@
   `nukes_node_arena` выполняет diagnostic atomic RMW на каждом allocate/free,
   `arena` сохраняет статистический API и global counter в release.
 - **Решение:** восемь named toolkits наследуют общий CRTP
-  `core::tools::testing_toolkit<derived_t>` из `core/tools/testing_toolkit.h`.
+  `core::tools::testing_mixin<derived_t>` из `core/tools/testing_toolkit.h`.
   Его закрытый consteval `define_tools()` выбирает тип через глобальный
   is_debug, а публичный `debug_tools` используется в наследовании владельцев.
   `std::type_identity` позволяет выбрать неполный CRTP type без construction;

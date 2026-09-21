@@ -1280,7 +1280,7 @@ TSan shuffle использовал ту же команду с `--sanitizers th
 
 `testing_toolkit_contract.cpp` теперь использует вложенные `debug_tools` всех
 восьми toolkits и дополнительно проверяет их наследование от общего
-`ace::core::tools::testing_toolkit<Toolkit>`. Compile-time regression с удалённым
+`ace::core::tools::testing_mixin<Toolkit>`. Compile-time regression с удалённым
 конструктором проверяет выбор ещё неполного CRTP type без construction;
 отдельный assertion проверяет, что release bases разных toolkits различны.
 Оба контракта по-прежнему собираются с `-O0`, один с `NDEBUG`, другой без него.
@@ -1306,3 +1306,12 @@ meson test -C /tmp/ace-toolkit-MODE --no-rebuild \
 `/tmp/ace-crtp-{clang,gcc,tsan}-tests.log`. Дополнительно GCC и Clang выполнили
 `-std=c++23 -fsyntax-only` contracts с `-DNDEBUG` и без него. Benchmarks
 повторно не запускались: менялся только compile-time выбор типа базы.
+
+
+Переименование CRTP-базы в `testing_mixin` и восьми наследников в `*_testing`
+проверено пересборкой `ace_testing_toolkit_debug` / `ace_testing_toolkit_release`
+на GCC и Clang. Команда `meson test -C /tmp/ace-toolkit-MODE --no-rebuild
+--print-errorlogs testing_toolkit.debug testing_toolkit.release` прошла **2/2**
+для каждого compiler (ASan/UBSan/LSan). Имя `testing_toolkit.h` сохранено;
+contracts и документация используют новые имена типов. `git diff --check`
+прошёл. Полные suites и benchmarks для изменения только имён не повторялись.

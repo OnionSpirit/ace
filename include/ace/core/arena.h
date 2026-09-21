@@ -69,8 +69,8 @@ namespace ace::core {
     };
 
     /** @brief Debug-only transient-allocation accounting shared with foreign releasers. */
-    struct extern_release_testing_toolkit
-        : tools::testing_toolkit<extern_release_testing_toolkit> {
+    struct extern_release_testing
+        : tools::testing_mixin<extern_release_testing> {
         std::atomic<std::size_t> _malloc_count { 0 }; ///< Outstanding transient chunks.
         /// @brief Records one transient chunk allocated by the owner.
         void note_malloc_allocate() noexcept { _malloc_count.fetch_add(1, std::memory_order_relaxed); }
@@ -81,11 +81,11 @@ namespace ace::core {
     };
 
     /// @brief Runtime release protocol plus the selected diagnostic base.
-    struct extern_release : extern_release_base, extern_release_testing_toolkit::debug_tools {};
+    struct extern_release : extern_release_base, extern_release_testing::debug_tools {};
 
     /** @brief Debug-only arena observability; owner-local counters and a process-wide total. */
-    struct arena_testing_toolkit
-        : tools::testing_toolkit<arena_testing_toolkit> {
+    struct arena_testing
+        : tools::testing_mixin<arena_testing> {
         std::size_t pool_held_bytes = 0; ///< System bytes retained by the PMR pool.
         std::size_t drain_count = 0; ///< Completed incoming release drains.
         static inline std::atomic<std::size_t> live_system_chunks { 0 }; ///< Process-wide retained system chunks.
@@ -133,8 +133,8 @@ namespace ace::core {
      * retirement, the last foreign releaser exclusively drains and destroys
      * the storage.
      */
-    struct arena : arena_testing_toolkit::debug_tools {
-        friend arena_testing_toolkit;
+    struct arena : arena_testing::debug_tools {
+        friend arena_testing;
 
         /// @brief Largest total chunk size served from the pmr pool.
         static constexpr std::size_t kMaxSize = 4096;
@@ -218,7 +218,7 @@ namespace ace::core {
                         context.note_malloc_deallocate();
                 }(*release);
                 std::free(chunk);
-                []<typename toolkit_t = arena_testing_toolkit::debug_tools> {
+                []<typename toolkit_t = arena_testing::debug_tools> {
                     if constexpr (is_debug)
                         toolkit_t::live_system_chunks.fetch_sub(1, std::memory_order_relaxed);
                 }();
@@ -328,7 +328,7 @@ namespace ace::core {
                     if constexpr (is_debug)
                         context.note_malloc_allocate();
                 }(_extern_release);
-                []<typename toolkit_t = arena_testing_toolkit::debug_tools> {
+                []<typename toolkit_t = arena_testing::debug_tools> {
                     if constexpr (is_debug)
                         toolkit_t::live_system_chunks.fetch_add(1, std::memory_order_relaxed);
                 }();
@@ -471,8 +471,8 @@ namespace ace::core {
     };
 
     /** @brief Debug-only process-wide tracking of live Nukes node storage. */
-    struct nukes_node_arena_testing_toolkit
-        : tools::testing_toolkit<nukes_node_arena_testing_toolkit> {
+    struct nukes_node_arena_testing
+        : tools::testing_mixin<nukes_node_arena_testing> {
         /// @brief Bytes currently checked out to live Nukes nodes.
         [[nodiscard]] static std::size_t outstanding_bytes() noexcept {
             return _outstanding_bytes.load(std::memory_order_relaxed);
@@ -490,13 +490,13 @@ namespace ace::core {
      * thread-local @c arena. Each node uses the process new/delete resource,
      * so storage remains independent of thread and static destruction order.
      */
-    class nukes_node_arena : public nukes_node_arena_testing_toolkit::debug_tools {
+    class nukes_node_arena : public nukes_node_arena_testing::debug_tools {
     public:
         [[nodiscard]] static void* allocate(
             const std::size_t bytes, const std::size_t alignment)
         {
             auto* const storage = std::pmr::new_delete_resource()->allocate(bytes, alignment);
-            []<typename toolkit_t = nukes_node_arena_testing_toolkit::debug_tools>(std::size_t size) {
+            []<typename toolkit_t = nukes_node_arena_testing::debug_tools>(std::size_t size) {
                 if constexpr (is_debug)
                     toolkit_t::_outstanding_bytes.fetch_add(size, std::memory_order_relaxed);
             }(bytes);
@@ -509,7 +509,7 @@ namespace ace::core {
             if (not storage)
                 return;
             std::pmr::new_delete_resource()->deallocate(storage, bytes, alignment);
-            []<typename toolkit_t = nukes_node_arena_testing_toolkit::debug_tools>(std::size_t size) {
+            []<typename toolkit_t = nukes_node_arena_testing::debug_tools>(std::size_t size) {
                 if constexpr (is_debug)
                     toolkit_t::_outstanding_bytes.fetch_sub(size, std::memory_order_relaxed);
             }(bytes);

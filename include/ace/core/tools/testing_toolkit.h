@@ -17,7 +17,7 @@ namespace ace::core::tools {
      * @warning All translation units in an executable must agree on NDEBUG.
      */
     template <typename derived_t>
-    class testing_toolkit {
+    class testing_mixin {
         /**
          * @brief Selects a type without constructing the incomplete CRTP toolkit.
          * @return Type identity of derived_t in debug, or of an empty type in release.

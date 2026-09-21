@@ -26,8 +26,8 @@
 namespace ace::core::tools {
 
     /** @brief Debug-only slab fault injection shared by all payload types on the current thread. */
-    struct slab_mempool_testing_toolkit
-        : testing_toolkit<slab_mempool_testing_toolkit> {
+    struct slab_mempool_testing
+        : testing_mixin<slab_mempool_testing> {
         /**
          * @brief Replaces the callback before slab allocation (false) or registration (true).
          * @param hook Callback that may throw; nullptr disables injection.
@@ -95,7 +95,7 @@ namespace ace::core::tools {
      * @tparam T  The element type stored in the nodes.
      */
     template<typename T>
-    class slab_mempool : public slab_mempool_testing_toolkit::debug_tools {
+    class slab_mempool : public slab_mempool_testing::debug_tools {
         q_node<T>* free_head = nullptr;          ///< Head of the free-node list.
         q_node<T>* free_tail = nullptr;          ///< Tail of the free-node list.
         std::vector<q_node<T>*> slabs;           ///< All allocated slabs (for destruction).
@@ -105,7 +105,7 @@ namespace ace::core::tools {
          * @brief Allocates a new slab and links its nodes into the free list.
          */
         void grow() {
-            []<typename toolkit_t = slab_mempool_testing_toolkit::debug_tools> {
+            []<typename toolkit_t = slab_mempool_testing::debug_tools> {
                 if constexpr (is_debug) {
                     if (toolkit_t::_slab_growth_hook)
                         toolkit_t::_slab_growth_hook(false);
@@ -113,7 +113,7 @@ namespace ace::core::tools {
             }();
             auto slab_owner = std::make_unique<q_node<T>[]>(CHUNK_SIZE);
             q_node<T>* slab = slab_owner.get();
-            []<typename toolkit_t = slab_mempool_testing_toolkit::debug_tools> {
+            []<typename toolkit_t = slab_mempool_testing::debug_tools> {
                 if constexpr (is_debug) {
                     if (toolkit_t::_slab_growth_hook)
                         toolkit_t::_slab_growth_hook(true);

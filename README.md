@@ -159,7 +159,7 @@ startup throws, scheduled tasks remain untouched and `ace::run()` can be retried
 
 `is_debug` is true when `NDEBUG` is absent. Test-only hooks and allocator
 statistics are inherited from `Toolkit::debug_tools`. Each toolkit derives
-from `ace::core::tools::testing_toolkit<Toolkit>`, which selects that base
+from `ace::core::tools::testing_mixin<Toolkit>`, which selects that base
 through its compile-time `define_tools()` method.
 With `NDEBUG`, those bases are empty: injection setters, `arena::stats()`,
 `arena::live_system_chunks`, and `nukes_node_arena::outstanding_bytes()` are

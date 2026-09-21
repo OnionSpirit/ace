@@ -689,10 +689,10 @@ Google Benchmark target `ace_benchmarks` включается `-Dbenchmarks=true
 
 ## Test-only toolkit bases (2026-09-22)
 
-Восемь владельцев используют отдельные `*_testing_toolkit` и
-`*_testing_toolkit::debug_tools`: `dispatcher`, `service_traits`, `slab_mempool`,
+Восемь владельцев используют отдельные `*_testing` и
+`*_testing::debug_tools`: `dispatcher`, `service_traits`, `slab_mempool`,
 `hierarchical_time_wheel`, `kernel_controller`, `arena`, `extern_release`,
-`nukes_node_arena`. Общий CRTP `ace::core::tools::testing_toolkit<derived_t>`
+`nukes_node_arena`. Общий CRTP `ace::core::tools::testing_mixin<derived_t>`
 из `include/ace/core/tools/testing_toolkit.h` содержит закрытый
 `static consteval define_tools()` с `if constexpr (is_debug)` и публичный
 `debug_tools`. Метод возвращает `std::type_identity`: derived toolkit ещё

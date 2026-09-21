@@ -73,8 +73,8 @@ namespace ace {
 namespace ace::core {
 
     /** @brief Debug-only worker-start injection; access requires an idle dispatcher. */
-    struct dispatcher_testing_toolkit
-        : tools::testing_toolkit<dispatcher_testing_toolkit> {
+    struct dispatcher_testing
+        : tools::testing_mixin<dispatcher_testing> {
         /**
          * @brief Installs a callback immediately before each worker construction.
          * @param hook Callback receiving the runner index; nullptr disables injection.
@@ -99,7 +99,7 @@ namespace ace::core {
      * The @c run() call blocks until all runner loads are zero. Tasks are
      * distributed by bounded load-aware sampling unless explicitly targeted.
      */
-    class dispatcher : public dispatcher_testing_toolkit::debug_tools {
+    class dispatcher : public dispatcher_testing::debug_tools {
 
         /// @brief Creates runners and worker states from the current configuration.
         dispatcher() {
@@ -257,7 +257,7 @@ inline void ace::core::dispatcher::ensure_workers() {
     try {
         _workers.reserve(required);
         for (std::size_t runner_id = 1; runner_id < _runners.size(); ++runner_id) {
-            []<typename toolkit_t = dispatcher_testing_toolkit::debug_tools>(std::size_t id) {
+            []<typename toolkit_t = dispatcher_testing::debug_tools>(std::size_t id) {
                 if constexpr (is_debug) {
                     if (toolkit_t::_worker_start_hook)
                         toolkit_t::_worker_start_hook(id);

@@ -86,8 +86,8 @@ namespace ace::core::traits {
      * @tparam spawn_mode_v Service ownership mode.
      */
     template <typename derived_t, service_spawn_mode spawn_mode_v>
-    struct service_traits_testing_toolkit
-        : tools::testing_toolkit<service_traits_testing_toolkit<derived_t, spawn_mode_v>> {
+    struct service_traits_testing
+        : tools::testing_mixin<service_traits_testing<derived_t, spawn_mode_v>> {
         /**
          * @brief Installs a current-thread callback before service scheduling.
          * @param hook Test callback, or nullptr to restore normal scheduling.
@@ -113,7 +113,7 @@ namespace ace::core::traits {
      * @tparam spawn_mode_v   Spawn mode — thread-local or thread-shared.
      */
     template <typename derived_t, service_spawn_mode spawn_mode_v>
-    class service_traits : public service_traits_testing_toolkit<derived_t, spawn_mode_v>::debug_tools {
+    class service_traits : public service_traits_testing<derived_t, spawn_mode_v>::debug_tools {
 
         /**
          * @brief Compile-time check of the derived type contract.

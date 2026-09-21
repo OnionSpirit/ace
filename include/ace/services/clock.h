@@ -46,8 +46,8 @@
 namespace ace::services {
 
     /** @brief Debug-only wheel-construction fault injection, isolated per thread. */
-    struct hierarchical_time_wheel_testing_toolkit
-        : core::tools::testing_toolkit<hierarchical_time_wheel_testing_toolkit> {
+    struct hierarchical_time_wheel_testing
+        : core::tools::testing_mixin<hierarchical_time_wheel_testing> {
         /**
          * @brief Installs a current-thread callback before wheel storage allocation.
          * @param hook Receives zero before level storage, then the one-based level
@@ -347,7 +347,7 @@ namespace ace::services {
      * The default configuration uses 1ms ticks and 256-slot wheels, supporting
      * timers up to the int64 millisecond range (~292 million years).
      */
-    struct hierarchical_time_wheel : public hierarchical_time_wheel_testing_toolkit::debug_tools {
+    struct hierarchical_time_wheel : public hierarchical_time_wheel_testing::debug_tools {
 
     private:
 
@@ -511,7 +511,7 @@ namespace ace::services {
             const auto max_round_ticks = INT64_MAX / tick_duration.count();
             const auto wheels_amount = std::min(fast_log(ticks_amount, _slot_count) + 1,
                                                 fast_log(max_round_ticks, _slot_count));
-            []<typename toolkit_t = hierarchical_time_wheel_testing_toolkit::debug_tools>(std::size_t position) {
+            []<typename toolkit_t = hierarchical_time_wheel_testing::debug_tools>(std::size_t position) {
                 if constexpr (is_debug) {
                     if (toolkit_t::_initialization_hook)
                         toolkit_t::_initialization_hook(position);
@@ -521,7 +521,7 @@ namespace ace::services {
 
             auto tick = _tick_duration;
             for (std::size_t i = 0; i < wheels_amount; ++i, tick *= static_cast<long>(_slot_count)) {
-                []<typename toolkit_t = hierarchical_time_wheel_testing_toolkit::debug_tools>(std::size_t position) {
+                []<typename toolkit_t = hierarchical_time_wheel_testing::debug_tools>(std::size_t position) {
                     if constexpr (is_debug) {
                         if (toolkit_t::_initialization_hook)
                             toolkit_t::_initialization_hook(position);

@@ -4,7 +4,7 @@
 
 > **Статус:** GCC 16 coverage union от 2026-08-23 покрывает **2262/2398 =
 > 94.33%** уникальных исполняемых строк `include/ace/**`. Текущая
-> default-конфигурация регистрирует 355 ACE Meson-тестов: 349 GTests, две
+> default-конфигурация регистрирует 359 ACE Meson-тестов: 353 GTests, две
 > Python unit checks, discovery consistency, LSan capability и два toolkit contracts. B29/B38/B66/B68
 > regressions проходят; successful-I/O tests всё ещё требуют доступного
 > `io_uring` и не становятся fallback tests.
@@ -149,10 +149,10 @@ tests, отклоняет parameterized macros и дубликаты. Семь u
 
 Review также выявил открытые пробелы B32/B33: не проверена cancellation для
 owning/direct `close_query`, а прямые move-assignment и self-move сценарии
-`io::link` и net entities не покрыты. Связанные transition-move риски B30/B31
-остаются открыты: outstanding fs/net query может ссылаться на перемещённую source
-entity, а self-move `fs::file` может изменить path. Специальных regressions для
-этих рисков пока нет.
+`io::link` и net entities не покрыты. Transition-move риск B30 остаётся открытым:
+outstanding fs/net query может ссылаться на перемещённую source entity. B31
+закрыт четырьмя `fs_fixture` проверками path, FD ownership и open после self-move, а также
+обычного move assignment; тест open требует доступного `io_uring`.
 
 **Как воспроизвести сбор данных:**
 ```bash
@@ -194,7 +194,7 @@ assertions целевой набор из 15 timer/runner/cancellation tests п�
 shuffled повторов, **150/150**, seeds 82821..82830. Это закрывает
 преждевременное completion B34;
 исключение B29 по-прежнему не устраняет остаточные пробелы review B32/B33 и
-transition-move риски B30/B31.
+transition-move риск B30. B31 закрыт отдельными fs regressions 2026-09-23.
 
 ### Regression coverage
 
@@ -212,6 +212,7 @@ transition-move риски B30/B31.
 | B21 | `io_entity_fixture.entity_close_awaited_single_ownership`, `entity_close_discarded_single_ownership`, `entity_close_repeated_is_idempotent`, `direct_close_query_discard_remains_non_owning` | ✅ Реализованы и проходят в GCC-прогонах |
 | B22 | `base_fixture.udp_bind_transfers_sole_ownership`; supporting coverage `base_fixture.udp_sendto_recv_loop` | ✅ Реализован и проходит в GCC-прогонах |
 | B25 | `io_entity_fixture.io_query_lengths_preserve_uint_max_boundary`, `oversize_io_queries_return_eoverflow_without_submission`, `kernelic_rejects_oversize_lengths_without_submission` | ✅ Реализованы и проходят |
+| B31 | `fs_fixture.file_self_move_preserves_path`, `file_self_move_preserves_descriptor_ownership`, `file_self_move_still_opens_original_path`, `file_move_assignment_transfers_path` | ✅ Path, FD и move checks; open пропускается при недоступном `io_uring` |
 | B38 | `io_entity_fixture.kernelic_init_failure_reports_availability_and_rejects_ring_operations`, `io_query_returns_kernel_init_error_without_submission`, `file_output_reports_kernel_init_error_without_fallback_bytes` | ✅ Deterministic init-failure regressions проходят |
 | B41 | `io_buffer_fixture.buffer_move_assign_releases_assembled_destination`, `buffer_move_assign_empty_source_releases_destination`, `buffer_self_move_assign_preserves_state` | ✅ Старое destination storage освобождается, self-move сохраняет данные и metadata |
 | B66 | `tests/sanitized_test_runner_test.py`, `ace_tests.discovery_consistency`, `ace_tests.lsan_capability` | ✅ Matrix и LSan capability policy реализованы |
@@ -836,6 +837,10 @@ transition-move риски B30/B31.
 | FS10 | `file_input_action` | input_action использует read_query | ⬜ |
 | FS11 | `file_write_and_read` | Полный цикл write → read → verify | ✅ (добавлен) |
 | FS12 | `open_rewrite_truncates_existing_file` | Повторная короткая запись усекает старый хвост (B15) | ✅ |
+| FS13 | `file_self_move_preserves_path` | Self-move сохраняет pathname и idle FD state (B31) | ✅ |
+| FS14 | `file_self_move_preserves_descriptor_ownership` | Self-move сохраняет sole FD ownership (B31) | ✅ |
+| FS15 | `file_move_assignment_transfers_path` | Обычный move assignment переносит pathname (B31) | ✅ |
+| FS16 | `file_self_move_still_opens_original_path` | После self-move открывается исходный файл (B31) | ✅ при доступном `io_uring`; иначе SKIP |
 
 ---
 
@@ -1054,7 +1059,7 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/cutex_extra_fixture.cpp` | `cutex_extra_fixture` | 5 |
 | `tests/cutex_fixture.cpp` | `cutex_fixture` | 5 |
 | `tests/dispatcher_fixture.cpp` | `dispatcher_fixture` | 17 |
-| `tests/fs_fixture.cpp` | `fs_fixture` | 4 |
+| `tests/fs_fixture.cpp` | `fs_fixture` | 8 |
 | `tests/future_traits_fixture.cpp` | `future_traits_fixture` | 8 |
 | `tests/get_runner_fixture.cpp` | `get_runner_fixture` | 1 |
 | `tests/id_alloc_fixture.cpp` | `id_alloc_fixture` | 3 |
@@ -1077,15 +1082,15 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/nukes_alignment_fixture.cpp` | `nukes_alignment_fixture` | 5 |
 | `tests/nukes_concurrency_fixture.cpp` | `nukes_concurrency_fixture` | 5 |
 | `tests/testing_toolkit_fixture.cpp` | `testing_toolkit_fixture` | 2 |
-| **Итого: 37 файлов** | | **349** |
+| **Итого: 37 файлов** | | **353** |
 
-Default Meson configuration (`ace_entry=false`) регистрирует **355 ACE** tests:
-349 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
+Default Meson configuration (`ace_entry=false`) регистрирует **359 ACE** tests:
+353 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
 `ace_tests.discovery_consistency`, `testing_toolkit.debug`, `testing_toolkit.release`
 и `ace_tests.lsan_capability`. Последний
 становится Meson SKIP при недоступном под ptrace LSan; остальные checks выполняются
 с `detect_leaks=0` только в auto mode. TSan profile не регистрирует LSan
-capability и содержит 354 tests. `ace_entry=true` добавляет fallback test.
+capability и содержит 358 tests. `ace_entry=true` добавляет fallback test.
 
 ### Проверка исправлений ревью (2026-09-21)
 
@@ -1351,3 +1356,23 @@ meson test -C /tmp/ace-toolkit-MODE --no-rebuild \
 для каждого compiler (ASan/UBSan/LSan). Имя `testing_toolkit.h` сохранено;
 contracts и документация используют новые имена типов. `git diff --check`
 прошёл. Полные suites и benchmarks для изменения только имён не повторялись.
+
+### B31: self-move `fs::file` (2026-09-23)
+
+Добавлены четыре `fs_fixture` tests: сохранение path и FD ownership при
+self-move, перенос path при обычном move assignment и открытие исходного файла
+после self-move. В текущей среде Clang 22 + ASan первые три прошли по 10
+shuffled повторов; test открытия
+пропущен во всех 10 повторах, поскольку `io_uring` недоступен. Исходный
+libstdc++ 16 сам пропускает self-move `std::filesystem::path`, поэтому test path
+не падал до исправления; это ограничение проверки явно принято пользователем.
+Benchmark не добавлялся и не запускался: move assignment не является горячим
+путём.
+
+`ninja -C build ace_tests` завершился успешно. Полный
+`meson test -C build --no-rebuild --suite ace --print-errorlogs --num-processes 4`
+дал **331 OK, 27 FAIL, 1 SKIP**: 25 ранее существовавших I/O GTests и debug
+toolkit contract требуют недоступного здесь `io_uring`; release toolkit contract
+не собрался из-за зарегистрированного B83. Все четыре новых test names
+зарегистрированы Meson; три path/FD/move tests прошли, а test открытия показан как
+OK на уровне Meson, хотя сам GoogleTest выводит SKIP.

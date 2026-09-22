@@ -395,6 +395,7 @@ simplest choice when closure lifetime would otherwise be difficult to see.
 - Move a typed async when ownership is transferred to `task_wrap()` or another
   owner.
 - Do not access a network entity after a consuming transition.
+- Self-move assignment of `ace::fs::file` preserves its path and descriptor state.
 - Await eager operations such as `recv_buf()` even though they start before the
   await.
 - Cancellation is part of coroutine and router lifetime management; do not let

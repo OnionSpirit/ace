@@ -142,7 +142,40 @@ namespace ace::fs {
      */
     struct ace::fs::file : io::entity<file> {
 
-        IMPORT_IO_ENTITY_ENV(file);
+        using io_entity_t = ace::io::entity<file>;
+
+    protected:
+        using io_entity_t::_fd;
+        using io_entity_t::_is_closed;
+
+    public:
+        /// @brief Copying is disabled because a file entity has sole ownership.
+        file(const file&) = delete;
+        file& operator=(const file&) = delete;
+
+        /// @brief Transfers the source path and descriptor ownership.
+        file(file&&) noexcept = default;
+
+        /**
+         * @brief Transfers the path and descriptor ownership from another file.
+         * @details Self-move is a no-op, preserving both the path and the base
+         * entity's ownership state. Otherwise the base assignment releases the
+         * destination's previous descriptor before the path is transferred.
+         * @param other Source file; left moved-from unless it is this file.
+         * @return This file.
+         */
+        file& operator=(file&& other) noexcept {
+            if (this == &other)
+                return *this;
+            io_entity_t::operator=(std::move(other));
+            _path = std::move(other._path);
+            return *this;
+        }
+
+        IMPORT_ERROR_HANDLING
+
+        /// @brief Releases any remaining descriptor through the base guard.
+        ~file() override = default;
 
         /// @brief Filesystem path of the file to open.
         std::filesystem::path _path;

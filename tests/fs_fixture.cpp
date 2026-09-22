@@ -4,6 +4,8 @@
 #include <fstream>
 #include <string>
 #include <system_error>
+#include <utility>
+#include <unistd.h>
 
 #include "environment.h"
 
@@ -14,6 +16,7 @@ namespace {
 
 struct fs_fixture : base_fixture {
     static constexpr const char* rewrite_path = "test_open_rewrite_truncates.txt";
+    static constexpr const char* self_move_path = "test_file_self_move.txt";
 
     static ace::task fs_testing() {
         auto f = ace::fs::file("flexing.txt");
@@ -53,9 +56,23 @@ struct fs_fixture : base_fixture {
         co_return;
     }
 
+    static ace::task self_move_open_task(std::filesystem::path path,
+                                         bool& io_available, bool& opened) {
+        ace::fs::file file(path);
+        auto* self = &file;
+        file = std::move(*self);
+        io_available = ace::services::kernel_controller::available();
+        if (not io_available)
+            co_return;
+        auto link = co_await file.open_rdonly();
+        opened = static_cast<bool>(link);
+        co_return;
+    }
+
     void TearDown() override {
         std::error_code error;
         std::filesystem::remove(rewrite_path, error);
+        std::filesystem::remove(self_move_path, error);
     }
 };
 
@@ -103,6 +120,72 @@ TEST_F(fs_fixture, open_rewrite_truncates_existing_file) {
     ASSERT_TRUE(res[0]);
     // File size directly observes O_TRUNC without relying on buffered write timing.
     EXPECT_EQ(std::filesystem::file_size(rewrite_path), 0u);
+}
+
+// Verifies that self-move leaves the file path and idle descriptor state unchanged.
+TEST_F(fs_fixture, file_self_move_preserves_path) {
+    const std::filesystem::path path(self_move_path);
+    ace::fs::file file(path);
+    auto* self = &file;
+    file = std::move(*self);
+
+    // The path is public state; checking it keeps this regression independent of io_uring.
+    EXPECT_EQ(path, file._path);
+    EXPECT_TRUE(file.is_closed());
+}
+
+// Verifies that self-move retains an owned descriptor in the file entity.
+TEST_F(fs_fixture, file_self_move_preserves_descriptor_ownership) {
+    int pipe_fds[2] = {-1, -1};
+    ASSERT_EQ(0, ::pipe(pipe_fds));
+
+    ace::fs::file file(self_move_path);
+    // open() consumes the entity, so use the public base assignment to exercise
+    // self-move while the file still owns a descriptor.
+    auto& base = static_cast<ace::io::entity<ace::fs::file>&>(file);
+    base = ace::io::entity<ace::fs::file>{pipe_fds[0], false};
+    auto* self = &file;
+    file = std::move(*self);
+
+    EXPECT_FALSE(file.is_closed());
+    auto [fd, closed] = file.extract();
+    // Extracting the same live FD proves sole ownership survived without io_uring.
+    EXPECT_EQ(pipe_fds[0], fd);
+    EXPECT_FALSE(closed);
+    EXPECT_NE(-1, ::fcntl(fd, F_GETFD));
+    ::close(fd);
+    ::close(pipe_fds[1]);
+}
+
+// Verifies ordinary move assignment still transfers the source file path.
+TEST_F(fs_fixture, file_move_assignment_transfers_path) {
+    ace::fs::file destination("previous.txt");
+    ace::fs::file source("incoming.txt");
+    auto& assigned = destination = std::move(source);
+
+    // The destination must use the incoming pathname after its old state is replaced.
+    EXPECT_EQ(std::filesystem::path("incoming.txt"), destination._path);
+    EXPECT_EQ(&destination, &assigned);
+    EXPECT_TRUE(destination.is_closed());
+}
+
+// Verifies that a self-moved file still opens its original path when io_uring is available.
+TEST_F(fs_fixture, file_self_move_still_opens_original_path) {
+    {
+        std::ofstream existing(self_move_path, std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(existing.is_open());
+        existing << "self-move target";
+    }
+
+    bool io_available = false;
+    bool opened = false;
+    ace::schedule(self_move_open_task(self_move_path, io_available, opened));
+    ace::run();
+    ASSERT_TRUE(ace::empty());
+    if (not io_available)
+        GTEST_SKIP() << "io_uring is unavailable in this environment";
+    // Opening the original file checks the public behavior after self-move.
+    EXPECT_TRUE(opened);
 }
 
 } // namespace

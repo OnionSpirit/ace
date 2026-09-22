@@ -360,7 +360,9 @@ cancelable `net::recv_query` через io_uring; они не выполняют
 
 `include/ace/fs.h` определяет move-consuming `ace::fs::file`, async open queries и
 `file_link`. `open_rdonly`, `open_wronly` и `open_rewrite` возвращают query;
-`open_rewrite` использует truncate semantics.
+`open_rewrite` использует truncate semantics. Self-move assignment `fs::file`
+сохраняет pathname и состояние владения FD; обычное move assignment переносит
+оба компонента.
 
 `include/ace/console.h` определяет `ace::console::input`, `print` и `println`.
 Свободные короткие aliases в namespace `ace` доступны только при корректном

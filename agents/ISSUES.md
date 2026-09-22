@@ -325,18 +325,26 @@
 
 ### B31. Self-move assignment `fs::file` может изменить path
 
-- **Статус:** Открыто.
+- **Статус:** Решено 2026-09-23.
 - **Приоритет:** Низкий.
 - **Файлы и символы:** `include/ace/fs.h` (`fs::file::operator=(file&&)`);
   `include/ace/io.h` (`io::entity::operator=(entity&&)`).
-- **Симптом:** default derived move assignment продолжает self-move `_path` после
-  того, как base move assignment досрочно вернулся как no-op. Выражение
-  `file = std::move(file)` поэтому может оставить path в unspecified state, хотя
-  base-класс обещает self-move no-op.
-- **Предлагаемое решение:** добавить явную derived self-assignment check либо
-  реализовать move assignment, сохраняющий path и base ownership при self-move.
-- **Проверка решения:** выполнить self-move `fs::file`, затем открыть тот же path
-  и проверить сохранение path, корректный результат и ownership FD.
+- **Причина:** default derived move assignment продолжал self-move `_path`
+  после того, как base move assignment досрочно возвращался как no-op.
+  Поведение зависело от реализации `std::filesystem::path::operator=(path&&)`.
+- **Решение:** явный `fs::file::operator=(file&&)` завершает self-move без
+  изменений, а при обычном move assignment передаёт base ownership и path.
+- **Регресс-тесты:** `fs_fixture.file_self_move_preserves_path`,
+  `file_self_move_preserves_descriptor_ownership`,
+  `file_self_move_still_opens_original_path`, `file_move_assignment_transfers_path`.
+  FD ownership проверяется через публичный base API без `io_uring`.
+- **Ограничение проверки:** libstdc++ 16 сам защищает self-move `path`, поэтому
+  path-test проходил и до исправления. В текущем окружении `io_uring` недоступен;
+  тест открытия пропускается. Исправление устраняет вызов self-move path на
+  уровне `fs::file` независимо от реализации стандартной библиотеки.
+  Три path/move/FD tests прошли по 10 shuffled повторов под Clang 22 + ASan.
+  Полный suite: 331 OK, 27 FAIL, 1 SKIP; 25 I/O GTests и debug toolkit
+  contract требуют `io_uring`, release toolkit contract блокирует B83.
 
 ### B32. Не покрыта отмена owning и direct `close_query`
 

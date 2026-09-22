@@ -257,12 +257,10 @@ inline void ace::core::dispatcher::ensure_workers() {
     try {
         _workers.reserve(required);
         for (std::size_t runner_id = 1; runner_id < _runners.size(); ++runner_id) {
-            []<typename toolkit_t = dispatcher_testing::debug_tools>(std::size_t id) {
-                if constexpr (is_debug) {
-                    if (toolkit_t::_worker_start_hook)
-                        toolkit_t::_worker_start_hook(id);
-                }
-            }(runner_id);
+            if constexpr (is_debug) {
+                if (_worker_start_hook)
+                    _worker_start_hook(runner_id);
+            }
             _workers.emplace_back(
                 std::bind_front(&dispatcher::worker_tf, this), runner_id);
         }

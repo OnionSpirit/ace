@@ -213,15 +213,11 @@ namespace ace::core {
                     _occupied -= size;
                 else
                     release->_released_bytes.fetch_add(size, std::memory_order_relaxed);
-                [](auto& context) {
-                    if constexpr (is_debug)
-                        context.note_malloc_deallocate();
-                }(*release);
+                if constexpr (is_debug) {
+                    release->note_malloc_deallocate();
+                    live_system_chunks.fetch_sub(1, std::memory_order_relaxed);
+                }
                 std::free(chunk);
-                []<typename toolkit_t = arena_testing::debug_tools> {
-                    if constexpr (is_debug)
-                        toolkit_t::live_system_chunks.fetch_sub(1, std::memory_order_relaxed);
-                }();
                 release_reference(*release, release == &_extern_release);
             } else if (release != &_extern_release) {
                 // NOTE: The freed header becomes an intrusive stack node. Its
@@ -324,14 +320,10 @@ namespace ace::core {
             if (transient) {
                 mem = std::malloc(total);
                 if (not mem) throw std::bad_alloc();
-                [](auto& context) {
-                    if constexpr (is_debug)
-                        context.note_malloc_allocate();
-                }(_extern_release);
-                []<typename toolkit_t = arena_testing::debug_tools> {
-                    if constexpr (is_debug)
-                        toolkit_t::live_system_chunks.fetch_add(1, std::memory_order_relaxed);
-                }();
+                if constexpr (is_debug) {
+                    _extern_release.note_malloc_allocate();
+                    live_system_chunks.fetch_add(1, std::memory_order_relaxed);
+                }
             } else {
                 mem = _small_pool.allocate(total);
                 if (mem == nullptr) throw std::bad_alloc();
@@ -370,10 +362,8 @@ namespace ace::core {
          * irrelevant because every chunk returns to the same PMR pool.
          */
         void drain_channel() {
-            [](auto& owner) {
-                if constexpr (is_debug)
-                    owner.note_drain();
-            }(*this);
+            if constexpr (is_debug)
+                note_drain();
             _occupied -= _extern_release._released_bytes.exchange(0, std::memory_order_relaxed);
             auto* chunk = _extern_release._released_chunks.exchange(
                 nullptr, std::memory_order_acquire);
@@ -397,22 +387,18 @@ namespace ace::core {
                 : _arena(arena) {}
 
             void* do_allocate(std::size_t bytes, std::size_t alignment) override {
-                [](auto& owner, std::size_t size) {
-                    if constexpr (is_debug) {
-                        owner.note_pool_allocate(size);
-                        owner.live_system_chunks.fetch_add(1, std::memory_order_relaxed);
-                    }
-                }(*_arena, bytes);
+                if constexpr (is_debug) {
+                    _arena->note_pool_allocate(bytes);
+                    live_system_chunks.fetch_add(1, std::memory_order_relaxed);
+                }
                 return std::pmr::new_delete_resource()->allocate(bytes, alignment);
             }
 
             void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override {
-                [](auto& owner, std::size_t size) {
-                    if constexpr (is_debug) {
-                        owner.note_pool_deallocate(size);
-                        owner.live_system_chunks.fetch_sub(1, std::memory_order_relaxed);
-                    }
-                }(*_arena, bytes);
+                if constexpr (is_debug) {
+                    _arena->note_pool_deallocate(bytes);
+                    live_system_chunks.fetch_sub(1, std::memory_order_relaxed);
+                }
                 std::pmr::new_delete_resource()->deallocate(p, bytes, alignment);
             }
 
@@ -496,10 +482,8 @@ namespace ace::core {
             const std::size_t bytes, const std::size_t alignment)
         {
             auto* const storage = std::pmr::new_delete_resource()->allocate(bytes, alignment);
-            []<typename toolkit_t = nukes_node_arena_testing::debug_tools>(std::size_t size) {
-                if constexpr (is_debug)
-                    toolkit_t::_outstanding_bytes.fetch_add(size, std::memory_order_relaxed);
-            }(bytes);
+            if constexpr (is_debug)
+                _outstanding_bytes.fetch_add(bytes, std::memory_order_relaxed);
             return storage;
         }
 
@@ -509,10 +493,8 @@ namespace ace::core {
             if (not storage)
                 return;
             std::pmr::new_delete_resource()->deallocate(storage, bytes, alignment);
-            []<typename toolkit_t = nukes_node_arena_testing::debug_tools>(std::size_t size) {
-                if constexpr (is_debug)
-                    toolkit_t::_outstanding_bytes.fetch_sub(size, std::memory_order_relaxed);
-            }(bytes);
+            if constexpr (is_debug)
+                _outstanding_bytes.fetch_sub(bytes, std::memory_order_relaxed);
         }
 
     };

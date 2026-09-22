@@ -105,20 +105,16 @@ namespace ace::core::tools {
          * @brief Allocates a new slab and links its nodes into the free list.
          */
         void grow() {
-            []<typename toolkit_t = slab_mempool_testing::debug_tools> {
-                if constexpr (is_debug) {
-                    if (toolkit_t::_slab_growth_hook)
-                        toolkit_t::_slab_growth_hook(false);
-                }
-            }();
+            if constexpr (is_debug) {
+                if (_slab_growth_hook)
+                    _slab_growth_hook(false);
+            }
             auto slab_owner = std::make_unique<q_node<T>[]>(CHUNK_SIZE);
             q_node<T>* slab = slab_owner.get();
-            []<typename toolkit_t = slab_mempool_testing::debug_tools> {
-                if constexpr (is_debug) {
-                    if (toolkit_t::_slab_growth_hook)
-                        toolkit_t::_slab_growth_hook(true);
-                }
-            }();
+            if constexpr (is_debug) {
+                if (_slab_growth_hook)
+                    _slab_growth_hook(true);
+            }
             slabs.push_back(slab);
 
             for (size_t i = 0; i < CHUNK_SIZE - 1; ++i) {

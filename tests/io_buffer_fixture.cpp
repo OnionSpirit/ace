@@ -6,11 +6,13 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include <ace/core/arena.h>
 #include <ace/io.h>
 
 struct io_buffer_fixture : ::testing::Test {};
@@ -245,4 +247,83 @@ TEST_F(io_buffer_fixture, buffer_move_assign) {
     destination = std::move(source);
     EXPECT_EQ(original_length, destination.len());
     EXPECT_EQ(0u, source.len());
+}
+
+// Verifies move assignment releases an assembled destination before taking source chunks.
+TEST_F(io_buffer_fixture, buffer_move_assign_releases_assembled_destination) {
+    std::thread([] {
+        auto& arena = ace::core::arena::get_instance();
+        const auto baseline = arena.stats().in_use_bytes;
+        {
+            ace::io::buffer source;
+            EXPECT_TRUE(source.append(std::string_view("new")));
+            EXPECT_TRUE(source.append(std::string_view(" payload")));
+            const auto source_bytes = arena.stats().in_use_bytes;
+
+            ace::io::buffer destination;
+            EXPECT_TRUE(destination.append(std::string_view("old")));
+            EXPECT_TRUE(destination.append(std::string_view(" content")));
+            ASSERT_NE(nullptr, destination.assemble()->msg_iov);
+            EXPECT_GT(arena.stats().in_use_bytes, source_bytes);
+
+            destination = std::move(source);
+            // Only source storage should remain after the replaced chunks and
+            // assembled iovec array have been released.
+            EXPECT_EQ(source_bytes, arena.stats().in_use_bytes);
+            EXPECT_EQ(0u, source.len());
+            EXPECT_EQ("new payload", destination.as<std::string>());
+            const auto* header = destination.assemble();
+            ASSERT_NE(nullptr, header->msg_iov);
+            EXPECT_EQ(2u, header->msg_iovlen);
+        }
+        // The arena delta detects storage that became unreachable during assignment.
+        EXPECT_EQ(baseline, arena.stats().in_use_bytes);
+    }).join();
+}
+
+// Verifies assigning an empty source releases all previously owned destination storage.
+TEST_F(io_buffer_fixture, buffer_move_assign_empty_source_releases_destination) {
+    std::thread([] {
+        auto& arena = ace::core::arena::get_instance();
+        const auto baseline = arena.stats().in_use_bytes;
+        {
+            ace::io::buffer source;
+            ace::io::buffer destination;
+            EXPECT_TRUE(destination.append(std::string_view("old")));
+            ASSERT_NE(nullptr, destination.assemble()->msg_iov);
+
+            destination = std::move(source);
+            EXPECT_EQ(0u, destination.len());
+            EXPECT_EQ(0u, source.len());
+            // An empty replacement must still dispose of the old chunk and iovec array.
+            EXPECT_EQ(baseline, arena.stats().in_use_bytes);
+        }
+        EXPECT_EQ(baseline, arena.stats().in_use_bytes);
+    }).join();
+}
+
+// Verifies self-move preserves the payload, assembled metadata, and arena ownership.
+TEST_F(io_buffer_fixture, buffer_self_move_assign_preserves_state) {
+    std::thread([] {
+        auto& arena = ace::core::arena::get_instance();
+        const auto baseline = arena.stats().in_use_bytes;
+        {
+            ace::io::buffer buffer;
+            EXPECT_TRUE(buffer.append(std::string_view("first")));
+            EXPECT_TRUE(buffer.append(std::string_view(" second")));
+            const auto* header = buffer.assemble();
+            ASSERT_NE(nullptr, header->msg_iov);
+            const auto* iovecs = header->msg_iov;
+            const auto allocated = arena.stats().in_use_bytes;
+
+            auto& self = buffer;
+            buffer = std::move(self);
+            // A self-move must leave both data and the already assembled view valid.
+            EXPECT_EQ("first second", buffer.as<std::string>());
+            EXPECT_EQ(2u, buffer.assemble()->msg_iovlen);
+            EXPECT_EQ(iovecs, buffer.assemble()->msg_iov);
+            EXPECT_EQ(allocated, arena.stats().in_use_bytes);
+        }
+        EXPECT_EQ(baseline, arena.stats().in_use_bytes);
+    }).join();
 }

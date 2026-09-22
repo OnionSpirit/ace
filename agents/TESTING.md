@@ -4,7 +4,7 @@
 
 > **Статус:** GCC 16 coverage union от 2026-08-23 покрывает **2262/2398 =
 > 94.33%** уникальных исполняемых строк `include/ace/**`. Текущая
-> default-конфигурация регистрирует 352 ACE Meson-теста: 346 GTests, две
+> default-конфигурация регистрирует 355 ACE Meson-тестов: 349 GTests, две
 > Python unit checks, discovery consistency, LSan capability и два toolkit contracts. B29/B38/B66/B68
 > regressions проходят; successful-I/O tests всё ещё требуют доступного
 > `io_uring` и не становятся fallback tests.
@@ -213,6 +213,7 @@ transition-move риски B30/B31.
 | B22 | `base_fixture.udp_bind_transfers_sole_ownership`; supporting coverage `base_fixture.udp_sendto_recv_loop` | ✅ Реализован и проходит в GCC-прогонах |
 | B25 | `io_entity_fixture.io_query_lengths_preserve_uint_max_boundary`, `oversize_io_queries_return_eoverflow_without_submission`, `kernelic_rejects_oversize_lengths_without_submission` | ✅ Реализованы и проходят |
 | B38 | `io_entity_fixture.kernelic_init_failure_reports_availability_and_rejects_ring_operations`, `io_query_returns_kernel_init_error_without_submission`, `file_output_reports_kernel_init_error_without_fallback_bytes` | ✅ Deterministic init-failure regressions проходят |
+| B41 | `io_buffer_fixture.buffer_move_assign_releases_assembled_destination`, `buffer_move_assign_empty_source_releases_destination`, `buffer_self_move_assign_preserves_state` | ✅ Старое destination storage освобождается, self-move сохраняет данные и metadata |
 | B66 | `tests/sanitized_test_runner_test.py`, `ace_tests.discovery_consistency`, `ace_tests.lsan_capability` | ✅ Matrix и LSan capability policy реализованы |
 | B68 | `nukes_alignment_fixture.*`, `arena_fixture.nukes_node_allocator_uses_durable_arena_and_preserves_overalignment` | ✅ Three freelists preserve 1/8/16/32/64/128/256-byte node alignment and ACE config uses durable storage |
 | B70 | `io_entity_fixture.file_output_reuses_completed_outcast_commands_without_payload_leaks` | ✅ Successful completion очищает payload перед `raw_release()`; full LSan clean |
@@ -565,6 +566,9 @@ transition-move риски B30/B31.
 | B25 | `buffer_prepend_raw` | prepend(void*, void*) — prepend байтового диапазона | ✅ |
 | B26 | `buffer_append_span_dynamic` | append(span<int>) — копирование POD span с dynamic_extent | ✅ |
 | B27 | `buffer_expand_overflow` | `len + control_hdr_len` проверяется до allocation, buffer остаётся пустым | ✅ |
+| B28 | `buffer_move_assign_releases_assembled_destination` | Непустой assembled destination освобождает chunks и iovec перед transfer | ✅ |
+| B29 | `buffer_move_assign_empty_source_releases_destination` | Пустой source также освобождает прежний destination | ✅ |
+| B30 | `buffer_self_move_assign_preserves_state` | Self-move сохраняет payload, assembled metadata и ownership | ✅ |
 
 #### `IoQueryFixture` (не реализована)
 
@@ -1055,7 +1059,7 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/get_runner_fixture.cpp` | `get_runner_fixture` | 1 |
 | `tests/id_alloc_fixture.cpp` | `id_alloc_fixture` | 3 |
 | `tests/io_any_fixture.cpp` | `io_any_fixture` | 6 |
-| `tests/io_buffer_fixture.cpp` | `io_buffer_fixture` | 25 |
+| `tests/io_buffer_fixture.cpp` | `io_buffer_fixture` | 28 |
 | `tests/io_entity_fixture.cpp` | `io_entity_fixture` | 32 |
 | `tests/io_hanged_fixture.cpp` | `io_hanged_fixture` | 5 |
 | `tests/omniptr_fixture.cpp` | `omniptr_fixture` | 12 |
@@ -1073,15 +1077,15 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/nukes_alignment_fixture.cpp` | `nukes_alignment_fixture` | 5 |
 | `tests/nukes_concurrency_fixture.cpp` | `nukes_concurrency_fixture` | 5 |
 | `tests/testing_toolkit_fixture.cpp` | `testing_toolkit_fixture` | 2 |
-| **Итого: 37 файлов** | | **346** |
+| **Итого: 37 файлов** | | **349** |
 
-Default Meson configuration (`ace_entry=false`) регистрирует **352 ACE** tests:
-346 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
+Default Meson configuration (`ace_entry=false`) регистрирует **355 ACE** tests:
+349 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
 `ace_tests.discovery_consistency`, `testing_toolkit.debug`, `testing_toolkit.release`
 и `ace_tests.lsan_capability`. Последний
 становится Meson SKIP при недоступном под ptrace LSan; остальные checks выполняются
 с `detect_leaks=0` только в auto mode. TSan profile не регистрирует LSan
-capability и содержит 351 tests. `ace_entry=true` добавляет fallback test.
+capability и содержит 354 tests. `ace_entry=true` добавляет fallback test.
 
 ### Проверка исправлений ревью (2026-09-21)
 
@@ -1290,6 +1294,22 @@ transient allocation, выравнивании frame и возврате к base
   sanitizer diagnostics. Под ptrace LSan недоступен; runner отключил только
   leak detection для ASan-прогона.
 - Полные suites и benchmarks в этой задаче не запускались.
+
+### Проверка B41 (2026-09-22)
+
+Три новых `io_buffer_fixture` regressions падали до исправления: два показывали
+невозвращённые arena bytes после потери destination storage, третий — пустой
+payload и потерянный assembled iovec при self-move. После добавления self-check
+и вызова `clear()` перед transfer все 28 тестов fixture прошли 20 shuffled
+повторов под Clang 22 AddressSanitizer и GCC 16 ThreadSanitizer: **560/560** в
+каждом режиме. Сборки `ninja -C build ace_tests` и `ninja -C build-tsan ace_tests`
+прошли. LSan недоступен под ptrace, поэтому ASan correctness-прогон выполнен
+штатным sanitizer runner без leak detection.
+
+Обе команды `meson test -C build --suite ace --print-errorlogs --num-processes 4`
+и аналогичная для `build-tsan` завершились до запуска тестов (exit 125):
+`ace_testing_toolkit_release` не компилируется при `NDEBUG`, см. B83.
+Benchmark-сценарии не добавлялись и не запускались.
 
 
 ### Общая CRTP-база toolkit (2026-09-22)

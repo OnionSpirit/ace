@@ -1021,9 +1021,17 @@ public:                                                                         
         }
 
         /**
-         * @brief Move assignment — transfers the chunk list and total length.
+         * @brief Replaces owned chunks and assembled metadata with those of @p b.
+         * @details Releases the destination's previous storage before transfer.
+         * Self-move is a no-op. The source is empty after a successful transfer.
+         * @param b Buffer whose storage and message metadata are transferred.
+         * @return This buffer.
+         * @warning Pointers into the destination's previous chunks or assembled
+         * iovec array are invalidated unless this is a self-move.
          */
         buffer& operator=(buffer&& b) noexcept {
+            if (this == &b) return *this;
+            clear();
             _hdr = b._hdr;
             b._hdr = msghdr{};
             _chunk_list_begin = b._chunk_list_begin;

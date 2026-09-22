@@ -309,6 +309,8 @@ FD. Это намеренное различие зафиксировано в
 
 `io::buffer` предоставляет chunked scatter-gather storage: `expand`, `append`,
 `prepend`, `shape`, `assemble`, `disassemble`, `clone`, `clear`, `len` и `as<T>`.
+Move assignment освобождает прежние chunks и собранный iovec destination,
+переносит состояние source и оставляет source пустым; self-move сохраняет буфер.
 `io::link` добавляет fire-and-forget `write`/`writeln`, async `read` и
 `read_buf`.
 

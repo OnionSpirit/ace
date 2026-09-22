@@ -59,6 +59,25 @@
 - **Объём:** по решению пользователя оставлено отдельной задачей; дальнейшее
   расследование и исправление не выполнялись.
 
+### B83. Release toolkit contract не компилируется при `NDEBUG`
+
+- **Статус:** Открыто.
+- **Приоритет:** Высокий.
+- **Файлы:** `include/ace/core/arena.h`, `include/ace/core/dispatcher.h`,
+  `include/ace/core/tools/queue.h`, `include/ace/services/clock.h`;
+  `tests/testing_toolkit_contract.cpp` обнаруживает ошибку.
+- **Симптом:** сборка `ace_testing_toolkit_release` с `-DNDEBUG` завершается
+  ошибками `no member named` / `not declared in this scope` для debug-only
+  hooks и counters. Полный Meson suite не доходит до запуска тестов.
+- **Причина:** обращения к полям отсутствующего в release `debug_tools`
+  остаются некорректными при проверке тела `if constexpr (is_debug)`;
+  Clang 22 и GCC 16 воспроизводят ошибку.
+- **Проверка:** `meson test -C build --suite ace --print-errorlogs
+  --num-processes 4` и аналогичная команда для `build-tsan` останавливаются
+  на compile target `ace_testing_toolkit_release` (exit 125).
+- **Объём:** обнаружено при проверке B41; исправление не входит в утверждённый
+  план B41 и не выполнялось.
+
 ### B80. Test-only hooks и диагностические counters присутствовали в release
 
 - **Статус:** Решено 2026-09-22.
@@ -482,7 +501,7 @@
 
 ### B41. Move-assignment `io::buffer` теряет destination chunks и ломает self-move
 
-- **Статус:** Открыто.
+- **Статус:** Решено 2026-09-22.
 - **Приоритет:** Высокий.
 - **Файл:** `include/ace/io.h` (`io::buffer::operator=(buffer&&)`).
 - **Симптом:** assignment перезаписывает `_hdr` и три указателя destination без
@@ -492,12 +511,16 @@
 - **Пробел теста:** `io_buffer_fixture.buffer_move_assign` использует пустую
   destination и не проверяет release старого payload, assembled state либо
   self-move; тест проходит на текущем дефекте.
-- **Предлагаемое решение:** self-check, затем гарантированно освободить прежнее
-  состояние destination и атомарно принять всё состояние source. Уточнить
-  exception guarantee; текущая операция заявлена `noexcept`.
-- **Проверка решения:** непустая и assembled destination, много chunks, empty
-  source, self-move; точные данные/len/msg_iovlen и arena live-chunk deltas;
-  ASan/LSan на отсутствие leak/UAF/double-free.
+- **Решение:** self-move теперь явный no-op; перед передачей состояния source
+  destination освобождает прежние chunks и собранный iovec через `clear()`.
+  `noexcept` сохранён, Doxygen описывает invalidation старых указателей.
+- **Регресс-тесты:** `buffer_move_assign_releases_assembled_destination`,
+  `buffer_move_assign_empty_source_releases_destination` и
+  `buffer_self_move_assign_preserves_state` проверяют payload, metadata и
+  arena accounting в изолированном потоке. Все три падали до исправления.
+- **Проверка решения:** 28 тестов `io_buffer_fixture` прошли 20 shuffled
+  повторов под Clang 22 ASan и GCC 16 TSan (560/560 в каждом режиме).
+  LSan недоступен под ptrace; полные Meson suites не запустились из-за B83.
 
 ### B42. `io::buffer::shape()` допускает OOB-read и invalidates assembled metadata
 

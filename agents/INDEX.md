@@ -716,5 +716,6 @@ thread isolation и независимость CRTP service hooks.
 а затем обычные allocation/scheduler/timer/I/O paths в обеих конфигурациях.
 
 Полные B80 host suites: GCC/Clang ASan+UBSan+LSan — по 352/352, повторный
-GCC TSan — 351/351. Исходный TSan сбой B82 и независимая от B80 shuffled
-зависимость B81 зарегистрированы отдельно; подробности в `TESTING.md`.
+GCC TSan — 351/351. Исходный TSan сбой B82 зарегистрирован отдельно;
+независимая от B80 shuffled-зависимость B81 исправлена позднее. Подробности в
+`TESTING.md`.

@@ -398,20 +398,23 @@ TEST_F(arena_fixture, owner_storage_outlives_departed_thread) {
     EXPECT_EQ(baseline_chunks, ace::core::arena::live_system_chunks.load());
 }
 
-// Verifies that a coroutine frame is allocated and released through the shared arena.
+// Verifies that a coroutine frame is allocated and released through its thread's arena.
 TEST_F(arena_fixture, promise_traits_uses_arena) {
-    auto& arena = ace::core::arena::get_instance();
-    const auto baseline = arena.stats();
-    {
-        auto coroutine = arena_valued_coroutine();
-        const auto allocated = arena.stats();
-        EXPECT_GT(allocated.in_use_bytes, baseline.in_use_bytes);
-        EXPECT_GE(allocated.pool_held_bytes, baseline.pool_held_bytes);
-        EXPECT_EQ(0u, allocated.malloc_count);
-        // The frame includes an aligned control block before the promise.
-        EXPECT_EQ(0u, reinterpret_cast<std::uintptr_t>(coroutine._coroutine.address()) % 16);
-    }
-    EXPECT_EQ(baseline.in_use_bytes, arena.stats().in_use_bytes);
+    on_fresh_arena([] {
+        auto& arena = ace::core::arena::get_instance();
+        const auto baseline = arena.stats();
+        {
+            auto coroutine = arena_valued_coroutine();
+            const auto allocated = arena.stats();
+            EXPECT_GT(allocated.in_use_bytes, baseline.in_use_bytes);
+            EXPECT_GE(allocated.pool_held_bytes, baseline.pool_held_bytes);
+            EXPECT_EQ(0u, allocated.malloc_count);
+            // The frame includes an aligned control block before the promise.
+            EXPECT_EQ(0u, reinterpret_cast<std::uintptr_t>(coroutine._coroutine.address()) % 16);
+        }
+        // An isolated arena excludes deferred frees from earlier tests.
+        EXPECT_EQ(baseline.in_use_bytes, arena.stats().in_use_bytes);
+    });
 }
 
 // Verifies deferred owner accounting after a foreign transient free.

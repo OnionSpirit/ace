@@ -933,7 +933,7 @@ its thread-local protocol.
 | AR9 | `occupied_zero_drains_every_alloc` | occupied=0 не делит на ноль и дренирует канал | ✅ |
 | AR10 | `limit_breach_fallback_malloc` | общий лимит: transient fallback или `bad_alloc` | ✅ |
 | AR11 | `destructor_returns_everything` | выход треда освобождает pool/channel/transient storage | ✅ |
-| AR12 | `promise_traits_uses_arena` | coroutine frame учитывается общей arena | ✅ |
+| AR12 | `promise_traits_uses_arena` | coroutine frame учитывается в изолированной thread-local arena независимо от порядка тестов | ✅ |
 | AR13 | `foreign_transient_free_updates_owner_accounting` | foreign transient-free корректирует owner accounting | ✅ |
 | AR14 | `typed_allocation_uses_arena` | typed small/large arrays используют pool/transient пути | ✅ |
 | AR15 | `typed_allocation_overflow` | переполнение `count*sizeof(T)` даёт `bad_array_new_length` | ✅ |
@@ -1250,10 +1250,10 @@ storage символов hooks/counters. Внешние translation units и ACE
 - 43 теста hooks/queue/clock/dispatcher/I/O прошли 20 shuffled повторов
   под GCC ASan+UBSan+LSan и GCC TSan: **860/860** в каждом режиме,
   `--gtest_random_seed=527` (далее GTest увеличивает seed).
-- Расширенный shuffled набор с arena остановился на B81 в обоих режимах:
-  `promise_traits_uses_arena` зависит от ранее накопленных foreign releases.
-  Та же проверка падает на неизменённом `e09db55` под TSan. B81/B82 оставлены
-  отдельными задачами по решению пользователя; тесты не ослаблялись.
+- Исторический расширенный shuffled набор с arena остановился на B81 в обоих
+  режимах: `promise_traits_uses_arena` зависел от ранее накопленных foreign
+  releases. Та же проверка падала на неизменённом `e09db55` под TSan. B81
+  исправлен отдельной задачей ниже; B82 остаётся открытым.
 - `nm -C` standalone contracts GCC/Clang: восемь hook/counter symbols в debug,
   ни одного из проверяемых symbols в release при `-O0`.
 - Coverage повторно не измерялось; процент в начале документа исторический.
@@ -1274,6 +1274,22 @@ python3 tests/sanitized_test_runner.py --sanitizers address,undefined \
 TSan shuffle использовал ту же команду с `--sanitizers thread` и binary из
 `/tmp/ace-toolkit-tsan`. Логи: `/tmp/ace-toolkit-{clang,gcc,tsan}-tests.log`,
 `/tmp/ace-toolkit-tsan-tests-rerun.log`, `/tmp/ace-toolkit-{gcc,tsan}-hooks-shuffle.log`.
+
+### Проверка B81 (2026-09-22)
+
+`arena_fixture.promise_traits_uses_arena` теперь использует `on_fresh_arena`.
+Все прежние assertions о росте `in_use_bytes`, pool accounting, отсутствии
+transient allocation, выравнивании frame и возврате к baseline сохранены.
+Индекс AR12 и fixture map не меняют нумерацию: новых тестов нет.
+
+- `ninja -C build ace_tests` (Clang 22, AddressSanitizer) — успешно.
+- `ninja -C build-tsan ace_tests` (GCC 16, ThreadSanitizer) — успешно.
+- `--gtest_filter=arena_fixture.*:dispatcher_fixture.* --gtest_shuffle
+  --gtest_random_seed=527 --gtest_repeat=20` через
+  `tests/sanitized_test_runner.py` — **760/760** в каждой конфигурации, без
+  sanitizer diagnostics. Под ptrace LSan недоступен; runner отключил только
+  leak detection для ASan-прогона.
+- Полные suites и benchmarks в этой задаче не запускались.
 
 
 ### Общая CRTP-база toolkit (2026-09-22)

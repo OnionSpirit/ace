@@ -22,19 +22,26 @@
 
 ### B81. Arena frame-accounting test зависит от предыдущих dispatcher tests
 
-- **Статус:** Открыто.
+- **Статус:** Решено 2026-09-22.
 - **Приоритет:** Средний.
 - **Файл:** `tests/arena_fixture.cpp`, `promise_traits_uses_arena`.
 - **Симптом:** shuffled запуск после dispatcher tests сравнивает 352 bytes
   после allocation с 1168 bytes до allocation и падает на `EXPECT_GT`.
 - **Причина:** baseline snapshot берётся на общем owner arena с отложенными
   foreign releases; следующая allocation может сначала списать эти releases.
-  Проверка требует изолированного arena, как остальные accounting tests.
-- **Объём:** по решению пользователя оставлено отдельной задачей; не исправлялось.
-- **Проверка:** воспроизведено на неизменённом ACE `e09db55` под GCC TSan:
+  Проверка требовала изолированной arena, как остальные accounting tests.
+- **Решение:** `promise_traits_uses_arena` выполняет все прежние assertions в
+  `on_fresh_arena`; его baseline больше не включает освобождения предыдущих тестов.
+- **Регресс-тест:** `arena_fixture.promise_traits_uses_arena` в перемешанном
+  наборе с `dispatcher_fixture.*`.
+- **Проверка до исправления:** воспроизведено на неизменённом ACE `e09db55` под GCC TSan:
   `--gtest_filter=arena_fixture.*:dispatcher_fixture.* --gtest_shuffle
-  --gtest_random_seed=527 --gtest_repeat=20`; текущая версия также падает
-  под ASan/UBSan и TSan. Test expectations не изменялись.
+  --gtest_random_seed=527 --gtest_repeat=20`; прежняя версия также падала
+  под ASan/UBSan и TSan.
+- **Проверка после исправления:** тот же набор из 38 тестов прошёл 20 shuffled
+  повторов (760/760) с Clang 22 AddressSanitizer и GCC 16 ThreadSanitizer.
+  Test expectations сохранены. Под ptrace LSan недоступен, поэтому ASan-прогон
+  выполнен через штатный `sanitized_test_runner.py` без leak detection.
 
 ### B82. Нестабильное membership assertion в automaton OR regression
 

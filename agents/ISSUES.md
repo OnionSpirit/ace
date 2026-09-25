@@ -1,6 +1,6 @@
 # ACE Framework - Issues and Technical Debt
 
-Дата актуализации: 2026-09-22.
+Дата актуализации: 2026-09-25.
 
 Этот файл является единым реестром известных багов, TODO, нестабильностей и
 технических нюансов, требующих решения. Закрытые записи не удаляются: их статус
@@ -19,6 +19,86 @@
    производительности - в `agents/BENCHMARKS.md`.
 
 ## Открытые баги
+
+### B85. LSan leak после успешного automaton OR regression
+
+- **Статус:** Решено (2026-09-25); отдельный план утверждён пользователем.
+- **Приоритет:** Высокий.
+- **Файлы:** `include/ace/core/async.h`, `include/ace/core/runner.h`,
+  `include/ace/core/async_handle.h`, `tests/yield_fixture.cpp`,
+  `tests/cross_mechanic_fixture.cpp`,
+  `or_ping_automaton_loop_no_value_loss`; allocation stack проходит через
+  `include/ace/core/arena.h` (`nukes_node_arena::allocate`) и Nukes dynamic nodes.
+- **Симптом:** GTest assertions проходят, но после teardown LeakSanitizer
+  сообщает 355 bytes в пяти allocations (213 direct + 142 indirect).
+  Полный Clang ASan+LSan suite: 363 OK / 1 FAIL. Одновременно выполнялся
+  полный TSan suite, прошедший 363/363.
+- **Причина:** `async_router::cancel_yield()` сбрасывал owning waiter node
+  без возврата runner-у. Связь с membership failure B82 не доказана:
+  здесь membership assertion прошёл, сбой обнаружен только LSan.
+- **Проверка:** `/tmp/ace-b84-host-clang-tests.log`; повторить ASan+LSan
+  `cross_mechanic_fixture.or_ping_automaton_loop_no_value_loss`, затем полный
+  suite без параллельной нагрузки. Не отключать leak detection для обхода.
+- **Объём:** отдельный утверждённый план B85: yield-waiter cancellation,
+  публичные lifetime regressions, sanitizer-проверки и BM18.
+- **Расследование по разрешению пользователя:** отдельные 500 повторов
+  существующего теста без параллельной нагрузки проходят assertions, но LSan
+  подтверждает 2059 bytes в 29 allocations (`/tmp/ace-b85-isolated-repeat.log`).
+  Последовательный повтор полного ASan+LSan suite прошёл 364/364; это не
+  отменяет воспроизведённый leak. Найден путь потери ownership:
+  `async_handle.h` ping/join router cancellation вызывает `cancel_yield()`,
+  а `async.h` сбрасывает `_yield_waiter` без возврата suspended node runner-у.
+  OR observer allocation stack соответствует потерянным узлам. Два новых
+  regression через публичный API детерминированно воспроизвели
+  неосвобождённые coroutine frames и 142 leaked bytes в двух allocations.
+- **Решение:** `cancel_yield()` очищает регистрацию и возвращает сохранённый
+  node через `runner::reattach()`; определение перенесено в `runner.h`.
+  Повторная отмена не публикует node повторно, next yield не потребляется,
+  automaton не отменяется.
+- **Регресс-тесты:** `yield_fixture.cancel_pending_ping_releases_waiter` и
+  `cancel_pending_join_releases_waiter`: destroyed exactly once, no resume,
+  повторная отмена, сохранение yield и terminal value.
+- **Проверка после исправления:** 500/500 повторов исходного OR regression с
+  обязательным LSan без утечек; связанные 66 tests × 20 shuffle repeats —
+  1320/1320 под ASan+LSan и 1320/1320 под TSan. Полные host suites:
+  ASan+LSan 366/366, TSan 365/365. Логи `/tmp/ace-b85-*.log`.
+  BM18 обычного ping: median CPU 5.509 → 5.549 ms (+0.7%, в пределах
+  межсерийного разброса); детали и ограничения в `agents/BENCHMARKS.md`.
+
+### B84. Timer tolerance test единично превышает верхнюю границу под TSan
+
+- **Статус:** Решено 2026-09-25; исправлен контракт теста, production timers не менялись.
+- **Приоритет:** Средний.
+- **Файл:** `tests/timer_fixture.cpp:208`, `do_timer_on_runner_test`.
+- **Симптом:** в 18-м shuffled повторе (seed 544) elapsed 707971 us для
+  requested 450000 us превысил предел requested + 100000 us. Остальные 719
+  проверок набора прошли; полный TSan suite — 363/363. Сообщения о data race нет.
+- **Условия и гипотеза:** одновременно выполнялись другие sanitizer suites;
+  влияние CPU scheduling/load возможно, но причина и связь с B45 не установлены.
+  Лог: `/tmp/ace-b45-tsan-shuffle.log`.
+- **Проверка:** повторить исходный filter queue/timer/clock initialization с
+  `--gtest_shuffle --gtest_random_seed=527 --gtest_repeat=20` без параллельной
+  нагрузки, при необходимости сравнить baseline. Не ослаблять временной допуск
+  без установления причины и отдельного согласования.
+- **Объём:** после расследования пользователь отдельно утвердил исправление
+  `do_timer_on_runner_test`, без изменения production timers.
+- **Дополнительное расследование:** пользователь разрешил исследование B84.
+  Последовательный повтор исходного TSan filter прошёл 720/720. Управляемая
+  остановка только тестового процесса на 750 ms после старта таймеров
+  детерминированно воспроизводит failure верхней границы (elapsed около 850 ms),
+  без сообщений sanitizer: `/tmp/ace-b84-controlled-pause.log`.
+  README явно не гарантирует hard upper bound при scheduler load; это
+  подтверждает несоответствие assertion контракту, но не устанавливает точную
+  причину исходного 707971 us выброса.
+- **Решение:** убрана не гарантированная контрактом верхняя граница 100 ms;
+  нижняя граница теперь вычисляется из исходной duration по ID. Добавлены
+  проверки соответствия reported duration, отсутствия повторных и пропущенных
+  ID. Существующий 30-секундный Meson process timeout сохранён.
+- **Проверка:** прежний тест падал с SIGSTOP 750 ms; изменённый проходит тот же
+  эксперимент (850 ms, exit 0). ASan+LSan и TSan shuffled filter — по 720/720;
+  полный TSan — 363/363, повторный полный ASan+LSan — 364/364. Первый полный
+  ASan+LSan дал 363/364 из-за отдельно зарегистрированного leak B85.
+  Подробности и логи в `agents/TESTING.md`.
 
 ### B81. Arena frame-accounting test зависит от предыдущих dispatcher tests
 
@@ -61,7 +141,7 @@
 
 ### B83. Release toolkit contract не компилируется при `NDEBUG`
 
-- **Статус:** Открыто.
+- **Статус:** Решено 2026-09-25.
 - **Приоритет:** Высокий.
 - **Файлы:** `include/ace/core/arena.h`, `include/ace/core/dispatcher.h`,
   `include/ace/core/tools/queue.h`, `include/ace/services/clock.h`;
@@ -72,11 +152,22 @@
 - **Причина:** обращения к полям отсутствующего в release `debug_tools`
   остаются некорректными при проверке тела `if constexpr (is_debug)`;
   Clang 22 и GCC 16 воспроизводят ошибку.
-- **Проверка:** `meson test -C build --suite ace --print-errorlogs
+- **Проверка до исправления:** `meson test -C build --suite ace --print-errorlogs
   --num-processes 4` и аналогичная команда для `build-tsan` останавливаются
   на compile target `ace_testing_toolkit_release` (exit 125).
-- **Объём:** обнаружено при проверке B41; исправление не входит в утверждённый
-  план B41 и не выполнялось.
+- **Решение:** обращения к optional members сделаны template-dependent внутри
+  generic lambdas по существующему образцу kernel controller. Release bases
+  остаются пустыми, accounting helpers отсутствуют; debug hooks/counters,
+  порядок операций и arena cross-thread release protocol сохранены.
+- **Регресс-тест:** `tests/testing_toolkit_contract.cpp` собирается в debug и
+  release при `-O0`; дополнен восемью concepts/assertions для отсутствия
+  accounting helpers в release. До исправления release compilation падала
+  на Clang 22 и GCC 16; после исправления оба режима проходят.
+- **Проверка после исправления:** Clang ASan+LSan — 359/359, GCC TSan — 358/358
+  вне песочницы с доступным `io_uring`; связанные 71 GTests прошли по 10 shuffle
+  повторов под ASan и TSan. `nm -C` для обоих compiler profiles: восемь
+  hook/counter storage symbols в debug, ноль в release `-O0`. Подробности и
+  первоначальные ограничения sandbox-прогонов — в `agents/TESTING.md`.
 
 ### B80. Test-only hooks и диагностические counters присутствовали в release
 
@@ -581,7 +672,7 @@
 
 ### B45. Move-конструктор intrusive `queue` оставляет nodes привязанными к source
 
-- **Статус:** Открыто.
+- **Статус:** Решено 2026-09-25.
 - **Приоритет:** Высокий.
 - **Файл:** `include/ace/core/tools/queue.h` (`queue(queue&&)`,
   `q_node::owning_queue`, `q_node::remove()`).
@@ -590,13 +681,21 @@
   пустой source через links destination и может повредить обе очереди.
 - **Пробел теста:** `queue_fixture.queue_move_constructor` извлекает элементы
   только через destination и не вызывает self-ejection сохранённого node.
-- **Предлагаемое решение:** либо обновить back-pointers всех перенесённых nodes
-  (O(N)), либо перепроектировать owner token/indirection так, чтобы move очереди
-  сохранял O(1) и `remove()` находил актуального владельца. Выбор важен для
-  O(1)-контракта timer cancellation.
-- **Проверка решения:** сохранить pointers на head/middle/tail, переместить queue,
-  удалить каждый через `q_node::remove()`, проверить links/destructors/reuse;
-  repeated moves и empty queue. Документировать complexity move/remove.
+- **Решение:** по утверждённому плану move-конструктор обновляет back-pointers
+  всех nodes за O(N), сохраняя O(1) `remove()`, noexcept, адреса nodes/payload,
+  общий pool и пустой reusable source. Новых allocation и owner abstractions нет.
+- **Регресс-тесты:** пять `queue_fixture` tests Q14–Q18 в `TESTING.md` проверяют
+  head/middle/tail removal, repeated moves, source lifetime, empty move,
+  независимость source/destination, exact-once destruction и pool reuse.
+  До исправления три теста падали на assertions, `queue_move_outlives_source`
+  давал ASan heap-use-after-free; empty boundary проходил и раньше.
+- **Проверка:** Clang ASan+LSan 364/364, GCC TSan 363/363; связанные 36 tests
+  прошли 20 shuffled повторов под ASan+LSan и в последовательном TSan-прогоне
+  (по 720/720). Первый TSan repeat имел один сторонний timer failure B84,
+  зарегистрированный отдельно и не объявленный исправленным.
+- **Benchmark:** BM26 сравнивает одинаковую нагрузку до/после исправления;
+  линейная стоимость подтверждена (64 nodes ~36.7 ns/move, 1024 ~913 ns,
+  16384 ~16.35 us). Baseline содержал B83; полный протокол в `BENCHMARKS.md`.
 
 ### B46. Уничтожение непустой `queue<T>` не разрушает живые `T`
 
@@ -988,7 +1087,9 @@
   служил benchmark.
 - **Решение:** runner timer/expire tests теперь измеряют `steady_clock`
   непосредственно вокруг await, сопоставляют уникальный timer ID с
-  requested/observed timestamps и проверяют нижнюю и разумную верхнюю границы.
+  requested/observed timestamps и проверяют нижнюю границу. В B84 (2026-09-25)
+  у relative test убрана не гарантированная scheduler-ом верхняя граница;
+  добавлены exact-once ID и проверка reported duration по исходному запросу.
   Absolute expire сравнивает wake timestamp с deadline. Correctness-нагрузка
   уменьшена до 1100 timers, тяжёлая 100k-нагрузка оставлена BM3.
 - **Проверка решения:** zero/sub-ms/boundary wheel slots, concurrent timers,

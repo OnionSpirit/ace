@@ -23,6 +23,14 @@ template <typename T> concept arena_snapshot = requires(const T& arena) { arena.
 template <typename T> concept arena_counter = requires { T::live_system_chunks; };
 template <typename T> concept node_counter = requires { T::outstanding_bytes(); };
 template <typename T> concept transient_counter = requires(T& release) { release._malloc_count; };
+template <typename T> concept malloc_allocate_note = requires(T& release) { release.note_malloc_allocate(); };
+template <typename T> concept malloc_deallocate_note = requires(T& release) { release.note_malloc_deallocate(); };
+template <typename T> concept malloc_snapshot = requires(const T& release) { release.malloc_count(); };
+template <typename T> concept pool_allocate_note = requires(T& arena) { arena.note_pool_allocate(64); };
+template <typename T> concept pool_deallocate_note = requires(T& arena) { arena.note_pool_deallocate(64); };
+template <typename T> concept drain_note = requires(T& arena) { arena.note_drain(); };
+template <typename T> concept pool_snapshot = requires(const T& arena) { arena.pool_held(); };
+template <typename T> concept drain_snapshot = requires(const T& arena) { arena.drains(); };
 
 template <typename Selected, typename Toolkit, typename Owner>
 consteval bool toolkit_contract() {
@@ -44,6 +52,16 @@ static_assert(arena_snapshot<core::arena> == is_debug);
 static_assert(arena_counter<core::arena> == is_debug);
 static_assert(node_counter<core::nukes_node_arena> == is_debug);
 static_assert(transient_counter<core::extern_release> == is_debug);
+
+// B83: accounting helpers must disappear too; empty release stubs would hide the bug.
+static_assert(malloc_allocate_note<core::extern_release> == is_debug);
+static_assert(malloc_deallocate_note<core::extern_release> == is_debug);
+static_assert(malloc_snapshot<core::extern_release> == is_debug);
+static_assert(pool_allocate_note<core::arena> == is_debug);
+static_assert(pool_deallocate_note<core::arena> == is_debug);
+static_assert(drain_note<core::arena> == is_debug);
+static_assert(pool_snapshot<core::arena> == is_debug);
+static_assert(drain_snapshot<core::arena> == is_debug);
 
 static_assert(toolkit_contract<core::dispatcher_testing::debug_tools,
     core::dispatcher_testing, core::dispatcher>());

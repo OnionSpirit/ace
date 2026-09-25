@@ -422,15 +422,14 @@ namespace ace::core {
                 return true;
             }
 
-            /// @brief Drop the registered yield waiter (automaton only).
-            bool cancel_yield() noexcept override {
-                if constexpr (is_automaton_rule<promise_rule_t>) {
-                    if (not _address) return false;
-                    auto handle = coroutine_t::from_address(_address);
-                    handle.promise()._yield_waiter.reset();
-                }
-                return true;
-            }
+            /**
+             * @brief Return the registered yield waiter to its runner (automaton only).
+             * @details Clears registration before returning ownership so cancellation
+             * can reclaim the waiting coroutine. Does not consume a yield or cancel
+             * the automaton. Repeated calls without a new waiter have no effect.
+             * @return @c false for an unbound automaton router, @c true otherwise.
+             */
+            bool cancel_yield() noexcept override;
 
             /// @brief Destroy the coroutine frame via the stored address.
             void destroy() noexcept override {

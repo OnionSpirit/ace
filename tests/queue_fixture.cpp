@@ -1,6 +1,8 @@
 #include "allocation_failure.h"
 
 #include <iostream>
+#include <memory>
+#include <optional>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -158,6 +160,122 @@ TEST_F(queue_fixture, queue_move_constructor) {
     EXPECT_TRUE(_queue.empty());
     EXPECT_EQ(55, moved_queue.dequeue().value);
     EXPECT_TRUE(moved_queue.empty());
+}
+
+// Verifies saved head/middle/tail nodes remove themselves from the moved queue in any order.
+TEST_F(queue_fixture, queue_move_preserves_node_removal) {
+    const int orders[][3] {{0, 1, 2}, {1, 2, 0}, {2, 0, 1}};
+    for (const auto& order : orders) {
+        tool::queue<test_payload> source(_mempool);
+        tool::q_node<test_payload>* nodes[] {
+            source.enqueue(test_payload {10}),
+            source.enqueue(test_payload {20}),
+            source.enqueue(test_payload {30})
+        };
+        tool::queue<test_payload> moved(std::move(source));
+        for (const auto index : order) {
+            SCOPED_TRACE(index);
+            EXPECT_TRUE(nodes[index]->remove());
+            // Source must stay empty; a stale owner would update its head/tail instead.
+            EXPECT_TRUE(source.empty());
+            EXPECT_FALSE(nodes[index]->remove());
+        }
+        ASSERT_TRUE(moved.empty());
+        moved.enqueue(test_payload {40});
+        EXPECT_EQ(40, moved.dequeue().value);
+        EXPECT_TRUE(moved.empty());
+    }
+}
+
+// Verifies repeated moves keep saved nodes attached to the final owner and sources reusable.
+TEST_F(queue_fixture, queue_repeated_move_keeps_sources_independent) {
+    auto* node = _queue.enqueue(test_payload {10});
+    tool::queue<test_payload> intermediate(std::move(_queue));
+    tool::queue<test_payload> destination(std::move(intermediate));
+    _queue.enqueue(test_payload {20});
+    intermediate.enqueue(test_payload {30});
+
+    EXPECT_TRUE(node->remove());
+    ASSERT_TRUE(destination.empty());
+    // New source payloads must survive removal of the transferred node.
+    ASSERT_FALSE(_queue.empty());
+    ASSERT_FALSE(intermediate.empty());
+    EXPECT_EQ(20, _queue.dequeue().value);
+    EXPECT_EQ(30, intermediate.dequeue().value);
+    EXPECT_TRUE(_queue.empty());
+    EXPECT_TRUE(intermediate.empty());
+}
+
+// Verifies a saved node remains removable after the moved-from queue's lifetime ends.
+TEST_F(queue_fixture, queue_move_outlives_source) {
+    std::optional<tool::queue<test_payload>> destination;
+    tool::q_node<test_payload>* node = nullptr;
+    auto source = std::make_unique<tool::queue<test_payload>>(_mempool);
+    node = source->enqueue(test_payload {10});
+    destination.emplace(std::move(*source));
+    source.reset();
+    // Heap lifetime makes stale-owner access reliably visible to ASan even at O0.
+    EXPECT_TRUE(node->remove());
+    EXPECT_TRUE(destination->empty());
+}
+
+// Verifies moving an empty queue preserves noexcept construction and leaves both queues reusable.
+TEST_F(queue_fixture, queue_move_empty_preserves_reuse) {
+    static_assert(std::is_nothrow_move_constructible_v<tool::queue<test_payload>>);
+    tool::queue<test_payload> destination(std::move(_queue));
+    EXPECT_TRUE(_queue.empty());
+    EXPECT_TRUE(destination.empty());
+    auto* source_node = _queue.enqueue(test_payload {1});
+    auto* destination_node = destination.enqueue(test_payload {2});
+    EXPECT_TRUE(source_node->remove());
+    EXPECT_TRUE(destination_node->remove());
+    EXPECT_TRUE(_queue.empty());
+    EXPECT_TRUE(destination.empty());
+}
+
+namespace {
+struct queue_lifetime_payload {
+    int* destructions;
+    int* moves;
+    queue_lifetime_payload(int& destroyed, int& moved) noexcept
+        : destructions(&destroyed), moves(&moved) {}
+    queue_lifetime_payload(const queue_lifetime_payload&) = delete;
+    queue_lifetime_payload(queue_lifetime_payload&& other) noexcept
+        : destructions(std::exchange(other.destructions, nullptr)), moves(other.moves) {
+        ++*moves;
+    }
+    ~queue_lifetime_payload() noexcept {
+        if (destructions) ++*destructions;
+    }
+};
+}
+
+// Verifies queue move never moves payloads and self-removal destroys once and returns the same node.
+TEST_F(queue_fixture, queue_move_preserves_payload_lifetime_and_pool_reuse) {
+    int destructions = 0;
+    int moves = 0;
+    {
+        tool::slab_mempool<queue_lifetime_payload> pool;
+        tool::queue<queue_lifetime_payload> source(pool);
+        auto* node = source.enqueue(queue_lifetime_payload {destructions, moves});
+        std::vector<tool::q_node<queue_lifetime_payload>*> unused;
+        // Exhaust the rest of the slab so the next alloc must return the removed node.
+        for (int i = 0; i < 1023; ++i) unused.push_back(pool.alloc());
+        const auto moves_before = moves;
+        tool::queue<queue_lifetime_payload> destination(std::move(source));
+        EXPECT_EQ(moves_before, moves);
+        EXPECT_EQ(0, destructions);
+        EXPECT_TRUE(node->remove());
+        EXPECT_EQ(1, destructions);
+        EXPECT_TRUE(destination.empty());
+        EXPECT_TRUE(source.empty());
+        EXPECT_FALSE(node->remove());
+        auto* recycled = pool.alloc();
+        EXPECT_EQ(node, recycled);
+        pool.free(recycled);
+        for (auto* spare : unused) pool.free(spare);
+    }
+    EXPECT_EQ(1, destructions);
 }
 
 // Verifies FIFO order across a longer sequence of enqueued values.

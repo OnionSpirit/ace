@@ -77,6 +77,9 @@ namespace ace::core {
      * @brief Awaitable that consumes one @c co_yield value from an automaton.
      * @details Co-awaiting a @c ping_handler resumes when the automaton has a
      * pending yield value (or finishes), and returns it.
+     * Canceling a coroutine suspended here unregisters its waiter and returns
+     * the node to its runner for cleanup; the automaton and its next value
+     * remain available to a subsequent consumer.
      * @tparam resume_t  Yielded value type (@c void by default).
      */
     template <typename resume_t = void>
@@ -143,6 +146,8 @@ namespace ace::core {
      * regardless of whether the read succeeds; it reads a terminal result
      * without an additional cancellation request. The @c void overload
      * requests cancellation for every non-idle automaton.
+     * Canceling a coroutine while it is still waiting unregisters and reclaims
+     * that waiter without consuming a value or canceling the automaton.
      * @tparam resume_t  Yielded / returned value type (@c void by default).
      */
     template <typename resume_t = void>

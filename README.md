@@ -165,6 +165,10 @@ With `NDEBUG`, those bases are empty: injection setters, `arena::stats()`,
 `arena::live_system_chunks`, and `nukes_node_arena::outstanding_bytes()` are
 unavailable. Release I/O initializes liburing directly.
 
+When extending instrumentation, make optional member accesses template-dependent
+inside `if constexpr (is_debug)`, as the existing generic lambdas do. A discarded
+branch alone does not prevent lookup of members missing from the release base.
+
 Use the same `NDEBUG` setting in every translation unit of an executable,
 including any ACE entry library: the setting affects class definitions.
 Meson builds the fault-injection GTests with `b_ndebug=false` and separately
@@ -255,6 +259,8 @@ Automatons have different handle semantics:
   it can return the final `co_return` value.
 - `join()` performs one ping-like read. If the automaton is still active, it
   then requests cancellation; it does not drain every yield.
+- Canceling a coroutine waiting in `ping()` or `join()` releases that waiter;
+  it does not consume the next value or cancel the automaton.
 - `cancel()` explicitly stops the automaton.
 - Destroying a live automaton handle automatically cancels the automaton.
 
@@ -396,6 +402,9 @@ simplest choice when closure lifetime would otherwise be difficult to see.
   owner.
 - Do not access a network entity after a consuming transition.
 - Self-move assignment of `ace::fs::file` preserves its path and descriptor state.
+- Moving `ace::core::tools::queue<T>` takes O(N), preserves node addresses and
+  keeps node self-removal O(1). The source remains empty and reusable; the shared
+  slab pool must outlive both queues and their nodes.
 - Await eager operations such as `recv_buf()` even though they start before the
   await.
 - Cancellation is part of coroutine and router lifetime management; do not let

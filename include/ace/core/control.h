@@ -281,7 +281,10 @@ namespace ace::core {
 
         /**
          * @brief Cancels a previously registered yield waiter.
-         * @return @c true if the waiter was unregistered by the router.
+         * @details Returns its node to the owning runner for cancellation cleanup,
+         * without consuming a yield or canceling the automaton. No effect when
+         * the bound automaton has no registered waiter.
+         * @return @c true if accepted by the router, @c false if unbound.
          */
         bool cancel_yield() const {
             if (not _block or not _block->_control_router) [[unlikely]] return false;

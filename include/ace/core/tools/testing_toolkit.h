@@ -14,6 +14,9 @@ namespace ace::core::tools {
     /**
      * @brief Exposes a toolkit as a debug base, or a distinct empty release base.
      * @tparam derived_t Toolkit inheriting this CRTP base; may still be incomplete.
+     * @details Accesses to optional members must depend on a template parameter
+     * inside an if constexpr (is_debug) branch, for example in a generic lambda.
+     * A discarded branch alone does not suppress non-dependent name lookup.
      * @warning All translation units in an executable must agree on NDEBUG.
      */
     template <typename derived_t>

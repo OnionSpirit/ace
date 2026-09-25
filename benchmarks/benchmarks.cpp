@@ -7,6 +7,7 @@
 #include <array>
 #include <barrier>
 #include <numeric>
+#include <optional>
 #include <thread>
 
 #include <ace/futures/spawn.h>
@@ -1137,3 +1138,44 @@ BENCHMARK(bm_dynamic_mpmc_queue)
     ->Args({4, 4})
     ->UseRealTime()
     ->Unit(benchmark::kMillisecond);
+
+// BM26 - Intrusive queue move construction, including owner back-pointer updates.
+// Allocation and payload cleanup are outside the timed loop. Each batch performs
+// 128 round trips (256 moves) to amortize the benchmark loop overhead. Node
+// self-removal correctness is covered by queue_fixture, not by this cost probe.
+static void bm_intrusive_queue_move(benchmark::State& state) {
+    using queue_t = ace::core::tools::queue<int>;
+    const int count = static_cast<int>(state.range(0));
+    ace::core::tools::slab_mempool<int> pool;
+    std::optional<queue_t> source(std::in_place, pool);
+    for (int i = 0; i < count; ++i) source->enqueue(int {i});
+
+    constexpr int moves_per_batch = 256;
+    for (auto _ : state) {
+        for (int i = 0; i < moves_per_batch / 2; ++i) {
+            queue_t destination(std::move(*source));
+            benchmark::DoNotOptimize(destination);
+            benchmark::ClobberMemory();
+            source.emplace(std::move(destination));
+            benchmark::DoNotOptimize(*source);
+            benchmark::ClobberMemory();
+        }
+    }
+
+    bool valid = true;
+    for (int i = 0; i < count; ++i) {
+        if (source->empty()) {
+            valid = false;
+            break;
+        }
+        if (source->dequeue() != i) valid = false;
+    }
+    if (not source->empty()) valid = false;
+    while (not source->empty()) (void)source->dequeue();
+    if (not valid) state.SkipWithError("Queue move changed FIFO payloads");
+    state.counters["nodes"] = count;
+    state.SetItemsProcessed(state.iterations() * moves_per_batch);
+}
+BENCHMARK(bm_intrusive_queue_move)
+    ->Arg(0)->Arg(1)->Arg(64)->Arg(1024)->Arg(16384)
+    ->Unit(benchmark::kNanosecond);

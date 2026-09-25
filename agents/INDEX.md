@@ -150,6 +150,11 @@ ace::task consume_sequence() {
 `include/ace/core/async_handle.h` содержит `join_handler`, `ping_handler` и
 `automaton_join_handler`. Обычный `join()` ждёт terminal status; automaton join
 читает следующее значение и применяет cancellation contract.
+Отмена корутины, ожидающей `ping()` или `join()`, снимает регистрацию
+`_yield_waiter` и возвращает owning node runner-у для cleanup (B85).
+Следующее значение и сам automaton остаются доступны; повторная отмена без
+новой регистрации не возвращает узел повторно. Определение
+`async_router::cancel_yield()` находится в `runner.h`, где доступен `reattach()`.
 
 ### Lifecycle и control block
 
@@ -477,6 +482,11 @@ ping. `_release_bound` остаётся логическим cursor wheel и н�
 новых deadline. `current_time()` возвращает последний обработанный millisecond
 snapshot, а не свежий timestamp.
 
+Scheduler load может задержать пробуждение: hard upper bound на lateness не
+гарантируется. `do_timer_on_runner_test` проверяет нижнюю границу по исходным
+длительностям, соответствие reported duration и однократную доставку каждого ID;
+зависания ограничиваются 30-секундным Meson process timeout (B84).
+
 `include/ace/futures/timeout.h` предоставляет relative `timeout` и absolute
 `expire`. Cancellation удаляет timer и возвращает waiter в runner.
 Ошибка регистрации, включая `std::bad_alloc`, сохраняется router-ом и
@@ -534,6 +544,12 @@ fallback, либо бросает `std::bad_alloc` согласно `_breach_mem
 `alloc()`. Отказ выделения или регистрации ownership распространяет исключение,
 освобождает временный slab и сохраняет pool пригодным для retry. Это исключает
 выделение памяти при TLS initialization из `noexcept` I/O paths.
+
+Move-конструктор `queue<T>` обновляет `owning_queue` у всех перенесённых nodes
+за O(N), без allocation и перемещения payload. Указатели на nodes сохраняются,
+`q_node::remove()` остаётся O(1) и работает после завершения lifetime source.
+Source остаётся пустым и пригодным к повторному использованию; общий slab pool
+должен пережить обе очереди и nodes. Операции требуют exclusive access (B45).
 
 | Файл | Символы |
 |------|---------|
@@ -616,7 +632,7 @@ fallback, либо бросает `std::bad_alloc` согласно `_breach_mem
 
 ### Текущая карта
 
-Test executable собирается из `tests/main.cpp`, `tests/environment.h` и **36
+Test executable собирается из `tests/main.cpp`, `tests/environment.h` и **37
 fixture source files**:
 
 ```text
@@ -639,13 +655,14 @@ runner_fixture.cpp             service_fixture.cpp
 signal_fixture.cpp
 socket_echo_fixture.cpp        spawn_extra_fixture.cpp
 spawn_fixture.cpp              timer_fixture.cpp
+testing_toolkit_fixture.cpp
 yield_fixture.cpp
 ```
 
 Fixture classes и helper coroutine functions объявляются в
 `tests/environment.h`; каждый fixture source содержит относящиеся к нему
 `TEST`/`TEST_F`. Общие fault-injection scopes находятся в
-`tests/allocation_failure.h`. Текущая source inventory - **346 Google Test**. Meson discover
+`tests/allocation_failure.h`. Текущая source inventory - **360 Google Test**. Meson discover
 mode регистрирует каждый GTest отдельным процессом с точным `--gtest_filter`.
 
 Помимо source GTests, стандартная конфигурация регистрирует tooling tests:
@@ -704,6 +721,10 @@ Google Benchmark target `ace_benchmarks` включается `-Dbenchmarks=true
 выбранный тип — toolkit для debug или отдельный локальный пустой тип для release.
 В production-классе отсутствуют debug setters, counters и snapshot
 methods при `NDEBUG`; рабочие ownership/cadence/error fields сохраняются.
+Обращения к optional members внутри `if constexpr (is_debug)` должны зависеть
+от параметра шаблона: нешаблонная discarded branch всё равно проверяет имена.
+Arena, dispatcher, slab и clock используют generic lambdas с зависимыми
+обращениями, как kernel controller; это исправляет release compilation B83.
 
 `service_traits` выбирает базу отдельно для каждой пары derived type/spawn mode,
 с thread-local callback. Slab toolkit намеренно не шаблонный: callback один

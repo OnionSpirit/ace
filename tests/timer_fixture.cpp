@@ -184,7 +184,7 @@ TEST_F(timer_fixture, do_and_await_test) {
     EXPECT_GE(ms_time, 100);
 }
 
-// Verifies that each scheduled timeout fires within its per-timer tolerance.
+// Verifies every requested timeout completes exactly once and never before its duration.
 TEST_F(timer_fixture, do_timer_on_runner_test) {
     using namespace std::chrono_literals;
     const std::vector<long> expected {
@@ -199,14 +199,22 @@ TEST_F(timer_fixture, do_timer_on_runner_test) {
 
     auto res = fetch(observations);
     ASSERT_EQ(expected.size(), res.size());
+    std::vector<bool> seen(expected.size(), false);
     for (const auto& observation : res) {
+        SCOPED_TRACE(observation.id);
         ASSERT_GE(observation.id, 0);
         ASSERT_LT(static_cast<std::size_t>(observation.id), expected.size());
-        // Matching by ID proves every individual timer completed and its
-        // externally observed elapsed time did not precede its own request.
-        EXPECT_GE(observation.elapsed_us, observation.requested_us);
-        EXPECT_LT(observation.elapsed_us, observation.requested_us + 100000);
+        EXPECT_FALSE(seen[observation.id]);
+        seen[observation.id] = true;
+        // Derive the lower bound from the input, not the coroutine's reported duration.
+        const auto requested_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::milliseconds(expected[observation.id])).count();
+        EXPECT_EQ(requested_us, observation.requested_us);
+        EXPECT_GE(observation.elapsed_us, requested_us);
     }
+    for (std::size_t id = 0; id < expected.size(); ++id)
+        EXPECT_TRUE(seen[id]) << "Missing timer ID " << id;
+    // Scheduler delays have no hard upper bound; Meson's process timeout catches hangs.
 }
 
 // Verifies that every absolute deadline is delivered by expire().

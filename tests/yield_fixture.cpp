@@ -63,6 +63,56 @@ struct yield_fixture : base_fixture {
         co_return 99;
     }
 
+    struct canceled_waiter_state {
+        int destroyed = 0;
+        bool resumed = false;
+        std::optional<int> next_value;
+        std::optional<int> final_value;
+    };
+
+    static ace::automaton<int> gated_automaton(ace::bus<int>& gate) {
+        co_yield co_await gate.pull();
+        co_return 42;
+    }
+
+    template<bool join>
+    static ace::task wait_for_automaton(
+        ace::core::async_handle<int, ace::core::automaton_rule>& automaton,
+        ace::bus<int>& entered,
+        canceled_waiter_state& state)
+    {
+        struct destruction_probe {
+            int& count;
+            ~destruction_probe() { ++count; }
+        } probe {state.destroyed};
+
+        // spawn pins both tasks to the same runner. The driver cannot process
+        // this notification until this task suspends and registers its waiter.
+        entered << 1;
+        if constexpr (join)
+            (void)co_await automaton.join();
+        else
+            (void)co_await automaton.ping();
+        state.resumed = true;
+    }
+
+    template<bool join>
+    static ace::task cancel_pending_waiter(canceled_waiter_state& state) {
+        ace::bus<int> gate;
+        ace::bus<int> entered;
+        auto automaton = co_await ace::spawn(gated_automaton(gate));
+        auto waiter = co_await ace::spawn(wait_for_automaton<join>(automaton, entered, state));
+        (void)co_await entered.pull();
+        waiter.cancel();
+        waiter.cancel();
+
+        // Cancellation must detach only the waiter: a replacement ping must
+        // still receive the first yield and the automaton's terminal result.
+        gate << 17;
+        state.next_value = co_await automaton.ping();
+        state.final_value = co_await automaton.ping();
+    }
+
     static auto push_to_channel(std::optional<int>&& val) -> std::optional<int> {
         _int_channel << val.value();
         val.reset();
@@ -208,6 +258,34 @@ TEST_F(yield_fixture, spawn_automaton_ping_with_timeout) {
     EXPECT_EQ(res[1], 20);
     EXPECT_EQ(res[2], 30);
     EXPECT_EQ(res[3], 99);
+}
+
+// Verifies repeated cancellation of a pending ping destroys its waiter exactly
+// once without resuming it or consuming the automaton's next value.
+TEST_F(yield_fixture, cancel_pending_ping_releases_waiter) {
+    canceled_waiter_state state;
+    ace::schedule(cancel_pending_waiter<false>(state));
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+    // Empty runnable queues alone do not prove the suspended frame was freed.
+    EXPECT_EQ(state.destroyed, 1);
+    EXPECT_FALSE(state.resumed);
+    EXPECT_EQ(state.next_value, std::optional<int> {17});
+    EXPECT_EQ(state.final_value, std::optional<int> {42});
+}
+
+// Verifies canceling a pending join releases its waiter exactly once and leaves
+// the automaton available for subsequent ping calls instead of canceling it.
+TEST_F(yield_fixture, cancel_pending_join_releases_waiter) {
+    canceled_waiter_state state;
+    ace::schedule(cancel_pending_waiter<true>(state));
+    ace::run();
+    EXPECT_TRUE(ace::empty());
+    // The destruction probe detects lost ownership even when LSan is absent.
+    EXPECT_EQ(state.destroyed, 1);
+    EXPECT_FALSE(state.resumed);
+    EXPECT_EQ(state.next_value, std::optional<int> {17});
+    EXPECT_EQ(state.final_value, std::optional<int> {42});
 }
 
 // Verifies join returns nullopt if another ping consumes the yield it observed as pending.

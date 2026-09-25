@@ -4,7 +4,7 @@
 
 > **Статус:** GCC 16 coverage union от 2026-08-23 покрывает **2262/2398 =
 > 94.33%** уникальных исполняемых строк `include/ace/**`. Текущая
-> default-конфигурация регистрирует 359 ACE Meson-тестов: 353 GTests, две
+> default-конфигурация регистрирует 366 ACE Meson-тестов: 360 GTests, две
 > Python unit checks, discovery consistency, LSan capability и два toolkit contracts. B29/B38/B66/B68
 > regressions проходят; successful-I/O tests всё ещё требуют доступного
 > `io_uring` и не становятся fallback tests.
@@ -253,6 +253,11 @@ transition-move риск B30. B31 закрыт отдельными fs regressio
 | Q11 | `throwing_payload_rolls_back_enqueue` | Throwing payload constructor возвращает node pool-у, queue остаётся usable | ✅ |
 | Q12 | `slab_allocation_failure_preserves_queue` | Отказ slab allocation сохраняет empty queue; следующий enqueue успешен | ✅ |
 | Q13 | `slab_registration_failure_preserves_queue` | Отказ ownership registration освобождает temporary slab и допускает retry | ✅ |
+| Q14 | `queue_move_preserves_node_removal` | Удаление сохранённых head/middle/tail после move в разных порядках, повторный remove и reuse destination (B45) | ✅ |
+| Q15 | `queue_repeated_move_keeps_sources_independent` | Повторные moves, removal у последнего owner, независимость новых payloads source/intermediate (B45) | ✅ |
+| Q16 | `queue_move_outlives_source` | Saved node удаляется после уничтожения source; ASan regression на use-after-free (B45) | ✅ |
+| Q17 | `queue_move_empty_preserves_reuse` | Пустой move остаётся noexcept; обе очереди пригодны к использованию (B45) | ✅ |
+| Q18 | `queue_move_preserves_payload_lifetime_and_pool_reuse` | Payload не перемещается при queue move, разрушается ровно один раз, node возвращается в pool (B45) | ✅ |
 
 #### `omniptr.h` — `omniptr_fixture`
 
@@ -531,6 +536,8 @@ transition-move риск B30. B31 закрыт отдельными fs regressio
 | AH9 | `check_valued_spawn_cancel` | join() на отменённой valued-таске → nullopt (cancel не даёт статусу стать e_finished) | ✅ |
 | AH10 | `check_valued_spawn_join_value` | join() на завершённой valued-таске → возвращает правильное значение из co_return | ✅ |
 | AH11 | `automaton_join_returns_nullopt_when_pending_yield_was_consumed` | Валидная ready/resume race возвращает nullopt после consumed yield и отменяет automaton (B16/B29) | ✅ |
+| AH12 | `cancel_pending_ping_releases_waiter` | Отмена ожидающего ping дважды: однократное уничтожение waiter, без resume и потери следующего/terminal value (B85, `yield_fixture`) | ✅ |
+| AH13 | `cancel_pending_join_releases_waiter` | Отмена ожидающего join освобождает waiter, сохраняя automaton и значения; повторная отмена безопасна (B85, `yield_fixture`) | ✅ |
 
 ---
 
@@ -1008,7 +1015,7 @@ its thread-local protocol.
 | X30 | `reattach_nullptr_noop` | reattach(nullptr) → await_ready=true, задача не суспендится | ✅ (добавлен) |
 | X31 | `reattach_cross_runner_migration` | 2 раннера: задача мигрирует между ними через reattach_router::redirect | ✅ (добавлен) |
 | X32 | `cancel_spawned_with_channel` (переоткрыт) | spawn → channel.pull → cancel — БЫЛ DISABLED (hang, B7); после фикса channel_router::cancel проходит стабильно | ✅ (переоткрыт) |
-| X33 | `do_timer_on_runner_test` / `do_expire_on_runner_test` (переработаны) | Проверка «каждый таймер сработал» вместо неверной монотонности (F6) | ✅ (переработаны) |
+| X33 | `do_timer_on_runner_test` / `do_expire_on_runner_test` (переработаны) | Каждый таймер не раньше своего deadline (F6); relative test дополнительно проверяет exact-once ID и reported duration без hard upper bound (B84) | ✅ (переработаны) |
 
 ---
 
@@ -1069,7 +1076,7 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/io_hanged_fixture.cpp` | `io_hanged_fixture` | 5 |
 | `tests/omniptr_fixture.cpp` | `omniptr_fixture` | 12 |
 | `tests/promise_traits_fixture.cpp` | `promise_traits_fixture` | 12 |
-| `tests/queue_fixture.cpp` | `queue_fixture` | 13 |
+| `tests/queue_fixture.cpp` | `queue_fixture` | 18 |
 | `tests/router_slot_fixture.cpp` | `router_slot_fixture` | 9 |
 | `tests/runner_fixture.cpp` | `runner_fixture` | 10 |
 | `tests/service_fixture.cpp` | `service_fixture` | 3 |
@@ -1078,19 +1085,19 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/spawn_extra_fixture.cpp` | `spawn_extra_fixture` | 9 |
 | `tests/spawn_fixture.cpp` | `spawn_fixture` | 10 |
 | `tests/timer_fixture.cpp` | `timer_fixture` | 16 |
-| `tests/yield_fixture.cpp` | `yield_fixture` | 8 |
+| `tests/yield_fixture.cpp` | `yield_fixture` | 10 |
 | `tests/nukes_alignment_fixture.cpp` | `nukes_alignment_fixture` | 5 |
 | `tests/nukes_concurrency_fixture.cpp` | `nukes_concurrency_fixture` | 5 |
 | `tests/testing_toolkit_fixture.cpp` | `testing_toolkit_fixture` | 2 |
-| **Итого: 37 файлов** | | **353** |
+| **Итого: 37 файлов** | | **360** |
 
-Default Meson configuration (`ace_entry=false`) регистрирует **359 ACE** tests:
-353 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
+Default Meson configuration (`ace_entry=false`) регистрирует **366 ACE** tests:
+360 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
 `ace_tests.discovery_consistency`, `testing_toolkit.debug`, `testing_toolkit.release`
 и `ace_tests.lsan_capability`. Последний
 становится Meson SKIP при недоступном под ptrace LSan; остальные checks выполняются
 с `detect_leaks=0` только в auto mode. TSan profile не регистрирует LSan
-capability и содержит 358 tests. `ace_entry=true` добавляет fallback test.
+capability и содержит 365 tests. `ace_entry=true` добавляет fallback test.
 
 ### Проверка исправлений ревью (2026-09-21)
 
@@ -1189,7 +1196,7 @@ successful-I/O failures с `-EPERM`; B38 crash не воспроизводитс
 | Файл | Назначение |
 |------|-----------|
 | `discover_tests.py` | Lexer-based `discover` и source/runtime `verify`; источник Meson registration names |
-| `tests/testing_toolkit_contract.cpp` | Отдельные debug/release executable contracts: API absence, selected bases, runtime smoke |
+| `tests/testing_toolkit_contract.cpp` | Отдельные debug/release executable contracts: API absence (включая accounting helpers, B83), selected bases, runtime smoke |
 | `tests/environment.h` | Общий `base_fixture` и shared test utilities; конкретные fixtures находятся рядом с тестами в split sources |
 | `tests/allocation_failure.h` | RAII current-thread slab allocation/registration и service-start failure injection |
 | `tests/main.cpp` | GTest entry point для `ace_tests` |
@@ -1208,7 +1215,7 @@ successful-I/O failures с `-EPERM`; B38 crash не воспроизводитс
 python3 discover_tests.py discover tests/*_fixture.cpp
 ```
 
-Команда возвращает 346 уникальных active GTest name. Meson выполняет эту же
+Команда возвращает 360 уникальных active GTest name. Meson выполняет эту же
 команду при setup, регистрирует каждый name отдельным `--gtest_filter`, а
 `ace_tests.discovery_consistency` через `verify` подтверждает совпадение списка
 source declarations с `ace_tests --gtest_list_tests`.
@@ -1240,7 +1247,7 @@ source declarations с `ace_tests --gtest_list_tests`.
 | `testing_toolkit_fixture.slab_hook_is_shared_across_types_and_thread_local` | Hook общий для разных slab payloads текущего потока, не действует в другом потоке; RAII restoration |
 | `testing_toolkit_fixture.service_hook_is_isolated_per_specialization` | Hook одной CRTP specialization не затрагивает другую; после restoration успешен retry |
 | `testing_toolkit.debug` | Все восемь selected bases являются toolkit types; тестовые setters/statistics доступны; штатные allocation/dispatch/timer/NOP работают |
-| `testing_toolkit.release` | Все восемь selected bases пустые; test-only API отсутствует; те же штатные paths работают с `NDEBUG` и `-O0` |
+| `testing_toolkit.release` | Все восемь selected bases пустые; test-only API, включая accounting helpers, отсутствует; те же штатные paths работают с `NDEBUG` и `-O0`; compile regression B83 |
 
 GTest target явно задаёт `b_ndebug=false`, независимо от project-level option.
 Два standalone contracts имеют противоположные `b_ndebug` и не входят в GTest
@@ -1376,3 +1383,188 @@ toolkit contract требуют недоступного здесь `io_uring`; 
 не собрался из-за зарегистрированного B83. Все четыре новых test names
 зарегистрированы Meson; три path/FD/move tests прошли, а test открытия показан как
 OK на уровне Meson, хотя сам GoogleTest выводит SKIP.
+
+### B83: release toolkit compilation (2026-09-25)
+
+Исправлены non-dependent обращения к отсутствующим debug members в arena,
+dispatcher, slab и clock. До исправления `testing_toolkit_contract.cpp`
+падал при `-DNDEBUG` на Clang 22.1.8 и GCC 16.2.1; debug syntax checks проходили.
+После исправления оба режима проходят при `-O0` на обоих компиляторах.
+Восемь дополнительных concepts/assertions проверяют отсутствие в release
+`note_malloc_allocate`, `note_malloc_deallocate`, `malloc_count`,
+`note_pool_allocate`, `note_pool_deallocate`, `note_drain`, `pool_held`, `drains`.
+Пустые release-заглушки этих методов нарушили бы проверяемый контракт.
+
+Новых GTests нет: fixture map остаётся **353 GTests в 37 файлах**; обновлён
+индекс существующего standalone contract. Сборки `ace_tests`,
+`ace_testing_toolkit_debug`, `ace_testing_toolkit_release` прошли в обоих
+профилях. `nm -C` показал восемь hook/counter storage symbols в debug и ноль
+в release для GCC и Clang, включая не оптимизированные (`-O0`) contracts.
+
+Проверки:
+
+- ASan и TSan: по **710/710** (71 GTest, 10 shuffled repeats, начальный seed
+  527) для arena, dispatcher, queue, clock initialization, testing toolkit и
+  timer fixtures. ASan использовал штатный runner с `leak-mode=auto`:
+  под ptrace LSan отключён с явным сообщением.
+- Первые sandbox full suites: ASan **331 OK / 27 FAIL / 1 SKIP**, TSan
+  **331 OK / 27 FAIL**. 25 I/O GTests требуют доступного `io_uring`; оба toolkit
+  contracts теперь собираются и доходят до проверки availability (exit 5).
+  Это ограничение окружения подтверждено успешными повторными host-прогонами.
+- Вне песочницы: **Clang ASan+LSan 359/359**, **GCC TSan 358/358**, без ошибок
+  и пропусков; оба debug/release contracts, включая настоящий I/O, проходят.
+- `git diff --check` прошёл. Benchmarks не добавлялись и не запускались:
+  исправлен compile-time lookup, алгоритмы не менялись.
+
+Команды (оба build-каталога используют существующую конфигурацию):
+
+```bash
+meson compile -C build ace_tests ace_testing_toolkit_debug ace_testing_toolkit_release -j 2
+meson compile -C build-tsan ace_tests ace_testing_toolkit_debug ace_testing_toolkit_release -j 2
+python3 tests/sanitized_test_runner.py --sanitizers address --leak-mode auto \
+  --probe-executable build/ace_tests -- build/ace_tests \
+  '--gtest_filter=arena_fixture.*:dispatcher_fixture.*:queue_fixture.*:clock_initialization_fixture.*:testing_toolkit_fixture.*:timer_fixture.*' \
+  --gtest_shuffle --gtest_random_seed=527 --gtest_repeat=10
+python3 tests/sanitized_test_runner.py --sanitizers thread --leak-mode auto \
+  --probe-executable build-tsan/ace_tests -- build-tsan/ace_tests \
+  '--gtest_filter=arena_fixture.*:dispatcher_fixture.*:queue_fixture.*:clock_initialization_fixture.*:testing_toolkit_fixture.*:timer_fixture.*' \
+  --gtest_shuffle --gtest_random_seed=527 --gtest_repeat=10
+meson test -C build --suite ace --print-errorlogs --num-processes 4
+meson test -C build-tsan --suite ace --print-errorlogs --num-processes 4
+```
+
+Логи: `/tmp/ace-b83-{clang,tsan}-build.log`,
+`/tmp/ace-b83-{asan,tsan}-shuffle.log`,
+`/tmp/ace-b83-{clang,tsan}-tests.log` (sandbox) и
+`/tmp/ace-b83-host-{clang,tsan}-tests.log` (успешные host suites).
+
+### B45: intrusive queue move ownership (2026-09-25)
+
+Добавлены пять tests Q14–Q18 (имена и сценарии выше); queue fixture теперь
+содержит 18 tests, полный discovery — 358 GTests. Проверки используют
+`enqueue`, `remove`, `empty`, `dequeue` и pool API, не читают `owning_queue`.
+Tracked payload подтверждает отсутствие payload move, однократный destructor
+и возврат node в pool. Source-lifetime regression освобождает исходную queue
+до удаления сохранённого node. B46 о destructor непустой queue не изменён.
+
+До исправления `queue_move_preserves_node_removal`,
+`queue_repeated_move_keeps_sources_independent`,
+`queue_move_preserves_payload_lifetime_and_pool_reuse` падали на assertions;
+`queue_move_outlives_source` давал ASan heap-use-after-free в `queue::unlink`.
+Empty-move boundary проходил и до исправления.
+
+После исправления:
+
+- Сборки `ace_tests` и обоих toolkit contracts прошли под Clang 22.1.8 ASan
+  и GCC 16.2.1 TSan; release benchmark target также собрался.
+- Полные host suites вне песочницы: **ASan+LSan 364/364**, **TSan 363/363**.
+- Queue/timer/clock-initialization filter: **ASan+LSan 720/720** (36 tests,
+  20 shuffled repeats, seed 527). Первый TSan прогон при параллельной нагрузке
+  дал **719/720**: `timer_fixture.do_timer_on_runner_test` превысил верхний
+  допуск (B84). Последовательный повтор тех же параметров прошёл **720/720**.
+  Все новые B45 tests прошли в обоих TSan-прогонах; B84 не считается решённым.
+- `git diff --check` прошёл. BM26 и измерения описаны в `BENCHMARKS.md`.
+
+Команды:
+
+```bash
+meson compile -C build ace_tests ace_testing_toolkit_debug ace_testing_toolkit_release -j 2
+meson compile -C build-tsan ace_tests ace_testing_toolkit_debug ace_testing_toolkit_release -j 2
+meson compile -C build-bench ace_benchmarks -j 2
+python3 tests/sanitized_test_runner.py --sanitizers address --leak-mode auto \
+  --probe-executable build/ace_tests -- build/ace_tests \
+  '--gtest_filter=queue_fixture.*:timer_fixture.*:clock_initialization_fixture.*' \
+  --gtest_shuffle --gtest_random_seed=527 --gtest_repeat=20
+python3 tests/sanitized_test_runner.py --sanitizers thread --leak-mode auto \
+  --probe-executable build-tsan/ace_tests -- build-tsan/ace_tests \
+  '--gtest_filter=queue_fixture.*:timer_fixture.*:clock_initialization_fixture.*' \
+  --gtest_shuffle --gtest_random_seed=527 --gtest_repeat=20
+meson test -C build --suite ace --print-errorlogs --num-processes 4
+meson test -C build-tsan --suite ace --print-errorlogs --num-processes 4
+```
+
+Логи: `/tmp/ace-b45-red-{tests,lifetime}.log`,
+`/tmp/ace-b45-{clang,tsan}-build.log`, `/tmp/ace-b45-{asan,tsan}-shuffle.log`,
+`/tmp/ace-b45-tsan-shuffle-serial.log`, `/tmp/ace-b45-host-{clang,tsan}-tests.log`.
+
+### B84: timeout contract under scheduler delay (2026-09-25)
+
+`timer_fixture.do_timer_on_runner_test` больше не требует пробуждения за
+requested + 100 ms: README допускает lateness без hard upper bound.
+Вместо этого каждый ID проверяется на диапазон, уникальность и присутствие;
+`requested_us` сверяется с исходным `expected[id]`, а нижняя граница elapsed
+вычисляется независимо из этого же исходного запроса. Проверки количества
+результатов и пустоты runtime сохранены. Meson timeout остаётся 30 секунд.
+Fixture map не меняется: 16 timer tests, 358 GTests, 364/363 Meson checks
+для ASan/TSan. Обновлён индекс X33.
+
+Контролируемая проверка выполняла существующий TSan test в отдельном процессе:
+через 100 ms после строки `[ RUN ]` процесс получал SIGSTOP на 750 ms, затем
+SIGCONT. До изменения — upper-bound failures и exit 1; после — тот же тест
+прошёл за 850 ms, exit 0. Сигналы направлялись только созданному тестовому
+процессу; ожидания и production timers во время эксперимента не подменялись.
+
+Результаты после сборки `meson compile -C build ace_tests -j 2` и аналогичной
+команды для `build-tsan`:
+
+- Последовательные ASan+LSan и TSan проверки с filter
+  `queue_fixture.*:timer_fixture.*:clock_initialization_fixture.*`, параметрами
+  `--gtest_shuffle --gtest_random_seed=527 --gtest_repeat=20` — **720/720** каждая.
+  Использован штатный `sanitized_test_runner.py --leak-mode auto` вне песочницы.
+- `meson test -C build-tsan --suite ace --print-errorlogs --num-processes 4` —
+  **363/363**.
+- `meson test -C build --suite ace --print-errorlogs --num-processes 4` — сначала
+  **363 OK / 1 FAIL**: assertions `cross_mechanic_fixture.or_ping_automaton_loop_no_value_loss`
+  прошли, но LSan нашёл 355 bytes в пяти allocations (B85). Последовательный
+  повтор той же команды — **364/364**. На этапе B84 leak оставался открытым:
+  отдельные 500 повторов automaton test подтвердили 2059 leaked bytes.
+  Последующее исправление B85 и его проверки описаны ниже.
+- Read-only review и `git diff --check` — без замечаний.
+
+README и Doxygen timer API проверены: уже описывают scheduler delay и не требуют
+изменений. `INDEX.md` уточняет контракт проверки. Benchmarks рассмотрены, но не
+добавлялись и не запускались: изменены только test assertions.
+
+Логи: `/tmp/ace-b84-controlled-pause{,-after}.log`,
+`/tmp/ace-b84-{clang,tsan}-build.log`, `/tmp/ace-b84-{asan,tsan}-shuffle.log`,
+`/tmp/ace-b84-host-{clang,tsan}-tests.log`,
+`/tmp/ace-b84-host-clang-tests-rerun.log`, `/tmp/ace-b85-isolated-repeat.log`.
+
+
+### Проверка B85: ownership отменённого yield waiter (2026-09-25)
+
+Два публичных regression в `yield_fixture` проверяют отмену ожидающего
+`ping()` и `join()`. Channel handshake и same-runner `spawn` обеспечивают
+регистрацию waiter до отмены без sleeps. Проверяются повторная отмена,
+однократное разрушение frame-local probe, отсутствие продолжения отменённой
+корутины, сохранение next yield (17) и terminal result (42).
+
+До исправления оба tests падают на `destroyed == 1` (фактически 0), LSan
+сообщает 142 bytes в двух allocations: `/tmp/ace-b85-red.log`. После
+исправления оба проходят с обязательным LSan: `/tmp/ace-b85-green.log`.
+Исходный OR regression до исправления дал 2059 leaked bytes за 500 повторов;
+после исправления те же 500 повторов проходят без leak diagnostics:
+`/tmp/ace-b85-or-repeat.log`.
+
+Команды проверки:
+
+```bash
+meson compile -C build ace_tests ace_testing_toolkit_debug ace_testing_toolkit_release -j 2
+meson compile -C build-tsan ace_tests ace_testing_toolkit_debug ace_testing_toolkit_release -j 2
+meson compile -C build-bench ace_benchmarks -j 2
+python3 tests/sanitized_test_runner.py --sanitizers address --leak-mode enabled --probe-executable build/ace_tests -- build/ace_tests '--gtest_filter=yield_fixture.cancel_pending_*'
+python3 tests/sanitized_test_runner.py --sanitizers address --leak-mode enabled --probe-executable build/ace_tests -- build/ace_tests --gtest_filter=cross_mechanic_fixture.or_ping_automaton_loop_no_value_loss --gtest_repeat=500
+python3 tests/sanitized_test_runner.py --sanitizers address --leak-mode enabled --probe-executable build/ace_tests -- build/ace_tests '--gtest_filter=yield_fixture.*:spawn_fixture.*:spawn_extra_fixture.*:compose_extra_fixture.*:cross_mechanic_fixture.*:backup_fixture.*' --gtest_shuffle --gtest_random_seed=527 --gtest_repeat=20
+python3 tests/sanitized_test_runner.py --sanitizers thread --leak-mode auto --probe-executable build-tsan/ace_tests -- build-tsan/ace_tests '--gtest_filter=yield_fixture.*:spawn_fixture.*:spawn_extra_fixture.*:compose_extra_fixture.*:cross_mechanic_fixture.*:backup_fixture.*' --gtest_shuffle --gtest_random_seed=527 --gtest_repeat=20
+meson test -C build --suite ace --print-errorlogs --num-processes 4
+meson test -C build-tsan --suite ace --print-errorlogs --num-processes 4
+```
+
+Все три сборки успешны. Полные host suites выполнены последовательно вне
+песочницы: **Clang ASan+LSan 366/366**, **GCC TSan 365/365**, без sanitizer
+ошибок и skipped checks. Логи `/tmp/ace-b85-host-clang-tests.log` и
+`/tmp/ace-b85-host-tsan-tests.log`. Связанные 66 tests × 20 shuffled repeats
+под ASan+LSan и TSan: **1320/1320** в каждом profile,
+`/tmp/ace-b85-asan-shuffle.log` и `/tmp/ace-b85-tsan-shuffle.log`.
+Discovery: 360 GTests, `yield_fixture` — 10 tests. Benchmark BM18 и его
+ограничения описаны в `agents/BENCHMARKS.md`; coverage заново не измерялся.

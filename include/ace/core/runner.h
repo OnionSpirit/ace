@@ -552,6 +552,22 @@ namespace ace::core {
 
     template<typename returnT, template <typename> typename promise_rule_t>
     requires is_rule<promise_rule_t>
+    bool async<returnT, promise_rule_t>::async_router::cancel_yield() noexcept {
+        if constexpr (is_automaton_rule<promise_rule_t>) {
+            if (not _address) return false;
+            auto handle = coroutine_t::from_address(_address);
+            auto waiter = handle.promise()._yield_waiter;
+            // Reattachment releases the waiter's ping/join router. Detach the
+            // registration first so it cannot retain or publish the same node.
+            handle.promise()._yield_waiter.reset();
+            if (waiter) runner::reattach(waiter);
+        }
+        return true;
+    }
+
+
+    template<typename returnT, template <typename> typename promise_rule_t>
+    requires is_rule<promise_rule_t>
     void async<returnT, promise_rule_t>::release_waiters() {
         if constexpr (is_spawnable_rule<promise_rule_t>) {
             if (_coroutine.promise()._waiters) {

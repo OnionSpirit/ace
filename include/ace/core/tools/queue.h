@@ -105,16 +105,20 @@ namespace ace::core::tools {
          * @brief Allocates a new slab and links its nodes into the free list.
          */
         void grow() {
-            if constexpr (is_debug) {
-                if (_slab_growth_hook)
-                    _slab_growth_hook(false);
-            }
+            []<typename toolkit_t = slab_mempool_testing::debug_tools> {
+                if constexpr (is_debug) {
+                    if (toolkit_t::_slab_growth_hook)
+                        toolkit_t::_slab_growth_hook(false);
+                }
+            }();
             auto slab_owner = std::make_unique<q_node<T>[]>(CHUNK_SIZE);
             q_node<T>* slab = slab_owner.get();
-            if constexpr (is_debug) {
-                if (_slab_growth_hook)
-                    _slab_growth_hook(true);
-            }
+            []<typename toolkit_t = slab_mempool_testing::debug_tools> {
+                if constexpr (is_debug) {
+                    if (toolkit_t::_slab_growth_hook)
+                        toolkit_t::_slab_growth_hook(true);
+                }
+            }();
             slabs.push_back(slab);
 
             for (size_t i = 0; i < CHUNK_SIZE - 1; ++i) {
@@ -201,12 +205,20 @@ namespace ace::core::tools {
         /**
          * @brief Move constructor — transfers the nodes and nulls the source.
          * @param q Source queue to move from.
+         * @details Takes O(N) time to rebind each node to this queue, without
+         * moving payloads or allocating. Existing node pointers remain valid;
+         * q_node::remove() still takes O(1) and targets the new owner even after
+         * the source is destroyed. The source remains empty and reusable.
+         * @warning The shared slab pool must outlive both queues and their nodes.
+         * Like other queue operations, moving requires exclusive access.
          */
         queue(queue&& q)  noexcept : mempool(q.mempool) {
             this->head = q.head;
             this->tail = q.tail;
             q.head = nullptr;
             q.tail = nullptr;
+            for (auto* node = head; node; node = node->next)
+                node->owning_queue = this;
         }
 
         /**

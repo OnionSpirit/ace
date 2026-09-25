@@ -511,18 +511,22 @@ namespace ace::services {
             const auto max_round_ticks = INT64_MAX / tick_duration.count();
             const auto wheels_amount = std::min(fast_log(ticks_amount, _slot_count) + 1,
                                                 fast_log(max_round_ticks, _slot_count));
-            if constexpr (is_debug) {
-                if (_initialization_hook)
-                    _initialization_hook(0);
-            }
+            []<typename toolkit_t = hierarchical_time_wheel_testing::debug_tools> {
+                if constexpr (is_debug) {
+                    if (toolkit_t::_initialization_hook)
+                        toolkit_t::_initialization_hook(0);
+                }
+            }();
             _time_wheels.reserve(wheels_amount);
 
             auto tick = _tick_duration;
             for (std::size_t i = 0; i < wheels_amount; ++i, tick *= static_cast<long>(_slot_count)) {
-                if constexpr (is_debug) {
-                    if (_initialization_hook)
-                        _initialization_hook(i + 1);
-                }
+                []<typename toolkit_t = hierarchical_time_wheel_testing::debug_tools>(std::size_t index) {
+                    if constexpr (is_debug) {
+                        if (toolkit_t::_initialization_hook)
+                            toolkit_t::_initialization_hook(index + 1);
+                    }
+                }(i);
                 _time_wheels.emplace_back(tick, _slot_count, &_release_budget, this);
             }
 

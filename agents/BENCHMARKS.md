@@ -1,6 +1,6 @@
 # ACE Framework - Benchmarking Guide
 
-Дата актуализации: 2026-09-21.
+Дата актуализации: 2026-09-25.
 
 ## Когда нужен бенчмарк
 
@@ -59,7 +59,7 @@ release-путь: `debug=false`, `optimization=3` и `b_ndebug=true`; поэто
 |------|-----------|
 | `benchmarks/main.cpp` | Google Benchmark entry point. |
 | `benchmarks/environment.h` | 4 helpers: `configure_runners`, `reset_runners`, `fetch_into`, `fetch`. |
-| `benchmarks/benchmarks.cpp` | 25 numbered benchmark scenarios (BM1-BM25). |
+| `benchmarks/benchmarks.cpp` | 26 numbered benchmark scenarios (BM1-BM26). |
 
 ## Инвентарь
 
@@ -90,6 +90,7 @@ release-путь: `debug=false`, `optimization=3` и `b_ndebug=true`; поэто
 | BM23 | `bm_legacy_weighted_selection` | Изолированный baseline прежней weighted-selection формулы для 2/4/8/16/64 runners. |
 | BM24 | `bm_repeated_short_run` | Повторные schedule/run циклы с 0/1/10/100 задачами и 1/2/4/8/16 runners. |
 | BM25 | `bm_dynamic_mpsc_queue`, `bm_dynamic_mpmc_queue` | Direct concurrent queue/reclamation throughput: MPSC 1P/1C и 4P/1C, MPMC 1P/1C и 4P/4C по 16384 сообщений на producer. |
+| BM26 | `bm_intrusive_queue_move` | Move construction intrusive queue для 0/1/64/1024/16384 nodes; 256 moves за timed iteration, allocation и FIFO cleanup вне измерения. |
 
 ## B75: dynamic Nukes queue reclamation (2026-08-30)
 
@@ -362,3 +363,91 @@ consteval selectors и namespace aliases на унаследованный `debu
 измерения не требуются; числа раздела B80 относятся к предшествующему изменению,
 а не к новому замеру CRTP-версии. Debug/release contracts проверяют выбранные
 типы и отсутствие instrumentation в release.
+
+### B83: восстановление release compilation (2026-09-25)
+
+Обращения к optional toolkit members перенесены в generic lambdas с зависимыми
+именами. Исправление сохраняет algorithms, allocation/release protocol,
+счётчики debug и отсутствие instrumentation в release. Новые benchmark-сценарии
+и замеры не нужны: меняется корректность compile-time lookup. Проверки GCC/Clang
+при `-O0` и отсутствие hook/counter storage symbols в release описаны в
+`TESTING.md`; выводов об изменении производительности не делаем.
+
+### B45: move intrusive queue (2026-09-25)
+
+Добавлен BM26 `bm_intrusive_queue_move`: один поток, без запуска ACE runners,
+0/1/64/1024/16384 заранее созданных nodes. Одна timed iteration выполняет 128
+round trips (256 move constructions); allocation и финальное FIFO-drain находятся
+вне timed loop. `DoNotOptimize` и `ClobberMemory` сохраняют наблюдаемость moves.
+Проверка FIFO не заменяет regressions self-removal в `queue_fixture`.
+
+Baseline — рабочее дерево с B83 до изменения move-конструктора B45; текущая
+версия отличается от него только перепривязкой owners и Doxygen. Benchmark
+source одинаковый. GCC 16.2.1, C++23, `-O3 -DNDEBUG`, Google Benchmark 1.8.4
+(release), без sanitizers; AMD Ryzen 5 7500F, 12 logical CPU, L3 32 MiB.
+Affinity/frequency вручную не фиксировались. Сборки и тесты были завершены до
+замеров. Четыре последовательные серии baseline/current/current/baseline по
+пять повторов, `--benchmark_min_time=0.05s --benchmark_repetitions=5`.
+
+Медианы десяти CPU-time измерений каждой версии; время iteration делится на
+256, чтобы получить ns на один move. `items_per_second` уже считает moves.
+
+| Nodes | Baseline, ns/move | B45, ns/move |
+|------:|-----------------:|------------:|
+| 0 | 1.86 | 2.00 |
+| 1 | 1.86 | 1.78 |
+| 64 | 1.86 | 36.74 |
+| 1024 | 1.86 | 912.82 |
+| 16384 | 1.86 | 16352.53 |
+
+Все повторы завершились без benchmark errors. Рост стоимости непустого move
+соответствует согласованному переходу O(1) → O(N); baseline не исправлял
+`owning_queue`. Малые различия 0/1 node не трактуются как устойчивое ускорение.
+Стоимость `q_node::remove()` не менялась, остаётся O(1). Эти измерения не являются
+оценкой end-to-end timer performance: в `cascade_slot` выражение `auto&& timers =
+std::move(...)` привязывает ссылку и не вызывает move-конструктор очереди.
+
+Для каждого binary выполнена команда:
+
+```bash
+LD_LIBRARY_PATH=/home/ivanm/code/cxx/ace/build-bench/subprojects/benchmark-1.8.4 \
+  BINARY --benchmark_filter='^bm_intrusive_queue_move/' \
+  --benchmark_min_time=0.05s --benchmark_repetitions=5 \
+  --benchmark_out=OUTPUT.json --benchmark_out_format=json
+```
+
+Baseline binary: `/tmp/ace-b45-baseline/ace_benchmarks`; current binary:
+`build-bench/ace_benchmarks`. Данные: `/tmp/ace-b45-perf-{1-baseline,2-current,3-current,4-baseline}.json`.
+
+
+## B85: контроль automaton ping после исправления cancellation (2026-09-25)
+
+Существующий BM18 `bm_automaton_ping`: один runner, 5000 automatons ×
+10 yields + terminal value = 55000 потреблённых значений за iteration.
+Новый benchmark не добавлен. Baseline — бинарник после B83/B45, до B85,
+сохранённый в `/tmp/ace-b85-baseline/ace_benchmarks`; B84 меняет только тест.
+Current собран `meson compile -C build-bench ace_benchmarks -j 2`.
+Оба GCC 16.2.1 release (`-O3`, `NDEBUG`), Google Benchmark 1.8.4 release,
+AMD Ryzen 5 7500F, 12 logical CPU, L3 32 MiB. Запуски на одном host после
+завершения sanitizer tests и сборок; load average 0.92/0.99/0.84.
+
+Четыре последовательные серии baseline/current/current/baseline, каждая
+с `--benchmark_filter='^bm_automaton_ping$' --benchmark_min_time=0.05s
+--benchmark_repetitions=5`. Для сохранённого бинарника задан
+`LD_LIBRARY_PATH=/home/ivanm/code/cxx/ace/build-bench/subprojects/benchmark-1.8.4`.
+JSON и логи: `/tmp/ace-b85-perf-{1-baseline,2-current,3-current,4-baseline}.{json,log}`.
+
+| Серия | Median CPU, ms | Median real, ms |
+|-------|---------------:|----------------:|
+| Baseline 1 | 5.421 | 5.436 |
+| Current 2 | 5.553 | 5.570 |
+| Current 3 | 5.545 | 5.561 |
+| Baseline 4 | 5.551 | 5.571 |
+
+Объединённые 10 samples каждого варианта: median CPU 5.509 → 5.549 ms
+(+0.7%), real 5.528 → 5.566 ms (+0.7%). Различие меньше разброса между
+baseline-сериями; устойчивое замедление обычного ping не выявлено. BM18 не
+измеряет стоимость отмены ожидающего waiter: этот путь проверен correctness
+regressions и LSan, а его необходимая работа теперь включает возврат узла
+runner-у вместо потери ownership. Вывод о производительности cancellation
+из этих измерений не делается.

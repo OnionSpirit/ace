@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "sources": {
+    "agents/ISSUES.md": "114b514c2cee7db3f07f21601de9c58ddcc4477ddba1f7948046ac86db7c8527",
+    "agents/TESTING.md": "0f9c7ae03e529c940b8bae476cf7d1125bfc1066ddd499a2c719f35faa2d5d1b",
+    "agents/BENCHMARKS.md": "cbf686b29cdf3eead59192ca8d98ab4f8f5b8e3ae9e916dbccfb1ddccf5fb13e"
+  },
+  "counts": {
+    "issues": 92,
+    "todos": 9,
+    "testing": 447,
+    "benchmarks": 26,
+    "total": 574
+  },
+  "status_mapping": {
+    "issue: Решено or intentional contract": "Решено",
+    "issue: Частично решено": "На проверке",
+    "testing: ✅": "Решено",
+    "testing: ⬜": "Открыто",
+    "todo: T1 resolved reference": "Решено",
+    "benchmark inventory": "Решено"
+  }
+}

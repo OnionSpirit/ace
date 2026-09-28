@@ -1,0 +1,11 @@
+{
+  "codex-ai-agent:attach-active-note-to-codex-agent": [
+    {
+      "modifiers": [
+        "Mod",
+        "Shift"
+      ],
+      "key": "A"
+    }
+  ]
+}

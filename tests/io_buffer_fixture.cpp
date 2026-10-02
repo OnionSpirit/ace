@@ -327,3 +327,92 @@ TEST_F(io_buffer_fixture, buffer_self_move_assign_preserves_state) {
         EXPECT_EQ(baseline, arena.stats().in_use_bytes);
     }).join();
 }
+
+// Verifies oversize shape rejects before reading past the tail and preserves all chunks.
+TEST_F(io_buffer_fixture, buffer_shape_rejects_growth_without_mutation) {
+    for (const bool multiple : {false, true}) {
+        ace::io::buffer buffer;
+        if (multiple) { ASSERT_TRUE(buffer.append("head:")); }
+        ASSERT_TRUE(buffer.append("tail"));
+        const auto original = buffer.as<std::string>();
+        const auto allocated = ace::core::arena::get_instance().stats().in_use_bytes;
+        // SIZE_MAX also proves validation precedes payload-plus-header allocation.
+        for (const auto length : {std::size_t(5), std::numeric_limits<std::size_t>::max()}) {
+            EXPECT_THROW(buffer.shape(length), std::out_of_range);
+            EXPECT_EQ(original, buffer.as<std::string>());
+            EXPECT_EQ(original.size(), buffer.len());
+            EXPECT_EQ(allocated, ace::core::arena::get_instance().stats().in_use_bytes);
+        }
+    }
+}
+
+// Verifies every assembled shape is rejected without invalidating published iovec pointers.
+TEST_F(io_buffer_fixture, buffer_shape_rejects_assembled_and_allows_disassembled) {
+    ace::io::buffer buffer;
+    ASSERT_TRUE(buffer.append("head:"));
+    ASSERT_TRUE(buffer.append("tail"));
+    auto* header = buffer.assemble();
+    auto* vectors = header->msg_iov;
+    void* tail = vectors[1].iov_base;
+    for (const auto length : {0u, 2u, 4u, 5u}) {
+        EXPECT_THROW(buffer.shape(length), std::logic_error);
+        ASSERT_EQ(vectors, header->msg_iov);
+        ASSERT_EQ(tail, vectors[1].iov_base);
+        EXPECT_EQ(4u, vectors[1].iov_len);
+        EXPECT_EQ("head:tail", buffer.as<std::string>());
+    }
+    buffer.disassemble();
+    buffer.shape(2);
+    EXPECT_EQ("head:ta", buffer.as<std::string>());
+    EXPECT_EQ(7u, buffer.len());
+    EXPECT_EQ(2u, buffer.assemble()->msg_iov[1].iov_len);
+}
+
+// Verifies empty/equal/zero shapes and repeated shrinking preserve lengths and links.
+TEST_F(io_buffer_fixture, buffer_shape_boundary_lengths_and_links) {
+    ace::io::buffer empty;
+    EXPECT_NO_THROW(empty.shape(0));
+    // Retain the existing empty-buffer no-op contract, even without a tail.
+    EXPECT_NO_THROW(empty.shape(5));
+    EXPECT_EQ(0u, empty.len());
+    for (const bool multiple : {false, true}) {
+        ace::io::buffer buffer;
+        if (multiple) { ASSERT_TRUE(buffer.prepend("head:")); }
+        ASSERT_TRUE(buffer.append("tail"));
+        buffer.shape(4);
+        EXPECT_EQ(multiple ? "head:tail" : "tail", buffer.as<std::string>());
+        buffer.shape(2);
+        EXPECT_EQ(multiple ? "head:ta" : "ta", buffer.as<std::string>());
+        buffer.shape(0);
+        EXPECT_EQ(multiple ? "head:" : "", buffer.as<std::string>());
+        EXPECT_EQ(multiple ? 5u : 0u, buffer.len());
+        ASSERT_TRUE(buffer.append("end"));
+        EXPECT_EQ(multiple ? "head:end" : "end", buffer.as<std::string>());
+    }
+}
+
+// Verifies failed replacement allocation leaves shape data, links, and arena accounting unchanged.
+TEST_F(io_buffer_fixture, buffer_shape_allocation_failure_is_transactional) {
+    struct configuration_scope {
+        std::size_t limit = ace::cfg::g_config._max_allocation_size;
+        bool breach = ace::cfg::g_config._breach_memory_limit;
+        ~configuration_scope() {
+            ace::cfg::g_config._max_allocation_size = limit;
+            ace::cfg::g_config._breach_memory_limit = breach;
+        }
+    } restore;
+    ace::io::buffer buffer;
+    ASSERT_TRUE(buffer.append("head:"));
+    ASSERT_TRUE(buffer.append("tail"));
+    const auto allocated = ace::core::arena::get_instance().stats().in_use_bytes;
+    ace::cfg::g_config._max_allocation_size = 1;
+    ace::cfg::g_config._breach_memory_limit = false;
+    EXPECT_THROW(buffer.shape(2), std::bad_alloc);
+    EXPECT_EQ(allocated, ace::core::arena::get_instance().stats().in_use_bytes);
+    EXPECT_EQ(9u, buffer.len());
+    EXPECT_EQ("head:tail", buffer.as<std::string>());
+    ace::cfg::g_config._max_allocation_size = restore.limit;
+    ace::cfg::g_config._breach_memory_limit = restore.breach;
+    buffer.shape(2);
+    EXPECT_EQ("head:ta", buffer.as<std::string>());
+}

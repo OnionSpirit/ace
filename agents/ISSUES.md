@@ -1899,3 +1899,25 @@
 | F4 | `cross_mechanic_fixture.cancel_spawned_with_channel` | Бесконечный cancel-loop B7; тест переоткрыт. |
 | F5 | `runner_fixture.suspending_task_run` | Standalone runner не давал 1 ms timer истечь; pump дополнен `sleep_for(2ms)`. |
 | F6 | timer/expire ordering tests | Таймеры соседних длительностей могут попасть в один слот; тест проверяет доставку каждого таймера, а не ложную монотонность. |
+
+
+## История исправлений B40/B42/B43/B46 — 2026-10-02
+
+Текущие статусы и полные проверки находятся в одноимённых карточках board/Tasks/issues.
+
+- B40: move-assignment async освобождает предыдущую coroutine через существующий
+  destructor lifecycle; self-move сохраняет ownership. Четыре context regression
+  покрывают lifetime matrix, observers, backups/insure и join waiter.
+- B42: shape проверяет assembled state (`logic_error`) и превышение tail length
+  (`out_of_range`) до allocation/mutation; четыре regression проверяют rejection,
+  boundaries, disassemble и allocation failure.
+- B43: primary as<T>() удалён; поддержанные explicit specializations сохранены.
+  Новый consumer contract проверяет отказ неподдерживаемых типов и содержимое
+  поддерживаемых conversions.
+- B46: queue destructor разрушает оставшиеся payloads и возвращает nodes в общий
+  pool. Два regression проверяют точные counts, pool reuse и ownership transfers.
+- B56: constness public accept overload исправлена. Дополнительно, после
+  согласования с пользователем, accept_query сохраняет исходную capacity и
+  ограничивает чтение caller storage; null и zero-capacity output безопасны.
+  Short/zero cases воспроизвели ASan heap-buffer-overflow, null — SEGV.
+  Тесты и итоговые проверки расширения записаны в карточке B56.

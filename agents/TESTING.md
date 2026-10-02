@@ -4,8 +4,8 @@
 
 > **Статус:** GCC 16 coverage union от 2026-08-23 покрывает **2262/2398 =
 > 94.33%** уникальных исполняемых строк `include/ace/**`. Текущая
-> default-конфигурация регистрирует 366 ACE Meson-тестов: 360 GTests, две
-> Python unit checks, discovery consistency, LSan capability и два toolkit contracts. B29/B38/B66/B68
+> default-конфигурация регистрирует 384 ACE Meson-тестов: 377 GTests, две
+> Python unit checks, discovery consistency, LSan capability, два toolkit contracts и buffer conversion contract. B29/B38/B66/B68
 > regressions проходят; successful-I/O tests всё ещё требуют доступного
 > `io_uring` и не становятся fallback tests.
 
@@ -1064,7 +1064,7 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/clock_initialization_fixture.cpp` | `clock_initialization_fixture` | 2 |
 | `tests/compose_extra_fixture.cpp` | `compose_extra_fixture` | 3 |
 | `tests/console_fixture.cpp` | `console_fixture` | 4 |
-| `tests/context_fixture.cpp` | `context_fixture` | 13 |
+| `tests/context_fixture.cpp` | `context_fixture` | 17 |
 | `tests/control_block_fixture.cpp` | `control_block_fixture` | 14 |
 | `tests/cross_mechanic_fixture.cpp` | `cross_mechanic_fixture` | 14 |
 | `tests/cutex_extra_fixture.cpp` | `cutex_extra_fixture` | 5 |
@@ -1075,12 +1075,12 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/get_runner_fixture.cpp` | `get_runner_fixture` | 1 |
 | `tests/id_alloc_fixture.cpp` | `id_alloc_fixture` | 3 |
 | `tests/io_any_fixture.cpp` | `io_any_fixture` | 6 |
-| `tests/io_buffer_fixture.cpp` | `io_buffer_fixture` | 28 |
-| `tests/io_entity_fixture.cpp` | `io_entity_fixture` | 32 |
+| `tests/io_buffer_fixture.cpp` | `io_buffer_fixture` | 32 |
+| `tests/io_entity_fixture.cpp` | `io_entity_fixture` | 39 |
 | `tests/io_hanged_fixture.cpp` | `io_hanged_fixture` | 5 |
 | `tests/omniptr_fixture.cpp` | `omniptr_fixture` | 12 |
 | `tests/promise_traits_fixture.cpp` | `promise_traits_fixture` | 12 |
-| `tests/queue_fixture.cpp` | `queue_fixture` | 18 |
+| `tests/queue_fixture.cpp` | `queue_fixture` | 20 |
 | `tests/router_slot_fixture.cpp` | `router_slot_fixture` | 9 |
 | `tests/runner_fixture.cpp` | `runner_fixture` | 10 |
 | `tests/service_fixture.cpp` | `service_fixture` | 3 |
@@ -1093,12 +1093,12 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/nukes_alignment_fixture.cpp` | `nukes_alignment_fixture` | 5 |
 | `tests/nukes_concurrency_fixture.cpp` | `nukes_concurrency_fixture` | 5 |
 | `tests/testing_toolkit_fixture.cpp` | `testing_toolkit_fixture` | 2 |
-| **Итого: 37 файлов** | | **360** |
+| **Итого: 37 файлов** | | **377** |
 
-Default Meson configuration (`ace_entry=false`) регистрирует **366 ACE** tests:
-360 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
-`ace_tests.discovery_consistency`, `testing_toolkit.debug`, `testing_toolkit.release`
-и `ace_tests.lsan_capability`. Последний
+Default Meson configuration (`ace_entry=false`) регистрирует **384 ACE** tests:
+377 GTests, `discover_tests.unit`, `sanitized_test_runner.unit`,
+`ace_tests.discovery_consistency`, `testing_toolkit.debug`, `testing_toolkit.release`,
+`buffer.conversion_contract` и `ace_tests.lsan_capability`. Последний
 становится Meson SKIP при недоступном под ptrace LSan; остальные checks выполняются
 с `detect_leaks=0` только в auto mode. TSan profile не регистрирует LSan
 capability и содержит 365 tests. `ace_entry=true` добавляет fallback test.
@@ -1572,3 +1572,58 @@ meson test -C build-tsan --suite ace --print-errorlogs --num-processes 4
 `/tmp/ace-b85-asan-shuffle.log` и `/tmp/ace-b85-tsan-shuffle.log`.
 Discovery: 360 GTests, `yield_fixture` — 10 tests. Benchmark BM18 и его
 ограничения описаны в `agents/BENCHMARKS.md`; coverage заново не измерялся.
+
+
+### B40/B42/B43/B46/B56 regressions (2026-10-02)
+
+- `context_fixture`: четыре `async_*move_assignment*` regression проверяют
+  32 сочетания empty/created/suspended/completed states с observers,
+  self-move, exact frame destruction, LIFO backup/insure и пробуждение join waiter.
+- `io_buffer_fixture`: четыре новых `buffer_shape_*` проверяют oversized
+  lengths, assembled/disassembled state, zero/equal/empty boundaries, links
+  и transactional allocation failure с arena accounting.
+- `queue_fixture.queue_destructor_*`: два regression проверяют ровно однократное
+  destruction и reuse всех slots общего slab, а также move/pop/unlink/remove/dequeue.
+- `io_entity_fixture.listener_accept_external_address*`: два loopback/error
+  regression инстанцируют исправленный public overload и проверяют peer address,
+  изменяемую длину, payload, завершение и закрытие FD. Расширение B56 добавляет
+  пять tests: exact-size short output (1/2/7/15 bytes), zero capacity, null
+  output с null/ignored length, missing length error и cancellation без клиента.
+- `tests/buffer_conversion_contract.cpp`: отдельный consumer executable
+  `ace_buffer_conversion_contract`, Meson test `buffer.conversion_contract`.
+  Проверяет отрицательные requires для int/vector<int> и реальные положительные
+  conversions string/vector<byte>. Потребитель подключает ace/ace.h перед io.h.
+
+На исходной реализации B40 четыре regression дали RED; B42 обе проверки
+rejection дали RED; B46 оба destructor regression дали RED; B43 compile-time
+assertions отвергли отсутствие ограничений; B56 consumer не компилировался
+из-за const socklen_t*. После исправлений целевые прогоны ASan+LSan и TSan
+дали по 710/710 (71 test × 10 shuffle repeats, seed 527).
+
+Команды и итоговые full-suite результаты фиксируются в соответствующих
+карточках issues. Runtime I/O/LSan проверки запускались вне песочницы;
+внутри песочницы исходные 59 targeted tests прошли с сообщением о недоступном
+LSan и EPERM для io_uring, поэтому успешное I/O отдельно подтверждено на host.
+
+До расширения B56 full suites: Clang 22.1.8 ASan+LSan **379/379**, GCC 16.2.1
+TSan **378/378**. Финальный `buffer.conversion_contract` дополнительно прошёл
+1/1 после добавления стандартного aggregate include `ace/ace.h`; в первом
+GCC standalone build его отсутствие давало undefined fire_backups при линковке.
+
+
+### B56: bounded short/null accept output — итог (2026-10-02)
+
+После разрешения расширения B56 все пять дополнительных regression реализованы.
+Short/zero-capacity tests до исправления воспроизводили ASan read 16 bytes
+за пределами heap allocation; null output — SEGV. Error при отсутствующем
+addrlen сохранился; cancellation проверяет pending accept без подключившегося
+клиента, отсутствие записи в storage и cleanup descriptor.
+
+`meson compile -C BUILD ace_tests ace_buffer_conversion_contract
+ace_testing_toolkit_debug ace_testing_toolkit_release -j 2` и
+`meson test -C BUILD --no-rebuild --suite ace --print-errorlogs --num-processes 4`
+прошли для `build` (Clang ASan+LSan **384/384**) и `build-tsan`
+(GCC TSan **383/383**). Набор `io_entity_fixture.listener_accept_*`
+через sanitized_test_runner, seed 527, repeat 10 — по **70/70**.
+Все runtime проверки выполнялись с доступным io_uring вне песочницы;
+LSan включён для ASan. Полные команды и RED/GREEN evidence — в карточке B56.

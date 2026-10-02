@@ -1201,13 +1201,11 @@ public:                                                                         
         /**
          * @brief Converts the buffer contents into type @c T.
          * @tparam T Target type (specialized for @c std::string and @c std::vector<std::byte>).
-         * @return Decayed default-constructed value when no specialization exists.
+         * @return A copy of the payload in the explicitly supported target type.
+         * @details Unsupported target types are rejected at compile time.
          */
         template <typename T>
-        T as() const {
-            static_assert("No 'as()' specialization for passed type <T>");
-            return std::decay_t<T>{};
-        }
+        T as() const = delete;
 
         /**
          * @brief Reserve space in the buffer. Main purpose is to get memory to read to
@@ -1217,11 +1215,21 @@ public:                                                                         
         void* expand(const std::size_t len) { return memtail(len); }
 
         /**
-         * @brief Shrinks tail chunk to a provided len
-         * @param [in] len new len for the tail chunk (last appended or expanded memory)
+         * @brief Shrinks the last appended or expanded chunk to the given length.
+         * @param[in] len New payload length, at most the current tail length.
+         * @throws std::logic_error if the buffer is assembled; call disassemble() first.
+         * @throws std::out_of_range if len exceeds the existing tail length.
+         * @throws std::bad_alloc if replacement storage cannot be allocated.
+         * @details An unassembled buffer without chunks is unchanged. Zero and
+         * equal lengths are allowed. Failure preserves data, length and ownership.
+         * Successful replacement invalidates pointers into the previous tail.
          */
         void shape(const std::size_t len) {
+            if (_hdr.msg_iov)
+                throw std::logic_error("cannot shape an assembled buffer");
             if (not _chunk_list_end) return;
+            if (len > _chunk_list_end->iov_len)
+                throw std::out_of_range("shape cannot grow the tail chunk");
             auto* new_tail = allocate_buf(len);
             memcpy(new_tail->iov_base, _chunk_list_end->iov_base, len + control_hdr_len);
             // NOTE: Prepend or append done then use this case

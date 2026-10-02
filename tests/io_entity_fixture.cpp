@@ -6,6 +6,7 @@
 #include <chrono>
 #include <climits>
 #include <fcntl.h>
+#include <memory>
 #include <string>
 #include <sys/socket.h>
 #include <sys/uio.h>
@@ -964,4 +965,262 @@ TEST_F(io_entity_fixture, file_output_reports_allocation_failure_without_fallbac
     EXPECT_EQ(EAGAIN, errno);
     ::close(pipe_fds[0]);
     ::close(pipe_fds[1]);
+}
+
+namespace {
+struct accept_result {
+    bool entered = false;
+    sockaddr_in peer{};
+    bool completed = false;
+    bool connected = false;
+    int received = INT_MIN;
+    char byte = 0;
+    std::string error;
+};
+
+ace::task accept_into_storage(ace::net::listener& listener, sockaddr* address,
+                              socklen_t* length, accept_result& result) {
+    result.entered = true;
+    auto connection = co_await listener.accept(address, length, SOCK_CLOEXEC);
+    result.connected = static_cast<bool>(connection);
+    if (result.connected) {
+        // Net entities expose address metadata as fields, with no address accessor.
+        result.peer = connection._peer_sin;
+        result.received = co_await connection.recv(&result.byte, 1);
+        (void)co_await connection.close();
+    } else {
+        result.error = connection.error();
+    }
+    (void)co_await listener.close();
+    result.completed = true;
+}
+
+struct native_accept_client {
+    int fd = -1;
+    ~native_accept_client() { if (fd >= 0) ::close(fd); }
+};
+}
+
+// Verifies the public accept overload fills peer address/length and returns usable ownership.
+TEST_F(io_entity_fixture, listener_accept_external_address_and_length) {
+    const int server_fd = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    ASSERT_GE(server_fd, 0);
+    ace::net::listener listener(server_fd, false);
+    sockaddr_in endpoint{};
+    endpoint.sin_family = AF_INET;
+    endpoint.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(0, ::bind(server_fd, reinterpret_cast<sockaddr*>(&endpoint), sizeof(endpoint)));
+    ASSERT_EQ(0, ::listen(server_fd, 1));
+    socklen_t endpoint_length = sizeof(endpoint);
+    ASSERT_EQ(0, ::getsockname(server_fd, reinterpret_cast<sockaddr*>(&endpoint), &endpoint_length));
+    native_accept_client client{::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0)};
+    ASSERT_GE(client.fd, 0);
+    ASSERT_EQ(0, ::connect(client.fd, reinterpret_cast<sockaddr*>(&endpoint), sizeof(endpoint)));
+    ASSERT_EQ(1, ::send(client.fd, "x", 1, MSG_NOSIGNAL));
+    sockaddr_in client_endpoint{};
+    socklen_t client_length = sizeof(client_endpoint);
+    ASSERT_EQ(0, ::getsockname(client.fd, reinterpret_cast<sockaddr*>(&client_endpoint), &client_length));
+    sockaddr_storage peer{};
+    socklen_t peer_length = sizeof(peer);
+    accept_result result;
+    ace::schedule(accept_into_storage(listener, reinterpret_cast<sockaddr*>(&peer), &peer_length, result));
+    run_dispatcher();
+    ASSERT_TRUE(result.completed);
+    ASSERT_TRUE(result.connected) << result.error;
+    EXPECT_EQ(sizeof(sockaddr_in), peer_length);
+    sockaddr_in actual{};
+    std::memcpy(&actual, &peer, sizeof(actual));
+    EXPECT_EQ(AF_INET, actual.sin_family);
+    EXPECT_EQ(client_endpoint.sin_addr.s_addr, actual.sin_addr.s_addr);
+    EXPECT_EQ(client_endpoint.sin_port, actual.sin_port);
+    EXPECT_EQ(1, result.received);
+    EXPECT_EQ('x', result.byte);
+    expect_fd_closed(server_fd);
+}
+
+// Verifies accept on a non-listening TCP socket returns an error without changing output storage.
+TEST_F(io_entity_fixture, listener_accept_external_address_error) {
+    const int server_fd = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    ASSERT_GE(server_fd, 0);
+    ace::net::listener listener(server_fd, false);
+    sockaddr_in peer{};
+    peer.sin_port = htons(1234);
+    socklen_t peer_length = sizeof(peer);
+    accept_result result;
+    ace::schedule(accept_into_storage(listener, reinterpret_cast<sockaddr*>(&peer), &peer_length, result));
+    run_dispatcher();
+    ASSERT_TRUE(result.completed);
+    EXPECT_FALSE(result.connected);
+    EXPECT_EQ(std::string(std::strerror(EINVAL)), result.error);
+    EXPECT_EQ(sizeof(peer), peer_length);
+    EXPECT_EQ(htons(1234), peer.sin_port);
+    expect_fd_closed(server_fd);
+}
+
+
+namespace {
+::testing::AssertionResult prepare_accept_loopback(ace::net::listener& listener,
+    native_accept_client& client, sockaddr_in& client_endpoint) {
+    const int fd = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) return ::testing::AssertionFailure() << "socket: " << errno;
+    sockaddr_in stale_peer{};
+    stale_peer.sin_family = AF_INET;
+    stale_peer.sin_port = htons(1234);
+    stale_peer.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    listener = ace::net::listener(fd, false, sockaddr_in{}, stale_peer);
+    sockaddr_in endpoint{};
+    endpoint.sin_family = AF_INET;
+    endpoint.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&endpoint), sizeof(endpoint)) != 0)
+        return ::testing::AssertionFailure() << "bind: " << errno;
+    if (::listen(fd, 1) != 0) return ::testing::AssertionFailure() << "listen: " << errno;
+    socklen_t size = sizeof(endpoint);
+    if (::getsockname(fd, reinterpret_cast<sockaddr*>(&endpoint), &size) != 0)
+        return ::testing::AssertionFailure() << "getsockname: " << errno;
+    client.fd = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (client.fd < 0) return ::testing::AssertionFailure() << "client socket: " << errno;
+    if (::connect(client.fd, reinterpret_cast<sockaddr*>(&endpoint), sizeof(endpoint)) != 0)
+        return ::testing::AssertionFailure() << "connect: " << errno;
+    if (::send(client.fd, "x", 1, MSG_NOSIGNAL) != 1)
+        return ::testing::AssertionFailure() << "send: " << errno;
+    size = sizeof(client_endpoint);
+    if (::getsockname(client.fd, reinterpret_cast<sockaddr*>(&client_endpoint), &size) != 0)
+        return ::testing::AssertionFailure() << "client getsockname: " << errno;
+    return ::testing::AssertionSuccess();
+}
+}
+
+// Verifies accept never reads beyond a genuinely short address allocation, even after addrlen grows.
+TEST_F(io_entity_fixture, listener_accept_short_address_storage) {
+    for (const socklen_t capacity : {1u, 2u, 7u, 15u}) {
+        SCOPED_TRACE(capacity);
+        ace::net::listener listener;
+        native_accept_client client;
+        sockaddr_in expected_peer{};
+        ASSERT_TRUE(prepare_accept_loopback(listener, client, expected_peer));
+        // Exact heap sizes expose a full sockaddr_in read to ASan instead of hiding
+        // the overread inside a larger sockaddr_storage object.
+        auto bytes = std::make_unique<unsigned char[]>(capacity);
+        std::memset(bytes.get(), 0xA5, capacity);
+        socklen_t length = capacity;
+        accept_result result;
+        ace::schedule(accept_into_storage(listener, reinterpret_cast<sockaddr*>(bytes.get()), &length, result));
+        run_dispatcher();
+        ASSERT_TRUE(result.completed);
+        ASSERT_TRUE(result.connected) << result.error;
+        EXPECT_EQ(sizeof(sockaddr_in), length);
+        EXPECT_EQ(0, std::memcmp(bytes.get(), &expected_peer, capacity));
+        sockaddr_in expected_metadata{};
+        std::memcpy(&expected_metadata, &expected_peer, capacity);
+        EXPECT_EQ(0, std::memcmp(&result.peer, &expected_metadata, sizeof(expected_metadata)));
+        EXPECT_EQ(1, result.received);
+        EXPECT_EQ('x', result.byte);
+        EXPECT_TRUE(listener.is_closed());
+    }
+}
+
+// Verifies zero-capacity output is untouched while actual addrlen and a usable connection are returned.
+TEST_F(io_entity_fixture, listener_accept_zero_address_capacity) {
+    ace::net::listener listener;
+    native_accept_client client;
+    sockaddr_in expected_peer{};
+    ASSERT_TRUE(prepare_accept_loopback(listener, client, expected_peer));
+    auto byte = std::make_unique<unsigned char>(0xA5);
+    socklen_t length = 0;
+    accept_result result;
+    ace::schedule(accept_into_storage(listener, reinterpret_cast<sockaddr*>(byte.get()), &length, result));
+    run_dispatcher();
+    ASSERT_TRUE(result.completed);
+    ASSERT_TRUE(result.connected) << result.error;
+    EXPECT_EQ(sizeof(sockaddr_in), length);
+    EXPECT_EQ(0xA5, *byte);
+    const sockaddr_in empty{};
+    EXPECT_EQ(0, std::memcmp(&empty, &result.peer, sizeof(empty)));
+    EXPECT_EQ(1, result.received);
+    EXPECT_EQ('x', result.byte);
+    EXPECT_TRUE(listener.is_closed());
+}
+
+// Verifies a null address suppresses output with either a null or ignored length pointer.
+TEST_F(io_entity_fixture, listener_accept_null_address_storage) {
+    for (const bool with_length : {false, true}) {
+        ace::net::listener listener;
+        native_accept_client client;
+        sockaddr_in expected_peer{};
+        ASSERT_TRUE(prepare_accept_loopback(listener, client, expected_peer));
+        socklen_t ignored_length = 31;
+        accept_result result;
+        ace::schedule(accept_into_storage(listener, nullptr,
+            with_length ? &ignored_length : nullptr, result));
+        run_dispatcher();
+        ASSERT_TRUE(result.completed);
+        ASSERT_TRUE(result.connected) << result.error;
+        EXPECT_EQ(31u, ignored_length);
+        const sockaddr_in empty{};
+        // A previous peer must not survive when this accept requested no address.
+        EXPECT_EQ(0, std::memcmp(&empty, &result.peer, sizeof(empty)));
+        EXPECT_EQ(1, result.received);
+        EXPECT_EQ('x', result.byte);
+        EXPECT_TRUE(listener.is_closed());
+    }
+}
+
+// Verifies a nonnull address with a missing length produces the kernel error without dereferencing null.
+TEST_F(io_entity_fixture, listener_accept_missing_address_length) {
+    ace::net::listener listener;
+    native_accept_client client;
+    sockaddr_in expected_peer{};
+    ASSERT_TRUE(prepare_accept_loopback(listener, client, expected_peer));
+    sockaddr_in output{};
+    output.sin_port = htons(1234);
+    accept_result result;
+    ace::schedule(accept_into_storage(listener, reinterpret_cast<sockaddr*>(&output), nullptr, result));
+    run_dispatcher();
+    ASSERT_TRUE(result.completed);
+    EXPECT_FALSE(result.connected);
+    EXPECT_EQ(std::string(std::strerror(EFAULT)), result.error);
+    EXPECT_EQ(htons(1234), output.sin_port);
+    EXPECT_TRUE(listener.is_closed());
+}
+
+namespace {
+ace::task cancel_accept_into_storage(ace::net::listener& listener, sockaddr* address,
+    socklen_t* length, accept_result& result, bool& suspended, bool& canceled) {
+    auto handle = co_await ace::spawn(accept_into_storage(listener, address, length, result));
+    co_await ace::timeout(std::chrono::milliseconds(1));
+    suspended = result.entered && !result.completed;
+    handle.cancel();
+    canceled = !co_await handle.join();
+    (void)co_await listener.close();
+}
+}
+
+// Verifies cancellation releases pending short/null-output accepts without touching output or completing the body.
+TEST_F(io_entity_fixture, listener_accept_optional_address_cancellation) {
+    for (const bool null_output : {false, true}) {
+        const int fd = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        ASSERT_GE(fd, 0);
+        ace::net::listener listener(fd, false);
+        sockaddr_in endpoint{};
+        endpoint.sin_family = AF_INET;
+        endpoint.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        ASSERT_EQ(0, ::bind(fd, reinterpret_cast<sockaddr*>(&endpoint), sizeof(endpoint)));
+        ASSERT_EQ(0, ::listen(fd, 1));
+        auto byte = std::make_unique<unsigned char>(0xA5);
+        socklen_t length = 1;
+        accept_result result;
+        bool suspended = false;
+        bool canceled = false;
+        // No client connects: the task must be suspended in accept when canceled.
+        ace::schedule(cancel_accept_into_storage(listener,
+            null_output ? nullptr : reinterpret_cast<sockaddr*>(byte.get()),
+            null_output ? nullptr : &length, result, suspended, canceled));
+        run_dispatcher();
+        EXPECT_TRUE(suspended);
+        EXPECT_TRUE(canceled);
+        EXPECT_FALSE(result.completed);
+        EXPECT_EQ(0xA5, *byte);
+        EXPECT_EQ(1u, length);
+        expect_fd_closed(fd);
+    }
 }

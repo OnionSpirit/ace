@@ -202,6 +202,12 @@ if tests_enabled
     )
 
     python = import('python').find_installation('python3')
+    buffer_conversion_contract = executable(
+        'ace_buffer_conversion_contract',
+        'tests/buffer_conversion_contract.cpp',
+        dependencies: [ace_dep],
+        override_options: test_sanitizer_options,
+    )
     discovery_script = files('discover_tests.py')[0]
     sanitized_test_runner = files('tests/sanitized_test_runner.py')[0]
     sanitized_test_runner_common_args = [
@@ -213,6 +219,13 @@ if tests_enabled
     sanitized_test_runner_args = sanitized_test_runner_common_args + [
       '--',
     ]
+    test(
+        'buffer.conversion_contract',
+        python,
+        args: sanitized_test_runner_args + [buffer_conversion_contract],
+        depends: [buffer_conversion_contract],
+        suite: ['ace', 'sanitizer'],
+    )
     discovered_tests = run_command(
       python, discovery_script, 'discover', test_fixture_sources,
       check: true

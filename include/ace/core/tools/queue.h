@@ -203,6 +203,18 @@ namespace ace::core::tools {
         explicit queue(slab_mempool<T>& mp) : mempool(mp) {}
 
         /**
+         * @brief Destroys remaining payloads and returns their nodes to the shared pool.
+         * @details Takes O(N) time for N remaining nodes and does not allocate.
+         * Nodes transferred through unlink() or pop() belong to the caller and
+         * are not released here. Other queues sharing the pool remain valid.
+         * @warning The pool must outlive this queue. Destruction requires exclusive
+         * access, as do the other queue operations.
+         */
+        ~queue() noexcept {
+            while (head) remove_node(head);
+        }
+
+        /**
          * @brief Move constructor — transfers the nodes and nulls the source.
          * @param q Source queue to move from.
          * @details Takes O(N) time to rebind each node to this queue, without

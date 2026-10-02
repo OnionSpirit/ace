@@ -164,7 +164,9 @@ ace::task consume_sequence() {
 `control_block_handle`. Lifecycle различает initialized, suspended, yielded,
 finished, failed и canceled states. `observe()` создаёт handle для join/cancel,
 router forwarding и чтения return/yield value. Coroutine frame уничтожается после
-освобождения ownership и всех наблюдателей.
+освобождения ownership и всех наблюдателей. Move-assignment `async` сначала
+выполняет cleanup прежней coroutine по правилам destructor, включая waiters,
+router cancellation и backups; self-move — no-op (B40).
 
 ## Комбинаторы
 
@@ -664,7 +666,7 @@ yield_fixture.cpp
 Fixture classes и helper coroutine functions объявляются в
 `tests/environment.h`; каждый fixture source содержит относящиеся к нему
 `TEST`/`TEST_F`. Общие fault-injection scopes находятся в
-`tests/allocation_failure.h`. Текущая source inventory - **360 Google Test**. Meson discover
+`tests/allocation_failure.h`. Текущая source inventory - **377 Google Test**. Meson discover
 mode регистрирует каждый GTest отдельным процессом с точным `--gtest_filter`.
 
 Помимо source GTests, стандартная конфигурация регистрирует tooling tests:
@@ -746,3 +748,23 @@ thread isolation и независимость CRTP service hooks.
 GCC TSan — 351/351. Исходный TSan сбой B82 зарегистрирован отдельно;
 независимая от B80 shuffled-зависимость B81 исправлена позднее. Подробности в
 `TESTING.md`.
+
+
+## Контракты B42/B43/B46/B56 (2026-10-02)
+
+- `io::buffer::shape(len)` запрещает assembled state через `std::logic_error`
+  и увеличение tail через `std::out_of_range`; ошибки и allocation failure
+  сохраняют данные, links и accounting. После `disassemble()` shrinking снова
+  разрешён. Zero/equal lengths разрешены, отсутствие tail сохраняет no-op.
+- `buffer::as<T>()` имеет удалённый primary template: доступны явные
+  специализации `std::string` и `std::vector<std::byte>`. Неподдерживаемый
+  тип отвергается при компиляции. Consumer contract проверяет оба направления.
+- `queue<T>` уничтожает оставшиеся payloads и возвращает nodes общему pool
+  за O(N) без allocations; pool должен переживать очередь. Detached nodes
+  после `unlink/pop` принадлежат вызывающему.
+- External-address `listener::accept` принимает `socklen_t*` как in/out
+  pointer; storage и listener должны сохранять адрес и lifetime до завершения
+  или отмены query, без изменения storage/length во время ожидания. Capacity
+  сохраняется при submit; metadata получает не больше capacity/returned length
+  и размера sockaddr_in. Остальные bytes обнуляются. Null addr игнорирует
+  addrlen; null/zero-capacity output обнуляет peer metadata (B56).

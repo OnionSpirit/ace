@@ -453,3 +453,48 @@ baseline-сериями; устойчивое замедление обычно�
 regressions и LSan, а его необходимая работа теперь включает возврат узла
 runner-у вместо потери ownership. Вывод о производительности cancellation
 из этих измерений не делается.
+
+
+## Контроль после B40/B42/B43/B46 — 2026-10-02
+
+Сценарии не менялись. Baseline собран из всех `include/` заголовков commit
+`8206dab` в `/tmp/ace-five-baseline`, current — `build-bench/ace_benchmarks`.
+Оба бинарника: GCC 16.2.1, C++23, `-O3 -DNDEBUG`, Google Benchmark 1.8.4;
+12 logical CPU, L3 32 MiB; ручной pinning/frequency отсутствуют. Измерения
+выполнены после завершения builds/tests: baseline/current/current/baseline,
+по пять repeats, `--benchmark_min_time=0.05s`. Первая пробная серия, которая
+могла пересечься с проверками, заменена полным повтором без фоновых builds/tests.
+
+Команда для каждого бинарника:
+`--benchmark_filter=^(bm_io_buffer_append|bm_intrusive_queue_move/(0|64|1024))$
+--benchmark_min_time=0.05s --benchmark_repetitions=5 --benchmark_out=OUTPUT.json
+--benchmark_out_format=json`. Для baseline задан
+`LD_LIBRARY_PATH=/home/ivanm/code/cxx/ace/build-bench/subprojects/benchmark-1.8.4`.
+Сырые результаты: `/tmp/ace-five-perf-{1-baseline,2-current,3-current,4-baseline}.json`.
+
+Медианы десяти CPU samples каждой версии:
+
+| Сценарий | Baseline | Current | Изменение |
+|---|---:|---:|---:|
+| Buffer append, ms/iteration | 12.770 | 12.937 | +1.31% |
+| Queue move 0 nodes, ns/256 moves | 510.066 | 506.568 | -0.69% |
+| Queue move 64 nodes, ns/256 moves | 9387.484 | 10007.252 | +6.60% |
+| Queue move 1024 nodes, ns/256 moves | 232813.292 | 233777.279 | +0.41% |
+
+В 64-node microbenchmark наблюдается рост примерно на 2.42 ns/move;
+медианы двух current-серий 10854.965 и 9942.761 ns/256 moves показывают
+заметный разброс. Это не end-to-end оценка timers/scheduler. Все сценарии
+завершились без errors. Новые performance targets не добавлялись: B43/B56
+меняют compile-time контракт; B42 добавляет проверки до прежнего allocation
+path. B40/B46 выполняют обязательный cleanup вместо потери ресурсов;
+сравнивать цену полного cleanup с прежней утечкой как оптимизацию некорректно.
+Сложность destruction непустой queue теперь O(N); enqueue/remove не изменены.
+
+
+### Расширение B56: short/null accept output (2026-10-02)
+
+Дополнительный benchmark не добавлен: исправление сохраняет scalar capacity
+и ограничивает уже существовавшее копирование sockaddr_in (максимум 16 bytes),
+без новых allocations, locks и syscalls. Производительность accept отдельно
+не измерялась; memory safety, результат и отмена проверяются correctness tests.
+Ранее приведённые BM12/BM26 measurements не оценивают accept path.

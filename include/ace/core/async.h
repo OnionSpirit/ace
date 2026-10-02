@@ -136,11 +136,21 @@ namespace ace::core {
         };
 
         /**
-         * @brief Move assignment.  Transfers ownership of the coroutine handle.
-         * @param ctx  Source async.  Its @c _coroutine is set to null.
+         * @brief Release the previous coroutine and take ownership of the source.
+         * @details Releases waiters, cancels the active router, fires pending
+         * backups and releases the owner reference exactly as destruction does.
+         * Observers can keep the previous frame alive until their final release.
+         * Self-move is a no-op. Outer await bindings belong to this awaitable
+         * object and are retained, just as they are during ordinary assignment.
+         * @param ctx Source async; emptied unless it is @c *this.
          * @return Reference to @c *this.
          */
         async &operator=(async && ctx)  noexcept {
+            if (this == &ctx) return *this;
+            {
+                // Reuse the destructor lifecycle without ending this object's lifetime.
+                async previous(std::move(*this));
+            }
             _coroutine = std::forward<coroutine_t>(ctx._coroutine);
             ctx._coroutine = nullptr;
             return *this;

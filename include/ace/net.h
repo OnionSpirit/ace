@@ -40,6 +40,8 @@
 #define ACE_NET_H
 
 
+#include <algorithm>
+#include <cstring>
 #include <vector>
 #include <string>
 #include <arpa/inet.h>
@@ -876,8 +878,9 @@ namespace ace::net {
             /**
              * @brief Constructs an accept query.
              * @param entity   Listener entity to accept from.
-             * @param addr     Storage for the peer address.
-             * @param addrlen  In/out length of @p addr.
+             * @param[out] addr Peer address storage, or nullptr to omit address output.
+             * @param[in,out] addrlen Storage capacity, replaced with actual length;
+             * ignored when addr is nullptr.
              * @param flags    Accept flags (default 0).
              */
             explicit accept_query(const listener_entity* entity, sockaddr* addr, socklen_t* addrlen, const int flags = 0)
@@ -887,18 +890,37 @@ namespace ace::net {
                 , _addrlen(addrlen)
                 , _flags(flags) {}
 
-            /** @brief Submits the accept operation to the kernel controller. */
+            /**
+             * @brief Saves output capacity and submits the accept operation.
+             * @param kwp Observer receiving the completion result.
+             * @return Whether the kernel controller accepted the request.
+             * @details Capacity is sampled at submission because the kernel replaces
+             * addrlen with the actual length, which may exceed the provided storage.
+             */
             bool setup_query(services::kernel_observer* kwp) const {
+                _addr_capacity = 0;
+                if (_addr) {
+                    if (_addrlen) _addr_capacity = *_addrlen;
+                }
                 return services::kernel_controller::accept(kwp, _fd, _addr, _addrlen, _flags);
             }
 
             /**
              * @brief Returns the accepted connection on success.
              * @return Connected entity, or a failed entity carrying the error code.
+             * @details Peer metadata contains only the bytes actually returned into
+             * caller storage; the remaining bytes are zero. Omitted or zero-capacity
+             * output produces zeroed peer metadata. Failure does not change metadata.
              */
             [[nodiscard]] io_transport_entity_t await_resume() const {
                 if (_res > -1) {
-                    _entity->_peer_sin = *reinterpret_cast<sockaddr_in*>(_addr);
+                    sockaddr_in peer{};
+                    if (_addr_capacity != 0) {
+                        const auto copied = std::min<std::size_t>(
+                            std::min(_addr_capacity, *_addrlen), sizeof(peer));
+                        std::memcpy(&peer, _addr, copied);
+                    }
+                    _entity->_peer_sin = peer;
                     return io::caster<io_transport_entity_t>::from_entity(_res, false, std::move(*_entity));
                 }
                 return io_transport_entity_t {_res, true};
@@ -907,6 +929,7 @@ namespace ace::net {
             const listener_entity* _entity;  ///< Listener entity being accepted from.
             sockaddr* _addr;                 ///< Storage for the peer address.
             socklen_t* _addrlen;             ///< In/out length of @c _addr.
+            mutable socklen_t _addr_capacity = 0; ///< Capacity before the kernel overwrites addrlen.
             const int _flags;                ///< Accept flags.
         };
 
@@ -914,8 +937,21 @@ namespace ace::net {
         [[nodiscard]] auto accept()
         -> accept_query { return accept_query { this, reinterpret_cast<sockaddr*>(&_self_sin), &_self_sin_size}; }
 
-        /** @brief Accepts a new connection into the given address storage. */
-        [[nodiscard]] auto accept(sockaddr* addr, const socklen_t* addrlen, const int flags = 0)
+        /**
+         * @brief Accepts a connection into caller-owned address storage.
+         * @param[out] addr Storage for the peer address, or nullptr to omit address output.
+         * @param[in,out] addrlen Capacity at submission; actual address length on completion.
+         * Ignored when addr is nullptr; otherwise must point to writable length storage.
+         * @param flags Accept flags passed to the kernel.
+         * @return Awaitable yielding a connection or a failed entity with the error.
+         * @details A short buffer receives only its capacity in bytes; addrlen can
+         * report a larger required size. Peer metadata keeps the returned prefix and
+         * zeroes the remainder. Null or zero-capacity output gives zeroed metadata.
+         * @warning The listener, address and length storage must remain alive and
+         * at stable addresses until completion or cancellation of the query.
+         * Do not change the output storage or length while the query is pending.
+         */
+        [[nodiscard]] auto accept(sockaddr* addr, socklen_t* addrlen, const int flags = 0)
         -> accept_query { return accept_query{this, addr, addrlen, flags}; }
 
         /** @brief Accepts a new connection for a specific IPv4 address and port. */

@@ -201,6 +201,9 @@ stateDiagram-v2
 
 Every `ace::async<T>` is move-only. Moving it transfers ownership of its
 coroutine handle; copying is not supported. This also applies to `ace::task`.
+Move assignment releases the previous coroutine using the normal destruction
+and cancellation rules before taking the source handle. Self-move is a no-op;
+existing observers may keep the replaced frame alive until they release it.
 
 ```cpp
 ace::async<int> answer() {
@@ -325,12 +328,34 @@ ACE also overloads logical composition for futures:
 Do not use `&&` or `||` with non-`bool` ACE-related values. Those operators are
 also composition syntax and can select an unintended overload.
 
+## I/O Buffers
+
+`ace::io::buffer::shape(length)` shrinks the last appended or expanded chunk.
+Growing that chunk throws `std::out_of_range`. Calling `shape()` after
+`assemble()` throws `std::logic_error`; call `disassemble()` first. These errors
+and allocation failure leave the buffer unchanged. Zero and equal lengths are
+allowed; an unassembled buffer with no chunks is unchanged.
+
+`buffer.as<std::string>()` and `buffer.as<std::vector<std::byte>>()` copy the
+payload into the requested container. Unsupported target types are compile-time
+errors.
+
 ## Networking
 
 Socket APIs form move-consuming state machines. Awaiting `bind()`, `connect()`,
 or `listen()` transfers the file descriptor into the next entity. Do not use the
 previous entity after the transition. Socket entities are movable, not copyable;
 store them as movable members or in `std::optional` when needed.
+
+The external-address overload `listener.accept(sockaddr*, socklen_t*, flags)`
+uses a writable length: supply the address storage capacity before awaiting it;
+the kernel reports the actual address length on completion. Keep the listener,
+address storage and length at stable addresses until completion or cancellation,
+and do not modify them while the query is pending. A short buffer receives only
+its capacity; the returned length can be larger. Connection peer metadata keeps
+the returned prefix and zeroes the rest. With a null address pointer, the length
+pointer is ignored and peer metadata is zeroed; zero-capacity output also gives
+zeroed metadata.
 
 ```mermaid
 stateDiagram-v2
@@ -405,6 +430,9 @@ simplest choice when closure lifetime would otherwise be difficult to see.
 - Moving `ace::core::tools::queue<T>` takes O(N), preserves node addresses and
   keeps node self-removal O(1). The source remains empty and reusable; the shared
   slab pool must outlive both queues and their nodes.
+- Destroying a queue destroys its remaining payloads and returns their nodes to
+  the shared pool in O(N). Nodes detached by `unlink()` or `pop()` belong to the
+  caller and must be transferred to another queue or explicitly released.
 - Await eager operations such as `recv_buf()` even though they start before the
   await.
 - Cancellation is part of coroutine and router lifetime management; do not let

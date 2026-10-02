@@ -326,3 +326,64 @@ TEST_F(queue_fixture, slab_registration_failure_preserves_queue) {
     _queue.enqueue(test_payload {8});
     EXPECT_EQ(8, _queue.dequeue().value);
 }
+
+// Verifies nonempty queues sharing a pool destroy only their own remaining payloads.
+TEST_F(queue_fixture, queue_destructor_releases_live_payloads_and_reuses_pool) {
+    int destroyed = 0;
+    int moves = 0;
+    tool::slab_mempool<queue_lifetime_payload> pool;
+    {
+        tool::queue<queue_lifetime_payload> survivor(pool);
+        survivor.enqueue(queue_lifetime_payload{destroyed, moves});
+        {
+            tool::queue<queue_lifetime_payload> first(pool);
+            for (int i = 0; i < 1023; ++i)
+                first.enqueue(queue_lifetime_payload{destroyed, moves});
+        }
+        EXPECT_EQ(1023, destroyed);
+        EXPECT_FALSE(survivor.empty());
+        // Disallow pool growth: all 1023 freed slots must be reusable while
+        // the other queue retains its node in the same slab.
+        slab_failure_scope no_growth(slab_failure_scope::allocation);
+        tool::queue<queue_lifetime_payload> reused(pool);
+        EXPECT_NO_THROW({
+            for (int i = 0; i < 1023; ++i)
+                reused.enqueue(queue_lifetime_payload{destroyed, moves});
+        });
+    }
+    EXPECT_EQ(2047, destroyed);
+}
+
+// Verifies move/pop/unlink/dequeue/remove transfer or release each payload exactly once.
+TEST_F(queue_fixture, queue_destructor_respects_transferred_and_removed_nodes) {
+    int destroyed = 0;
+    int moves = 0;
+    tool::slab_mempool<queue_lifetime_payload> pool;
+    tool::q_node<queue_lifetime_payload>* unlinked = nullptr;
+    {
+        tool::queue<queue_lifetime_payload> source(pool);
+        source.enqueue(queue_lifetime_payload{destroyed, moves});
+        unlinked = source.enqueue(queue_lifetime_payload{destroyed, moves});
+        source.unlink(unlinked);
+        tool::queue<queue_lifetime_payload> receiver(pool);
+        receiver.enqueue(source.pop());
+        source.enqueue(queue_lifetime_payload{destroyed, moves});
+        auto* removed = source.enqueue(queue_lifetime_payload{destroyed, moves});
+        EXPECT_TRUE(removed->remove());
+        EXPECT_EQ(1, destroyed);
+        {
+            auto value = receiver.dequeue();
+            EXPECT_EQ(1, destroyed); // dequeue moves ownership into the returned value.
+        }
+        EXPECT_EQ(2, destroyed);
+        {
+            tool::queue<queue_lifetime_payload> destination(std::move(source));
+            EXPECT_TRUE(source.empty());
+        }
+        EXPECT_EQ(3, destroyed);
+    }
+    EXPECT_EQ(3, destroyed); // Neither queue owns the explicitly unlinked payload.
+    unlinked->destruct();
+    pool.free(unlinked);
+    EXPECT_EQ(4, destroyed);
+}

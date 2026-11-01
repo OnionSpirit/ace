@@ -132,6 +132,13 @@ namespace ace::core {
      * external-release queue and lifetime counter are atomic. After owner
      * retirement, the last foreign releaser exclusively drains and destroys
      * the storage.
+     * @warning Returned payloads are guaranteed to be aligned only to
+     * @c kAlignment (16 bytes). Objects placed directly in that storage must
+     * require no stricter alignment. This does not lower the alignment of a
+     * coroutine frame or its members: callers storing over-aligned objects
+     * must provide additional alignment and retain the original allocation
+     * pointer for deallocation. In particular, Nukes-backed channels can
+     * require 64-byte alignment even when their payload type is an int.
      */
     struct arena : arena_testing::debug_tools {
         friend arena_testing;
@@ -142,7 +149,7 @@ namespace ace::core {
         /// @brief Size of the per-chunk header stored before the user payload.
         static constexpr std::size_t kHeaderSize = sizeof(chunk_header);
 
-        /// @brief Guaranteed alignment of returned storage.
+        /// @brief Guaranteed payload alignment; direct placement requires alignof(T) <= 16.
         static constexpr std::size_t kAlignment = 16;
 
         /// @brief Bit 63 of the header size field marks a transient (malloc-served) chunk.
@@ -162,7 +169,8 @@ namespace ace::core {
         /**
          * @brief Allocates @p size bytes from the current thread's arena.
          * @param size Requested payload size.
-         * @return Pointer to the user payload area (chunk header + 16 bytes).
+         * @return Pointer immediately after the chunk header, aligned to
+         *         @c kAlignment; stronger alignment is not guaranteed.
          * @throws std::bad_alloc on allocation failure or when the arena limit
          *         is reached and @c breach_memory_limit is disabled.
          */

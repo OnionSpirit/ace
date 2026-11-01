@@ -114,8 +114,7 @@ TEST_F(promise_traits_fixture, operator_new_layout) {
 TEST_F(promise_traits_fixture, operator_new_preserves_frame_canary) {
     using promise_type = ace::task::promise_type;
     constexpr std::size_t requested_frame_size = 257;
-    constexpr std::size_t allocation_size =
-        requested_frame_size + ace::core::control_block_size;
+    constexpr std::size_t allocation_size = requested_frame_size + ace::core::control_block_size;
     constexpr unsigned char canary = 0xa5;
 
     auto& arena = ace::core::arena::get_instance();
@@ -125,16 +124,17 @@ TEST_F(promise_traits_fixture, operator_new_preserves_frame_canary) {
 
     void* frame = promise_type::operator new(requested_frame_size);
     auto* block = ace::core::control_block::get_block_from_address(frame);
-    const bool reused_seeded_allocation = block == seeded_allocation;
-    EXPECT_TRUE(reused_seeded_allocation);
-    if (reused_seeded_allocation) {
-        const auto* frame_bytes = static_cast<const unsigned char*>(frame);
-        EXPECT_TRUE(std::all_of(
-            frame_bytes,
-            frame_bytes + requested_frame_size,
-            [](const unsigned char byte) { return byte == canary; }
-        ));
-    }
+    EXPECT_EQ(seeded_allocation, block);
+    // The complete frame must lie in the seeded region and retain its canary.
+    const auto* frame_bytes = static_cast<const unsigned char*>(frame);
+    EXPECT_GE(frame_bytes, static_cast<const unsigned char*>(seeded_allocation));
+    EXPECT_LE(frame_bytes + requested_frame_size,
+              static_cast<const unsigned char*>(seeded_allocation) + allocation_size);
+    EXPECT_TRUE(std::all_of(
+        frame_bytes,
+        frame_bytes + requested_frame_size,
+        [](const unsigned char byte) { return byte == canary; }
+    ));
 
     EXPECT_TRUE(ace::core::control_block::untrack(block));
     promise_type::operator delete(frame, requested_frame_size);

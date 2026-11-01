@@ -422,39 +422,34 @@ namespace ace::core::traits {
         }
 
         /**
-         * @brief Custom allocator that prepends a @c control_block before the coroutine frame.
-         * @details Allocates @c mem_size + sizeof(control_block) bytes through the
-         * thread-local arena, constructs a @c control_block at the
-         * beginning, then returns a pointer offset by @c sizeof(control_block).
-         * The block stores the exact total allocation size as immutable metadata
-         * until deallocation. This enables external handles and frame prefetching
-         * without a separate heap allocation.
-         * @param mem_size  Compiler-requested coroutine frame size.
-         * @return Pointer to the coroutine frame area after the control block.
-         * @throws std::bad_alloc when the size overflows or arena allocation fails.
+         * @brief Allocate a coroutine frame immediately after its control block.
+         * @details The frame has arena::kAlignment (16-byte) alignment. Objects
+         * requiring stricter alignment must live outside the frame and outlive
+         * every coroutine access, including cancellation and retained observers.
+         * The allocation contains only the control block and compiler frame.
+         * @param mem_size Compiler-requested coroutine frame size.
+         * @return Frame address immediately after its control block.
+         * @throws std::bad_alloc if the size exceeds metadata capacity or the
+         *         arena cannot allocate storage.
          */
         void* operator new(size_t mem_size) {
-            if (mem_size > std::numeric_limits<size_t>::max() - control_block_size)
+            constexpr auto max_frame_size = std::numeric_limits<uint32_t>::max();
+            if (mem_size > max_frame_size - control_block_size)
                 throw std::bad_alloc {};
             const auto frame_size = mem_size + control_block_size;
-            const auto ptr = static_cast<uint8_t*>(arena::get_instance().allocate(frame_size));
-            void* mem_ptr = ptr + control_block_size;
-            auto* block = new (ptr) control_block();
+            auto* block = new (arena::get_instance().allocate(frame_size)) control_block();
             block->_frame_size = frame_size;
-            return mem_ptr;
+            return reinterpret_cast<uint8_t*>(block) + control_block_size;
         }
 
         /**
-         * @brief Custom deallocator.  Frees the whole allocation once the
-         * control block is untracked.
-         * @param mem_ptr  Pointer to the coroutine frame area.
-         * @param mem_size Compiler-provided coroutine frame size.
+         * @brief Release the block-and-frame allocation after the final reference.
+         * @param mem_ptr Pointer returned by the frame allocator.
+         * @param mem_size Compiler-provided frame size (arena reads its own header).
          */
         void operator delete(void* mem_ptr, size_t mem_size) noexcept {
             // NOTE: Delete only after the owning async and all observers release the block.
             if (control_block* block = control_block::get_block_from_address(mem_ptr); control_block::is_untracked(block)) {
-                // NOTE: Restore the arena allocation size by including the prefix block.
-                mem_size += sizeof(control_block);
                 block->~control_block();
                 arena::get_instance().deallocate(block, mem_size);
             }

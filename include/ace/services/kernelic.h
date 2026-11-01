@@ -30,8 +30,14 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <climits>
+#include <cstddef>
 #include <cstring>
 #include <limits>
+#include <memory>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 #include <liburing.h>
 
 #include "ace/core/tools/testing_toolkit.h"
@@ -45,6 +51,19 @@ namespace ace::services {
     struct kernel_controller_testing
         : core::tools::testing_mixin<kernel_controller_testing> {
         using ring_init_fn = int (*)(unsigned, io_uring*, io_uring_params*);
+        using submit_rejection_fn = int (*)(void);
+        /**
+         * @brief Replaces the calling thread's submission rejection callback.
+         * @param callback Callback returning INT_MIN to accept, or a nonpositive
+         * submission error to reject before ring initialization; nullptr disables it.
+         * @return Previous callback, suitable for scoped restoration.
+         * @warning Debug-only, thread-local instrumentation. The callback must not
+         * throw and must remain valid until restored on the same thread. It is
+         * invoked only for nonnull observers and must not submit recursively.
+         */
+        static submit_rejection_fn set_submit_rejection_for_testing(submit_rejection_fn callback) noexcept {
+            return std::exchange(_submit_rejection_cb, callback);
+        }
         /**
          * @brief Replaces the queue initializer for deterministic tests.
          * @warning This test-only hook destroys any successfully initialized
@@ -56,6 +75,7 @@ namespace ace::services {
 
     protected:
         inline static thread_local ring_init_fn _ring_init_cb = io_uring_queue_init_params;
+        inline static thread_local submit_rejection_fn _submit_rejection_cb = nullptr;
     };
 
     /**
@@ -202,7 +222,12 @@ namespace ace::services {
          * observer->_submission_error to -ENOMEM; initialization failure preserves
          * the exact negative errno. Rejection publishes no request or callback.
          * @warning IO function params shall be passed without SQE ptr and preparation
-         * functions must not throw. The observer remains caller-owned on rejection.
+         * functions must not throw. Parameter tuples must fit eight uintptr_t words,
+         * require no stronger alignment than uintptr_t, and support noexcept
+         * construction from parameter lvalues, move construction and destruction.
+         * Parameter copying during preparation must not throw. Pointer arguments
+         * remain non-owning; their pointees must outlive completion or cancellation.
+         * The observer remains caller-owned on rejection.
          *
          * Same order but observer ptr required instead of the SQE ptr:
          *
@@ -405,8 +430,11 @@ namespace ace::services {
      *
      * @details When the submission queue is full (4096 entries), new operations
      * are buffered as @c kernel_entity objects in the thread-local
-     * @c _submission_buffer.  Each entity captures the function pointer, SQE,
-     * and up to 8 parameters.  @c apply() reconstructs the original call.
+     * @c _submission_buffer. Each entity captures the function pointer and a
+     * typed tuple in eight uintptr_t words, with compile-time size/alignment and noexcept checks.
+     * Entities are move-only: relocation constructs a new typed tuple and destroys
+     * the old one. Destruction releases the active tuple exactly once. No SQE is
+     * retained; @c apply() obtains a fresh slot and reconstructs the original call.
      */
     struct kernel_controller::kernel_entity {
 
@@ -419,7 +447,18 @@ namespace ace::services {
          * @param args     Function parameters (without the SQE).
          */
         template <typename io_uring_foo_t, typename ... Args>
-        kernel_entity(io_uring_foo_t foo, kernel_observer* observer, Args... args);
+        kernel_entity(io_uring_foo_t foo, kernel_observer* observer, Args... args) noexcept;
+
+        /// @brief Transfers the typed tuple, leaving the source without a live tuple.
+        kernel_entity(kernel_entity&& other) noexcept;
+        kernel_entity(const kernel_entity&) = delete;
+        kernel_entity& operator=(const kernel_entity&) = delete;
+        kernel_entity& operator=(kernel_entity&&) = delete;
+
+        /// @brief Destroys the stored tuple, if this entity still owns one.
+        ~kernel_entity() noexcept {
+            if (_destroy) _destroy(_params);
+        }
 
         // NOTE: Polymorphic action handler
         /**
@@ -431,7 +470,7 @@ namespace ace::services {
          * @param params        Stored parameters.
          */
         template <typename io_uring_foo_t, typename ... Args>
-        static void action_templ(void* io_uring_foo, io_uring_sqe* sqe, const uintptr_t* params);
+        static void action_templ(void* io_uring_foo, io_uring_sqe* sqe, std::byte* params);
 
         // NOTE: Applies the buffered request.  Returns @c false when the ring
         // has no free SQE slot at the moment (the caller should re-queue).
@@ -443,13 +482,15 @@ namespace ace::services {
 
         ACE_CACHE_LINE(0)
 
-        uintptr_t _params[8] = {}; ///< Stored function parameters (as a tuple).
+        alignas(uintptr_t) std::byte _params[8 * sizeof(uintptr_t)]; ///< Raw storage for the active tuple.
 
         ACE_CACHE_LINE(1)
 
-        void (*_action)(void*, io_uring_sqe*, const uintptr_t*) = nullptr; ///< Type-erased action handler.
+        void (*_action)(void*, io_uring_sqe*, std::byte*) = nullptr; ///< Type-erased action handler.
         kernel_observer* _observer = nullptr;                             ///< Completion observer.
         void* _io_uring_foo = nullptr;                                    ///< Type-erased io_uring function pointer.
+        void (*_move)(std::byte*, std::byte*) noexcept = nullptr; ///< Constructs destination tuple and destroys source.
+        void (*_destroy)(std::byte*) noexcept = nullptr; ///< Destroys the active tuple; null after moving.
 
         /// @brief Thread-local slab pool for kernel entities.
         static thread_local core::tools::slab_mempool<kernel_entity> _kernelic_entity_mempool;
@@ -612,6 +653,17 @@ template <typename foo_t, typename ... Params> bool
 ACE_SERVICES_KERNEL_CONTROLLER_SPACE
 submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept {
     if (not observer) return false;
+    const int injected_error = []<typename toolkit_t = kernel_controller_testing::debug_tools> {
+        if constexpr (is_debug) {
+            if (toolkit_t::_submit_rejection_cb)
+                return toolkit_t::_submit_rejection_cb();
+        }
+        return INT_MIN;
+    }();
+    if (injected_error != INT_MIN) {
+        observer->_submission_error = injected_error;
+        return false;
+    }
     observer->_submission_error = initialization_error();
     if (observer->_submission_error not_eq 0) return false;
     try {
@@ -644,18 +696,44 @@ submit(foo_t io_uring_foo, kernel_observer* observer, Params... params) noexcept
 
 template <typename io_uring_foo_t, typename ... Args>
 ACE_SERVICES_KERNEL_ENTITY_SPACE
-kernel_entity(io_uring_foo_t foo, kernel_observer* observer, Args... args) {
+kernel_entity(io_uring_foo_t foo, kernel_observer* observer, Args... args) noexcept {
+    using tuple_t = std::tuple<Args...>;
+    static_assert(sizeof(tuple_t) <= sizeof(_params),
+        "kernel deferred parameter tuple exceeds eight uintptr_t words");
+    static_assert(alignof(tuple_t) <= alignof(uintptr_t),
+        "kernel deferred parameter tuple alignment exceeds uintptr_t alignment");
+    static_assert(std::is_nothrow_constructible_v<tuple_t, Args&...>,
+        "kernel deferred parameter tuple construction must be noexcept");
+    static_assert(std::is_nothrow_move_constructible_v<tuple_t>,
+        "kernel deferred parameter tuple move must be noexcept");
+    static_assert(std::is_nothrow_destructible_v<tuple_t>,
+        "kernel deferred parameter tuple destruction must be noexcept");
     _action = action_templ<io_uring_foo_t, Args...>;
     _observer = observer;
     _io_uring_foo = reinterpret_cast<void*>(foo);
-    // NOTE: Placement new to copy params to the local storage
-    new (_params) std::tuple<Args...>(args...);
+    new (_params) tuple_t(args...);
+    _move = [](std::byte* destination, std::byte* source) noexcept {
+        auto* tuple = std::launder(reinterpret_cast<tuple_t*>(source));
+        new (destination) tuple_t(std::move(*tuple));
+        std::destroy_at(tuple);
+    };
+    _destroy = [](std::byte* storage) noexcept {
+        std::destroy_at(std::launder(reinterpret_cast<tuple_t*>(storage)));
+    };
+}
+
+ACE_SERVICES_KERNEL_ENTITY_MEMBER()
+kernel_entity(kernel_entity&& other) noexcept
+    : _action(other._action), _observer(other._observer), _io_uring_foo(other._io_uring_foo),
+      _move(other._move), _destroy(std::exchange(other._destroy, nullptr)) {
+    if (_destroy) _move(_params, other._params);
+    other._observer = nullptr;
 }
 
 template <typename io_uring_foo_t, typename ... Args> void
 ACE_SERVICES_KERNEL_ENTITY_SPACE
-action_templ(void* io_uring_foo, io_uring_sqe* sqe, const uintptr_t* params) {
-    std::tuple<Args...> tuple { *reinterpret_cast<const std::tuple<Args...>*>(params) };
+action_templ(void* io_uring_foo, io_uring_sqe* sqe, std::byte* params) {
+    auto& tuple = *std::launder(reinterpret_cast<std::tuple<Args...>*>(params));
     io_uring_foo_t foo { reinterpret_cast<io_uring_foo_t>(io_uring_foo) };
     [&]<std::size_t ... index_v>(std::index_sequence<index_v...>) {
         foo(sqe, std::get<index_v>(tuple)...);

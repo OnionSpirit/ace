@@ -97,9 +97,8 @@ struct yield_fixture : base_fixture {
     }
 
     template<bool join>
-    static ace::task cancel_pending_waiter(canceled_waiter_state& state) {
-        ace::bus<int> gate;
-        ace::bus<int> entered;
+    static ace::task cancel_pending_waiter(canceled_waiter_state& state,
+                                           ace::bus<int>& gate, ace::bus<int>& entered) {
         auto automaton = co_await ace::spawn(gated_automaton(gate));
         auto waiter = co_await ace::spawn(wait_for_automaton<join>(automaton, entered, state));
         (void)co_await entered.pull();
@@ -264,7 +263,11 @@ TEST_F(yield_fixture, spawn_automaton_ping_with_timeout) {
 // once without resuming it or consuming the automaton's next value.
 TEST_F(yield_fixture, cancel_pending_ping_releases_waiter) {
     canceled_waiter_state state;
-    ace::schedule(cancel_pending_waiter<false>(state));
+    // Channels require 64-byte alignment and must outlive every scheduled user.
+    // Keep them on the ordinary stack, outside the 16-byte-aligned frame.
+    ace::bus<int> gate;
+    ace::bus<int> entered;
+    ace::schedule(cancel_pending_waiter<false>(state, gate, entered));
     ace::run();
     EXPECT_TRUE(ace::empty());
     // Empty runnable queues alone do not prove the suspended frame was freed.
@@ -278,7 +281,11 @@ TEST_F(yield_fixture, cancel_pending_ping_releases_waiter) {
 // the automaton available for subsequent ping calls instead of canceling it.
 TEST_F(yield_fixture, cancel_pending_join_releases_waiter) {
     canceled_waiter_state state;
-    ace::schedule(cancel_pending_waiter<true>(state));
+    // Channels require 64-byte alignment and must outlive every scheduled user.
+    // Keep them on the ordinary stack, outside the 16-byte-aligned frame.
+    ace::bus<int> gate;
+    ace::bus<int> entered;
+    ace::schedule(cancel_pending_waiter<true>(state, gate, entered));
     ace::run();
     EXPECT_TRUE(ace::empty());
     // The destruction probe detects lost ownership even when LSan is absent.

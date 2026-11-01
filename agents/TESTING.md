@@ -4,8 +4,8 @@
 
 > **Статус:** GCC 16 coverage union от 2026-08-23 покрывает **2262/2398 =
 > 94.33%** уникальных исполняемых строк `include/ace/**`. Текущая
-> default-конфигурация регистрирует 384 ACE Meson-тестов: 377 GTests, две
-> Python unit checks, discovery consistency, LSan capability, два toolkit contracts и buffer conversion contract. B29/B38/B66/B68
+> default-конфигурация регистрирует 408 ACE Meson-тестов: 400 GTests, две
+> Python unit checks, discovery consistency, LSan capability, два toolkit contracts и buffer conversion / kernel storage contracts. B29/B38/B66/B68
 > regressions проходят; successful-I/O tests всё ещё требуют доступного
 > `io_uring` и не становятся fallback tests.
 
@@ -1076,7 +1076,10 @@ unexpected names. Дубликаты, malformed declarations и parameterized ma
 | `tests/id_alloc_fixture.cpp` | `id_alloc_fixture` | 3 |
 | `tests/io_any_fixture.cpp` | `io_any_fixture` | 6 |
 | `tests/io_buffer_fixture.cpp` | `io_buffer_fixture` | 32 |
-| `tests/io_entity_fixture.cpp` | `io_entity_fixture` | 39 |
+| `tests/io_entity_fixture.cpp` | `io_entity_fixture` | 46 |
+| `tests/frame_alignment_fixture.cpp` | `frame_alignment_fixture` | 7 |
+| `tests/io_submission_fixture.cpp` | `io_submission_fixture` | 6 |
+| `tests/kernel_storage_fixture.cpp` | `kernel_storage_fixture` | 3 |
 | `tests/io_hanged_fixture.cpp` | `io_hanged_fixture` | 5 |
 | `tests/omniptr_fixture.cpp` | `omniptr_fixture` | 12 |
 | `tests/promise_traits_fixture.cpp` | `promise_traits_fixture` | 12 |
@@ -1627,3 +1630,50 @@ ace_testing_toolkit_debug ace_testing_toolkit_release -j 2` и
 через sanitized_test_runner, seed 527, repeat 10 — по **70/70**.
 Все runtime проверки выполнялись с доступным io_uring вне песочницы;
 LSan включён для ASan. Полные команды и RED/GREEN evidence — в карточке B56.
+
+## B24/B28/B37/B53/B60 regression inventory — 2026-11-01
+
+- `io_entity_fixture.read_buf_scripted_eof_matrix`, `read_buf_scripted_error_after_data`,
+  `read_buf_file_eof_matrix`, `recv_buf_eof_matrix`, `recv_buf_error_after_data`:
+  empty/short/64/128-byte input, terminal error precedence, real TCP loopback.
+  Regular-file matrix проверяется после исправления B86 (offset progression).
+- `io_submission_fixture` (6): file/socket rejection error, payload accounting,
+  command reuse, no fallback bytes, exact successful retry; direct socket setup
+  rejection, awaited allocation/init failures and successful owning socket.
+- `kernel_storage_fixture` (3): typed tuple lifetime through move/queue teardown,
+  deferred preparation values, actual read/write/nop signatures past ring capacity.
+- `kernel.storage_contract`: `tests/check_kernel_storage_contract.py` compiles
+  valid current wrappers and exact-size tuple; oversized/overaligned/throwing-copy
+  cases must fail with their specific static_assert diagnostic.
+- Toolkit debug/release contracts also verify submit rejection hook availability.
+- New test statuses/results live in B24/B28/B37/B53/B60 cards; B86 is a separate
+  discovered regular-file bug. Real io_uring runs require host access; restricted
+  EPERM results must not be reported as successful I/O coverage.
+
+## B86/B87 regression inventory — актуально 2026-11-08
+
+- B86: `io_entity_fixture.file_link_read_advances_position` проверяет bounded
+  64/64/EOF reads разных chunks; `read_query_preserves_explicit_and_default_offsets`
+  сохраняет positional API и descriptor position; file EOF matrix B24 разблокирован.
+- `frame_alignment_fixture` (7): direct alignment16/exact span/frame endpoints,
+  overflow до allocation; локальные объекты alignment16 и ссылки на внешние
+  объекты alignment64/256/4096 через suspension, observers и cancellation;
+  pooled/transient foreign release при живом owner и после его выхода.
+- B13 canary проверяет compact allocation control_block+frame без padding/cookie.
+- B87 cancellation regressions владеют bus<int> в обычном TEST_F scope;
+  корутина принимает ссылки. Alignment UBSan остаётся включён.
+- Итоговые команды/результаты и review — в карточках B24/B86/B87.
+
+Финальный полный прогон 2026-11-01: GCC ASan+UBSan и Clang ASan — **408/408**
+на каждой конфигурации без исключений. Общая выборка38 tests ×10 shuffle repeats
+с LSan —380/380 на каждом compiler. B87 дополнительно проверен при O3:
+7 alignment/lifetime tests ×10 на GCC/Clang с ASan+UBSan. Команды и ограничения
+allocation/ABI описаны в карточке B87; прежние B86/B87 blockers сняты.
+
+### B87 external ownership — 2026-11-08
+
+После возврата compact allocator и переноса каналов в caller scope:
+GCC/Clang **ASan+UBSan 408/408 каждый**, alignment включён. Targeted21tests
+×10 shuffle repeats с LSan —210/210 каждый. Число тестов не изменилось;
+7 frame tests теперь проверяют ограниченный alignment16 и внешние aligned
+объекты, а не поддержку over-aligned locals. Команды/логи: карточка B87.

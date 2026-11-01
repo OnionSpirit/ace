@@ -57,7 +57,7 @@ namespace ace::core {
      *
      * @details Allocated immediately before the coroutine frame by
      * @c promise_traits::operator new. Stores the reference count, immutable
-     * allocation size and an
+     * block-and-frame allocation size, and an
      * optional pointer to a @c control_router_handle that enables external
      * join / cancel operations.
      *
@@ -70,7 +70,7 @@ namespace ace::core {
         struct {
             uint32_t          _refcount   : 24 { 1 };                ///< Owner and observer references. Initial value: 1 for the owning coroutine.
             promise_lifecycle _status     : 8  { e_inited };         ///< Current lifecycle state of the coroutine (see @c promise_lifecycle).
-            uint32_t          _frame_size : 32 { 0 };                ///< Immutable allocation size, including the control block; set before the frame is constructed.
+            uint32_t          _frame_size : 32 { 0 };                ///< Immutable contiguous block-and-frame allocation size.
         };
         traits::async_router_handle* _control_router { nullptr };    ///< Optional router for external join/cancel; set by @c setup_control_block().
 

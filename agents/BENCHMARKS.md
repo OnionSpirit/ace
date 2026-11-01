@@ -61,7 +61,7 @@ release-путь: `debug=false`, `optimization=3` и `b_ndebug=true`; поэто
 |------|-----------|
 | `benchmarks/main.cpp` | Google Benchmark entry point. |
 | `benchmarks/environment.h` | 4 helpers: `configure_runners`, `reset_runners`, `fetch_into`, `fetch`. |
-| `benchmarks/benchmarks.cpp` | 26 numbered benchmark scenarios (BM1-BM26). |
+| `benchmarks/benchmarks.cpp` | 27 numbered benchmark scenarios (BM1-BM27). |
 
 ## Инвентарь
 
@@ -92,7 +92,17 @@ release-путь: `debug=false`, `optimization=3` и `b_ndebug=true`; поэто
 | BM23 | `bm_legacy_weighted_selection` | Изолированный baseline прежней weighted-selection формулы для 2/4/8/16/64 runners. |
 | BM24 | `bm_repeated_short_run` | Повторные schedule/run циклы с 0/1/10/100 задачами и 1/2/4/8/16 runners. |
 | BM25 | `bm_dynamic_mpsc_queue`, `bm_dynamic_mpmc_queue` | Direct concurrent queue/reclamation throughput: MPSC 1P/1C и 4P/1C, MPMC 1P/1C и 4P/4C по 16384 сообщений на producer. |
+| BM27 | `bm_kernel_deferred_submission` | 6000 pending NOPs, one runner, overflow queue relocation and exact-once completion. |
 | BM26 | `bm_intrusive_queue_move` | Move construction intrusive queue для 0/1/64/1024/16384 nodes; 256 moves за timed iteration, allocation и FIFO cleanup вне измерения. |
+
+## B60: deferred parameter storage (BM27)
+
+`bm_kernel_deferred_submission` schedules 6000 NOP operations before the first
+service ping (4096 ring entries), one runner. Setup allocates observer storage
+outside timing; each iteration measures scheduling, deferred enqueue/moves,
+submission and completion. Every observer must receive exactly one zero result.
+Baseline and result use the same scenario and GCC release options; measurements
+and environment are recorded in `board/Tasks/benchmarks/BM27.md` and issue B60.
 
 ## B75: dynamic Nukes queue reclamation (2026-08-30)
 
@@ -498,3 +508,84 @@ path. B40/B46 выполняют обязательный cleanup вместо �
 без новых allocations, locks и syscalls. Производительность accept отдельно
 не измерялась; memory safety, результат и отмена проверяются correctness tests.
 Ранее приведённые BM12/BM26 measurements не оценивают accept path.
+
+## BM27 проверка B60 — 2026-11-01
+
+GCC16.2.1 release, AMD Ryzen5 7500F,1 runner,6000 NOPs, ABBA ×5 repeats.
+Все20 samples без errors. CPU median baseline0.356201ms/current0.355119ms
+(-0.30%, меньше межсерийного разброса; ускорение не заявляется).
+Полный protocol и paths: `board/Tasks/benchmarks/BM27.md`.
+
+## B87: стоимость выравнивания frame — 2026-11-01
+
+Baseline — бинарник после B24/B28/B37/B53/B60, до B87; current — окончательное
+исправление B87. Одинаковые sources benchmark, GCC16.2.1 C++23 -O3 -DNDEBUG,
+Google Benchmark1.8.4, liburing, без sanitizers; AMD Ryzen5 7500F,12 logical CPUs,
+L3 32MiB, Linux7.2.11-arch1-1. Pinning/frequency не фиксировались. Все builds/tests
+завершены до измерений; loadavg от0.52/1.06/0.57 до0.59/1.06/0.57.
+Порядок baseline/current/current/baseline, по5 repeats; всего10 CPU samples
+каждой версии на сценарий. Все140 samples завершены без benchmark errors.
+
+Команда для `/tmp/ace-five-20261101/b87-{baseline,current}-bench`:
+```
+--benchmark_filter=^(bm_schedule_throughput/(1|4|16)|bm_spawn_cancel|bm_spawn_join|bm_automaton_ping|bm_kernel_deferred_submission)$
+--benchmark_min_time=0.05s --benchmark_repetitions=5
+--benchmark_out=OUTPUT.json --benchmark_out_format=json
+```
+
+BM11 —200000 tasks и1/4/16 runners; BM4 —100 spawn/cancel;
+BM8 —20000 spawn/join; BM18 —5000 automatons ×10 yields; BM27 —6000 NOPs,
+ring4096. Остальные сценарии используют один runner. Измеряется весь заданный
+сценарий, а не цена единичной allocation.
+
+| Сценарий | Baseline median CPU ms | Current median CPU ms | Изменение |
+|---|---:|---:|---:|
+| `bm_spawn_cancel` | 0.006057 | 0.006451 | +6.50% |
+| `bm_spawn_join` | 2.292198 | 2.390378 | +4.28% |
+| `bm_schedule_throughput/1` | 12.404065 | 18.444557 | +48.70% |
+| `bm_schedule_throughput/4` | 20.024154 | 24.828872 | +23.99% |
+| `bm_schedule_throughput/16` | 24.944103 | 27.795466 | +11.43% |
+| `bm_automaton_ping` | 5.582999 | 6.042460 | +8.23% |
+| `bm_kernel_deferred_submission` | 0.358646 | 0.359870 | +0.34% |
+
+Замедление BM11 воспроизводится в обеих current-сериях: для1 runner медианы
+baseline12.430/12.370ms, current18.491/18.398ms. Это существенная регрессия
+производительности, не шум. Дополнительный pointer/slack увеличивает raw
+allocation и может менять pool class; отдельно вклад allocation, cache и
+alignment arithmetic не измерялся, поэтому причинный процент не приписывается
+одному механизму. Исправление корректности B87 **не нейтрально по производительности**.
+BM27 +0.34% меньше межсерийного разброса; устойчивого изменения там не выявлено.
+
+JSON/logs: `/tmp/ace-five-20261101/b87-perf-{1-baseline,2-current,3-current,4-baseline}.{json,log}`.
+Ограничения: результаты относятся к этому CPU/compiler/load и перечисленным
+scenarios; память и все пользовательские workloads отдельно не профилировались.
+
+## B87: external ownership и compact allocator — 2026-11-08
+
+Baseline — padded B87 include snapshot перед пересмотром; current — compact
+control_block+frame и external ownership каналов. Одинаковые benchmark sources,
+GCC16.2.1 -std=c++23 -O3 -DNDEBUG, Google Benchmark1.8.4, liburing, без sanitizers;
+Ryzen5 7500F,12 logical CPU, Linux7.2.11-arch1-1. Pinning/frequency не фиксировались.
+После завершения builds/tests выполнено ABBA ×5 repeats (10 samples каждой версии,
+140 samples суммарно), без benchmark errors. Loadavg3.19/2.01/1.29 →2.85/1.97/1.29.
+
+Нагрузки: BM4 100 spawn/cancel, BM8 20000 spawn/join, BM11 200000tasks при1/4/16
+runners, BM18 5000automatons ×10yields, BM27 6000NOP/ring4096. Остальные —1runner.
+
+Команда обоих `/tmp/ace-b87-external/{baseline,current}-bench`:
+`--benchmark_filter=^(bm_schedule_throughput/(1|4|16)|bm_spawn_cancel|bm_spawn_join|bm_automaton_ping|bm_kernel_deferred_submission)$ --benchmark_min_time=0.05s --benchmark_repetitions=5 --benchmark_out=OUTPUT.json --benchmark_out_format=json`.
+
+| Сценарий | Padded B87 CPU median ms | Compact CPU median ms | Изменение |
+|---|---:|---:|---:|
+| `bm_spawn_cancel` | 0.006559 | 0.005962 | -9.10% |
+| `bm_spawn_join` | 2.420347 | 2.289945 | -5.39% |
+| `bm_schedule_throughput/1` | 19.094238 | 12.243707 | -35.88% |
+| `bm_schedule_throughput/4` | 25.412118 | 21.359391 | -15.95% |
+| `bm_schedule_throughput/16` | 29.464167 | 26.338009 | -10.61% |
+| `bm_automaton_ping` | 6.458728 | 5.556450 | -13.97% |
+| `bm_kernel_deferred_submission` | 0.345737 | 0.343638 | -0.61% |
+
+Показан результат относительно padded B87, не новое прямое сравнение с версией
+до01.11. Цена allocation по структуре восстановлена: frame+16 без slack/cookie;
+проверка metadata overflow сохранена. Реальные timings зависят от нагрузки host.
+Сырые JSON/logs: `/tmp/ace-b87-external/perf-{1-baseline,2-current,3-current,4-baseline}.{json,log}`.

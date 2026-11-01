@@ -359,8 +359,9 @@ IPv4-specific. IPv6 исправление явно отложено в
 решения aliases нельзя считать рабочим API.
 
 `connection::recv_buf()` возвращает eager `promise<io::input_t>` и требует
-`co_await`. Известный EOF edge case накопленного `io::link::read_buf()` описан в
-[B24](ISSUES.md#b24-iolinkread_buf-может-потерять-накопленные-данные-при-eof).
+`co_await`. Оба buffer-read пути сохраняют накопленные bytes при EOF;
+пустой EOF возвращает `unexpected(0)`, ошибка — положительный errno с
+приоритетом над partial data (B24). `io::link::read_buf()` остаётся lazy.
 Высокоуровневый `connection_link::read()` и `read_buf()` используют тот же
 cancelable `net::recv_query` через io_uring; они не выполняют blocking `::recv`
 на runner thread.
@@ -368,7 +369,9 @@ cancelable `net::recv_query` через io_uring; они не выполняют
 ## Файлы и консоль
 
 `include/ace/fs.h` определяет move-consuming `ace::fs::file`, async open queries и
-`file_link`. `open_rdonly`, `open_wronly` и `open_rewrite` возвращают query;
+`file_link`. Чтение через file_link продвигает общую позицию FD;
+низкоуровневый read_query сохраняет explicit/default-offset semantics (B86).
+`open_rdonly`, `open_wronly` и `open_rewrite` возвращают query;
 `open_rewrite` использует truncate semantics. Self-move assignment `fs::file`
 сохраняет pathname и состояние владения FD; обычное move assignment переносит
 оба компонента.
@@ -666,7 +669,7 @@ yield_fixture.cpp
 Fixture classes и helper coroutine functions объявляются в
 `tests/environment.h`; каждый fixture source содержит относящиеся к нему
 `TEST`/`TEST_F`. Общие fault-injection scopes находятся в
-`tests/allocation_failure.h`. Текущая source inventory - **377 Google Test**. Meson discover
+`tests/allocation_failure.h`. Текущая source inventory - **400 Google Test**. Meson discover
 mode регистрирует каждый GTest отдельным процессом с точным `--gtest_filter`.
 
 Помимо source GTests, стандартная конфигурация регистрирует tooling tests:
@@ -768,3 +771,27 @@ GCC TSan — 351/351. Исходный TSan сбой B82 зарегистрир�
   сохраняется при submit; metadata получает не больше capacity/returned length
   и размера sockaddr_in. Остальные bytes обнуляются. Null addr игнорирует
   addrlen; null/zero-capacity output обнуляет peer metadata (B56).
+
+## Уточнения B28/B37/B53/B60 — 2026-11-01
+
+- Meson выбирает vendor flags через `get_id()`; LTO управляется `b_lto`.
+- Fire-and-forget file/socket rejected submissions всегда освобождают command
+  и buffer; unspecified error становится `-EIO`. Busy fallback применяется
+  только без runner/command slot. `socket::setup_query()` сохраняет bool submit.
+- `kernel_entity` хранит typed tuple в 8 uintptr-sized words с прежним
+  alignment, проверяет size/alignment/nothrow construction/move/destruction;
+  callbacks обеспечивают typed relocation и destruction, включая requeue.
+- Debug-only `set_submit_rejection_for_testing` — thread-local scoped hook;
+  INT_MIN пропускает submit, <=0 отклоняет без публикации/CQE. Release controller
+  не предоставляет setter и не выполняет hook lookup.
+
+## Coroutine frame alignment (B87) — 2026-11-08
+
+Frame allocation сохраняет простой layout control_block + frame, alignment16.
+Over-aligned объекты нельзя хранить внутри frame: caller владеет ими в обычном
+scope и передаёт ссылки, сохраняя lifetime до completion/cancellation всех users.
+В частности bus<int> имеет alignment64 из-за встроенных Nukes queues/freelists.
+Два cancellation regressions владеют каналами в TEST_F, coroutine принимает ссылки.
+Это ограниченный контракт, не поддержка произвольных over-aligned locals.
+UBSan alignment не отключён; arena и протокол cross-thread release сохранены.
+Дополнительные padding/cookie из версии B87 от01.11 удалены по запросу пользователя.

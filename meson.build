@@ -95,6 +95,7 @@ if tests_enabled
         'tests/cutex_fixture.cpp',
         'tests/dispatcher_fixture.cpp',
         'tests/fs_fixture.cpp',
+        'tests/frame_alignment_fixture.cpp',
         'tests/future_traits_fixture.cpp',
         'tests/get_runner_fixture.cpp',
         'tests/id_alloc_fixture.cpp',
@@ -102,6 +103,8 @@ if tests_enabled
         'tests/io_buffer_fixture.cpp',
         'tests/io_entity_fixture.cpp',
         'tests/io_hanged_fixture.cpp',
+        'tests/io_submission_fixture.cpp',
+        'tests/kernel_storage_fixture.cpp',
         'tests/nukes_alignment_fixture.cpp',
         'tests/nukes_concurrency_fixture.cpp',
         'tests/omniptr_fixture.cpp',
@@ -124,9 +127,9 @@ if tests_enabled
         'tests/main.cpp',
     )
 
-    # NOTE: Defining compiler-dependent args
+    # Select vendor flags by compiler identity; LTO is controlled by b_lto.
     cpp_compiler = meson.get_compiler('cpp')
-    compiler = cpp_compiler.get_argument_syntax()
+    compiler = cpp_compiler.get_id()
 
     compile_args = []
     if compiler == 'gcc'
@@ -140,7 +143,6 @@ if tests_enabled
     elif compiler == 'clang'
         compile_args = [
             '-std=c++23',
-            '-flto',
 #            '-fexperimental-library',
 #            '-Wno-invalid-offsetof'
         ]
@@ -202,6 +204,13 @@ if tests_enabled
     )
 
     python = import('python').find_installation('python3')
+    test(
+        'kernel.storage_contract',
+        python,
+        args: [files('tests/check_kernel_storage_contract.py')[0], meson.project_source_root()] + cpp_compiler.cmd_array(),
+        suite: 'ace',
+        timeout: 120,
+    )
     buffer_conversion_contract = executable(
         'ace_buffer_conversion_contract',
         'tests/buffer_conversion_contract.cpp',
@@ -345,14 +354,16 @@ if benchmarks_enabled
     )
 
     compiler = meson.get_compiler('cpp')
-    compiler_syntax = compiler.get_argument_syntax()
+    compiler_id = compiler.get_id()
 
     benchmark_compile_args = []
-    if compiler_syntax == 'gcc'
+    if compiler_id == 'gcc'
         benchmark_compile_args = ['-std=c++23']
-    elif compiler_syntax == 'clang'
-        benchmark_compile_args = ['-std=c++23', '-flto']
+    elif compiler_id == 'clang'
+        benchmark_compile_args = ['-std=c++23']
     endif
+
+    message('Benchmark arguments for @0@ compiler: '.format(compiler_id), benchmark_compile_args)
 
     benchmark_executable = executable(
         'ace_benchmarks',

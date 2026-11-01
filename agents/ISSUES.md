@@ -15,7 +15,7 @@
 2. Карточка содержит статус, затронутые файлы, симптом, причину или гипотезу,
    приоритет и способ проверки; архивную запись дополнять, когда нужен
    долговременный технический контекст.
-3. Использовать статусы доски `Открыто`, `Исследуется`, `В работе`,
+3. Использовать статусы доски `Открыто`, `Разобрано`, `В работе`,
    `На проверке`, `Заблокировано` и `Решено`.
 4. После исправления указать суть решения и тест в карточке, защищающей от
    регрессии.
@@ -1921,3 +1921,47 @@
   ограничивает чтение caller storage; null и zero-capacity output безопасны.
   Short/zero cases воспроизвели ASan heap-buffer-overflow, null — SEGV.
   Тесты и итоговые проверки расширения записаны в карточке B56.
+
+## B86: file_link explicit offset — 2026-11-01
+
+При исследовании B24 обнаружено повторное чтение обычных файлов с offset=0.
+Причина, границы и актуальный статус: `board/Tasks/issues/B86.md`.
+
+## B87: over-aligned coroutine frame — 2026-11-01
+
+GCC ASan+UBSan выявляет frame alignment64 при фактическом alignment16 в двух
+automaton cancellation regressions; исходные headers/tests воспроизводят сбой.
+Актуальная карточка: `board/Tasks/issues/B87.md`.
+
+## Реализация B24/B28/B37/B53/B60 — 2026-11-01
+
+- B28: compiler identity через get_id, LTO только через b_lto; GCC/Clang targets собраны.
+- B37: rejected fire-and-forget write освобождает payload/command, unspecified errno → -EIO.
+- B53: setup_query сохраняет фактический bool controller; добавлены direct/awaited regressions.
+- B60: bounded typed tuple relocation/destruction, compile contracts и BM27; deep review без findings.
+- B24: buffer EOF исправлен и подтверждён scripted/TCP; regular-file проверка блокируется новым B86, карточка не закрыта.
+- GCC full suite имеет два baseline alignment failures B87; новые14 tests ×10 проходят на GCC/Clang.
+Точные команды и текущие статусы — в одноимённых карточках.
+
+## Итог B24/B28/B37/B53/B60 с разрешёнными B86/B87 — 2026-11-01
+
+Пользователь включил B86/B87 в работу; ограничения предыдущей записи сняты.
+B86 использует текущую позицию file descriptor без изменения low-level default0.
+B87 сохраняет raw arena pointer перед control_block и выравнивает frame base
+по size-derived alignment, оставляя точный prefetch span и протокол arena.
+Проверены typed locals64/256/4096; внутренние offsets compiler frame остаются
+ответственностью compiler ABI (универсальная гарантия scalar alignas не заявляется).
+Полные GCC ASan+UBSan / Clang ASan suites:408/408 каждый, без исключений;
+38 targeted tests ×10 на каждом compiler, LSan enabled. Regular-file matrix
+B24 проходит. Независимое финальное deep review без замечаний.
+Performance результаты и точные команды находятся в карточках и BENCHMARKS.
+
+## B87: пересмотр решения — 2026-11-08
+
+По запросу пользователя over-aligned каналы двух cancellation regressions
+вынесены из coroutine frame в обычный caller scope. Возвращён компактный
+allocator control_block+frame без padding/cookie; alignment UBSan включён.
+Контракт ограничивает объекты внутри frame alignment16; external references
+требуют lifetime до завершения/отмены всех users. Произвольные over-aligned
+locals не поддерживаются. Предыдущие гарантии и измерения padded реализации
+остаются историей; актуальные результаты в карточке B87.

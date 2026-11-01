@@ -49,7 +49,8 @@ namespace ace::fs {
      * @details Implements @c output_action() via async write through
      * @c io::outcast::command, with a blocking @c ::writev() fallback only
      * when no runner context or command slot is available. Rejected submissions
-     * report the initialization error or @c -ENOMEM through the failure handler.
+     * report the initialization error, @c -ENOMEM, or @c -EIO when no error
+     * was supplied, through the failure handler.
      * @c input_action() uses @c core::read_query for async reads.
      */
     struct ace::fs::file_link : io::link {
@@ -65,8 +66,8 @@ namespace ace::fs {
          * @c writev operation through @c kernel_controller; falls back to a
          * blocking @c ::writev() when no runner context or command slot is
          * available. A rejected submission returns the command to its pool and
-         * reports the initialization error or @c -ENOMEM through
-         * @c io::outcast::fail_cb_handler.
+         * reports the initialization error, @c -ENOMEM, or @c -EIO when no error
+         * was supplied, through @c io::outcast::fail_cb_handler.
          * @param buff Buffer to write.
          */
         void output_action(io::buffer&& buff) override {
@@ -82,12 +83,10 @@ namespace ace::fs {
                 if (services::kernel_controller::writev(cmd, _fd, assembled->msg_iov, assembled->msg_iovlen, 0, 0))
                     return;
                 const int error = cmd->_submission_error;
-                if (error not_eq 0) {
-                    // No CQE will arrive after a rejected submission, so complete the
-                    // command locally through its normal result path.
-                    cmd->on_result(error);
-                    return;
-                }
+                // No CQE follows rejection. Even an unspecified failure must
+                // release the payload and command instead of using moved-from buff.
+                cmd->on_result(error not_eq 0 ? error : -EIO);
+                return;
             }
             // NOTE: If can not get slot or identity not found -> using busy behavior
             const auto* assembled = buff.assemble();
@@ -96,13 +95,17 @@ namespace ace::fs {
         };
 
         /**
-         * @brief Reads data from the file into a buffer asynchronously.
-         * @param buff Destination buffer.
-         * @param len  Number of bytes to read.
-         * @return Awaitable resolving to the number of bytes read.
+         * @brief Asynchronously reads from and advances the current file position.
+         * @param buff Destination buffer, writable until completion or cancellation.
+         * @param len Number of bytes to read.
+         * @return Awaitable resolving to the number of bytes read, zero at EOF,
+         * or a negative errno on failure.
+         * @details Uses the descriptor's shared file position so consecutive
+         * reads and @c read_buf() consume successive bytes rather than rereading
+         * offset zero. Low-level @c io::read_query positional reads are unchanged.
          */
         promise<int> input_action(void *buff, const std::size_t len) override {
-            co_return co_await io::read_query(_fd, buff, len);
+            co_return co_await io::read_query(_fd, buff, len, static_cast<uint64_t>(-1));
         }
 
     public:

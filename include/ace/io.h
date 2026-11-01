@@ -462,7 +462,8 @@ public:                                                                         
          * @param buf Destination binary buffer whose lifetime extends through
          *            query completion.
          * @param nbytes Writable size of @p buf in bytes.
-         * @param offset File offset (0 = current position).
+         * @param offset Absolute file offset (default zero); @c uint64_t(-1) uses
+         * and advances the current position of a seekable descriptor.
          */
         [[nodiscard]] explicit read_query(const int fd, void *buf, const size_t nbytes, const uint64_t offset = 0)
             : query(fd)
@@ -512,7 +513,8 @@ public:                                                                         
          * @param fd File descriptor to write to.
          * @param buf Source buffer.
          * @param nbytes Number of bytes to write.
-         * @param offset File offset (0 = current position).
+         * @param offset Absolute file offset (default zero); @c uint64_t(-1) uses
+         * and advances the current position of a seekable descriptor.
          */
         explicit write_query(const int fd, const void *buf, const size_t nbytes, const uint64_t offset = 0)
             : query(fd)
@@ -1946,9 +1948,13 @@ public:                                                                         
         }
 
         /**
-         * @brief Reads until a short read occurs, growing the buffer as needed.
+         * @brief Lazily reads until a short read or EOF, growing the buffer as needed.
          * @param flags Reserved for future use.
-         * @return @c io::input_t holding the buffer on success, or @c std::unexpected with a negative errno.
+         * @return @c io::input_t holding accumulated data, including full chunks
+         * followed by EOF. Empty EOF returns @c std::unexpected(0); a read error
+         * returns @c std::unexpected with a positive errno and discards partial data.
+         * @warning This link must remain alive until the returned coroutine
+         * completes or is canceled.
          */
         async<io::input_t> read_buf(const int flags = 0) {
             static constexpr int buf_len = 64;
@@ -1962,7 +1968,7 @@ public:                                                                         
             while (bytes_read == buf_len) {
                 data = buf.expand(buf_len);
                 bytes_read = co_await input_action(data, buf_len);
-                if (bytes_read < 1) co_return std::unexpected(-bytes_read);
+                if (bytes_read < 0) co_return std::unexpected(-bytes_read);
             }
 
             if (bytes_read < buf_len)

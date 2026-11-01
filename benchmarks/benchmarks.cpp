@@ -1179,3 +1179,63 @@ static void bm_intrusive_queue_move(benchmark::State& state) {
 BENCHMARK(bm_intrusive_queue_move)
     ->Arg(0)->Arg(1)->Arg(64)->Arg(1024)->Arg(16384)
     ->Unit(benchmark::kNanosecond);
+
+// BM27 - Deferred kernel submission: 6000 requests pending before the first ping.
+// Runner configuration, ring initialization and observer storage are set up once
+// outside timing; the measured batch includes enqueue, overflow relocation and
+// CQE delivery. Every observer must receive exactly one successful completion.
+namespace {
+struct deferred_benchmark_observer final : ace::services::kernel_observer {
+    unsigned calls = 0;
+    int result = -1;
+    void on_result(const int value) override { ++calls; result = value; }
+};
+
+ace::task submit_deferred_benchmark(std::vector<deferred_benchmark_observer>& observers,
+                                  bool& accepted) {
+    for (auto& observer : observers) {
+        if (not ace::services::kernel_controller::nop(&observer))
+            accepted = false;
+    }
+    co_return;
+}
+} // namespace
+
+static void bm_kernel_deferred_submission(benchmark::State& state) {
+    constexpr unsigned operations = 6000;
+    configure_runners(1);
+    if (not ace::services::kernel_controller::available()) {
+        state.SkipWithError("io_uring unavailable");
+        reset_runners();
+        return;
+    }
+    std::vector<deferred_benchmark_observer> observers(operations);
+    for (auto _ : state) {
+        state.PauseTiming();
+        for (auto& observer : observers) {
+            observer.calls = 0;
+            observer.result = -1;
+        }
+        bool accepted = true;
+        auto submission = submit_deferred_benchmark(observers, accepted);
+        state.ResumeTiming();
+        ace::schedule(std::move(submission));
+        ace::run();
+        state.PauseTiming();
+        bool valid = accepted and ace::empty();
+        for (const auto& observer : observers) {
+            if (observer.calls != 1 or observer.result != 0)
+                valid = false;
+        }
+        if (not valid) {
+            state.SkipWithError("Deferred submission rejected, lost or duplicated a completion");
+            break;
+        }
+        state.ResumeTiming();
+    }
+    state.counters["runners"] = 1;
+    state.counters["operations"] = operations;
+    state.SetItemsProcessed(state.iterations() * operations);
+    reset_runners();
+}
+BENCHMARK(bm_kernel_deferred_submission)->Unit(benchmark::kMillisecond);

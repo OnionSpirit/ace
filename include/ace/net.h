@@ -417,8 +417,8 @@ namespace ace::net {
          * @brief Asynchronously writes a buffer to the socket via @c sendmsg.
          * @details Uses blocking @c ::sendmsg only when no runner context or
          * command slot is available. A rejected submission releases the command
-         * and reports the initialization error or @c -ENOMEM through
-         * @c io::outcast::fail_cb_handler.
+         * and reports the initialization error, @c -ENOMEM, or @c -EIO when no error
+         * was supplied, through @c io::outcast::fail_cb_handler.
          * @param buff  Scatter-gather buffer to send.
          */
         void output_action(io::buffer&& buff) override {
@@ -435,12 +435,10 @@ namespace ace::net {
                 if (services::kernel_controller::sendmsg(cmd, _fd, assembled, 0))
                     return;
                 const int error = cmd->_submission_error;
-                if (error not_eq 0) {
-                    // A rejected submission has no CQE, so complete the command locally
-                    // through the same cleanup and error-reporting path.
-                    cmd->on_result(error);
-                    return;
-                }
+                // Rejection never publishes a CQE. Normalize a missing errno
+                // while releasing the command and its payload exactly once.
+                cmd->on_result(error not_eq 0 ? error : -EIO);
+                return;
             }
             // NOTE: If can not get slot or identity not found -> using busy behavior
             const auto* assembled = buff.assemble();
@@ -819,8 +817,13 @@ namespace ace::net {
         -> recvmsg_query { return recvmsg_query{_fd, buff.assemble(), flags}; }
 
         /**
-         * @brief Eagerly reads all available data into a growing @c io::buffer.
-         * @return @c io::input_t containing the buffer, or an error code.
+         * @brief Eagerly receives until a short read or EOF into a growing @c io::buffer.
+         * @param flags Receive flags passed to each underlying receive query.
+         * @return @c io::input_t holding accumulated data, including full chunks
+         * followed by EOF. Empty EOF returns @c std::unexpected(0); a receive
+         * error returns @c std::unexpected with a positive errno and discards partial data.
+         * @warning The connection and its descriptor must remain valid until
+         * the returned coroutine completes or is canceled.
          */
         [[nodiscard]] auto recv_buf(const int flags = 0) const
         -> promise<io::input_t> {
@@ -835,7 +838,7 @@ namespace ace::net {
             while (bytes_read == buf_len) {
                 data = buf.expand(buf_len);
                 bytes_read = co_await recv_query(_fd, data, buf_len, flags);
-                if (bytes_read < 1) co_return std::unexpected(-bytes_read);
+                if (bytes_read < 0) co_return std::unexpected(-bytes_read);
             }
 
             if (bytes_read < buf_len)
@@ -1246,10 +1249,13 @@ namespace ace::net {
             : io_query_t(0)
             , _flags(flags) {}
 
-        /** @brief Submits the socket creation operation to the kernel controller. */
+        /**
+         * @brief Submits socket creation and preserves the controller's acceptance result.
+         * @param kwp Observer that remains caller-owned if submission is rejected.
+         * @return True if accepted; false on rejection, with no completion callback.
+         */
         bool setup_query(services::kernel_observer* kwp) const {
-            services::kernel_controller::socket(kwp, domain_v, type_v, protocol_v, _flags);
-            return true;
+            return services::kernel_controller::socket(kwp, domain_v, type_v, protocol_v, _flags);
         }
 
         /** @brief Returns the created socket entity on success. */

@@ -24,7 +24,11 @@
 #ifndef ACE_PROMISE_H
 #define ACE_PROMISE_H
 
+#include <algorithm>
+#include <bit>
 #include <concepts>
+#include <cstring>
+#include <memory>
 #include <coroutine>
 #include <limits>
 #include <type_traits>
@@ -422,41 +426,61 @@ namespace ace::core::traits {
         }
 
         /**
-         * @brief Custom allocator that prepends a @c control_block before the coroutine frame.
-         * @details Allocates @c mem_size + sizeof(control_block) bytes through the
-         * thread-local arena, constructs a @c control_block at the
-         * beginning, then returns a pointer offset by @c sizeof(control_block).
-         * The block stores the exact total allocation size as immutable metadata
-         * until deallocation. This enables external handles and frame prefetching
-         * without a separate heap allocation.
-         * @param mem_size  Compiler-requested coroutine frame size.
-         * @return Pointer to the coroutine frame area after the control block.
-         * @throws std::bad_alloc when the size overflows or arena allocation fails.
+         * @brief Allocate an aligned coroutine frame with an adjacent control block.
+         * @details The frame base is aligned to
+         * @c max(arena::kAlignment,std::bit_floor(mem_size)). The compiler supplies
+         * only the frame size in C++23, so over-aligned locals require a compatible
+         * compiler frame layout; this is not a guarantee for arbitrary explicitly
+         * aligned scalar locals. The arena payload contains alignment padding and
+         * a saved raw pointer before the control block. The immutable
+         * @c _frame_size covers only the contiguous block and compiler frame,
+         * allowing prefetch to stay inside that span.
+         * @param mem_size Compiler-requested coroutine frame size.
+         * @return Aligned frame address immediately after its control block.
+         * @throws std::bad_alloc if metadata or allocation arithmetic overflows,
+         *         or arena allocation fails.
          */
         void* operator new(size_t mem_size) {
-            if (mem_size > std::numeric_limits<size_t>::max() - control_block_size)
+            constexpr auto max_size = std::numeric_limits<size_t>::max();
+            constexpr auto max_frame_size = std::numeric_limits<uint32_t>::max();
+            if (mem_size > max_size - control_block_size)
                 throw std::bad_alloc {};
             const auto frame_size = mem_size + control_block_size;
-            const auto ptr = static_cast<uint8_t*>(arena::get_instance().allocate(frame_size));
-            void* mem_ptr = ptr + control_block_size;
-            auto* block = new (ptr) control_block();
+            if (frame_size > max_frame_size)
+                throw std::bad_alloc {};
+            const auto alignment = std::max(arena::kAlignment, std::bit_floor(mem_size));
+            if (frame_size > max_size - sizeof(void*))
+                throw std::bad_alloc {};
+            const auto prefixed_size = frame_size + sizeof(void*);
+            if (prefixed_size > max_size - (alignment - 1))
+                throw std::bad_alloc {};
+            const auto allocation_size = prefixed_size + alignment - 1;
+            void* raw = arena::get_instance().allocate(allocation_size);
+            void* frame = static_cast<uint8_t*>(raw) + sizeof(void*) + control_block_size;
+            auto space = allocation_size - sizeof(void*) - control_block_size;
+            std::align(alignment, mem_size, frame, space);
+            auto* prefix = static_cast<uint8_t*>(frame) - control_block_size;
+            // The saved pointer can be unaligned; memcpy avoids typed access there.
+            std::memcpy(prefix - sizeof(void*), &raw, sizeof(raw));
+            auto* block = new (prefix) control_block();
             block->_frame_size = frame_size;
-            return mem_ptr;
+            return frame;
         }
 
         /**
-         * @brief Custom deallocator.  Frees the whole allocation once the
-         * control block is untracked.
-         * @param mem_ptr  Pointer to the coroutine frame area.
-         * @param mem_size Compiler-provided coroutine frame size.
+         * @brief Release the original arena payload after the final reference.
+         * @details Recovers the saved raw pointer before the control block, keeping
+         * the arena's pooled/transient and cross-thread release protocol intact.
+         * @param mem_ptr Pointer returned by the frame allocator.
+         * @param mem_size Compiler-provided frame size (arena reads its own header).
          */
         void operator delete(void* mem_ptr, size_t mem_size) noexcept {
             // NOTE: Delete only after the owning async and all observers release the block.
             if (control_block* block = control_block::get_block_from_address(mem_ptr); control_block::is_untracked(block)) {
-                // NOTE: Restore the arena allocation size by including the prefix block.
-                mem_size += sizeof(control_block);
+                void* raw;
+                std::memcpy(&raw, reinterpret_cast<uint8_t*>(block) - sizeof(void*), sizeof(raw));
                 block->~control_block();
-                arena::get_instance().deallocate(block, mem_size);
+                arena::get_instance().deallocate(raw, mem_size);
             }
         }
 

@@ -18,6 +18,7 @@ template <typename T> concept worker_hook = requires { T::set_worker_start_for_t
 template <typename T> concept service_hook = requires { T::set_respawn_for_testing(nullptr); };
 template <typename T> concept slab_hook = requires { T::set_growth_for_testing(nullptr); };
 template <typename T> concept wheel_hook = requires { T::set_initialization_for_testing(nullptr); };
+template <typename T> concept submit_hook = requires { T::set_submit_rejection_for_testing(nullptr); };
 template <typename T> concept ring_hook = requires { T::set_queue_init_for_testing(nullptr); };
 template <typename T> concept arena_snapshot = requires(const T& arena) { arena.stats(); };
 template <typename T> concept arena_counter = requires { T::live_system_chunks; };
@@ -48,6 +49,7 @@ static_assert(service_hook<services::kernel_controller> == is_debug);
 static_assert(slab_hook<tools::slab_mempool<int>> == is_debug);
 static_assert(wheel_hook<services::hierarchical_time_wheel> == is_debug);
 static_assert(ring_hook<services::kernel_controller> == is_debug);
+static_assert(submit_hook<services::kernel_controller> == is_debug);
 static_assert(arena_snapshot<core::arena> == is_debug);
 static_assert(arena_counter<core::arena> == is_debug);
 static_assert(node_counter<core::nukes_node_arena> == is_debug);

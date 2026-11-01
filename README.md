@@ -89,7 +89,16 @@ Synchronous fire-and-forget file, socket, and console output reports it through
 `ace::io::outcast::fail_cb_handler` instead of falling back to a blocking write.
 If service startup or the submission queue runs out of memory, direct submits
 return `false`, awaited I/O returns `-ENOMEM`, and fire-and-forget output reports
-`-ENOMEM` through the same handler. A rejected request produces no completion.
+`-ENOMEM` through the same handler. A rejected request produces no completion. Fire-and-forget file/socket writes
+release their command and buffer on every rejection; a rejection without an
+error code reports `-EIO` and does not fall back to a blocking write.
+
+Direct `kernel_controller::submit()` captures deferred parameters in storage
+of `8 * sizeof(uintptr_t)` bytes, aligned to `alignof(uintptr_t)`. The parameter
+tuple must fit and have non-throwing construction from its arguments, move and
+destruction; unsupported signatures are rejected at compile time. Moving a queued
+request preserves typed parameter lifetime. Pointer arguments remain non-owning
+and their pointees must remain valid until the operation completes.
 
 ## Include Order
 
@@ -174,6 +183,14 @@ including any ACE entry library: the setting affects class definitions.
 Meson builds the fault-injection GTests with `b_ndebug=false` and separately
 checks the debug and release contracts, even when the project uses
 `-Db_ndebug=true`.
+
+Coroutine allocations keep the control block immediately before the frame and
+align the frame base to `max(16, bit_floor(compiler_requested_size))`. Extra
+padding and the original allocation pointer are kept outside the compiler-owned
+frame; final release returns the original allocation to its arena. This preserves
+owner-thread and cross-thread cleanup. Over-aligned object locals are tested at
+64, 256 and 4096 bytes on GCC and Clang; their layout within the frame remains the
+compiler's responsibility.
 
 ## Coroutine Types
 
@@ -340,6 +357,15 @@ allowed; an unassembled buffer with no chunks is unchanged.
 payload into the requested container. Unsupported target types are compile-time
 errors.
 
+`io::link::read_buf()` and `connection::recv_buf()` return accumulated bytes
+when a short read or EOF follows data. An empty EOF remains `std::unexpected(0)`.
+A read error takes precedence over accumulated bytes and returns a **positive**
+errno in `io::input_t`; raw read/recv queries still return negative errno values.
+`read_buf()` is lazy; `recv_buf()` is eager and must still be awaited.
+`fs::file_link` reads use and advance the descriptor's shared file position.
+Low-level `io::read_query` retains positional semantics: its default offset is
+zero, and explicit offsets do not advance the descriptor's current position.
+
 ## Networking
 
 Socket APIs form move-consuming state machines. Awaiting `bind()`, `connect()`,
@@ -477,6 +503,9 @@ For an existing build directory, use
 `meson setup build-test --reconfigure -Dtests=true` before compiling. Meson
 registers each GoogleTest case as a separate test process. Run ACE's own suite
 without dependency tests through `meson test -C build-test --suite ace`.
+
+GCC and Clang flags are selected by compiler identity. LTO is opt-in through
+Meson `-Db_lto=true`; Clang does not implicitly enable it.
 
 Test targets default to ASan. The sanitizer matrix uses separate build
 directories because TSan cannot be combined with ASan:

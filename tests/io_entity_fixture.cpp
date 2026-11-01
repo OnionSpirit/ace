@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <chrono>
 #include <climits>
+#include <cstring>
 #include <fcntl.h>
 #include <memory>
 #include <string>
@@ -1223,4 +1224,281 @@ TEST_F(io_entity_fixture, listener_accept_optional_address_cancellation) {
         EXPECT_EQ(1u, length);
         expect_fd_closed(fd);
     }
+}
+
+
+namespace {
+
+struct buffer_fd_owner final {
+    explicit buffer_fd_owner(const int descriptor) : fd(descriptor) {}
+    ~buffer_fd_owner() { if (fd >= 0) ::close(fd); }
+    int release() { return std::exchange(fd, -1); }
+    int fd;
+};
+
+// Prepare connected TCP endpoints synchronously so recv_buf sees a fixed queued payload.
+bool make_buffer_tcp_pair(int (&fds)[2]) {
+    buffer_fd_owner listener(::socket(AF_INET, SOCK_STREAM, 0));
+    if (listener.fd < 0) return false;
+    sockaddr_in address {};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t length = sizeof(address);
+    if (::bind(listener.fd, reinterpret_cast<const sockaddr*>(&address), length) < 0) return false;
+    if (::listen(listener.fd, 1) < 0) return false;
+    if (::getsockname(listener.fd, reinterpret_cast<sockaddr*>(&address), &length) < 0) return false;
+    buffer_fd_owner peer(::socket(AF_INET, SOCK_STREAM, 0));
+    if (peer.fd < 0) return false;
+    if (::connect(peer.fd, reinterpret_cast<const sockaddr*>(&address), length) < 0) return false;
+    fds[0] = ::accept(listener.fd, nullptr, nullptr);
+    if (fds[0] < 0) return false;
+    fds[1] = peer.release();
+    return true;
+}
+
+struct buffer_read_result {
+    bool has_value = false;
+    int error = INT_MIN;
+    std::string content;
+};
+
+// Scripts the virtual input boundary while exercising the public lazy read_buf API.
+struct scripted_buffer_link final : ace::io::link {
+    explicit scripted_buffer_link(std::vector<int> results) : results(std::move(results)) {}
+
+    std::vector<int> results;
+    std::size_t calls = 0;
+
+protected:
+    void output_action(ace::io::buffer&&) override {}
+
+    ace::promise<int> input_action(void* data, std::size_t len) override {
+        EXPECT_EQ(64u, len);
+        if (calls >= results.size()) {
+            ADD_FAILURE() << "read_buf read beyond its terminal result";
+            co_return -EIO;
+        }
+        const int result = results[calls++];
+        if (result > 0)
+            std::memset(data, 'a' + static_cast<int>(calls - 1), result);
+        co_return result;
+    }
+};
+
+void save_buffer_result(ace::io::input_t input, buffer_read_result& result) {
+    result.has_value = input.has_value();
+    if (input)
+        result.content = input.value().as<std::string>();
+    else
+        result.error = input.error();
+}
+
+ace::task read_buffer_link(ace::io::link& link, buffer_read_result& result) {
+    save_buffer_result(co_await link.read_buf(), result);
+}
+
+ace::task receive_buffer(ace::net::connection& connection, buffer_read_result& result) {
+    save_buffer_result(co_await connection.recv_buf(), result);
+}
+
+thread_local int buffer_recv_submissions = 0;
+
+int reject_second_buffer_recv() {
+    return ++buffer_recv_submissions == 2 ? -EIO : INT_MIN;
+}
+
+struct buffer_submit_override final {
+    explicit buffer_submit_override(int (*callback)())
+        : previous(ace::services::kernel_controller::set_submit_rejection_for_testing(callback)) {}
+    ~buffer_submit_override() {
+        ace::services::kernel_controller::set_submit_rejection_for_testing(previous);
+    }
+    int (*previous)();
+};
+
+ace::task receive_buffer_with_error(ace::net::connection& connection, buffer_read_result& result) {
+    buffer_recv_submissions = 0;
+    // Install on the executing runner, whose submit hook is thread-local.
+    buffer_submit_override override(reject_second_buffer_recv);
+    save_buffer_result(co_await connection.recv_buf(), result);
+}
+
+} // namespace
+
+// Verifies empty EOF, short reads and EOF after one or two full chunks through link::read_buf.
+TEST_F(io_entity_fixture, read_buf_scripted_eof_matrix) {
+    const std::vector<std::vector<int>> scripts {{0}, {7}, {64, 0}, {64, 64, 0}};
+    const std::vector<std::string> expected {"", std::string(7, 'a'),
+        std::string(64, 'a'), std::string(64, 'a') + std::string(64, 'b')};
+    for (std::size_t i = 0; i < scripts.size(); ++i) {
+        SCOPED_TRACE(i);
+        scripted_buffer_link link(scripts[i]);
+        buffer_read_result result;
+        auto task = read_buffer_link(link, result);
+        EXPECT_EQ(0u, link.calls); // The lazy link API must not read before scheduling.
+        ace::schedule(std::move(task));
+        run_dispatcher();
+        EXPECT_EQ(scripts[i].size(), link.calls);
+        if (i == 0) {
+            EXPECT_FALSE(result.has_value);
+            EXPECT_EQ(0, result.error);
+        } else {
+            EXPECT_TRUE(result.has_value);
+            // Exact content also excludes the unused tail reserved for the EOF probe.
+            EXPECT_EQ(expected[i], result.content);
+        }
+    }
+}
+
+// Verifies a negative link read wins over accumulated data and keeps a positive errno.
+TEST_F(io_entity_fixture, read_buf_scripted_error_after_data) {
+    for (const auto& script : {std::vector<int>{-EIO}, std::vector<int>{64, -EIO},
+                              std::vector<int>{64, 64, -EIO}}) {
+        scripted_buffer_link link(script);
+        buffer_read_result result;
+        ace::schedule(read_buffer_link(link, result));
+        run_dispatcher();
+        EXPECT_EQ(script.size(), link.calls);
+        EXPECT_FALSE(result.has_value);
+        EXPECT_EQ(EIO, result.error); // The expected error stores errno, not the negative query result.
+    }
+}
+
+// Verifies actual file reads preserve exact 64-byte multiples when the next read reaches EOF.
+TEST_F(io_entity_fixture, read_buf_file_eof_matrix) {
+    ASSERT_TRUE(ace::services::kernel_controller::available());
+    for (const std::size_t size : {0u, 7u, 64u, 128u}) {
+        SCOPED_TRACE(size);
+        char path[] = "/tmp/ace-b24-read-XXXXXX";
+        const int fd = ::mkstemp(path);
+        ASSERT_NE(-1, fd);
+        buffer_fd_owner descriptor(fd);
+        ASSERT_EQ(0, ::unlink(path));
+        const std::string payload(size, 'f');
+        ASSERT_EQ(static_cast<ssize_t>(size), ::write(fd, payload.data(), size));
+        ASSERT_EQ(0, ::lseek(fd, 0, SEEK_SET));
+        buffer_read_result result;
+        {
+            ace::fs::file_link link(descriptor.release(), false);
+            ace::schedule(read_buffer_link(link, result));
+            run_dispatcher();
+        }
+        run_dispatcher(); // Complete the owning link's asynchronous descriptor close.
+        if (size == 0) {
+            EXPECT_FALSE(result.has_value);
+            EXPECT_EQ(0, result.error);
+        } else {
+            ASSERT_TRUE(result.has_value);
+            EXPECT_EQ(payload, result.content);
+        }
+    }
+}
+
+// Verifies transport recv_buf distinguishes empty EOF and retains short or full-chunk payloads.
+TEST_F(io_entity_fixture, recv_buf_eof_matrix) {
+    ASSERT_TRUE(ace::services::kernel_controller::available());
+    for (const std::size_t size : {0u, 7u, 64u, 128u}) {
+        SCOPED_TRACE(size);
+        int fds[2] = {-1, -1};
+        ASSERT_TRUE(make_buffer_tcp_pair(fds));
+        buffer_fd_owner peer(fds[1]);
+        ace::net::connection connection(fds[0], false);
+        const std::string payload(size, 'n');
+        ASSERT_EQ(static_cast<ssize_t>(size), ::write(fds[1], payload.data(), size));
+        ASSERT_EQ(0, ::shutdown(fds[1], SHUT_WR));
+        buffer_read_result result;
+        ace::schedule(receive_buffer(connection, result));
+        run_dispatcher();
+        if (size == 0) {
+            EXPECT_FALSE(result.has_value);
+            EXPECT_EQ(0, result.error);
+        } else {
+            ASSERT_TRUE(result.has_value);
+            EXPECT_EQ(payload, result.content);
+        }
+        { auto close = connection.close(); }
+        run_dispatcher();
+    }
+}
+
+// Verifies a rejected second transport receive discards the first full chunk and returns positive EIO.
+TEST_F(io_entity_fixture, recv_buf_error_after_data) {
+    ASSERT_TRUE(ace::services::kernel_controller::available());
+    int fds[2] = {-1, -1};
+    ASSERT_TRUE(make_buffer_tcp_pair(fds));
+    buffer_fd_owner peer(fds[1]);
+    ace::net::connection connection(fds[0], false);
+    const std::string payload(64, 'n');
+    ASSERT_EQ(64, ::write(fds[1], payload.data(), payload.size()));
+    buffer_read_result result;
+    ace::schedule(receive_buffer_with_error(connection, result));
+    run_dispatcher();
+    EXPECT_EQ(2, buffer_recv_submissions); // A real first receive precedes the deterministic error.
+    EXPECT_FALSE(result.has_value);
+    EXPECT_EQ(EIO, result.error);
+    { auto close = connection.close(); }
+    run_dispatcher();
+}
+
+namespace {
+
+ace::task read_file_sequentially(ace::fs::file_link& link,
+    std::array<std::array<char, 64>, 3>& buffers, std::array<int, 3>& results) {
+    for (std::size_t i = 0; i < results.size(); ++i)
+        results[i] = co_await link.read(buffers[i].data(), buffers[i].size());
+}
+
+ace::task read_file_at_offsets(const int fd,
+    std::array<std::array<char, 4>, 3>& buffers, std::array<int, 3>& results) {
+    results[0] = co_await ace::io::read_query(fd, buffers[0].data(), buffers[0].size(), 64);
+    results[1] = co_await ace::io::read_query(fd, buffers[1].data(), buffers[1].size(), 0);
+    results[2] = co_await ace::io::read_query(fd, buffers[2].data(), buffers[2].size());
+}
+
+} // namespace
+
+// Verifies sequential file_link reads advance through distinct full chunks and then reach EOF.
+TEST_F(io_entity_fixture, file_link_read_advances_position) {
+    ASSERT_TRUE(ace::services::kernel_controller::available());
+    char path[] = "/tmp/ace-b86-sequential-XXXXXX";
+    buffer_fd_owner descriptor(::mkstemp(path));
+    ASSERT_NE(-1, descriptor.fd);
+    ASSERT_EQ(0, ::unlink(path));
+    const std::string payload = std::string(64, 'a') + std::string(64, 'b');
+    ASSERT_EQ(128, ::write(descriptor.fd, payload.data(), payload.size()));
+    ASSERT_EQ(0, ::lseek(descriptor.fd, 0, SEEK_SET));
+    std::array<std::array<char, 64>, 3> buffers {};
+    std::array<int, 3> results {INT_MIN, INT_MIN, INT_MIN};
+    {
+        ace::fs::file_link link(descriptor.release(), false);
+        ace::schedule(read_file_sequentially(link, buffers, results));
+        run_dispatcher();
+        // The bounded three reads expose a repeated offset without risking an endless read_buf loop.
+        EXPECT_EQ((std::array<int, 3>{64, 64, 0}), results);
+        EXPECT_EQ(std::string(64, 'a'), std::string(buffers[0].data(), buffers[0].size()));
+        EXPECT_EQ(std::string(64, 'b'), std::string(buffers[1].data(), buffers[1].size()));
+    }
+    run_dispatcher();
+}
+
+// Verifies low-level explicit and default offsets retain positional reads without moving the descriptor position.
+TEST_F(io_entity_fixture, read_query_preserves_explicit_and_default_offsets) {
+    ASSERT_TRUE(ace::services::kernel_controller::available());
+    char path[] = "/tmp/ace-b86-offset-XXXXXX";
+    buffer_fd_owner descriptor(::mkstemp(path));
+    ASSERT_NE(-1, descriptor.fd);
+    ASSERT_EQ(0, ::unlink(path));
+    const std::string payload = std::string(64, 'a') + std::string(64, 'b');
+    ASSERT_EQ(128, ::write(descriptor.fd, payload.data(), payload.size()));
+    ASSERT_EQ(5, ::lseek(descriptor.fd, 5, SEEK_SET));
+    std::array<std::array<char, 4>, 3> buffers {};
+    std::array<int, 3> results {INT_MIN, INT_MIN, INT_MIN};
+    ace::schedule(read_file_at_offsets(descriptor.fd, buffers, results));
+    run_dispatcher();
+    EXPECT_EQ((std::array<int, 3>{4, 4, 4}), results);
+    EXPECT_EQ("bbbb", std::string(buffers[0].data(), buffers[0].size()));
+    EXPECT_EQ("aaaa", std::string(buffers[1].data(), buffers[1].size()));
+    EXPECT_EQ("aaaa", std::string(buffers[2].data(), buffers[2].size()));
+    // Both explicit offsets and the existing default zero are independent of current position.
+    EXPECT_EQ(5, ::lseek(descriptor.fd, 0, SEEK_CUR));
 }
